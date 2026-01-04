@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Migration Status{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Migration Status</h2>
+    <p>Migration ID: <strong>{{ migration_id }}</strong></p>
+    
+    <div id="status" style="margin-top: 2rem;">
+        <p>Loading...</p>
+    </div>
+    
+    <div style="margin-top: 2rem;">
+        <div style="background: #e5e7eb; height: 30px; border-radius: 1rem; overflow: hidden;">
+            <div id="progressBar" style="background: #059669; height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <p id="progressText" style="margin-top: 0.5rem; text-align: center;">0%</p>
+    </div>
+</div>
+
+<script>
+const migrationId = '{{ migration_id }}';
+
+async function checkStatus() {
+    try {
+        const response = await fetch(`/api/migrations/${migrationId}/status`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const status = data.status;
+            const progress = data.progress_percent || 0;
+            const step = data.current_step || 'Waiting...';
+            
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressText').textContent = progress + '%';
+            
+            let statusHtml = `
+                <p><strong>Status:</strong> ${status}</p>
+                <p><strong>Progress:</strong> ${progress}%</p>
+                <p><strong>Current Step:</strong> ${step}</p>
+            `;
+            
+            if (status === 'completed') {
+                statusHtml += `
+                    <div style="background: #d1fae5; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+                        <h3>✅ Migration Complete!</h3>
+                        <a href="/api/migrations/${migrationId}/report" class="btn" style="margin-top: 1rem;">Download Report</a>
+                    </div>
+                `;
+                clearInterval(pollInterval);
+            } else if (status === 'failed') {
+                statusHtml += `
+                    <div style="background: #fee; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+                        <h3>❌ Migration Failed</h3>
+                        <p>${data.error_message || 'Unknown error'}</p>
+                    </div>
+                `;
+                clearInterval(pollInterval);
+            }
+            
+            document.getElementById('status').innerHTML = statusHtml;
+        }
+    } catch (error) {
+        console.error('Error checking status:', error);
+    }
+}
+
+// Poll every 3 seconds
+checkStatus();
+const pollInterval = setInterval(checkStatus, 3000);
+</script>
+{% endblock %}

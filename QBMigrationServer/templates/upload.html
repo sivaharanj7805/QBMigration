@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Data - QB Migration{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Upload QuickBooks Data</h2>
+    <p>Upload encrypted data from QB Desktop client</p>
+    
+    <form id="uploadForm" style="margin-top: 2rem;">
+        <div>
+            <label for="sessionId">Session ID:</label><br>
+            <input type="text" id="sessionId" required style="width: 100%; padding: 0.5rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 0.25rem;">
+        </div>
+        
+        <div style="margin-top: 1rem;">
+            <label for="encryptedData">Encrypted Data:</label><br>
+            <textarea id="encryptedData" rows="10" required style="width: 100%; padding: 0.5rem; margin: 0.5rem 0; border: 1px solid #ccc; border-radius: 0.25rem;"></textarea>
+        </div>
+        
+        <button type="submit" class="btn" style="margin-top: 1rem;">Upload & Start Migration</button>
+    </form>
+    
+    <div id="result" style="margin-top: 2rem;"></div>
+</div>
+
+<script>
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const sessionId = document.getElementById('sessionId').value;
+    const encryptedData = document.getElementById('encryptedData').value;
+    
+    const resultDiv = document.getElementById('result');
+    resultDiv.innerHTML = '<p>Uploading...</p>';
+    
+    try {
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                session_id: sessionId,
+                encrypted_data: encryptedData,
+                timestamp: new Date().toISOString()
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            resultDiv.innerHTML = `
+                <div style="background: #d1fae5; padding: 1rem; border-radius: 0.5rem; border: 1px solid #059669;">
+                    <h3>✅ Upload Successful!</h3>
+                    <p>Migration ID: <strong>${data.migration_id}</strong></p>
+                    <p>Status: ${data.status}</p>
+                    <p>${data.message}</p>
+                    <a href="/status/${data.migration_id}" class="btn" style="display: inline-block; margin-top: 1rem;">View Progress</a>
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div style="background: #fee; padding: 1rem; border-radius: 0.5rem; border: 1px solid #f00;">
+                    <h3>❌ Upload Failed</h3>
+                    <p>${data.error}</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div style="background: #fee; padding: 1rem; border-radius: 0.5rem; border: 1px solid #f00;">
+                <h3>❌ Error</h3>
+                <p>${error.message}</p>
+            </div>
+        `;
+    }
+});
+</script>
+{% endblock %}

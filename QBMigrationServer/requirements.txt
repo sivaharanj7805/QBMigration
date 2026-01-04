@@ -1,0 +1,30 @@
+# Web Framework
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-CORS==4.0.0
+Flask-Limiter==3.5.0
+
+# Background Jobs
+Celery==5.3.4
+Redis==5.0.1
+
+# Database
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9  # PostgreSQL (optional, use SQLite for dev)
+
+# Security
+bcrypt==4.1.2
+PyJWT==2.8.0
+cryptography==41.0.7
+
+# Email
+Flask-Mail==0.9.1
+
+# Utilities
+python-dotenv==1.0.0
+requests==2.31.0
+Werkzeug==3.0.1
+
+# Our existing dependencies
+pyotp==2.9.0
