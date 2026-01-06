@@ -2,11 +2,15 @@
 Database Migration Script
 Migrates from SQLite to PostgreSQL and updates schema
 """
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from app import create_app, db
 from models.user import User
 from models.migration import Migration
-import os
+
+
 
 def migrate_database():
     """Migrate database schema"""

@@ -1,3 +1,8 @@
+import os
+import logging
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, jsonify, request
 from flask_login import LoginManager
 from flask_cors import CORS
@@ -13,11 +18,11 @@ from config import config
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
 from sqlalchemy import text
-import os
-import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 import sys
+
+
 
 def setup_logging(app):
     """Configure application logging with rotating file handler"""
@@ -156,6 +161,26 @@ def create_app(config_name='development'):
     
     # Load configuration
     app.config.from_object(config[config_name])
+
+    config_class = config[config_name]
+    app.config.from_object(config_class)
+
+    # Initialize config-specific setup
+    if hasattr(config_class, 'init_app'):
+        config_class.init_app(app)
+
+    @app.before_request
+    def check_content_length():
+        """Reject requests that are too large"""
+        max_size = app.config.get('MAX_CONTENT_LENGTH', 50 * 1024 * 1024)
+        
+        if request.content_length and request.content_length > max_size:
+            # FIX: Use app.logger instead of logger
+            app.logger.warning(f"Request too large ({request.content_length} bytes) from {request.remote_addr}")
+            return jsonify({
+                'success': False,
+                'error': f'Request too large. Maximum size is {max_size // (1024 * 1024)}MB.'
+            }), 413
     
     # Setup logging first
     setup_logging(app)

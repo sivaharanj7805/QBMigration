@@ -1,29 +1,50 @@
+"""
+User Model with Enterprise Security
+- Argon2id password hashing
+- 2FA with TOTP
+- Password history tracking
+- Account lockout protection
+"""
+
 from models.database import db
 from flask_login import UserMixin
+from datetime import datetime, timedelta
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
-from datetime import datetime, timedelta
-import secrets
-import re
-import json
 import pyotp
+import json
+import re
+import secrets
 
-# Initialize Argon2 password hasher (OWASP recommended)
+# Initialize Argon2 password hasher with secure parameters
 ph = PasswordHasher(
-    time_cost=2,
-    memory_cost=65536,
-    parallelism=1,
-    hash_len=32,
-    salt_len=16
+    time_cost=3,        # Number of iterations
+    memory_cost=65536,  # Memory usage in KiB (64 MB)
+    parallelism=4,      # Number of parallel threads
+    hash_len=32,        # Length of hash in bytes
+    salt_len=16         # Length of salt in bytes
 )
 
 
-class User(db.Model, UserMixin):
-    """User model with comprehensive security features"""
+class User(UserMixin, db.Model):
+    """
+    User model with comprehensive security features
+    
+    Security Features:
+    - Argon2id password hashing (industry best practice)
+    - Multi-factor authentication (TOTP)
+    - Password history (prevents reuse)
+    - Account lockout (prevents brute force)
+    - Failed login tracking
+    - Device fingerprinting support
+    """
+    
     __tablename__ = 'users'
     
-    # Primary identifiers
+    # Primary Key
     id = db.Column(db.Integer, primary_key=True)
+    
+    # Authentication
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     
@@ -31,341 +52,354 @@ class User(db.Model, UserMixin):
     first_name = db.Column(db.String(100))
     last_name = db.Column(db.String(100))
     company_name = db.Column(db.String(255))
+    phone = db.Column(db.String(20))
     
-    # Security - Account Status
-    is_active = db.Column(db.Boolean, default=True)
-    is_verified = db.Column(db.Boolean, default=False)
-    is_admin = db.Column(db.Boolean, default=False)
+    # Account Status
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    email_verified = db.Column(db.Boolean, default=False)
+    email_verification_token = db.Column(db.String(255))
     
-    # Security - Login Protection
+    # Security - Account Lockout
     failed_login_attempts = db.Column(db.Integer, default=0)
-    locked_until = db.Column(db.DateTime, nullable=True)
-    last_login = db.Column(db.DateTime, nullable=True)
-    last_login_ip = db.Column(db.String(50))
-    last_device_fingerprint = db.Column(db.String(64))
-    
-    # Security - Email Verification
-    verification_token = db.Column(db.String(100), unique=True, nullable=True)
-    verification_token_expires = db.Column(db.DateTime, nullable=True)
+    last_failed_login = db.Column(db.DateTime)
+    account_locked_until = db.Column(db.DateTime)
     
     # Security - Password Management
     password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
-    password_history = db.Column(db.Text)  # JSON array of old password hashes
-    require_password_change = db.Column(db.Boolean, default=False)
+    password_history = db.Column(db.Text)  # JSON array of previous password hashes
+    must_change_password = db.Column(db.Boolean, default=False)
     
-    # Security - 2FA/MFA
-    mfa_secret = db.Column(db.String(32))
+    # Security - Multi-Factor Authentication
     mfa_enabled = db.Column(db.Boolean, default=False)
-    mfa_backup_codes = db.Column(db.Text)  # JSON array of backup codes
+    mfa_secret = db.Column(db.String(32))  # TOTP secret
+    backup_codes = db.Column(db.Text)  # JSON array of backup codes
     
-    # Security - CAPTCHA
-    failed_captcha_attempts = db.Column(db.Integer, default=0)
+    # Security - Device Fingerprinting
+    trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = db.Column(db.DateTime)
     
     # Relationships
-    migrations = db.relationship('Migration', backref='user', lazy=True, cascade='all, delete-orphan')
+    migrations = db.relationship('Migration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
+    
+    def __repr__(self):
+        return f'<User {self.email}>'
+    
+    # ========================================================================
+    # PASSWORD MANAGEMENT
+    # ========================================================================
     
     def set_password(self, password):
         """
-        Hash password using Argon2id with history tracking
+        Set user password with validation and history tracking
         
         Args:
-            password: Plain text password
+            password: New password
             
         Raises:
-            ValueError: If password doesn't meet requirements or was used before
+            ValueError: If password is weak or recently used
         """
         # Validate password strength
-        if not self._validate_password_strength(password):
-            raise ValueError("Password does not meet security requirements")
+        self._validate_password_strength(password)
         
-        # Check password history
+        # CRITICAL: Check password history BEFORE hashing
         if self.check_password_reuse(password):
-            raise ValueError("Password was used recently. Please choose a different password.")
+            raise ValueError("Password has been used recently. Please choose a different password.")
         
-        # Hash new password
-        new_hash = ph.hash(password)
+        # Hash password with Argon2id
+        password_hash = ph.hash(password)
         
-        # Save old password to history
-        self._add_to_password_history(self.password_hash)
+        # Add to password history
+        self._add_to_password_history(password_hash)
         
-        # Update password
-        self.password_hash = new_hash
+        # Set new password
+        self.password_hash = password_hash
         self.password_changed_at = datetime.utcnow()
-        self.require_password_change = False
     
     def check_password(self, password):
         """
-        Verify password against hash
+        Check if provided password matches stored hash
         
         Args:
-            password: Plain text password to verify
+            password: Password to check
             
         Returns:
             bool: True if password matches, False otherwise
         """
+        if not self.password_hash:
+            return False
+        
         try:
-            ph.verify(self.password_hash, password)
+            # Verify password
+            is_valid = ph.verify(self.password_hash, password)
             
-            # Check if rehashing is needed (algorithm updated)
-            if ph.check_needs_rehash(self.password_hash):
-                self.password_hash = ph.hash(password)
-                db.session.commit()
+            # CRITICAL FIX: Track failed attempts in the database
+            # Note: This is tracked in auth.py, not here
+            # This method only verifies the password
             
-            return True
+            return is_valid
         except (VerifyMismatchError, VerificationError, InvalidHash):
             return False
+        except Exception:
+            return False
     
-    def check_password_reuse(self, new_password):
+    def _validate_password_strength(self, password):
         """
-        Check if password was used before
+        Validate password meets strength requirements
+        
+        Requirements:
+        - At least 8 characters
+        - Contains uppercase letter
+        - Contains lowercase letter
+        - Contains digit
         
         Args:
-            new_password: Password to check
+            password: Password to validate
+            
+        Raises:
+            ValueError: If password doesn't meet requirements
+        """
+        if len(password) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        
+        if not re.search(r'[A-Z]', password):
+            raise ValueError("Password must contain at least one uppercase letter")
+        
+        if not re.search(r'[a-z]', password):
+            raise ValueError("Password must contain at least one lowercase letter")
+        
+        if not re.search(r'\d', password):
+            raise ValueError("Password must contain at least one digit")
+    
+    def check_password_reuse(self, password):
+        """
+        Check if password was recently used
+        
+        Args:
+            password: Password to check
             
         Returns:
-            bool: True if password was used before
+            bool: True if password was recently used, False otherwise
         """
         if not self.password_history:
             return False
         
+        # Parse password history
         try:
             history = json.loads(self.password_history)
-            
-            # Check last N passwords
-            for old_hash in history[-5:]:
-                try:
-                    ph.verify(old_hash, new_password)
-                    return True  # Password was used before
-                except:
-                    continue
-            
-            return False
         except:
             return False
+        
+        # Check against each previous password
+        for old_hash in history:
+            try:
+                if ph.verify(old_hash, password):
+                    return True
+            except:
+                continue
+        
+        return False
     
     def _add_to_password_history(self, password_hash):
-        """Add password hash to history"""
-        if not password_hash:
-            return
+        """
+        Add password hash to history
         
+        Maintains last 5 passwords
+        
+        Args:
+            password_hash: Hashed password to add
+        """
+        # Parse existing history
         try:
             history = json.loads(self.password_history) if self.password_history else []
         except:
             history = []
         
+        # Add new hash
         history.append(password_hash)
         
-        # Keep only last 5 passwords
+        # Keep only last 5
         history = history[-5:]
         
+        # Save
         self.password_history = json.dumps(history)
     
-    @staticmethod
-    def _validate_password_strength(password):
-        """
-        Validate password meets security requirements
-        
-        Args:
-            password: Password to validate
-            
-        Returns:
-            bool: True if valid
-        """
-        if len(password) < 8:
-            return False
-        
-        if not re.search(r'[A-Z]', password):
-            return False
-        
-        if not re.search(r'[a-z]', password):
-            return False
-        
-        if not re.search(r'\d', password):
-            return False
-        
-        # Check common passwords
-        common_passwords = ['password', '12345678', 'qwerty', 'abc123', 'password123', 'admin123']
-        if password.lower() in common_passwords:
-            return False
-        
-        return True
-    
-    # ============================================================================
+    # ========================================================================
     # ACCOUNT LOCKOUT
-    # ============================================================================
+    # ========================================================================
     
     def is_locked(self):
-        """Check if account is locked"""
-        if self.locked_until and datetime.utcnow() < self.locked_until:
-            return True
-        
-        if self.locked_until and datetime.utcnow() >= self.locked_until:
-            self.unlock_account()
-        
-        return False
-    
-    def increment_failed_login(self):
-        """Increment failed login counter and lock if threshold reached"""
-        self.failed_login_attempts += 1
-        
-        if self.failed_login_attempts >= 5:
-            self.locked_until = datetime.utcnow() + timedelta(minutes=15)
-        
-        db.session.commit()
-    
-    def reset_failed_login(self):
-        """Reset failed login counter"""
-        self.failed_login_attempts = 0
-        self.locked_until = None
-        db.session.commit()
-    
-    def unlock_account(self):
-        """Manually unlock account"""
-        self.failed_login_attempts = 0
-        self.locked_until = None
-        db.session.commit()
-    
-    # ============================================================================
-    # EMAIL VERIFICATION
-    # ============================================================================
-    
-    def generate_verification_token(self):
-        """Generate secure email verification token"""
-        self.verification_token = secrets.token_urlsafe(32)
-        self.verification_token_expires = datetime.utcnow() + timedelta(hours=24)
-        db.session.commit()
-        return self.verification_token
-    
-    def verify_email(self, token):
         """
-        Verify email with token
+        Check if account is currently locked
         
-        Args:
-            token: Verification token
-            
         Returns:
-            bool: True if verified successfully
+            bool: True if account is locked, False otherwise
         """
-        if not self.verification_token or self.verification_token != token:
+        if not self.account_locked_until:
             return False
         
-        if self.verification_token_expires and datetime.utcnow() > self.verification_token_expires:
+        # Check if lock has expired
+        if datetime.utcnow() > self.account_locked_until:
+            # Lock expired, reset
+            self.account_locked_until = None
+            self.failed_login_attempts = 0
             return False
         
-        self.is_verified = True
-        self.verification_token = None
-        self.verification_token_expires = None
-        db.session.commit()
         return True
     
-    # ============================================================================
-    # TWO-FACTOR AUTHENTICATION (2FA)
-    # ============================================================================
+    def record_failed_login(self):
+        """
+        Record failed login attempt
+        
+        Locks account after 5 failed attempts
+        """
+        self.failed_login_attempts += 1
+        self.last_failed_login = datetime.utcnow()
+        
+        # Lock account after 5 failures
+        if self.failed_login_attempts >= 5:
+            self.account_locked_until = datetime.utcnow() + timedelta(minutes=15)
+    
+    def record_successful_login(self):
+        """
+        Record successful login
+        
+        Resets failed login counter
+        """
+        self.failed_login_attempts = 0
+        self.last_failed_login = None
+        self.account_locked_until = None
+        self.last_login = datetime.utcnow()
+    
+    # ========================================================================
+    # MULTI-FACTOR AUTHENTICATION
+    # ========================================================================
     
     def enable_2fa(self):
         """
-        Enable 2FA and generate secret
+        Enable 2FA for user
         
         Returns:
-            tuple: (secret, qr_code_url)
+            tuple: (secret, qr_code_url, backup_codes)
         """
-        if not self.mfa_secret:
-            self.mfa_secret = pyotp.random_base32()
-        
-        self.mfa_enabled = True
-        
-        # Generate backup codes
-        backup_codes = [secrets.token_hex(4) for _ in range(10)]
-        self.mfa_backup_codes = json.dumps(backup_codes)
-        
-        db.session.commit()
+        # Generate TOTP secret
+        secret = pyotp.random_base32()
+        self.mfa_secret = secret
         
         # Generate QR code URL
-        totp = pyotp.TOTP(self.mfa_secret)
+        totp = pyotp.TOTP(secret)
         qr_url = totp.provisioning_uri(
             name=self.email,
             issuer_name='QB Migration'
         )
         
-        return self.mfa_secret, qr_url, backup_codes
+        # Generate backup codes
+        backup_codes = [secrets.token_hex(4).upper() for _ in range(10)]
+        self.backup_codes = json.dumps(backup_codes)
+        
+        # Enable 2FA
+        self.mfa_enabled = True
+        
+        return secret, qr_url, backup_codes
     
     def disable_2fa(self):
-        """Disable 2FA"""
+        """Disable 2FA for user"""
         self.mfa_enabled = False
-        db.session.commit()
+        self.mfa_secret = None
+        self.backup_codes = None
     
     def verify_2fa_token(self, token):
         """
         Verify 2FA token
         
         Args:
-            token: 6-digit TOTP token or backup code
+            token: TOTP token or backup code
             
         Returns:
-            bool: True if valid
+            bool: True if valid, False otherwise
         """
         if not self.mfa_enabled or not self.mfa_secret:
-            return True  # 2FA not enabled
+            return False
         
-        # Check TOTP token
+        # Try TOTP verification
         totp = pyotp.TOTP(self.mfa_secret)
         if totp.verify(token, valid_window=1):
             return True
         
-        # Check backup codes
-        if self.mfa_backup_codes:
+        # Try backup codes
+        if self.backup_codes:
             try:
-                backup_codes = json.loads(self.mfa_backup_codes)
-                if token in backup_codes:
+                codes = json.loads(self.backup_codes)
+                if token.upper() in codes:
                     # Remove used backup code
-                    backup_codes.remove(token)
-                    self.mfa_backup_codes = json.dumps(backup_codes)
-                    db.session.commit()
+                    codes.remove(token.upper())
+                    self.backup_codes = json.dumps(codes)
                     return True
             except:
                 pass
         
         return False
     
-    # ============================================================================
-    # UTILITY METHODS
-    # ============================================================================
+    # ========================================================================
+    # DEVICE FINGERPRINTING
+    # ========================================================================
     
-    def update_login_info(self, ip_address, device_fingerprint):
-        """Update login information"""
-        self.last_login = datetime.utcnow()
-        self.last_login_ip = ip_address
-        self.last_device_fingerprint = device_fingerprint
-        db.session.commit()
-    
-    def to_dict(self, include_sensitive=False):
-        """Convert user to dictionary"""
-        data = {
-            'id': self.id,
-            'email': self.email,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'company_name': self.company_name,
-            'is_active': self.is_active,
-            'is_verified': self.is_verified,
-            'mfa_enabled': self.mfa_enabled,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'last_login': self.last_login.isoformat() if self.last_login else None
-        }
+    def is_trusted_device(self, fingerprint):
+        """
+        Check if device is trusted
         
-        if include_sensitive:
-            data.update({
-                'failed_login_attempts': self.failed_login_attempts,
-                'is_locked': self.is_locked(),
-                'locked_until': self.locked_until.isoformat() if self.locked_until else None,
-                'require_password_change': self.require_password_change
-            })
+        Args:
+            fingerprint: Device fingerprint hash
+            
+        Returns:
+            bool: True if trusted, False otherwise
+        """
+        if not self.trusted_devices:
+            return False
         
-        return data
+        try:
+            devices = json.loads(self.trusted_devices)
+            return fingerprint in devices
+        except:
+            return False
     
-    def __repr__(self):
-        return f'<User {self.email}>'
+    def add_trusted_device(self, fingerprint):
+        """
+        Add device to trusted list
+        
+        Args:
+            fingerprint: Device fingerprint hash
+        """
+        try:
+            devices = json.loads(self.trusted_devices) if self.trusted_devices else []
+        except:
+            devices = []
+        
+        if fingerprint not in devices:
+            devices.append(fingerprint)
+        
+        # Keep only last 5 devices
+        devices = devices[-5:]
+        
+        self.trusted_devices = json.dumps(devices)
+    
+    # ========================================================================
+    # FLASK-LOGIN METHODS
+    # ========================================================================
+    
+    def get_id(self):
+        """Required by Flask-Login"""
+        return str(self.id)
+    
+    @property
+    def is_authenticated(self):
+        """Required by Flask-Login"""
+        return True
+    
+    @property
+    def is_anonymous(self):
+        """Required by Flask-Login"""
+        return False

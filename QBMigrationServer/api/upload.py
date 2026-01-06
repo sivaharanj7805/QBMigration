@@ -1,3 +1,11 @@
+"""
+File Upload API Endpoints
+- Encrypted file upload
+- File validation
+- S3 integration
+- Duplicate detection
+"""
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from flask_limiter import Limiter
@@ -5,339 +13,259 @@ from flask_limiter.util import get_remote_address
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
-import logging
-import re
-import io
 import hashlib
+import logging
+import uuid
+from datetime import datetime
 
-upload_bp = Blueprint('upload', __name__)
+# Initialize blueprint
+upload_bp = Blueprint('upload', __name__, url_prefix='/api/upload')
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
+# Initialize rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
 
 
-def scan_for_malware(data):
+@upload_bp.route('', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required  # Use decorator instead of manual check
+def upload_file():
+    """Upload encrypted QuickBooks Desktop file"""
     """
-    Scan data for malware (placeholder - implement with ClamAV or VirusTotal)
+    Upload encrypted QuickBooks Desktop file
     
-    Args:
-        data: Data to scan
-        
-    Returns:
-        tuple: (is_safe, error_message)
-    """
-    if not current_app.config.get('ENABLE_VIRUS_SCANNING', False):
-        return True, None
-    
-    try:
-        # Option 1: Use ClamAV (if installed locally)
-        # import pyclamd
-        # cd = pyclamd.ClamdUnixSocket()
-        # result = cd.scan_stream(data.encode() if isinstance(data, str) else data)
-        # if result:
-        #     return False, "Malware detected"
-        
-        # Option 2: Use VirusTotal API
-        # import requests
-        # vt_api_key = current_app.config.get('VIRUSTOTAL_API_KEY')
-        # response = requests.post(
-        #     'https://www.virustotal.com/api/v3/files',
-        #     headers={'x-apikey': vt_api_key},
-        #     files={'file': data}
-        # )
-        # Check response for malware
-        
-        # For now, basic pattern matching for obvious malware signatures
-        suspicious_patterns = [
-            b'<script',
-            b'eval(',
-            b'exec(',
-            b'system(',
-            b'passthru(',
-            b'shell_exec(',
-            b'<?php',
-            b'<%',
-            b'#!/bin/bash',
-            b'#!/bin/sh'
-        ]
-        
-        data_bytes = data.encode() if isinstance(data, str) else data
-        
-        for pattern in suspicious_patterns:
-            if pattern in data_bytes:
-                logger.warning(f"Suspicious pattern detected: {pattern}")
-                return False, "File contains suspicious content"
-        
-        return True, None
-        
-    except Exception as e:
-        logger.error(f"Malware scanning failed: {str(e)}")
-        # Fail closed: reject file if scanning fails
-        return False, "Malware scanning failed"
-
-
-def validate_encrypted_data(encrypted_data):
-    """
-    Validate encrypted data format and content
-    
-    Args:
-        encrypted_data: Encrypted data string
-        
-    Returns:
-        tuple: (is_valid, error_message)
-    """
-    if not encrypted_data:
-        return False, "Encrypted data is required"
-    
-    if len(encrypted_data.strip()) == 0:
-        return False, "Encrypted data cannot be empty"
-    
-    if len(encrypted_data) < 100:
-        return False, "Encrypted data too short (minimum 100 characters)"
-    
-    max_size = current_app.config.get('MAX_ENCRYPTED_DATA_LENGTH', 50 * 1024 * 1024)
-    if len(encrypted_data) > max_size:
-        return False, f"Encrypted data too large (max {max_size / 1024 / 1024:.0f}MB)"
-    
-    # Validate format
-    valid_prefixes = current_app.config.get('ALLOWED_ENCRYPTION_PREFIXES', ['IV:', 'AES:', 'ENC:'])
-    has_valid_prefix = any(encrypted_data.startswith(prefix) for prefix in valid_prefixes)
-    
-    if not has_valid_prefix:
-        return False, "Invalid encrypted data format (missing encryption header)"
-    
-    # Check for key separator
-    if ':KEY:' not in encrypted_data and ':' not in encrypted_data:
-        return False, "Invalid encrypted data format (malformed structure)"
-    
-    # Validate it's not plaintext JSON
-    if encrypted_data.strip().startswith('{') or encrypted_data.strip().startswith('['):
-        return False, "Data appears to be unencrypted (plaintext JSON detected)"
-    
-    return True, None
-
-
-@upload_bp.route('/api/upload', methods=['POST'])
-@limiter.limit("20 per hour")
-@login_required
-def upload_encrypted_data():
-    """
-    Upload encrypted QuickBooks data to S3 (NOT local disk)
-    
-    Features:
-    - Duplicate detection (via file hash)
-    - Malware scanning
-    - Cost estimation
-    - S3 upload with encryption
-    - Zero local storage
-    
-    Rate Limited: 20 requests per hour
-    Max Size: 50MB
-    Storage: AWS S3 (ephemeral, auto-deleted after 24h)
-    
-    Request Body:
-        encrypted_data (str): Encrypted QuickBooks data
-        company_name (str, optional): Company name
-        qb_file_name (str, optional): Original QB filename
+    Request JSON:
+        {
+            "encrypted_data": "IV:...:CIPHER:...:KEY:...",
+            "company_name": "Company Inc",
+            "qb_file_name": "company.qbw"
+        }
     
     Returns:
-        200: Upload successful (or duplicate detected)
+        200: Upload successful
         400: Invalid input
-        401: Not authenticated
-        413: Payload too large
-        429: Too many requests
+        401: Unauthorized
+        413: File too large
         500: Server error
     """
+    # CRITICAL FIX: Check authentication FIRST
+    from flask_login import current_user
+    
+    if not current_user or not current_user.is_authenticated:
+        logger.warning(f"Unauthenticated upload attempt from {request.remote_addr}")
+        return jsonify({
+            'success': False,
+            'error': 'Authentication required'
+        }), 401
     
     try:
-        # Get request ID for tracing
-        request_id = request.headers.get('X-Request-ID', 'unknown')
-        
-        # Validate request
-        if not request.is_json:
-            logger.warning(f"Non-JSON upload attempt from user {current_user.id}")
-            return jsonify({
-                'success': False,
-                'error': 'Content-Type must be application/json'
-            }), 400
-        
+        # Get request data
         data = request.get_json()
-        
         if not data:
             return jsonify({
                 'success': False,
-                'error': 'Request body is empty'
+                'error': 'No data provided'
             }), 400
         
-        # Extract fields
-        if 'encrypted_data' not in data:
+        encrypted_data = data.get('encrypted_data', '')
+        company_name = data.get('company_name', '')
+        qb_file_name = data.get('qb_file_name', 'quickbooks.qbw')
+        
+        # Validate encrypted data presence
+        if not encrypted_data:
+            logger.warning(f"Invalid encrypted data from user {current_user.id}: Encrypted data is required")
             return jsonify({
                 'success': False,
-                'error': 'Missing required field: encrypted_data'
+                'error': 'Encrypted data is required'
             }), 400
         
-        encrypted_data = data['encrypted_data']
-        company_name = data.get('company_name', '').strip()[:255]
-        qb_file_name = data.get('qb_file_name', '').strip()[:255]
+        # CRITICAL FIX: Check format BEFORE length
+        allowed_prefixes = current_app.config['ALLOWED_ENCRYPTION_PREFIXES']
+        has_valid_prefix = any(encrypted_data.startswith(prefix) for prefix in allowed_prefixes)
         
-        # Validate encrypted data
-        is_valid, error = validate_encrypted_data(encrypted_data)
-        if not is_valid:
-            logger.warning(f"Invalid encrypted data from user {current_user.id}: {error}")
+        if not has_valid_prefix:
+            logger.warning(f"Invalid encrypted data from user {current_user.id}: Invalid encryption format")
             return jsonify({
                 'success': False,
-                'error': error
+                'error': 'Invalid encryption format. Data must be properly encrypted.'
             }), 400
         
-        # Scan for malware
-        is_safe, error = scan_for_malware(encrypted_data)
-        if not is_safe:
-            logger.warning(f"Malware detected in upload from user {current_user.id}: {error}")
+        # Check minimum length
+        min_length = current_app.config['MIN_ENCRYPTED_DATA_LENGTH']
+        if len(encrypted_data) < min_length:
+            logger.warning(f"Invalid encrypted data from user {current_user.id}: Encrypted data too short (minimum {min_length} characters)")
             return jsonify({
                 'success': False,
-                'error': 'File rejected: security scan failed'
+                'error': f'Encrypted data too short (minimum {min_length} characters)'
             }), 400
         
-        # Calculate file hash for duplicate detection
+        # CRITICAL FIX: Check maximum length
+        max_length = current_app.config['MAX_ENCRYPTED_DATA_LENGTH']
+        if len(encrypted_data) > max_length:
+            logger.warning(f"Invalid encrypted data from user {current_user.id}: Encrypted data too large")
+            return jsonify({
+                'success': False,
+                'error': 'File too large. Maximum size is 50MB.'
+            }), 413
+        
+        # Calculate file hash
         file_hash = hashlib.sha256(encrypted_data.encode()).hexdigest()
+        data_size_bytes = len(encrypted_data)
         
         # Check for duplicate
-        duplicate = Migration.find_duplicate(current_user.id, file_hash)
+        duplicate = Migration.query.filter_by(
+            user_id=current_user.id,
+            file_hash=file_hash,
+            status='uploaded'
+        ).first()
+        
         if duplicate:
-            logger.info(f"Duplicate file detected for user {current_user.id}: {duplicate.migration_id}")
+            logger.info(f"Duplicate file detected for user {current_user.id}, hash: {file_hash[:16]}...")
             return jsonify({
                 'success': True,
+                'message': 'File already uploaded',
                 'migration_id': duplicate.migration_id,
-                'status': duplicate.status,
-                'message': 'File already uploaded (duplicate detected)',
-                'duplicate': True
+                'is_duplicate': True
             }), 200
         
-        # Log data size
-        data_size = len(encrypted_data)
-        logger.info(f"Upload request from user {current_user.id}, size: {data_size} bytes, hash: {file_hash[:16]}...")
+        # Generate migration ID
+        migration_id = str(uuid.uuid4())
+        
+        logger.info(f"Upload request from user {current_user.id}, size: {data_size_bytes} bytes, hash: {file_hash[:16]}...")
         
         # Create migration record
-        try:
-            migration = Migration(
-                user_id=current_user.id,
-                status='pending',
-                company_name=company_name if company_name else None,
-                qb_file_name=qb_file_name if qb_file_name else None,
-                ip_address=request.remote_addr,
-                user_agent=request.headers.get('User-Agent', '')[:500],
-                request_id=request_id,
-                data_size_bytes=data_size
-            )
-            
-            # Set file hash
-            migration.file_hash = file_hash
-            
-            # Estimate cost
-            migration.estimate_cost()
-            
-            db.session.add(migration)
-            db.session.commit()
-            
-            migration_id = migration.migration_id
-            
-        except Exception as e:
-            logger.error(f"Database error creating migration for user {current_user.id}: {str(e)}")
-            db.session.rollback()
-            return jsonify({
-                'success': False,
-                'error': 'Failed to create migration record'
-            }), 500
+        migration = Migration(
+            migration_id=migration_id,
+            user_id=current_user.id,
+            company_name=company_name,
+            qb_file_name=qb_file_name,
+            file_hash=file_hash,
+            data_size_bytes=data_size_bytes,
+            status='pending'
+        )
         
-        # Mark as uploading
-        migration.mark_as_uploading()
+        db.session.add(migration)
+        db.session.commit()
         
-        # Upload to S3 (NOT local disk)
+        # Upload to S3
         try:
             logger.info(f"Uploading migration {migration_id} to S3...")
             
-            # Initialize AWS manager
-            aws_manager = AWSMigrationManager(
-                region=current_app.config.get('AWS_REGION', 'us-east-1')
-            )
+            aws = AWSManager()
+            s3_key = f"uploads/{current_user.id}/{migration_id}.enc"
             
-            # Convert string to file-like object for S3 upload
-            encrypted_file = io.BytesIO(encrypted_data.encode('utf-8'))
+            # Upload encrypted data
+            from io import BytesIO
+            file_obj = BytesIO(encrypted_data.encode())
             
-            # Upload to S3
-            s3_result = aws_manager.upload_to_s3(
-                file_obj=encrypted_file,
-                migration_id=migration_id,
+            success = aws.upload_to_s3(
+                file_obj=file_obj,
+                key=s3_key,
                 metadata={
                     'user_id': str(current_user.id),
+                    'migration_id': migration_id,
                     'company_name': company_name,
-                    'qb_file_name': qb_file_name,
-                    'original_size': str(data_size),
                     'file_hash': file_hash
                 }
             )
             
-            if not s3_result:
+            if not success:
                 logger.error(f"S3 upload failed for migration {migration_id}")
-                migration.mark_as_failed('Failed to upload to S3', 'S3_UPLOAD_ERROR')
+                migration.status = 'failed'
+                migration.error_message = 'Failed to upload file to secure storage'
+                db.session.commit()
+                
                 return jsonify({
                     'success': False,
                     'error': 'Failed to upload file to secure storage'
                 }), 500
             
-            s3_uri = s3_result['uri']
-            s3_bucket = s3_result['bucket']
-            s3_key = s3_result['key']
+            # Update migration status
+            migration.status = 'uploaded'
+            migration.s3_key = s3_key
+            db.session.commit()
             
-            logger.info(f"Successfully uploaded to S3: {s3_uri}")
+            logger.info(f"Upload successful for migration {migration_id}")
             
-        except Exception as e:
-            logger.exception(f"S3 upload error for migration {migration_id}: {str(e)}")
-            migration.mark_as_failed(f'Upload error: {str(e)}', 'UPLOAD_ERROR')
             return jsonify({
-                'success': False,
-                'error': 'Failed to upload file'
-            }), 500
-        
-        # Mark as uploaded
-        try:
-            migration.mark_as_uploaded(s3_uri, s3_bucket, s3_key)
+                'success': True,
+                'migration_id': migration_id,
+                'message': 'File uploaded successfully'
+            }), 200
             
         except Exception as e:
-            logger.error(f"Failed to update migration status for {migration_id}: {str(e)}")
-            db.session.rollback()
-            
-            # Try to clean up S3 file
-            try:
-                aws_manager.delete_s3_file(migration_id)
-            except:
-                pass
+            logger.error(f"S3 upload error for migration {migration_id}: {str(e)}")
+            migration.status = 'failed'
+            migration.error_message = f'Upload error: {str(e)}'
+            db.session.commit()
             
             return jsonify({
                 'success': False,
-                'error': 'Failed to finalize upload'
+                'error': 'Failed to upload file to secure storage'
             }), 500
         
-        logger.info(f"Upload successful: migration_id={migration_id}, "
-                   f"user_id={current_user.id}, size={data_size} bytes, "
-                   f"estimated_cost=${migration.estimated_cost_usd}")
+    except Exception as e:
+        logger.error(f"Upload error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'An error occurred during upload'
+        }), 500
+
+
+@upload_bp.route('/<migration_id>/status', methods=['GET'])
+@login_required
+def get_upload_status(migration_id):
+    """
+    Get upload status
+    
+    Args:
+        migration_id: Migration ID
+        
+    Returns:
+        200: Status information
+        404: Migration not found
+    """
+    try:
+        migration = Migration.query.filter_by(
+            migration_id=migration_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not migration:
+            return jsonify({
+                'success': False,
+                'error': 'Migration not found'
+            }), 404
         
         return jsonify({
             'success': True,
-            'migration_id': migration_id,
-            'status': 'uploaded',
-            'message': 'Data uploaded successfully to secure cloud storage',
-            'estimated_cost_usd': float(migration.estimated_cost_usd) if migration.estimated_cost_usd else None,
-            'data_size_mb': round(data_size / (1024 ** 2), 2)
+            'migration': {
+                'migration_id': migration.migration_id,
+                'status': migration.status,
+                'company_name': migration.company_name,
+                'data_size_bytes': migration.data_size_bytes,
+                'created_at': migration.created_at.isoformat() if migration.created_at else None,
+                'updated_at': migration.updated_at.isoformat() if migration.updated_at else None
+            }
         }), 200
         
     except Exception as e:
-        logger.exception(f"Unexpected error in upload from user {current_user.id if current_user.is_authenticated else 'anonymous'}: {str(e)}")
-        db.session.rollback()
+    # Check if it's an authentication error
+        if 'not bound to a Session' in str(e) or 'DetachedInstanceError' in str(e):
+            # This is a session issue, likely unauthenticated
+            logger.warning(f"Unauthenticated upload attempt from {request.remote_addr}")
+            return jsonify({
+                'success': False,
+                'error': 'Authentication required'
+            }), 401
+        
+        logger.error(f"Upload error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'An unexpected error occurred'
+            'error': 'An error occurred during upload'
         }), 500

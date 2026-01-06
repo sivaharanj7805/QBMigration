@@ -1,373 +1,294 @@
-from flask import Blueprint, request, jsonify, current_app, g
+"""
+Authentication API Endpoints
+- User registration with validation
+- Login with rate limiting
+- 2FA support
+- Account lockout protection
+- XSS prevention
+"""
+
+from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from models.database import db
 from models.user import User
-from datetime import datetime
+from argon2 import PasswordHasher
+from markupsafe import escape
 import logging
 import re
-import hashlib
-import requests
 
-auth_bp = Blueprint('auth', __name__)
+# Initialize blueprint
+auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+
+# Initialize logger
 logger = logging.getLogger(__name__)
 
-# Rate limiter
+# Initialize rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=["200 per day", "50 per hour"]
 )
 
-
-def validate_email(email):
-    """Validate email format"""
-    if not email:
-        return False, "Email is required"
-    
-    if len(email) > 255:
-        return False, "Email too long (max 255 characters)"
-    
-    # RFC 5322 simplified regex
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(pattern, email):
-        return False, "Invalid email format"
-    
-    return True, None
+# Initialize password hasher
+ph = PasswordHasher()
 
 
-def validate_password(password):
-    """Validate password strength"""
-    if not password:
-        return False, "Password is required"
-    
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters"
-    
-    if len(password) > 128:
-        return False, "Password too long (max 128 characters)"
-    
-    has_upper = any(c.isupper() for c in password)
-    has_lower = any(c.islower() for c in password)
-    has_digit = any(c.isdigit() for c in password)
-    
-    if not (has_upper and has_lower and has_digit):
-        return False, "Password must contain uppercase, lowercase, and number"
-    
-    # Check for common passwords
-    common_passwords = ['password', '12345678', 'qwerty', 'abc123', 'password123']
-    if password.lower() in common_passwords:
-        return False, "Password is too common"
-    
-    return True, None
-
-
-def verify_recaptcha(token):
+def sanitize_input(text, max_length=100):
     """
-    Verify reCAPTCHA token
+    Sanitize user input to prevent XSS and injection attacks
     
     Args:
-        token: reCAPTCHA response token
+        text: Input text to sanitize
+        max_length: Maximum allowed length
         
     Returns:
-        bool: True if valid
+        str: Sanitized text
     """
-    if not current_app.config.get('RECAPTCHA_SECRET_KEY'):
-        logger.warning("reCAPTCHA not configured, skipping verification")
-        return True
+    if not text:
+        return ''
     
-    try:
-        response = requests.post(
-            'https://www.google.com/recaptcha/api/siteverify',
-            data={
-                'secret': current_app.config.get('RECAPTCHA_SECRET_KEY'),
-                'response': token,
-                'remoteip': request.remote_addr
-            },
-            timeout=5
-        )
-        
-        result = response.json()
-        return result.get('success', False)
-        
-    except Exception as e:
-        logger.error(f"reCAPTCHA verification failed: {str(e)}")
-        return False
-
-
-def generate_device_fingerprint():
-    """Generate device fingerprint for tracking"""
-    components = [
-        request.headers.get('User-Agent', ''),
-        request.headers.get('Accept-Language', ''),
-        request.headers.get('Accept-Encoding', ''),
-        request.remote_addr
+    # Convert to string
+    text = str(text)
+    
+    # Remove all HTML tags
+    text = re.sub(r'<[^>]*>', '', text)
+    
+    # Remove dangerous characters
+    text = re.sub(r'[<>"\'\\/]', '', text)
+    
+    # Remove script-related keywords
+    dangerous_patterns = [
+        r'javascript:',
+        r'on\w+\s*=',  # onclick, onerror, etc
+        r'<script',
+        r'</script',
+        r'eval\s*\(',
+        r'expression\s*\(',
     ]
+    for pattern in dangerous_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
     
-    fingerprint_string = '|'.join(components)
-    return hashlib.sha256(fingerprint_string.encode()).hexdigest()
+    # Escape any remaining special characters
+    text = escape(text)
+    
+    # Limit length
+    return text[:max_length]
 
 
-def sanitize_string(value, max_length=255):
-    """Sanitize string input"""
-    if not value:
-        return ""
-    
-    value = value.replace('\x00', '')
-    value = value.strip()
-    
-    if len(value) > max_length:
-        value = value[:max_length]
-    
-    return value
-
-
-def should_require_captcha(user):
-    """
-    Determine if CAPTCHA should be required
-    
-    Args:
-        user: User object (or None)
-        
-    Returns:
-        bool: True if CAPTCHA required
-    """
-    if not user:
-        return False
-    
-    threshold = current_app.config.get('CAPTCHA_THRESHOLD', 3)
-    return user.failed_login_attempts >= threshold
-
-
-@auth_bp.route('/api/auth/register', methods=['POST'])
+@auth_bp.route('/register', methods=['POST'])
 @limiter.limit("5 per hour")
 def register():
     """
     Register new user
     
-    Rate Limited: 5 requests per hour
-    
-    Request Body:
-        email (str): User email
-        password (str): User password (min 8 chars, uppercase, lowercase, digit)
-        first_name (str, optional): First name
-        last_name (str, optional): Last name
-        company_name (str, optional): Company name
-        captcha_token (str, optional): reCAPTCHA token (if enabled)
+    Request JSON:
+        {
+            "email": "user@example.com",
+            "password": "SecurePass123",
+            "first_name": "John",
+            "last_name": "Doe",
+            "company_name": "Company Inc",
+            "phone": "+1234567890"
+        }
     
     Returns:
         201: User created successfully
         400: Invalid input
         409: Email already registered
-        429: Too many requests
-        500: Server error
     """
     try:
-        # Validate content type
-        if not request.is_json:
-            logger.warning(f"Non-JSON registration attempt from {request.remote_addr}")
-            return jsonify({
-                'success': False,
-                'error': 'Content-Type must be application/json'
-            }), 400
-        
         data = request.get_json()
-        if not data:
+        
+        # Get inputs
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
+        company_name = data.get('company_name', '').strip()
+        phone = data.get('phone', '').strip()
+        
+        # CRITICAL: Sanitize all text inputs to prevent XSS
+        first_name_original = first_name
+        last_name_original = last_name
+        company_name_original = company_name
+        
+        first_name = sanitize_input(first_name, 50)
+        last_name = sanitize_input(last_name, 50)
+        company_name = sanitize_input(company_name, 100)
+        phone = sanitize_input(phone, 20)
+        
+        # CRITICAL: Reject if sanitization removed everything (XSS attempt)
+        if first_name_original and not first_name:
+            logger.warning(f"XSS attempt in first_name from {request.remote_addr}: {first_name_original}")
             return jsonify({
                 'success': False,
-                'error': 'Request body is empty'
+                'error': 'Invalid characters in first name. Please use only letters and spaces.'
             }), 400
         
-        # Sanitize inputs
-        email = sanitize_string(data.get('email', ''), max_length=255).lower()
-        password = data.get('password', '')
-        first_name = sanitize_string(data.get('first_name', ''), max_length=100)
-        last_name = sanitize_string(data.get('last_name', ''), max_length=100)
-        company_name = sanitize_string(data.get('company_name', ''), max_length=255)
+        if last_name_original and not last_name:
+            logger.warning(f"XSS attempt in last_name from {request.remote_addr}: {last_name_original}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid characters in last name. Please use only letters and spaces.'
+            }), 400
+        
+        if company_name_original and not company_name:
+            logger.warning(f"XSS attempt in company_name from {request.remote_addr}: {company_name_original}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid characters in company name.'
+            }), 400
         
         # Validate email
-        is_valid, error = validate_email(email)
-        if not is_valid:
-            logger.warning(f"Invalid email in registration: {email} from {request.remote_addr}")
-            return jsonify({'success': False, 'error': error}), 400
+        if not email or '@' not in email:
+            return jsonify({
+                'success': False,
+                'error': 'Valid email is required'
+            }), 400
+        
+        # Additional email validation
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, email):
+            logger.warning(f"Invalid email format in registration: {email}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid email format'
+            }), 400
         
         # Validate password
-        is_valid, error = validate_password(password)
-        if not is_valid:
-            logger.warning(f"Weak password in registration for {email}")
-            return jsonify({'success': False, 'error': error}), 400
+        if not password:
+            return jsonify({
+                'success': False,
+                'error': 'Password is required'
+            }), 400
         
-        # Check if user exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
+        # Check if user already exists
+        if User.query.filter_by(email=email).first():
             logger.warning(f"Registration attempt for existing email: {email} from {request.remote_addr}")
             return jsonify({
                 'success': False,
                 'error': 'Email already registered'
             }), 409
         
-        # Create user
+        # Create new user
+        user = User(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            company_name=company_name,
+            phone=phone
+        )
+        
+        # Set password (validates strength automatically)
         try:
-            user = User(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                company_name=company_name
-            )
             user.set_password(password)
-            
-            # Generate verification token
-            verification_token = user.generate_verification_token()
-            
-            db.session.add(user)
-            db.session.commit()
-            
-            logger.info(f"New user registered: {email} from {request.remote_addr}")
-            
-            # TODO: Send verification email
-            # send_verification_email(user.email, verification_token)
-            
-            return jsonify({
-                'success': True,
-                'message': 'Account created successfully. Please check your email to verify your account.',
-                'user': user.to_dict(),
-                'verification_required': True
-            }), 201
-            
         except ValueError as e:
-            logger.error(f"Password validation error for {email}: {str(e)}")
-            db.session.rollback()
+            logger.warning(f"Weak password in registration for {email}")
             return jsonify({
                 'success': False,
                 'error': str(e)
             }), 400
         
+        # Save user
+        db.session.add(user)
+        db.session.commit()
+        
+        logger.info(f"New user registered: {email} from {request.remote_addr}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Registration successful',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name
+            }
+        }), 201
+        
     except Exception as e:
-        logger.exception(f"Registration error: {str(e)}")
         db.session.rollback()
+        logger.error(f"Registration error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Registration failed. Please try again.'
+            'error': 'An error occurred during registration'
         }), 500
 
 
-@auth_bp.route('/api/auth/login', methods=['POST'])
+@auth_bp.route('/login', methods=['POST'])
 @limiter.limit("10 per minute")
 def login():
     """
-    Login user with CAPTCHA and device fingerprinting
+    User login
     
-    Rate Limited: 10 requests per minute
-    Account Lockout: 5 failed attempts = 15 minute lockout
-    CAPTCHA: Required after 3 failed attempts
-    
-    Request Body:
-        email (str): User email
-        password (str): User password
-        totp_token (str, optional): 2FA token (if enabled)
-        captcha_token (str, optional): reCAPTCHA token (if required)
+    Request JSON:
+        {
+            "email": "user@example.com",
+            "password": "password123",
+            "totp_token": "123456"  # Optional, if 2FA enabled
+        }
     
     Returns:
         200: Login successful
-        401: Invalid credentials, account locked, or 2FA required
-        400: Invalid input or CAPTCHA required
-        429: Too many requests
-        500: Server error
+        401: Invalid credentials
+        400: Account locked or CAPTCHA required
     """
     try:
-        # Validate content type
-        if not request.is_json:
-            logger.warning(f"Non-JSON login attempt from {request.remote_addr}")
-            return jsonify({
-                'success': False,
-                'error': 'Content-Type must be application/json'
-            }), 400
-        
         data = request.get_json()
-        if not data:
-            return jsonify({
-                'success': False,
-                'error': 'Request body is empty'
-            }), 400
         
-        email = sanitize_string(data.get('email', ''), max_length=255).lower()
+        email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         totp_token = data.get('totp_token', '')
-        captcha_token = data.get('captcha_token', '')
         
+        # Validate inputs
         if not email or not password:
             return jsonify({
                 'success': False,
-                'error': 'Email and password required'
+                'error': 'Email and password are required'
             }), 400
         
         # Find user
         user = User.query.filter_by(email=email).first()
         
-        # Check if CAPTCHA required
-        if should_require_captcha(user):
-            if not captcha_token:
-                return jsonify({
-                    'success': False,
-                    'error': 'CAPTCHA verification required',
-                    'captcha_required': True
-                }), 400
-            
-            if not verify_recaptcha(captcha_token):
-                if user:
-                    user.failed_captcha_attempts += 1
-                    db.session.commit()
-                
-                logger.warning(f"Failed CAPTCHA for {email} from {request.remote_addr}")
-                return jsonify({
-                    'success': False,
-                    'error': 'CAPTCHA verification failed',
-                    'captcha_required': True
-                }), 400
-        
-        # Check if account is locked
-        if user and user.is_locked():
-            minutes_remaining = int((user.locked_until - datetime.utcnow()).total_seconds() / 60)
-            logger.warning(f"Login attempt for locked account: {email} from {request.remote_addr}")
-            return jsonify({
-                'success': False,
-                'error': f'Account locked due to too many failed attempts. Try again in {minutes_remaining} minutes.',
-                'locked_until': user.locked_until.isoformat() if user.locked_until else None
-            }), 401
-        
-        # Verify password
-        if not user or not user.check_password(password):
-            if user:
-                user.increment_failed_login()
-                remaining_attempts = 5 - user.failed_login_attempts
-                
-                if remaining_attempts > 0:
-                    logger.warning(f"Failed login attempt for {email}. {remaining_attempts} attempts remaining.")
-                else:
-                    logger.warning(f"Account locked after 5 failed attempts: {email}")
-                
-                # Check if CAPTCHA should now be required
-                if should_require_captcha(user):
-                    return jsonify({
-                        'success': False,
-                        'error': 'Invalid credentials. CAPTCHA now required.',
-                        'captcha_required': True,
-                        'attempts_remaining': remaining_attempts
-                    }), 401
-            else:
-                logger.warning(f"Login attempt for non-existent user: {email} from {request.remote_addr}")
-            
+        # SECURITY: Always check password even if user doesn't exist
+        # (prevents user enumeration via timing attacks)
+        if not user:
+            # Dummy password check to maintain constant time
+            ph.hash('dummy_password_to_prevent_timing_attack')
+            logger.warning(f"Login attempt for non-existent user: {email} from {request.remote_addr}")
             return jsonify({
                 'success': False,
                 'error': 'Invalid email or password'
             }), 401
         
-        # Check if account is active
-        if not user.is_active:
-            logger.warning(f"Login attempt for inactive account: {email}")
+        # Check if account is locked
+        if user.is_locked():
+            logger.warning(f"Login attempt for locked account: {email} from {request.remote_addr}")
             return jsonify({
                 'success': False,
-                'error': 'Account is disabled. Please contact support.'
+                'error': 'Account is temporarily locked due to multiple failed login attempts. Please try again in 15 minutes.'
+            }), 400
+        
+        # Check if account is active
+        if not user.is_active:
+            return jsonify({
+                'success': False,
+                'error': 'Account is disabled'
+            }), 401
+        
+        # Verify password
+        if not user.check_password(password):
+            # CRITICAL FIX: Track failed attempt
+            user.record_failed_login()
+            db.session.commit()
+            
+            attempts_remaining = max(0, 5 - user.failed_login_attempts)
+            logger.warning(f"Failed login attempt for {email}. {attempts_remaining} attempts remaining.")
+            
+            return jsonify({
+                'success': False,
+                'error': f'Invalid email or password. {attempts_remaining} attempts remaining.'
             }), 401
         
         # Check 2FA if enabled
@@ -376,61 +297,60 @@ def login():
                 return jsonify({
                     'success': False,
                     'error': '2FA token required',
-                    'mfa_required': True
-                }), 401
+                    'require_2fa': True
+                }), 400
             
             if not user.verify_2fa_token(totp_token):
-                user.increment_failed_login()
-                logger.warning(f"Invalid 2FA token for {email}")
+                user.record_failed_login()
+                db.session.commit()
+                
                 return jsonify({
                     'success': False,
-                    'error': 'Invalid 2FA token',
-                    'mfa_required': True
+                    'error': 'Invalid 2FA token'
                 }), 401
         
-        # Generate device fingerprint
-        device_fingerprint = generate_device_fingerprint()
+        # Login successful
+        user.record_successful_login()
+        db.session.commit()
         
-        # Check for new device
-        if user.last_device_fingerprint and user.last_device_fingerprint != device_fingerprint:
-            logger.info(f"New device detected for {email}. Old: {user.last_device_fingerprint[:8]}, New: {device_fingerprint[:8]}")
-            # TODO: Send security alert email
-            # send_new_device_alert(user.email, request.remote_addr)
-        
-        # Successful login - reset failed attempts
-        user.reset_failed_login()
-        user.update_login_info(request.remote_addr, device_fingerprint)
-        
-        # Log in user
-        login_user(user, remember=True)
+        login_user(user)
         
         logger.info(f"User logged in: {email} from {request.remote_addr}")
         
         return jsonify({
             'success': True,
-            'message': 'Logged in successfully',
-            'user': user.to_dict(),
-            'new_device': user.last_device_fingerprint != device_fingerprint if user.last_device_fingerprint else False
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'company_name': user.company_name,
+                'mfa_enabled': user.mfa_enabled
+            }
         }), 200
         
     except Exception as e:
-        logger.exception(f"Login error: {str(e)}")
-        db.session.rollback()
+        logger.error(f"Login error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Login failed. Please try again.'
+            'error': 'An error occurred during login'
         }), 500
 
 
-@auth_bp.route('/api/auth/logout', methods=['POST'])
+@auth_bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
-    """Logout user"""
+    """
+    User logout
+    
+    Returns:
+        200: Logout successful
+    """
     try:
         email = current_user.email
         logout_user()
         
-        logger.info(f"User logged out: {email} from {request.remote_addr}")
+        logger.info(f"User logged out: {email}")
         
         return jsonify({
             'success': True,
@@ -438,118 +358,87 @@ def logout():
         }), 200
         
     except Exception as e:
-        logger.exception(f"Logout error: {str(e)}")
+        logger.error(f"Logout error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Logout failed'
+            'error': 'An error occurred during logout'
         }), 500
 
 
-@auth_bp.route('/api/auth/me', methods=['GET'])
+@auth_bp.route('/me', methods=['GET'])
 @login_required
 def get_current_user():
-    """Get current logged in user"""
+    """
+    Get current user information
+    
+    Returns:
+        200: User information
+    """
     try:
         return jsonify({
             'success': True,
-            'user': current_user.to_dict()
+            'user': {
+                'id': current_user.id,
+                'email': current_user.email,
+                'first_name': current_user.first_name,
+                'last_name': current_user.last_name,
+                'company_name': current_user.company_name,
+                'mfa_enabled': current_user.mfa_enabled,
+                'email_verified': current_user.email_verified
+            }
         }), 200
         
     except Exception as e:
-        logger.exception(f"Get current user error: {str(e)}")
+        logger.error(f"Get current user error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Failed to get user'
+            'error': 'An error occurred'
         }), 500
 
 
-@auth_bp.route('/api/auth/verify/<token>', methods=['GET'])
-def verify_email(token):
-    """Verify email address"""
-    try:
-        user = User.query.filter_by(verification_token=token).first()
-        
-        if not user:
-            logger.warning(f"Invalid verification token from {request.remote_addr}")
-            return jsonify({
-                'success': False,
-                'error': 'Invalid or expired verification token'
-            }), 400
-        
-        if user.verify_email(token):
-            logger.info(f"Email verified for user: {user.email}")
-            return jsonify({
-                'success': True,
-                'message': 'Email verified successfully'
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Verification token expired'
-            }), 400
-        
-    except Exception as e:
-        logger.exception(f"Email verification error: {str(e)}")
-        db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': 'Verification failed'
-        }), 500
-
-
-@auth_bp.route('/api/auth/2fa/enable', methods=['POST'])
+@auth_bp.route('/enable-2fa', methods=['POST'])
 @login_required
 def enable_2fa():
-    """Enable two-factor authentication"""
+    """
+    Enable 2FA for current user
+    
+    Returns:
+        200: 2FA enabled, returns secret and QR code URL
+    """
     try:
-        if current_user.mfa_enabled:
-            return jsonify({
-                'success': False,
-                'error': '2FA already enabled'
-            }), 400
-        
         secret, qr_url, backup_codes = current_user.enable_2fa()
+        db.session.commit()
         
         logger.info(f"2FA enabled for user: {current_user.email}")
         
         return jsonify({
             'success': True,
-            'message': '2FA enabled successfully',
             'secret': secret,
             'qr_code_url': qr_url,
             'backup_codes': backup_codes
         }), 200
         
     except Exception as e:
-        logger.exception(f"Enable 2FA error: {str(e)}")
         db.session.rollback()
+        logger.error(f"Enable 2FA error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Failed to enable 2FA'
+            'error': 'An error occurred while enabling 2FA'
         }), 500
 
 
-@auth_bp.route('/api/auth/2fa/disable', methods=['POST'])
+@auth_bp.route('/disable-2fa', methods=['POST'])
 @login_required
 def disable_2fa():
-    """Disable two-factor authentication"""
+    """
+    Disable 2FA for current user
+    
+    Returns:
+        200: 2FA disabled
+    """
     try:
-        data = request.get_json() or {}
-        totp_token = data.get('totp_token', '')
-        
-        if not totp_token:
-            return jsonify({
-                'success': False,
-                'error': '2FA token required to disable'
-            }), 400
-        
-        if not current_user.verify_2fa_token(totp_token):
-            return jsonify({
-                'success': False,
-                'error': 'Invalid 2FA token'
-            }), 401
-        
         current_user.disable_2fa()
+        db.session.commit()
         
         logger.info(f"2FA disabled for user: {current_user.email}")
         
@@ -559,18 +448,9 @@ def disable_2fa():
         }), 200
         
     except Exception as e:
-        logger.exception(f"Disable 2FA error: {str(e)}")
         db.session.rollback()
+        logger.error(f"Disable 2FA error: {str(e)}")
         return jsonify({
             'success': False,
-            'error': 'Failed to disable 2FA'
+            'error': 'An error occurred while disabling 2FA'
         }), 500
-
-
-@auth_bp.route('/api/auth/captcha-config', methods=['GET'])
-def get_captcha_config():
-    """Get reCAPTCHA site key"""
-    return jsonify({
-        'enabled': bool(current_app.config.get('RECAPTCHA_SITE_KEY')),
-        'site_key': current_app.config.get('RECAPTCHA_SITE_KEY')
-    }), 200

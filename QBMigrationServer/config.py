@@ -25,9 +25,12 @@ class Config:
     # ============================================================================
     # DATABASE - PostgreSQL
     # ============================================================================
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'postgresql://qbmigration:changeme@localhost:5432/qbmigration')
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+    if not SQLALCHEMY_DATABASE_URI:
+        print("❌ ERROR: DATABASE_URL not found in environment!")
     
     # Fix Heroku/Railway postgres:// URLs
+
     if SQLALCHEMY_DATABASE_URI and SQLALCHEMY_DATABASE_URI.startswith('postgres://'):
         SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace('postgres://', 'postgresql://', 1)
     
@@ -199,7 +202,7 @@ class Config:
     DEFAULT_PAGE_SIZE = 50
     MAX_PAGE_SIZE = 100
     MAX_OFFSET = 10000
-
+    
 
 class DevelopmentConfig(Config):
     """Development configuration"""
@@ -212,11 +215,23 @@ class DevelopmentConfig(Config):
 class TestingConfig(Config):
     """Testing configuration"""
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'postgresql://test:test@localhost:5432/qbmigration_test'
+    DEBUG = False
+    
+    # Don't define SQLALCHEMY_DATABASE_URI here yet!
+    # We'll use init_app to set it
+    
     RATELIMIT_ENABLED = False
     AUTO_CLEANUP_ENABLED = False
     BACKUP_ENABLED = False
+    BACKUP_TO_S3 = False
     WTF_CSRF_ENABLED = False
+    AWS_S3_BUCKET = None
+    
+    @classmethod
+    def init_app(cls, app):
+        """Initialize app with test database"""
+        # CRITICAL: Set the database URI here, AFTER the class is loaded
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_test'
 
 
 class ProductionConfig(Config):
