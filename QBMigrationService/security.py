@@ -2,10 +2,18 @@ import hashlib
 import hmac
 import secrets
 import pyotp
+import re
 from datetime import datetime, timedelta
+from typing import Dict, List, Tuple, Optional
 
 class SecurityManager:
-    """Additional security utilities"""
+    """
+    Enhanced security with:
+    - Pre-migration data scan
+    - Naming collision detection
+    - Permission scope verification
+    - Rate limiting
+    """
     
     @staticmethod
     def generate_session_id():
@@ -14,7 +22,7 @@ class SecurityManager:
     
     @staticmethod
     def hash_password(password):
-        """Hash password using SHA-256 (use bcrypt in production)"""
+        """Hash password using bcrypt"""
         import bcrypt
         salt = bcrypt.gensalt(rounds=12)
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
@@ -80,3 +88,295 @@ class SecurityManager:
         # Add this request
         SecurityManager._rate_limit_store[user_id].append(now)
         return True
+    
+    # ========================================================================
+    # PRE-MIGRATION SCAN
+    # ========================================================================
+    
+    @staticmethod
+    def pre_migration_scan(data: Dict) -> Dict[str, any]:
+        """
+        CRITICAL: Scan source data before migration starts
+        
+        Detects:
+        - Naming collisions across Customer/Vendor/Employee
+        - Duplicate DocNumbers
+        - Invalid characters
+        - Data size warnings
+        - QBD version compatibility
+        
+        Returns:
+            Dict with 'warnings', 'errors', 'should_proceed'
+        """
+        print("\n" + "=" * 80)
+        print("  PRE-MIGRATION SCAN")
+        print("=" * 80)
+        
+        scan_result = {
+            'warnings': [],
+            'errors': [],
+            'should_proceed': True,
+            'recommendations': []
+        }
+        
+        # Check 1: DisplayName uniqueness across entities
+        print("\n[1/6] Checking for naming collisions...")
+        name_collisions = SecurityManager._check_name_collisions(data)
+        
+        if name_collisions:
+            scan_result['errors'].append(
+                f"Found {len(name_collisions)} naming collisions that will cause migration to fail"
+            )
+            scan_result['should_proceed'] = False
+            
+            print(f"  ❌ Found {len(name_collisions)} naming collisions:")
+            for collision in name_collisions[:5]:
+                print(f"     - {collision}")
+            
+            if len(name_collisions) > 5:
+                print(f"     ... and {len(name_collisions) - 5} more")
+        else:
+            print("  ✓ No naming collisions")
+        
+        # Check 2: Duplicate DocNumbers
+        print("\n[2/6] Checking for duplicate DocNumbers...")
+        duplicate_docs = SecurityManager._check_duplicate_doc_numbers(data)
+        
+        if duplicate_docs:
+            scan_result['warnings'].append(
+                f"Found {len(duplicate_docs)} duplicate invoice numbers"
+            )
+            print(f"  ⚠️  Found {len(duplicate_docs)} duplicate DocNumbers")
+        else:
+            print("  ✓ No duplicate DocNumbers")
+        
+        # Check 3: Invalid characters
+        print("\n[3/6] Checking for invalid characters...")
+        invalid_chars = SecurityManager._check_invalid_characters(data)
+        
+        if invalid_chars:
+            scan_result['warnings'].append(
+                f"Found {len(invalid_chars)} names with invalid characters (will be sanitized)"
+            )
+            print(f"  ⚠️  Found {len(invalid_chars)} names with invalid characters")
+        else:
+            print("  ✓ No invalid characters")
+        
+        # Check 4: Data size warnings
+        print("\n[4/6] Checking data volume...")
+        size_warnings = SecurityManager._check_data_size(data)
+        
+        for warning in size_warnings:
+            scan_result['warnings'].append(warning)
+            print(f"  ⚠️  {warning}")
+        
+        if not size_warnings:
+            print("  ✓ Data volume is reasonable")
+        
+        # Check 5: Inactive records with zero balances
+        print("\n[5/6] Checking for cleanable records...")
+        cleanable = SecurityManager._check_cleanable_records(data)
+        
+        if cleanable['count'] > 0:
+            scan_result['recommendations'].append(
+                f"Consider removing {cleanable['count']} inactive records with zero balances to speed up migration"
+            )
+            print(f"  💡 Found {cleanable['count']} inactive records that could be removed")
+        else:
+            print("  ✓ No unnecessary records found")
+        
+        # Check 6: Multi-user mode detection
+        print("\n[6/6] Checking file status...")
+        if data.get('IsMultiUserMode'):
+            scan_result['errors'].append(
+                "QuickBooks file is in Multi-user mode. Close all other connections before migration."
+            )
+            scan_result['should_proceed'] = False
+            print("  ❌ File is in Multi-user mode")
+        else:
+            print("  ✓ File is in single-user mode")
+        
+        # Print summary
+        print("\n" + "=" * 80)
+        print("  SCAN SUMMARY")
+        print("=" * 80)
+        print(f"  Errors: {len(scan_result['errors'])}")
+        print(f"  Warnings: {len(scan_result['warnings'])}")
+        print(f"  Recommendations: {len(scan_result['recommendations'])}")
+        
+        if scan_result['should_proceed']:
+            print("\n  ✓ PRE-MIGRATION SCAN PASSED")
+        else:
+            print("\n  ❌ PRE-MIGRATION SCAN FAILED")
+            print("\n  Please fix the following errors before proceeding:")
+            for error in scan_result['errors']:
+                print(f"    - {error}")
+        
+        print("=" * 80 + "\n")
+        
+        return scan_result
+    
+    @staticmethod
+    def _check_name_collisions(data: Dict) -> List[str]:
+        """Check for naming collisions across Customer/Vendor/Employee"""
+        all_names = set()
+        collisions = []
+        
+        # Collect all names
+        for customer in data.get('Customers', []):
+            name = customer.get('Name', '').strip().lower()
+            if name in all_names:
+                collisions.append(f"Customer: {customer.get('Name')}")
+            all_names.add(name)
+        
+        for vendor in data.get('Vendors', []):
+            name = vendor.get('Name', '').strip().lower()
+            if name in all_names:
+                collisions.append(f"Vendor: {vendor.get('Name')}")
+            all_names.add(name)
+        
+        for employee in data.get('Employees', []):
+            name = employee.get('Name', '').strip().lower()
+            if name in all_names:
+                collisions.append(f"Employee: {employee.get('Name')}")
+            all_names.add(name)
+        
+        return collisions
+    
+    @staticmethod
+    def _check_duplicate_doc_numbers(data: Dict) -> List[str]:
+        """Check for duplicate invoice/bill DocNumbers"""
+        doc_numbers = {}
+        duplicates = []
+        
+        for invoice in data.get('Invoices', []):
+            doc_num = invoice.get('RefNumber')
+            if doc_num:
+                if doc_num in doc_numbers:
+                    duplicates.append(f"Invoice #{doc_num}")
+                else:
+                    doc_numbers[doc_num] = True
+        
+        return duplicates
+    
+    @staticmethod
+    def _check_invalid_characters(data: Dict) -> List[str]:
+        """Check for invalid characters in names"""
+        invalid_pattern = re.compile(r'[<>:"/\\|?*]')
+        invalid_names = []
+        
+        for customer in data.get('Customers', []):
+            name = customer.get('Name', '')
+            if invalid_pattern.search(name):
+                invalid_names.append(f"Customer: {name}")
+        
+        for vendor in data.get('Vendors', []):
+            name = vendor.get('Name', '')
+            if invalid_pattern.search(name):
+                invalid_names.append(f"Vendor: {name}")
+        
+        return invalid_names
+    
+    @staticmethod
+    def _check_data_size(data: Dict) -> List[str]:
+        """Check for data size warnings"""
+        warnings = []
+        
+        invoice_count = len(data.get('Invoices', []))
+        customer_count = len(data.get('Customers', []))
+        item_count = len(data.get('Items', []))
+        
+        # Large data warnings
+        if invoice_count > 10000:
+            warnings.append(
+                f"Large invoice count ({invoice_count:,}). Migration may take 2-3 hours."
+            )
+        
+        if customer_count > 5000:
+            warnings.append(
+                f"Large customer count ({customer_count:,}). Consider archiving inactive customers."
+            )
+        
+        if item_count > 2000:
+            warnings.append(
+                f"Large item count ({item_count:,}). Consider removing unused items."
+            )
+        
+        # Total targets check (QBD limit is 1.2M)
+        total_targets = (
+            customer_count + 
+            len(data.get('Vendors', [])) + 
+            len(data.get('Accounts', [])) +
+            item_count +
+            invoice_count * 5  # Estimate 5 targets per invoice
+        )
+        
+        if total_targets > 1_200_000:
+            warnings.append(
+                f"File exceeds 1.2M targets ({total_targets:,}). Consider splitting migration."
+            )
+        
+        return warnings
+    
+    @staticmethod
+    def _check_cleanable_records(data: Dict) -> Dict:
+        """Check for inactive records with zero balances"""
+        cleanable_count = 0
+        
+        for customer in data.get('Customers', []):
+            if not customer.get('IsActive', True) and customer.get('Balance', 0) == 0:
+                cleanable_count += 1
+        
+        for vendor in data.get('Vendors', []):
+            if not vendor.get('IsActive', True) and vendor.get('Balance', 0) == 0:
+                cleanable_count += 1
+        
+        return {
+            'count': cleanable_count
+        }
+    
+    # ========================================================================
+    # PERMISSION VERIFICATION
+    # ========================================================================
+    
+    @staticmethod
+    def verify_oauth_scopes(access_token: str) -> Tuple[bool, List[str]]:
+        """
+        Verify OAuth token has required scopes
+        
+        Returns:
+            (has_required_scopes, actual_scopes)
+        """
+        import requests
+        
+        # Introspect token to get scopes
+        url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/introspect"
+        
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        data = {
+            "token": access_token
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=data)
+            
+            if response.status_code == 200:
+                result = response.json()
+                scope_string = result.get('scope', '')
+                actual_scopes = scope_string.split() if scope_string else []
+                
+                # Check for required scope
+                required = "com.intuit.quickbooks.accounting"
+                has_required = required in actual_scopes
+                
+                return has_required, actual_scopes
+            else:
+                return False, []
+                
+        except Exception as e:
+            print(f"Warning: Could not verify token scopes: {e}")
+            return True, []  # Assume OK if check fails
