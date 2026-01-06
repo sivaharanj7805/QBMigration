@@ -1,30 +1,79 @@
-# Web Framework
-Flask==3.0.0
+# ============================================================================
+# QB MIGRATION SERVER - PRODUCTION REQUIREMENTS
+# ============================================================================
+
+# Core Flask
+Flask==3.1.2
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
-Flask-CORS==4.0.0
-Flask-Limiter==3.5.0
-
-# Background Jobs
-Celery==5.3.4
-Redis==5.0.1
-
-# Database
-SQLAlchemy==2.0.23
-psycopg2-binary==2.9.9  # PostgreSQL (optional, use SQLite for dev)
-
-# Security
-bcrypt==4.1.2
-PyJWT==2.8.0
-cryptography==41.0.7
-
-# Email
+Flask-CORS==6.0.2
+Flask-Limiter==4.1.1
+Flask-Migrate==4.0.5
 Flask-Mail==0.9.1
+python-dotenv==1.2.1
+Werkzeug==3.1.4
+
+# Security - Password Hashing
+argon2-cffi==23.1.0
+bcrypt==4.1.2
+
+# Security - 2FA
+pyotp==2.9.0
+qrcode==7.4.2
+
+# Security - Rate Limiting
+limits==5.6.0
+redis==5.0.1
+
+# Security - Encryption
+cryptography==46.0.3
+
+# Monitoring & Error Tracking
+sentry-sdk[flask]==2.18.0
+
+# Database - PostgreSQL
+SQLAlchemy==2.0.23
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# AWS SDK
+boto3==1.35.36
+botocore==1.35.36
+
+# Validation
+email-validator==2.1.0
+
+# HTTP Requests
+requests==2.32.5
+
+# JWT (if needed)
+PyJWT==2.10.1
+
+# Scheduling
+APScheduler==3.10.4
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-flask==1.3.0
+freezegun==1.4.0
+faker==22.6.0
+
+# Code Quality
+flake8==7.0.0
+black==24.1.1
+mypy==1.8.0
+
+# Documentation
+flasgger==0.9.7.1
+
+# Production Server
+gunicorn==21.2.0
+gevent==23.9.1
+
+# Monitoring
+prometheus-flask-exporter==0.23.0
 
 # Utilities
-python-dotenv==1.0.0
-requests==2.31.0
-Werkzeug==3.0.1
-
-# Our existing dependencies
-pyotp==2.9.0
+python-dateutil==2.8.2
+pytz==2024.1
