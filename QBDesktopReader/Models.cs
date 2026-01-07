@@ -4,9 +4,18 @@ using System.Collections.Generic;
 namespace QBDesktopReader
 {
     // ============================================================
-    // COMPLETE DATA MODELS FOR ALL QB DATA TYPES
-    // Covers checklist items 3-30
-    // CORRECTED VERSION with decimal types and all references
+    // ENHANCED DATA MODELS FOR QB DATA EXTRACTION - VERSION 2.0
+    // Covers checklist items 3-30 with critical improvements:
+    // - Audit metadata (TimeCreated, TimeModified, EditSequence)
+    // - LinkedTxn support for transaction relationships
+    // - Multi-currency tracking (CurrencyRef, ExchangeRate)
+    // - Voided/Pending flags on all transactions
+    // - Billable status tracking
+    // - Unit of measure support
+    // - Sales tax group details
+    // - Company preferences (Item 30)
+    // - Bank reconciliation support (Item 3)
+    // - Job timeline tracking (Item 25)
     // ============================================================
 
     /// <summary>
@@ -18,6 +27,10 @@ namespace QBDesktopReader
         public DateTime ExtractedAt { get; set; }
         public string CompanyName { get; set; }
         public string QBVersion { get; set; }
+        public string CompanyFile { get; set; }
+        
+        // Company Preferences (Item 30) - NEW
+        public CompanyPreferences Preferences { get; set; }
         
         // Lists/Master Data
         public List<AccountData> Accounts { get; set; }
@@ -56,10 +69,66 @@ namespace QBDesktopReader
         public List<EstimateData> Estimates { get; set; }
         public List<DepositData> Deposits { get; set; }
         public List<JournalEntryData> JournalEntries { get; set; }
+        
+        // Deleted records tracking (for incremental syncs) - NEW
+        public List<DeletedRecord> DeletedRecords { get; set; }
     }
 
     // ============================================================
-    // CHART OF ACCOUNTS (Item 3)
+    // NEW SUPPORTING CLASSES
+    // ============================================================
+    
+    /// <summary>
+    /// Company preferences and settings (Item 30)
+    /// </summary>
+    public class CompanyPreferences
+    {
+        public string AccountingMethod { get; set; } // "Accrual" or "Cash"
+        public bool UseAccountNumbers { get; set; }
+        public bool UseClassTracking { get; set; }
+        public string InventoryValuationMethod { get; set; } // "AverageCost" or "FIFO"
+        public string FiscalYearStartMonth { get; set; }
+        public bool IsMultiCurrencyEnabled { get; set; }
+        public string HomeCurrency { get; set; }
+    }
+
+    /// <summary>
+    /// Deleted record tracking for incremental syncs
+    /// </summary>
+    public class DeletedRecord
+    {
+        public string ListID { get; set; }
+        public string TxnID { get; set; }
+        public string RecordType { get; set; }
+        public DateTime? TimeDeleted { get; set; }
+    }
+
+    /// <summary>
+    /// Linked transaction reference (tracks relationships between transactions)
+    /// </summary>
+    public class LinkedTxn
+    {
+        public string TxnID { get; set; }
+        public string TxnType { get; set; }
+        public DateTime TxnDate { get; set; }
+        public string RefNumber { get; set; }
+        public decimal Amount { get; set; }
+        public string LinkType { get; set; } // e.g., "Payment", "Credit", "Bill"
+    }
+
+    /// <summary>
+    /// Sales tax group detail (for multi-component tax groups)
+    /// </summary>
+    public class SalesTaxGroupDetail
+    {
+        public string TaxItemRef { get; set; }
+        public string TaxItemName { get; set; }
+        public decimal TaxRate { get; set; }
+        public decimal TaxAmount { get; set; }
+    }
+
+    // ============================================================
+    // CHART OF ACCOUNTS (Item 3) - ENHANCED
     // ============================================================
     public class AccountData
     {
@@ -68,16 +137,28 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string AccountType { get; set; }
         public string AccountNumber { get; set; }
-        public decimal Balance { get; set; }  // DECIMAL for money
+        public decimal Balance { get; set; }
         public string Description { get; set; }
         public bool IsActive { get; set; }
         public string ParentRef { get; set; }
         public string TaxLineInfo { get; set; }
         public string SpecialAccountType { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Bank reconciliation support (Item 3) - NEW
+        public decimal? ClearedBalance { get; set; }
+        public DateTime? LastReconciledDate { get; set; }
     }
 
     // ============================================================
-    // CUSTOMERS (Item 4)
+    // CUSTOMERS (Item 4) - ENHANCED
     // ============================================================
     public class CustomerData
     {
@@ -96,52 +177,61 @@ namespace QBDesktopReader
         public string Email { get; set; }
         public string Website { get; set; }
         
-        // Bill Address - FIXED: Added Addr3 and Note
+        // Bill Address
         public string BillAddr1 { get; set; }
         public string BillAddr2 { get; set; }
-        public string BillAddr3 { get; set; }  // ADDED
-        public string BillAddr4 { get; set; }  // ADDED (some QB versions have 4 lines)
-        public string BillAddr5 { get; set; }  // ADDED (some QB versions have 5 lines)
+        public string BillAddr3 { get; set; }
+        public string BillAddr4 { get; set; }
+        public string BillAddr5 { get; set; }
         public string BillCity { get; set; }
         public string BillState { get; set; }
         public string BillPostalCode { get; set; }
         public string BillCountry { get; set; }
-        public string BillNote { get; set; }   // ADDED
+        public string BillNote { get; set; }
         
-        // Ship Address - FIXED: Added Addr3 and Note
+        // Ship Address
         public string ShipAddr1 { get; set; }
         public string ShipAddr2 { get; set; }
-        public string ShipAddr3 { get; set; }  // ADDED
-        public string ShipAddr4 { get; set; }  // ADDED
-        public string ShipAddr5 { get; set; }  // ADDED
+        public string ShipAddr3 { get; set; }
+        public string ShipAddr4 { get; set; }
+        public string ShipAddr5 { get; set; }
         public string ShipCity { get; set; }
         public string ShipState { get; set; }
         public string ShipPostalCode { get; set; }
         public string ShipCountry { get; set; }
-        public string ShipNote { get; set; }   // ADDED
+        public string ShipNote { get; set; }
         
-        // Financial - DECIMAL for money
+        // Financial
         public decimal Balance { get; set; }
         public decimal TotalBalance { get; set; }
         public decimal CreditLimit { get; set; }
         
-        // References - FIXED: Actually populated now
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        
+        // References
         public string CustomerTypeRef { get; set; }
         public string TermsRef { get; set; }
         public string SalesTaxCodeRef { get; set; }
         public string PriceLevelRef { get; set; }
         
-        // Other
+        // Job tracking (Item 25)
         public string Notes { get; set; }
         public bool IsActive { get; set; }
-        public string ParentRef { get; set; } // For sub-customers
+        public string ParentRef { get; set; }
         public string JobStatus { get; set; }
         public DateTime? JobStartDate { get; set; }
+        public DateTime? JobProjectedEndDate { get; set; } // NEW - for timeline tracking
         public DateTime? JobEndDate { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // VENDORS (Item 5)
+    // VENDORS (Item 5) - ENHANCED
     // ============================================================
     public class VendorData
     {
@@ -157,24 +247,27 @@ namespace QBDesktopReader
         public string Fax { get; set; }
         public string Email { get; set; }
         
-        // Address - FIXED: Added Addr3
+        // Address
         public string Addr1 { get; set; }
         public string Addr2 { get; set; }
-        public string Addr3 { get; set; }  // ADDED
-        public string Addr4 { get; set; }  // ADDED
-        public string Addr5 { get; set; }  // ADDED
+        public string Addr3 { get; set; }
+        public string Addr4 { get; set; }
+        public string Addr5 { get; set; }
         public string City { get; set; }
         public string State { get; set; }
         public string PostalCode { get; set; }
         public string Country { get; set; }
-        public string Note { get; set; }    // ADDED
+        public string Note { get; set; }
         
-        // Financial - DECIMAL for money
+        // Financial
         public decimal Balance { get; set; }
         public decimal CreditLimit { get; set; }
         
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        
         // Tax
-        public string TaxID { get; set; } // 1099 info
+        public string TaxID { get; set; }
         public bool Is1099Vendor { get; set; }
         
         // References
@@ -184,10 +277,15 @@ namespace QBDesktopReader
         // Other
         public string Notes { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - SERVICE (Item 6)
+    // ITEMS - SERVICE (Item 6) - ENHANCED
     // ============================================================
     public class ServiceItemData
     {
@@ -195,18 +293,27 @@ namespace QBDesktopReader
         public string Name { get; set; }
         public string FullName { get; set; }
         public string Description { get; set; }
-        public decimal SalesPrice { get; set; }          // DECIMAL
-        public decimal PurchaseCost { get; set; }        // DECIMAL
+        public decimal SalesPrice { get; set; }
+        public decimal PurchaseCost { get; set; }
         public string IncomeAccountRef { get; set; }
         public string ExpenseAccountRef { get; set; }
         public string SalesTaxCodeRef { get; set; }
         public string UnitOfMeasureSetRef { get; set; }
         public bool IsActive { get; set; }
         public string ParentRef { get; set; }
+        
+        // Unit of measure - NEW
+        public string SalesUnitOfMeasure { get; set; }
+        public string PurchaseUnitOfMeasure { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - INVENTORY (Item 6)
+    // ITEMS - INVENTORY (Item 6) - ENHANCED
     // ============================================================
     public class InventoryItemData
     {
@@ -215,11 +322,11 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string Description { get; set; }
         
-        // Pricing - DECIMAL
+        // Pricing
         public decimal SalesPrice { get; set; }
         public decimal PurchaseCost { get; set; }
         
-        // Inventory - DECIMAL
+        // Inventory
         public decimal QuantityOnHand { get; set; }
         public decimal ReorderPoint { get; set; }
         public decimal QuantityOnOrder { get; set; }
@@ -235,10 +342,19 @@ namespace QBDesktopReader
         public string UnitOfMeasureSetRef { get; set; }
         public bool IsActive { get; set; }
         public string ParentRef { get; set; }
+        
+        // Unit of measure - NEW
+        public string SalesUnitOfMeasure { get; set; }
+        public string PurchaseUnitOfMeasure { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - NON-INVENTORY (Item 6)
+    // ITEMS - NON-INVENTORY (Item 6) - ENHANCED
     // ============================================================
     public class NonInventoryItemData
     {
@@ -246,43 +362,65 @@ namespace QBDesktopReader
         public string Name { get; set; }
         public string FullName { get; set; }
         public string Description { get; set; }
-        public decimal SalesPrice { get; set; }      // DECIMAL
-        public decimal PurchaseCost { get; set; }    // DECIMAL
+        public decimal SalesPrice { get; set; }
+        public decimal PurchaseCost { get; set; }
         public string IncomeAccountRef { get; set; }
         public string ExpenseAccountRef { get; set; }
         public string SalesTaxCodeRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Unit of measure - NEW
+        public string SalesUnitOfMeasure { get; set; }
+        public string PurchaseUnitOfMeasure { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - OTHER CHARGE (Item 6)
+    // ITEMS - OTHER CHARGE (Item 6) - ENHANCED
     // ============================================================
     public class OtherChargeItemData
     {
         public string ListID { get; set; }
         public string Name { get; set; }
         public string Description { get; set; }
-        public decimal Rate { get; set; }            // DECIMAL
+        public decimal Rate { get; set; }
         public string AccountRef { get; set; }
         public string SalesTaxCodeRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - DISCOUNT (Item 6)
+    // ITEMS - DISCOUNT (Item 6) - ENHANCED
     // ============================================================
     public class DiscountItemData
     {
         public string ListID { get; set; }
         public string Name { get; set; }
         public string Description { get; set; }
-        public decimal DiscountRate { get; set; }   // DECIMAL
+        public decimal DiscountRate { get; set; }
         public string AccountRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Discount type - NEW
+        public string DiscountRatePercent { get; set; } // "Percentage" or "FixedAmount"
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - PAYMENT (Item 6)
+    // ITEMS - PAYMENT (Item 6) - ENHANCED
     // ============================================================
     public class PaymentItemData
     {
@@ -291,23 +429,33 @@ namespace QBDesktopReader
         public string Description { get; set; }
         public string DepositToAccountRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - SALES TAX (Item 6)
+    // ITEMS - SALES TAX (Item 6) - ENHANCED
     // ============================================================
     public class SalesTaxItemData
     {
         public string ListID { get; set; }
         public string Name { get; set; }
         public string Description { get; set; }
-        public decimal TaxRate { get; set; }        // DECIMAL
+        public decimal TaxRate { get; set; }
         public string TaxVendorRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // ITEMS - GROUP (Item 6)
+    // ITEMS - GROUP (Item 6) - ENHANCED
     // ============================================================
     public class ItemGroupData
     {
@@ -316,16 +464,24 @@ namespace QBDesktopReader
         public string Description { get; set; }
         public List<ItemGroupLineData> Lines { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     public class ItemGroupLineData
     {
         public string ItemRef { get; set; }
-        public decimal Quantity { get; set; }       // DECIMAL
+        public decimal Quantity { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
     }
 
     // ============================================================
-    // INVOICES (Item 7)
+    // INVOICES (Item 7) - ENHANCED
     // ============================================================
     public class InvoiceData
     {
@@ -347,7 +503,7 @@ namespace QBDesktopReader
         public string ShipAddr1 { get; set; }
         public string ShipCity { get; set; }
         
-        // Amounts - DECIMAL
+        // Amounts
         public decimal Subtotal { get; set; }
         public decimal SalesTaxAmount { get; set; }
         public decimal TotalAmount { get; set; }
@@ -362,21 +518,48 @@ namespace QBDesktopReader
         
         // Line Items
         public List<InvoiceLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
+        
+        // Sales tax group details - NEW
+        public List<SalesTaxGroupDetail> SalesTaxGroupDetails { get; set; }
     }
 
     public class InvoiceLineData
     {
         public string ItemRef { get; set; }
         public string Description { get; set; }
-        public decimal Quantity { get; set; }       // DECIMAL
-        public decimal Rate { get; set; }           // DECIMAL
-        public decimal Amount { get; set; }         // DECIMAL
+        public decimal Quantity { get; set; }
+        public decimal Rate { get; set; }
+        public decimal Amount { get; set; }
         public string ClassRef { get; set; }
         public string SalesTaxCodeRef { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
+        
+        // Billable status - NEW
+        public string BillableStatus { get; set; }  // "Billable", "NotBillable", "HasBeenBilled"
+        
+        // Tax information - NEW
+        public bool IsTaxInclusive { get; set; }
     }
 
     // ============================================================
-    // BILLS (Item 8)
+    // BILLS (Item 8) - ENHANCED
     // ============================================================
     public class BillData
     {
@@ -389,7 +572,7 @@ namespace QBDesktopReader
         public string VendorRef { get; set; }
         public string TermsRef { get; set; }
         
-        // Amounts - DECIMAL
+        // Amounts
         public decimal AmountDue { get; set; }
         public decimal AmountPaid { get; set; }
         public decimal Balance { get; set; }
@@ -400,18 +583,38 @@ namespace QBDesktopReader
         
         // Line Items
         public List<BillLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        public bool IsPending { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class BillLineData
     {
         public string AccountRef { get; set; }
         public string Description { get; set; }
-        public decimal Amount { get; set; }         // DECIMAL
+        public decimal Amount { get; set; }
         public string ClassRef { get; set; }
+        
+        // Billable status - NEW
+        public string BillableStatus { get; set; }
+        public string CustomerRef { get; set; }  // For billable expenses
     }
 
     // ============================================================
-    // PAYMENTS RECEIVED (Item 9)
+    // PAYMENTS RECEIVED (Item 9) - ENHANCED
     // ============================================================
     public class PaymentReceivedData
     {
@@ -424,7 +627,7 @@ namespace QBDesktopReader
         public string PaymentMethodRef { get; set; }
         public string DepositToAccountRef { get; set; }
         
-        // Amount - DECIMAL
+        // Amount
         public decimal TotalAmount { get; set; }
         
         // Payment Details
@@ -436,17 +639,32 @@ namespace QBDesktopReader
         
         // Other
         public string Memo { get; set; }
-        public decimal UnusedPayment { get; set; }  // DECIMAL
+        public decimal UnusedPayment { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class PaymentAppliedToData
     {
-        public string TxnID { get; set; } // Invoice TxnID
-        public decimal PaymentAmount { get; set; }  // DECIMAL
+        public string TxnID { get; set; }
+        public decimal PaymentAmount { get; set; }
     }
 
     // ============================================================
-    // BILL PAYMENTS (Item 10)
+    // BILL PAYMENTS (Item 10) - ENHANCED
     // ============================================================
     public class BillPaymentData
     {
@@ -459,7 +677,7 @@ namespace QBDesktopReader
         public string PaymentMethodRef { get; set; }
         public string BankAccountRef { get; set; }
         
-        // Amount - DECIMAL
+        // Amount
         public decimal TotalAmount { get; set; }
         
         // Payment Details
@@ -470,16 +688,31 @@ namespace QBDesktopReader
         
         // Other
         public string Memo { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class BillPaymentAppliedToData
     {
-        public string TxnID { get; set; } // Bill TxnID
-        public decimal PaymentAmount { get; set; }  // DECIMAL
+        public string TxnID { get; set; }
+        public decimal PaymentAmount { get; set; }
     }
 
     // ============================================================
-    // EMPLOYEES (Item 11)
+    // EMPLOYEES (Item 11) - ENHANCED
     // ============================================================
     public class EmployeeData
     {
@@ -495,8 +728,8 @@ namespace QBDesktopReader
         
         // Address
         public string Addr1 { get; set; }
-        public string Addr2 { get; set; }  // ADDED
-        public string Addr3 { get; set; }  // ADDED
+        public string Addr2 { get; set; }
+        public string Addr3 { get; set; }
         public string City { get; set; }
         public string State { get; set; }
         public string PostalCode { get; set; }
@@ -511,10 +744,15 @@ namespace QBDesktopReader
         
         // Other
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // SALES TAX CODES (Item 12)
+    // SALES TAX CODES (Item 12) - ENHANCED
     // ============================================================
     public class SalesTaxCodeData
     {
@@ -523,10 +761,18 @@ namespace QBDesktopReader
         public string Description { get; set; }
         public bool IsTaxable { get; set; }
         public bool IsActive { get; set; }
+        
+        // Tax agency reference - NEW
+        public string TaxAgencyRef { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // CLASSES (Item 13)
+    // CLASSES (Item 13) - ENHANCED
     // ============================================================
     public class ClassData
     {
@@ -535,10 +781,15 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string ParentRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // TERMS (Item 14)
+    // TERMS (Item 14) - ENHANCED
     // ============================================================
     public class TermsData
     {
@@ -546,12 +797,21 @@ namespace QBDesktopReader
         public string Name { get; set; }
         public int StdDueDays { get; set; }
         public int StdDiscountDays { get; set; }
-        public decimal DiscountPct { get; set; }    // DECIMAL
+        public decimal DiscountPct { get; set; }
         public bool IsActive { get; set; }
+        
+        // Date-driven terms support - NEW
+        public int? DueDayOfMonth { get; set; }
+        public string TermsType { get; set; } // "Standard" or "DateDriven"
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // PAYMENT METHODS (Item 15)
+    // PAYMENT METHODS (Item 15) - ENHANCED
     // ============================================================
     public class PaymentMethodData
     {
@@ -559,10 +819,15 @@ namespace QBDesktopReader
         public string Name { get; set; }
         public string PaymentMethodType { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // CREDIT MEMOS (Item 18)
+    // CREDIT MEMOS (Item 18) - ENHANCED
     // ============================================================
     public class CreditMemoData
     {
@@ -570,23 +835,45 @@ namespace QBDesktopReader
         public string RefNumber { get; set; }
         public DateTime TxnDate { get; set; }
         public string CustomerRef { get; set; }
-        public decimal TotalAmount { get; set; }        // DECIMAL
-        public decimal CreditRemaining { get; set; }    // DECIMAL
+        public decimal TotalAmount { get; set; }
+        public decimal CreditRemaining { get; set; }
         public string Memo { get; set; }
         public List<CreditMemoLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        public bool IsPending { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class CreditMemoLineData
     {
         public string ItemRef { get; set; }
         public string Description { get; set; }
-        public decimal Quantity { get; set; }          // DECIMAL
-        public decimal Rate { get; set; }              // DECIMAL
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Quantity { get; set; }
+        public decimal Rate { get; set; }
+        public decimal Amount { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
+        
+        // Tax information - NEW
+        public bool IsTaxInclusive { get; set; }
     }
 
     // ============================================================
-    // PURCHASE ORDERS (Item 19)
+    // PURCHASE ORDERS (Item 19) - ENHANCED
     // ============================================================
     public class PurchaseOrderData
     {
@@ -594,23 +881,42 @@ namespace QBDesktopReader
         public string RefNumber { get; set; }
         public DateTime TxnDate { get; set; }
         public string VendorRef { get; set; }
-        public decimal TotalAmount { get; set; }       // DECIMAL
+        public decimal TotalAmount { get; set; }
         public string Memo { get; set; }
         public bool IsManuallyClosed { get; set; }
         public List<PurchaseOrderLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        public bool IsPending { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class PurchaseOrderLineData
     {
         public string ItemRef { get; set; }
         public string Description { get; set; }
-        public decimal Quantity { get; set; }          // DECIMAL
-        public decimal Rate { get; set; }              // DECIMAL
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Quantity { get; set; }
+        public decimal Rate { get; set; }
+        public decimal Amount { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
     }
 
     // ============================================================
-    // ESTIMATES (Item 20)
+    // ESTIMATES (Item 20) - ENHANCED
     // ============================================================
     public class EstimateData
     {
@@ -618,23 +924,44 @@ namespace QBDesktopReader
         public string RefNumber { get; set; }
         public DateTime TxnDate { get; set; }
         public string CustomerRef { get; set; }
-        public decimal TotalAmount { get; set; }       // DECIMAL
+        public decimal TotalAmount { get; set; }
         public string Memo { get; set; }
         public bool IsActive { get; set; }
         public List<EstimateLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsPending { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class EstimateLineData
     {
         public string ItemRef { get; set; }
         public string Description { get; set; }
-        public decimal Quantity { get; set; }          // DECIMAL
-        public decimal Rate { get; set; }              // DECIMAL
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Quantity { get; set; }
+        public decimal Rate { get; set; }
+        public decimal Amount { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
+        
+        // Tax information - NEW
+        public bool IsTaxInclusive { get; set; }
     }
 
     // ============================================================
-    // SALES RECEIPTS (Item 21)
+    // SALES RECEIPTS (Item 21) - ENHANCED
     // ============================================================
     public class SalesReceiptData
     {
@@ -644,42 +971,82 @@ namespace QBDesktopReader
         public string CustomerRef { get; set; }
         public string PaymentMethodRef { get; set; }
         public string DepositToAccountRef { get; set; }
-        public decimal TotalAmount { get; set; }       // DECIMAL
+        public decimal TotalAmount { get; set; }
         public string Memo { get; set; }
         public List<SalesReceiptLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        public bool IsPending { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
+        
+        // Sales tax group details - NEW
+        public List<SalesTaxGroupDetail> SalesTaxGroupDetails { get; set; }
     }
 
     public class SalesReceiptLineData
     {
         public string ItemRef { get; set; }
         public string Description { get; set; }
-        public decimal Quantity { get; set; }          // DECIMAL
-        public decimal Rate { get; set; }              // DECIMAL
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Quantity { get; set; }
+        public decimal Rate { get; set; }
+        public decimal Amount { get; set; }
+        
+        // Unit of measure - NEW
+        public string UnitOfMeasure { get; set; }
+        
+        // Tax information - NEW
+        public bool IsTaxInclusive { get; set; }
     }
 
     // ============================================================
-    // DEPOSITS (Item 16)
+    // DEPOSITS (Item 16) - ENHANCED
     // ============================================================
     public class DepositData
     {
         public string TxnID { get; set; }
         public DateTime TxnDate { get; set; }
         public string DepositToAccountRef { get; set; }
-        public decimal TotalDeposit { get; set; }      // DECIMAL
+        public decimal TotalDeposit { get; set; }
         public string Memo { get; set; }
         public List<DepositLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
+        
+        // Linked transactions - NEW
+        public List<LinkedTxn> LinkedTxns { get; set; }
     }
 
     public class DepositLineData
     {
         public string PaymentTxnID { get; set; }
         public string EntityRef { get; set; }
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Amount { get; set; }
     }
 
     // ============================================================
-    // JOURNAL ENTRIES (Item 17)
+    // JOURNAL ENTRIES (Item 17) - ENHANCED
     // ============================================================
     public class JournalEntryData
     {
@@ -688,32 +1055,52 @@ namespace QBDesktopReader
         public DateTime TxnDate { get; set; }
         public string Memo { get; set; }
         public List<JournalEntryLineData> Lines { get; set; }
+        
+        // Multi-currency support - NEW
+        public string CurrencyRef { get; set; }
+        public decimal? ExchangeRate { get; set; }
+        
+        // Transaction status - NEW
+        public bool IsVoided { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     public class JournalEntryLineData
     {
         public string Type { get; set; } // "Debit" or "Credit"
         public string AccountRef { get; set; }
-        public decimal Amount { get; set; }            // DECIMAL
+        public decimal Amount { get; set; }
         public string Memo { get; set; }
         public string EntityRef { get; set; }
         public string ClassRef { get; set; }
+        
+        // Billable status - NEW
+        public string BillableStatus { get; set; }
     }
 
     // ============================================================
-    // PRICE LEVELS (Item 22)
+    // PRICE LEVELS (Item 22) - ENHANCED
     // ============================================================
     public class PriceLevelData
     {
         public string ListID { get; set; }
         public string Name { get; set; }
         public string PriceLevelType { get; set; }
-        public decimal PriceLevelFixedPercentage { get; set; }  // DECIMAL
+        public decimal PriceLevelFixedPercentage { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // CUSTOMER TYPES (Item 23)
+    // CUSTOMER TYPES (Item 23) - ENHANCED
     // ============================================================
     public class CustomerTypeData
     {
@@ -722,10 +1109,15 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string ParentRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // VENDOR TYPES (Item 24)
+    // VENDOR TYPES (Item 24) - ENHANCED
     // ============================================================
     public class VendorTypeData
     {
@@ -734,10 +1126,15 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string ParentRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 
     // ============================================================
-    // JOB TYPES (Item 25)
+    // JOB TYPES (Item 25) - ENHANCED
     // ============================================================
     public class JobTypeData
     {
@@ -746,5 +1143,10 @@ namespace QBDesktopReader
         public string FullName { get; set; }
         public string ParentRef { get; set; }
         public bool IsActive { get; set; }
+        
+        // Audit metadata (Item 29) - NEW
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
+        public string EditSequence { get; set; }
     }
 }

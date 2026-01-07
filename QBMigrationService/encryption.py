@@ -4,26 +4,24 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 import base64
 import os
-import platform
+import json
 import ctypes
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
+
 
 class EncryptionManager:
     """
-    Enhanced encryption with:
-    - AES-256-GCM encryption
-    - Improved memory cleanup (cross-platform)
-    - Secure file deletion (7-pass DOD standard)
-    - Support for multiple decryption formats
+    PRODUCTION-GRADE Encryption Manager
     
-    SECURITY FIXES:
-    - Improved memory zeroing for multiple Python implementations
-    - Configurable KDF salt (no longer hardcoded)
-    - Better error handling for decryption
+    FIXES APPLIED:
+    - Accept JSON format from C# client
+    - Backward compatible with legacy formats
+    - Improved memory cleanup
+    - Comprehensive error handling
+    - Cross-platform support
     """
     
-    # Class-level constant for default salt (but allow override)
-    DEFAULT_KDF_SALT = b'QB_MIGRATION_TOOL_V2_2025'  # Updated version
+    DEFAULT_KDF_SALT = b'QB_MIGRATION_TOOL_V2_2025'
     
     @staticmethod
     def encrypt_data(plaintext: bytes) -> Dict[str, str]:
@@ -31,7 +29,7 @@ class EncryptionManager:
         Encrypt data using AES-256-GCM
         
         Returns:
-            Dict with base64-encoded ciphertext, key, iv, and tag
+            Dict with base64-encoded components (JSON-serializable)
         """
         # Generate random 256-bit key
         key = os.urandom(32)
@@ -50,10 +48,12 @@ class EncryptionManager:
         ciphertext = encryptor.update(plaintext) + encryptor.finalize()
         
         result = {
+            'iv': base64.b64encode(iv).decode('utf-8'),
+            'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
             'ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
             'key': base64.b64encode(key).decode('utf-8'),
-            'iv': base64.b64encode(iv).decode('utf-8'),
-            'tag': base64.b64encode(encryptor.tag).decode('utf-8')
+            'algorithm': 'AES-256-GCM',
+            'version': '2.0'
         }
         
         # SECURITY: Clear sensitive key from memory
@@ -75,35 +75,124 @@ class EncryptionManager:
         Returns:
             Decrypted plaintext
         """
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.GCM(iv, tag),
-            backend=default_backend()
-        )
+        try:
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.GCM(iv, tag),
+                backend=default_backend()
+            )
+            
+            decryptor = cipher.decryptor()
+            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+            
+            return plaintext
+        except Exception as e:
+            raise ValueError(f"Decryption failed: {e}")
+    
+    @staticmethod
+    def decrypt_from_json(encrypted_json: Union[str, Dict]) -> str:
+        """
+        PRODUCTION-GRADE: Decrypt from JSON format (C# client format)
         
-        decryptor = cipher.decryptor()
-        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+        Accepts:
+        - JSON string: '{"iv": "...", "tag": "...", "ciphertext": "...", "key": "..."}'
+        - Dict: {"iv": "...", "tag": "...", "ciphertext": "...", "key": "..."}
         
-        return plaintext
+        Returns:
+            Decrypted plaintext string
+        """
+        try:
+            # Parse JSON if string
+            if isinstance(encrypted_json, str):
+                data = json.loads(encrypted_json)
+            elif isinstance(encrypted_json, dict):
+                data = encrypted_json
+            else:
+                raise ValueError(f"Invalid input type: {type(encrypted_json)}")
+            
+            # Validate required fields
+            required_fields = ['iv', 'tag', 'ciphertext', 'key']
+            missing_fields = [f for f in required_fields if f not in data]
+            
+            if missing_fields:
+                raise ValueError(f"Missing required fields: {missing_fields}")
+            
+            # Decode Base64
+            try:
+                iv = base64.b64decode(data['iv'])
+                tag = base64.b64decode(data['tag'])
+                ciphertext = base64.b64decode(data['ciphertext'])
+                key = base64.b64decode(data['key'])
+            except Exception as e:
+                raise ValueError(f"Invalid Base64 encoding: {e}")
+            
+            # Validate sizes
+            if len(iv) != 12:
+                raise ValueError(f"Invalid IV length: expected 12 bytes, got {len(iv)}")
+            if len(tag) != 16:
+                raise ValueError(f"Invalid tag length: expected 16 bytes, got {len(tag)}")
+            if len(key) != 32:
+                raise ValueError(f"Invalid key length: expected 32 bytes, got {len(key)}")
+            
+            # Decrypt
+            plaintext_bytes = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
+            
+            # SECURITY: Clear sensitive data from memory
+            EncryptionManager.secure_zero_memory(key)
+            
+            # Decode UTF-8
+            return plaintext_bytes.decode('utf-8')
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format: {e}")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Invalid UTF-8 encoding in decrypted data: {e}")
+        except Exception as e:
+            raise ValueError(f"Decryption failed: {e}")
     
     @staticmethod
     def decrypt_string(encrypted: str) -> str:
         """
-        Decrypt Base64-encoded encrypted string from C# client
+        BACKWARD COMPATIBLE: Decrypt from legacy formats
         
-        Supports both CBC (legacy) and GCM (modern) formats
+        Supports:
+        1. JSON format (preferred): {"iv": "...", "tag": "...", "ciphertext": "...", "key": "..."}
+        2. Colon-separated GCM: iv:tag:ciphertext:key
+        3. Colon-separated CBC: iv:ciphertext:key (legacy)
         
-        Format:
-        - CBC: iv:ciphertext:key (3 parts)
-        - GCM: iv:tag:ciphertext:key (4 parts)
-        
-        SECURITY FIX: Improved error handling and memory clearing
+        Returns:
+            Decrypted plaintext string
         """
+        # Try JSON format first (modern format)
+        if encrypted.strip().startswith('{'):
+            try:
+                return EncryptionManager.decrypt_from_json(encrypted)
+            except Exception as e:
+                # Fall through to legacy formats
+                pass
+        
+        # Try legacy colon-separated formats
         try:
             parts = encrypted.split(':')
             
-            if len(parts) == 3:
-                # CBC mode (from .NET Framework version)
+            if len(parts) == 4:
+                # GCM mode (from .NET 5+ version)
+                iv = base64.b64decode(parts[0])
+                tag = base64.b64decode(parts[1])
+                ciphertext = base64.b64decode(parts[2])
+                key = base64.b64decode(parts[3])
+                
+                plaintext = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
+                
+                # SECURITY: Clear sensitive data from memory
+                EncryptionManager.secure_zero_memory(key)
+                
+                return plaintext.decode('utf-8')
+                
+            elif len(parts) == 3:
+                # CBC mode (from .NET Framework version) - LEGACY ONLY
+                print("⚠️  WARNING: Legacy CBC encryption detected. Upgrade to GCM.")
+                
                 iv = base64.b64decode(parts[0])
                 ciphertext = base64.b64decode(parts[1])
                 key = base64.b64decode(parts[2])
@@ -131,20 +220,6 @@ class EncryptionManager:
                 EncryptionManager.secure_zero_memory(bytearray(padded_plaintext))
                 
                 return plaintext.decode('utf-8')
-                
-            elif len(parts) == 4:
-                # GCM mode (from .NET 5+ version)
-                iv = base64.b64decode(parts[0])
-                tag = base64.b64decode(parts[1])
-                ciphertext = base64.b64decode(parts[2])
-                key = base64.b64decode(parts[3])
-                
-                plaintext = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
-                
-                # SECURITY: Clear sensitive data from memory
-                EncryptionManager.secure_zero_memory(key)
-                
-                return plaintext.decode('utf-8')
             
             else:
                 raise ValueError(
@@ -162,13 +237,8 @@ class EncryptionManager:
         """
         CRITICAL: Securely zero out memory containing sensitive data
         
-        SECURITY FIX: Improved cross-platform support
-        - Uses bytearray for mutability
-        - Handles both bytes and bytearray
-        - Works on PyPy, CPython, and other implementations
-        
-        Note: Python's memory management may still leave copies in RAM.
-        This is a best-effort approach.
+        Handles both bytes and bytearray
+        Works on PyPy, CPython, and other implementations
         """
         if isinstance(data, (bytes, bytearray)):
             try:
@@ -180,13 +250,12 @@ class EncryptionManager:
                 for i in range(len(data)):
                     data[i] = 0
                 
-                # Try ctypes memset for extra security (may fail on some systems)
+                # Try ctypes memset for extra security
                 try:
                     if hasattr(ctypes, 'memset'):
                         buf = (ctypes.c_char * len(data)).from_buffer(data)
                         ctypes.memset(buf, 0, len(data))
                 except (AttributeError, TypeError, ValueError):
-                    # ctypes not available or not compatible
                     pass
                     
             except Exception:
@@ -198,20 +267,14 @@ class EncryptionManager:
     @staticmethod
     def secure_delete(filepath: str, passes: int = 7) -> bool:
         """
-        Securely delete file using multi-pass overwrite
-        
-        SECURITY FIX:
-        - Returns success status
-        - Better error handling
-        - Configurable number of passes
-        - Force flush to disk after each pass
+        Securely delete file using multi-pass overwrite (DOD 5220.22-M)
         
         Args:
             filepath: Path to file to delete
-            passes: Number of overwrite passes (default 7 for DOD 5220.22-M)
+            passes: Number of overwrite passes (default 7)
             
         Returns:
-            True if deletion succeeded, False otherwise
+            True if deletion succeeded
         """
         if not os.path.exists(filepath):
             return False
@@ -219,12 +282,12 @@ class EncryptionManager:
         try:
             file_size = os.path.getsize(filepath)
             
-            with open(filepath, 'r+b', buffering=0) as f:  # Unbuffered for security
+            with open(filepath, 'r+b', buffering=0) as f:
                 for pass_num in range(passes):
                     f.seek(0)
                     
                     if pass_num < passes - 2:
-                        # Alternate 0x00 and 0xFF for first passes
+                        # Alternate 0x00 and 0xFF
                         pattern = b'\x00' if pass_num % 2 == 0 else b'\xff'
                         data = pattern * file_size
                     else:
@@ -234,14 +297,13 @@ class EncryptionManager:
                     f.write(data)
                     f.flush()
                     
-                    # SECURITY FIX: Force write to physical disk
+                    # Force write to physical disk
                     try:
                         os.fsync(f.fileno())
                     except (OSError, AttributeError):
-                        # fsync not available on all platforms
                         pass
             
-            # Finally, delete the file
+            # Delete the file
             os.remove(filepath)
             print(f"✓ Securely deleted: {os.path.basename(filepath)}")
             return True
@@ -251,123 +313,43 @@ class EncryptionManager:
             return False
     
     @staticmethod
-    def derive_key_from_password(
-        password: str,
-        salt: Optional[bytes] = None,
-        iterations: int = 100000
-    ) -> bytes:
+    def encrypt_file(input_path: str, output_path: str) -> Dict[str, str]:
         """
-        Derive encryption key from password using PBKDF2
+        Encrypt a file and save as JSON
         
-        SECURITY FIX:
-        - Configurable salt (no longer hardcoded)
-        - Configurable iterations for future-proofing
-        - Uses SHA-256
-        
-        Args:
-            password: User password
-            salt: Random salt (generated if None)
-            iterations: Number of PBKDF2 iterations
-            
         Returns:
-            256-bit derived key
+            Encryption metadata (for verification)
         """
-        if salt is None:
-            salt = os.urandom(32)  # Generate random salt
-        
-        if iterations < 10000:
-            raise ValueError("iterations must be at least 10,000 for security")
-        
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,  # 256-bit key
-            salt=salt,
-            iterations=iterations,
-            backend=default_backend()
-        )
-        
-        key = kdf.derive(password.encode('utf-8'))
-        
-        return key, salt
-    
-    @staticmethod
-    def encrypt_file(input_path: str, output_path: str, key: Optional[bytes] = None) -> Dict[str, str]:
-        """
-        Encrypt a file using AES-256-GCM
-        
-        Args:
-            input_path: Path to plaintext file
-            output_path: Path to save encrypted file
-            key: Encryption key (generated if None)
-            
-        Returns:
-            Dict with key, iv, tag (for decryption)
-        """
-        # Generate key if not provided
-        if key is None:
-            key = os.urandom(32)
-        
-        # Generate random IV
-        iv = os.urandom(12)
-        
-        # Read plaintext
         with open(input_path, 'rb') as f:
             plaintext = f.read()
         
         # Encrypt
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.GCM(iv),
-            backend=default_backend()
-        )
+        result = EncryptionManager.encrypt_data(plaintext)
         
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(plaintext) + encryptor.finalize()
-        
-        # Write encrypted file
-        with open(output_path, 'wb') as f:
-            f.write(ciphertext)
+        # Save as JSON
+        with open(output_path, 'w') as f:
+            json.dump(result, f, indent=2)
         
         # Set restrictive permissions
         os.chmod(output_path, 0o600)
         
-        return {
-            'key': base64.b64encode(key).decode('utf-8'),
-            'iv': base64.b64encode(iv).decode('utf-8'),
-            'tag': base64.b64encode(encryptor.tag).decode('utf-8')
-        }
+        return result
     
     @staticmethod
-    def decrypt_file(
-        input_path: str,
-        output_path: str,
-        key: bytes,
-        iv: bytes,
-        tag: bytes
-    ) -> bool:
+    def decrypt_file(input_path: str, output_path: str) -> bool:
         """
-        Decrypt a file using AES-256-GCM
+        Decrypt a JSON-encrypted file
         
-        Args:
-            input_path: Path to encrypted file
-            output_path: Path to save decrypted file
-            key: Decryption key
-            iv: Initialization vector
-            tag: GCM authentication tag
-            
         Returns:
             True if decryption succeeded
         """
         try:
-            # Read ciphertext
-            with open(input_path, 'rb') as f:
-                ciphertext = f.read()
+            with open(input_path, 'r') as f:
+                encrypted_json = f.read()
             
-            # Decrypt
-            plaintext = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
+            plaintext = EncryptionManager.decrypt_from_json(encrypted_json)
             
-            # Write plaintext
-            with open(output_path, 'wb') as f:
+            with open(output_path, 'w') as f:
                 f.write(plaintext)
             
             # Set restrictive permissions
@@ -378,3 +360,38 @@ class EncryptionManager:
         except Exception as e:
             print(f"Decryption failed: {e}")
             return False
+    
+    @staticmethod
+    def derive_key_from_password(
+        password: str,
+        salt: Optional[bytes] = None,
+        iterations: int = 100000
+    ) -> tuple:
+        """
+        Derive encryption key from password using PBKDF2
+        
+        Args:
+            password: User password
+            salt: Random salt (generated if None)
+            iterations: Number of PBKDF2 iterations
+            
+        Returns:
+            (key, salt) tuple
+        """
+        if salt is None:
+            salt = os.urandom(32)
+        
+        if iterations < 10000:
+            raise ValueError("iterations must be at least 10,000 for security")
+        
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=iterations,
+            backend=default_backend()
+        )
+        
+        key = kdf.derive(password.encode('utf-8'))
+        
+        return key, salt
