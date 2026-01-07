@@ -1,23 +1,87 @@
 import os
+from pathlib import Path
+from typing import Optional
 
-# QuickBooks Online API credentials
+# ============================================================================
+# CONFIGURATION VALIDATION & SANITIZATION
+# ============================================================================
+
+def get_env_int(key: str, default: int) -> int:
+    """Safely get integer from environment with validation"""
+    try:
+        return int(os.getenv(key, str(default)))
+    except ValueError:
+        print(f"Warning: Invalid integer for {key}, using default: {default}")
+        return default
+
+def get_env_float(key: str, default: float) -> float:
+    """Safely get float from environment with validation"""
+    try:
+        return float(os.getenv(key, str(default)))
+    except ValueError:
+        print(f"Warning: Invalid float for {key}, using default: {default}")
+        return default
+
+def get_env_bool(key: str, default: str = "true") -> bool:
+    """Safely get boolean from environment"""
+    return os.getenv(key, default).lower() in ("true", "1", "yes")
+
+def sanitize_migration_id(migration_id: str) -> str:
+    """
+    Sanitize migration_id to prevent path traversal attacks
+    
+    SECURITY: Prevents directory traversal with IDs like "../../etc/passwd"
+    """
+    # Remove path separators and dangerous characters
+    safe_id = "".join(c for c in migration_id if c.isalnum() or c in "_-")
+    
+    if not safe_id or safe_id != migration_id:
+        raise ValueError(
+            f"Invalid migration_id: '{migration_id}'. "
+            "Only alphanumeric, underscore, and hyphen allowed."
+        )
+    
+    return safe_id
+
+# ============================================================================
+# QUICKBOOKS ONLINE API CREDENTIALS
+# ============================================================================
+
 CLIENT_ID = os.getenv("QBO_CLIENT_ID", "YOUR_CLIENT_ID_HERE")
 CLIENT_SECRET = os.getenv("QBO_CLIENT_SECRET", "YOUR_CLIENT_SECRET_HERE")
 REFRESH_TOKEN = os.getenv("QBO_REFRESH_TOKEN", "YOUR_REFRESH_TOKEN_HERE")
 REALM_ID = os.getenv("QBO_REALM_ID", "YOUR_REALM_ID_HERE")
 ACCESS_TOKEN = os.getenv("QBO_ACCESS_TOKEN", "")  # Optional for initial setup
 
+# Validate critical credentials
+if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
+    print("⚠️  WARNING: QBO credentials not configured. Set environment variables.")
+
+# ============================================================================
+# ENVIRONMENT & REGION CONFIGURATION
+# ============================================================================
+
 # Environment (sandbox or production)
-ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox")
+ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
+if ENVIRONMENT not in ("sandbox", "production"):
+    print(f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'")
+    ENVIRONMENT = "sandbox"
 
 # Region support (US, CA, UK, AU, IN)
-REGION = os.getenv("QBO_REGION", "US")
+REGION = os.getenv("QBO_REGION", "US").upper()
+VALID_REGIONS = ("US", "CA", "UK", "AU", "IN")
+if REGION not in VALID_REGIONS:
+    print(f"Warning: Invalid region '{REGION}', defaulting to 'US'")
+    REGION = "US"
 
 # Production guard - requires explicit flag to run against production
-PRODUCTION_GUARD_ENABLED = os.getenv("QBO_PRODUCTION_GUARD", "true").lower() == "true"
-PRODUCTION_CONFIRMATION_FLAG = os.getenv("QBO_CONFIRM_PRODUCTION", "false").lower() == "true"
+PRODUCTION_GUARD_ENABLED = get_env_bool("QBO_PRODUCTION_GUARD", "true")
+PRODUCTION_CONFIRMATION_FLAG = get_env_bool("QBO_CONFIRM_PRODUCTION", "false")
 
-# Multi-region API URLs
+# ============================================================================
+# MULTI-REGION API URLS
+# ============================================================================
+
 REGION_URLS = {
     "US": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
@@ -42,7 +106,7 @@ REGION_URLS = {
 }
 
 # Build BASE_URL based on region and environment
-region_config = REGION_URLS.get(REGION.upper(), REGION_URLS["US"])
+region_config = REGION_URLS.get(REGION, REGION_URLS["US"])
 base_url_template = region_config.get(ENVIRONMENT, region_config["sandbox"])
 BASE_URL = f"{base_url_template}/{REALM_ID}"
 
@@ -50,51 +114,121 @@ BASE_URL = f"{base_url_template}/{REALM_ID}"
 OAUTH_BASE_URL = "https://oauth.platform.intuit.com/oauth2/v1"
 OAUTH_TOKEN_URL = f"{OAUTH_BASE_URL}/tokens/bearer"
 OAUTH_REVOKE_URL = f"{OAUTH_BASE_URL}/tokens/revoke"
+OAUTH_INTROSPECT_URL = f"{OAUTH_BASE_URL}/tokens/introspect"
 
-# File paths
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-INPUT_FILE = os.path.join(DATA_DIR, "extracted_data.json")
-OUTPUT_DIR = os.path.join(DATA_DIR, "migration_results")
-ENCRYPTED_DIR = os.path.join(DATA_DIR, "encrypted")
-LOG_DIR = os.path.join(DATA_DIR, "logs")
+# ============================================================================
+# FILE PATHS (Using pathlib for cross-platform compatibility)
+# ============================================================================
 
-# Security settings
-DATA_RETENTION_HOURS = int(os.getenv("DATA_RETENTION_HOURS", "1"))
-ENABLE_2FA = os.getenv("ENABLE_2FA", "true").lower() == "true"
-ENABLE_AUDIT_LOGGING = os.getenv("ENABLE_AUDIT_LOGGING", "true").lower() == "true"
-ENABLE_AUTO_DELETION = os.getenv("ENABLE_AUTO_DELETION", "true").lower() == "true"
-ENCRYPT_LOGS = os.getenv("ENCRYPT_LOGS", "true").lower() == "true"
+# Use absolute paths to avoid working directory issues
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+INPUT_FILE = DATA_DIR / "extracted_data.json"
+OUTPUT_DIR = DATA_DIR / "migration_results"
+ENCRYPTED_DIR = DATA_DIR / "encrypted"
+LOG_DIR = DATA_DIR / "logs"
 
-# Migration settings
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "30"))  # QBO limit is 30
-RATE_LIMIT_DELAY = float(os.getenv("RATE_LIMIT_DELAY", "0.15"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+# ============================================================================
+# SECURITY SETTINGS
+# ============================================================================
 
-# QBO API Limits
+DATA_RETENTION_HOURS = get_env_int("DATA_RETENTION_HOURS", 1)
+ENABLE_2FA = get_env_bool("ENABLE_2FA", "true")
+ENABLE_AUDIT_LOGGING = get_env_bool("ENABLE_AUDIT_LOGGING", "true")
+ENABLE_AUTO_DELETION = get_env_bool("ENABLE_AUTO_DELETION", "true")
+ENCRYPT_LOGS = get_env_bool("ENCRYPT_LOGS", "true")
+
+# Minimum bcrypt rounds (should be configurable for future-proofing)
+BCRYPT_ROUNDS = get_env_int("BCRYPT_ROUNDS", 12)
+if BCRYPT_ROUNDS < 10:
+    print("Warning: BCRYPT_ROUNDS too low, using minimum of 10")
+    BCRYPT_ROUNDS = 10
+
+# Token refresh buffer (in seconds) - configurable for different batch sizes
+TOKEN_REFRESH_BUFFER_SECONDS = get_env_int("TOKEN_REFRESH_BUFFER_SECONDS", 300)  # 5 minutes
+
+# ============================================================================
+# MIGRATION SETTINGS
+# ============================================================================
+
+BATCH_SIZE = get_env_int("BATCH_SIZE", 30)  # QBO limit is 30
+if BATCH_SIZE > 30:
+    print(f"Warning: BATCH_SIZE {BATCH_SIZE} exceeds QBO limit of 30, using 30")
+    BATCH_SIZE = 30
+
+RATE_LIMIT_DELAY = get_env_float("RATE_LIMIT_DELAY", 0.15)
+MAX_RETRIES = get_env_int("MAX_RETRIES", 3)
+
+# Parallel processing settings
+MAX_PARALLEL_WORKERS = get_env_int("MAX_PARALLEL_WORKERS", 5)
+if MAX_PARALLEL_WORKERS > 10:
+    print(f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting")
+
+# ============================================================================
+# QBO API LIMITS
+# ============================================================================
+
 QBO_RATE_LIMIT_PER_MINUTE = 500  # Requests per minute
 QBO_BATCH_SIZE_LIMIT = 30  # Items per batch request
 QBO_QUERY_MAX_RESULTS = 1000  # Max results per query
+QBO_MAX_FIELD_LENGTH = 4000  # Max characters for notes/descriptions
 
-# QuickBooks Desktop limits
-QBD_MAX_TARGETS_WARNING = 1_200_000  # Warn if file exceeds 1.2M targets
-QBD_SUPPORTED_VERSIONS = ['2018', '2019', '2020', '2021', '2022', '2023', '2024']
+# ============================================================================
+# MIGRATION AUDIT TRAIL
+# ============================================================================
 
-# Migration audit trail
-ADD_MIGRATION_MEMO = os.getenv("ADD_MIGRATION_MEMO", "true").lower() == "true"
+ADD_MIGRATION_MEMO = get_env_bool("ADD_MIGRATION_MEMO", "true")
 MIGRATION_MEMO_TEMPLATE = "Migrated from QuickBooks Desktop on {date} by {app_name}"
 APP_NAME = os.getenv("APP_NAME", "QB Migration Tool")
 
-# Required OAuth scopes
+# ============================================================================
+# REQUIRED OAUTH SCOPES
+# ============================================================================
+
 REQUIRED_SCOPES = [
     "com.intuit.quickbooks.accounting"
 ]
 
-# Create directories
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(ENCRYPTED_DIR, exist_ok=True)
-os.makedirs(LOG_DIR, exist_ok=True)
+# ============================================================================
+# CURRENCY CODES BY REGION
+# ============================================================================
 
+REGION_CURRENCIES = {
+    "US": "USD",
+    "CA": "CAD",
+    "UK": "GBP",
+    "AU": "AUD",
+    "IN": "INR"
+}
+
+DEFAULT_CURRENCY = REGION_CURRENCIES.get(REGION, "USD")
+
+# ============================================================================
+# DIRECTORY CREATION (Only if not in read-only mode)
+# ============================================================================
+
+def initialize_directories():
+    """
+    Initialize required directories
+    
+    SECURITY FIX: Only create directories when needed, not on import
+    """
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        ENCRYPTED_DIR.mkdir(parents=True, exist_ok=True)
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # Set restrictive permissions on data directory
+        os.chmod(DATA_DIR, 0o700)  # Owner read/write/execute only
+        
+    except PermissionError as e:
+        print(f"⚠️  Warning: Cannot create directories: {e}")
+        print(f"   Ensure write permissions for: {DATA_DIR}")
+
+# ============================================================================
+# PRODUCTION GUARD
+# ============================================================================
 
 def validate_production_access():
     """
@@ -105,7 +239,7 @@ def validate_production_access():
     if ENVIRONMENT == "production":
         if PRODUCTION_GUARD_ENABLED and not PRODUCTION_CONFIRMATION_FLAG:
             raise Exception(
-                "❌ PRODUCTION GUARD: Cannot run against production without explicit confirmation.\n"
+                "⛔ PRODUCTION GUARD: Cannot run against production without explicit confirmation.\n"
                 "Set environment variable: QBO_CONFIRM_PRODUCTION=true\n"
                 "Or disable guard with: QBO_PRODUCTION_GUARD=false"
             )
@@ -117,8 +251,11 @@ def validate_production_access():
     else:
         print(f"✓ Running in {ENVIRONMENT.upper()} mode (Region: {REGION})")
 
+# ============================================================================
+# QBO PLAN RECOMMENDATION
+# ============================================================================
 
-def get_qbo_plan_recommendation(class_count, item_count, user_count):
+def get_qbo_plan_recommendation(class_count: int, item_count: int, user_count: int) -> str:
     """
     Recommend QBO plan based on data volume
     
@@ -141,14 +278,19 @@ def get_qbo_plan_recommendation(class_count, item_count, user_count):
         else:
             return "Plus"
 
+# ============================================================================
+# REALM_ID VALIDATION
+# ============================================================================
 
-# Currency codes by region
-REGION_CURRENCIES = {
-    "US": "USD",
-    "CA": "CAD",
-    "UK": "GBP",
-    "AU": "AUD",
-    "IN": "INR"
-}
-
-DEFAULT_CURRENCY = REGION_CURRENCIES.get(REGION.upper(), "USD")
+def validate_realm_id(token_realm_id: Optional[str] = None) -> bool:
+    """
+    Validate that REALM_ID matches the OAuth token's realm
+    
+    SECURITY: Prevents posting data to wrong company
+    """
+    if token_realm_id and token_realm_id != REALM_ID:
+        raise ValueError(
+            f"REALM_ID mismatch! Config: {REALM_ID}, Token: {token_realm_id}\n"
+            "Refusing to migrate data to wrong company."
+        )
+    return True
