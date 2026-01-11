@@ -1,6 +1,10 @@
 import os
 from datetime import timedelta
 import secrets
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Config:
     """Base configuration with comprehensive security and AWS integration"""
@@ -58,7 +62,7 @@ class Config:
     
     # EC2
     AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', 'ami-0c55b159cbfafe1f0')
-    AWS_EC2_INSTANCE_TYPE = os.getenv('AWS_EC2_INSTANCE_TYPE', 't3.medium')
+    AWS_EC2_INSTANCE_TYPE = os.getenv('AWS_EC2_INSTANCE_TYPE', 't3.micro')
     AWS_EC2_KEY_NAME = os.getenv('AWS_EC2_KEY_NAME', 'qb-migration-key')
     AWS_EC2_SECURITY_GROUP = os.getenv('AWS_EC2_SECURITY_GROUP')
     AWS_EC2_SUBNET_ID = os.getenv('AWS_EC2_SUBNET_ID')

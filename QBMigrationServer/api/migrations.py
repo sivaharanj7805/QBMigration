@@ -12,43 +12,38 @@ logger = logging.getLogger(__name__)
 @migrations_bp.route('/api/migrations', methods=['GET'])
 @login_required
 def list_migrations():
-    """
-    List all migrations for current user
-    
-    Query Parameters:
-        status (str, optional): Filter by status
-        limit (int, optional): Max results (default 50)
-        offset (int, optional): Pagination offset
-    
-    Returns:
-        200: List of migrations
-        500: Server error
-    """
+    """List all migrations for current user"""
     try:
-        # Get query parameters
-        status_filter = request.args.get('status')
-        limit = min(int(request.args.get('limit', 50)), 100)
-        offset = int(request.args.get('offset', 0))
+        migrations = Migration.query.filter_by(user_id=current_user.id)\
+            .order_by(Migration.created_at.desc()).all()
         
-        # Build query
-        query = Migration.query.filter_by(user_id=current_user.id)
-        
-        if status_filter:
-            query = query.filter_by(status=status_filter)
-        
-        # Order by created date (newest first)
-        query = query.order_by(Migration.created_at.desc())
-        
-        # Paginate
-        total = query.count()
-        migrations = query.limit(limit).offset(offset).all()
+        # Serialize migrations properly (handle missing fields)
+        migrations_data = []
+        for migration in migrations:
+            migration_dict = {
+                'id': migration.id,
+                'migration_id': migration.migration_id,
+                'status': migration.status,
+                'company_name': migration.company_name,
+                'qb_file_name': migration.qb_file_name,
+                'progress_percent': migration.progress_percent,
+                'created_at': migration.created_at.isoformat() if migration.created_at else None,
+                'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
+                's3_uri': migration.s3_uri
+            }
+            
+            # Add optional fields only if they exist
+            if hasattr(migration, 'error_message'):
+                migration_dict['error_message'] = migration.error_message
+            if hasattr(migration, 'updated_at') and migration.updated_at:
+                migration_dict['updated_at'] = migration.updated_at.isoformat()
+            
+            migrations_data.append(migration_dict)
         
         return jsonify({
             'success': True,
-            'migrations': [m.to_dict() for m in migrations],
-            'total': total,
-            'limit': limit,
-            'offset': offset
+            'migrations': migrations_data,
+            'count': len(migrations_data)
         }), 200
         
     except Exception as e:
@@ -85,9 +80,24 @@ def get_migration(migration_id):
                 'error': 'Migration not found'
             }), 404
         
+        # Use to_dict if available
+        if hasattr(migration, 'to_dict') and callable(migration.to_dict):
+            migration_data = migration.to_dict()
+        else:
+            migration_data = {
+                'id': migration.id,
+                'migration_id': migration.migration_id,
+                'status': migration.status,
+                'company_name': migration.company_name,
+                'qb_file_name': migration.qb_file_name,
+                'progress_percent': migration.progress_percent or 0,
+                'created_at': migration.created_at.isoformat() if migration.created_at else None,
+                's3_uri': migration.s3_uri
+            }
+        
         return jsonify({
             'success': True,
-            'migration': migration.to_dict()
+            'migration': migration_data
         }), 200
         
     except Exception as e:
@@ -124,15 +134,21 @@ def get_migration_status(migration_id):
                 'error': 'Migration not found'
             }), 404
         
-        return jsonify({
+        status_data = {
             'success': True,
             'migration_id': migration.migration_id,
             'status': migration.status,
-            'progress_percent': migration.progress_percent,
-            'current_step': migration.current_step,
-            'created_at': migration.created_at.isoformat() if migration.created_at else None,
-            'completed_at': migration.completed_at.isoformat() if migration.completed_at else None
-        }), 200
+            'progress_percent': migration.progress_percent or 0,
+            'created_at': migration.created_at.isoformat() if migration.created_at else None
+        }
+        
+        # Add optional fields
+        if hasattr(migration, 'current_step') and migration.current_step:
+            status_data['current_step'] = migration.current_step
+        if hasattr(migration, 'completed_at') and migration.completed_at:
+            status_data['completed_at'] = migration.completed_at.isoformat()
+        
+        return jsonify(status_data), 200
         
     except Exception as e:
         logger.exception(f"Failed to get migration status {migration_id}: {str(e)}")
@@ -201,7 +217,11 @@ def start_migration(migration_id):
             }), 400
         
         # Mark as provisioning
-        migration.mark_as_provisioning()
+        if hasattr(migration, 'mark_as_provisioning') and callable(migration.mark_as_provisioning):
+            migration.mark_as_provisioning()
+        else:
+            migration.status = 'provisioning'
+            db.session.commit()
         
         # Initialize AWS manager
         logger.info(f"Starting AWS migration for {migration_id}...")
@@ -222,14 +242,24 @@ def start_migration(migration_id):
         
         if not instance_id:
             logger.error(f"Failed to create EC2 instance for {migration_id}")
-            migration.mark_as_failed('Failed to create AWS instance', 'EC2_CREATE_ERROR')
+            if hasattr(migration, 'mark_as_failed') and callable(migration.mark_as_failed):
+                migration.mark_as_failed('Failed to create AWS instance', 'EC2_CREATE_ERROR')
+            else:
+                migration.status = 'failed'
+                db.session.commit()
             return jsonify({
                 'success': False,
                 'error': 'Failed to create AWS instance. Please try again.'
             }), 500
         
         # Mark as processing
-        migration.mark_as_processing(instance_id)
+        if hasattr(migration, 'mark_as_processing') and callable(migration.mark_as_processing):
+            migration.mark_as_processing(instance_id)
+        else:
+            migration.status = 'processing'
+            if hasattr(migration, 'aws_instance_id'):
+                migration.aws_instance_id = instance_id
+            db.session.commit()
         
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
         
@@ -248,6 +278,16 @@ def start_migration(migration_id):
             'success': False,
             'error': 'Failed to start migration. Please try again.'
         }), 500
+
+
+@migrations_bp.route('/api/migrations/<migration_id>/process', methods=['POST'])
+@login_required
+def process_migration(migration_id):
+    """
+    Process migration - alias for start_migration
+    For backwards compatibility with older clients
+    """
+    return start_migration(migration_id)
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/cancel', methods=['POST'])
@@ -291,21 +331,27 @@ def cancel_migration(migration_id):
         aws_manager = AWSMigrationManager()
         
         # Cleanup AWS resources
+        instance_id = getattr(migration, 'aws_instance_id', None)
         cleanup_results = aws_manager.cleanup_migration(
             migration_id=migration_id,
-            instance_id=migration.aws_instance_id
+            instance_id=instance_id
         )
         
         # Mark as failed (cancelled)
-        migration.mark_as_failed('Cancelled by user', 'USER_CANCELLED')
+        if hasattr(migration, 'mark_as_failed') and callable(migration.mark_as_failed):
+            migration.mark_as_failed('Cancelled by user', 'USER_CANCELLED')
+        else:
+            migration.status = 'failed'
+            db.session.commit()
         
         # Update cleanup status
-        if cleanup_results.get('instance_terminated'):
+        if hasattr(migration, 'mark_ec2_terminated') and cleanup_results.get('instance_terminated'):
             migration.mark_ec2_terminated()
-        if cleanup_results.get('s3_deleted'):
+        if hasattr(migration, 'mark_s3_deleted') and cleanup_results.get('s3_deleted'):
             migration.mark_s3_deleted()
         
-        migration.mark_cleanup_completed()
+        if hasattr(migration, 'mark_cleanup_completed'):
+            migration.mark_cleanup_completed()
         
         logger.info(f"Migration {migration_id} cancelled successfully")
         
@@ -358,28 +404,40 @@ def retry_migration(migration_id):
                 'error': 'Only failed migrations can be retried'
             }), 400
         
-        if not migration.can_retry():
-            return jsonify({
-                'success': False,
-                'error': f'Maximum retry attempts reached ({migration.max_retries})'
-            }), 400
+        # Check retry count
+        if hasattr(migration, 'can_retry') and callable(migration.can_retry):
+            if not migration.can_retry():
+                max_retries = getattr(migration, 'max_retries', 3)
+                return jsonify({
+                    'success': False,
+                    'error': f'Maximum retry attempts reached ({max_retries})'
+                }), 400
         
         # Increment retry count
-        migration.increment_retry()
+        if hasattr(migration, 'increment_retry') and callable(migration.increment_retry):
+            migration.increment_retry()
+        elif hasattr(migration, 'retry_count'):
+            migration.retry_count = (migration.retry_count or 0) + 1
+            db.session.commit()
         
         # Reset status to uploaded
         migration.status = 'uploaded'
         migration.progress_percent = 0
-        migration.current_step = None
-        migration.error_message = None
-        migration.error_code = None
+        if hasattr(migration, 'current_step'):
+            migration.current_step = None
+        if hasattr(migration, 'error_message'):
+            migration.error_message = None
+        if hasattr(migration, 'error_code'):
+            migration.error_code = None
         db.session.commit()
         
-        logger.info(f"Migration {migration_id} reset for retry (attempt {migration.retry_count}/{migration.max_retries})")
+        retry_count = getattr(migration, 'retry_count', 1)
+        max_retries = getattr(migration, 'max_retries', 3)
+        logger.info(f"Migration {migration_id} reset for retry (attempt {retry_count}/{max_retries})")
         
         return jsonify({
             'success': True,
-            'message': f'Migration ready to retry (attempt {migration.retry_count}/{migration.max_retries})',
+            'message': f'Migration ready to retry (attempt {retry_count}/{max_retries})',
             'migration_id': migration_id
         }), 200
         
@@ -422,12 +480,18 @@ def delete_migration(migration_id):
         logger.info(f"Deleting migration {migration_id}...")
         
         # Cleanup AWS resources if not already done
-        if not migration.cleanup_completed:
+        cleanup_completed = getattr(migration, 'cleanup_completed', False)
+        if not cleanup_completed:
             aws_manager = AWSMigrationManager()
-            aws_manager.cleanup_migration(
-                migration_id=migration_id,
-                instance_id=migration.aws_instance_id
-            )
+            instance_id = getattr(migration, 'aws_instance_id', None)
+            try:
+                aws_manager.cleanup_migration(
+                    migration_id=migration_id,
+                    instance_id=instance_id
+                )
+            except Exception as cleanup_error:
+                logger.warning(f"Cleanup failed during deletion: {str(cleanup_error)}")
+                # Continue with deletion even if cleanup fails
         
         # Delete from database
         db.session.delete(migration)

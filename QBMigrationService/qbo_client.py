@@ -841,7 +841,50 @@ class PremiumQBOClient:
             "deleted": deleted,
             "failed": failed,
             "total": len(entities)
-        }
+        }    
+    def query_raw(self, query: str, oauth_manager: Optional[Any] = None) -> List[Dict]:
+        """
+        $25M FIX: Execute a raw SQL-like query against QBO API
+        
+        This is needed for bank reconciliation verification.
+        
+        Args:
+            query: SQL-like query (e.g., "SELECT * FROM Invoice WHERE ...")
+            oauth_manager: OAuth manager for token refresh
+            
+        Returns:
+            List of matching entities
+        """
+        headers = self._get_headers(oauth_manager)
+        
+        # URL encode the query
+        import urllib.parse
+        encoded_query = urllib.parse.quote(query)
+        
+        url = f"{self.base_url}/query?query={encoded_query}&minorversion={self.minor_version}"
+        
+        try:
+            response = self.session.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                query_response = data.get('QueryResponse', {})
+                
+                # Get the first key (entity type)
+                for key, value in query_response.items():
+                    if isinstance(value, list):
+                        return value
+                
+                return []
+            else:
+                logger.error(f"Query failed: {response.status_code} - {response.text}")
+                return []
+        
+        except Exception as e:
+            logger.error(f"Query error: {e}")
+            return []
+    
+
     
     def __del__(self):
         """Cleanup: close session"""

@@ -20,6 +20,7 @@ from utils.cleanup_scheduler import init_cleanup_scheduler
 from sqlalchemy import text
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from api.health import health_bp
 import sys
 
 
@@ -250,6 +251,7 @@ def create_app(config_name='development'):
     app.register_blueprint(upload_bp)
     app.register_blueprint(migrations_bp)
     app.register_blueprint(webhooks_bp)
+    app.register_blueprint(health_bp)
     app.logger.info('Blueprints registered: auth, upload, migrations, webhooks')
     
     # Initialize backup scheduler

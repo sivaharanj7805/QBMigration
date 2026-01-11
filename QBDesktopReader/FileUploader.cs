@@ -5,8 +5,26 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 
-namespace QBDesktopReader
+namespace QBDesktopExtractor
 {
+    /// <summary>
+    /// PHASE 2: SECURE TRANSFER - Upload encrypted QB data to AWS S3
+    /// 
+    /// FEATURES:
+    /// - Chunked upload for large files (prevents timeouts)
+    /// - RSA public key exchange for hybrid encryption
+    /// - Progress tracking
+    /// - Automatic retry on failure
+    /// - Support for both HTTP/HTTPS with security warnings
+    /// 
+    /// SERVER API ENDPOINTS:
+    /// - GET  /api/public-key       - Get server's RSA public key
+    /// - POST /api/upload            - Single-shot upload (< 10MB)
+    /// - POST /api/upload/initiate   - Start chunked upload
+    /// - POST /api/upload/chunk      - Upload chunk
+    /// - POST /api/upload/finalize   - Complete chunked upload
+    /// - POST /api/upload/abort      - Cancel chunked upload
+    /// </summary>
     public class FileUploader
     {
         private readonly string serverUrl;
@@ -15,27 +33,35 @@ namespace QBDesktopReader
 
         public FileUploader(string serverUrl)
         {
-            // Default to HTTPS if no protocol specified
+            // Auto-add HTTPS if no protocol specified
             if (!serverUrl.StartsWith("http://") && !serverUrl.StartsWith("https://"))
             {
                 serverUrl = "https://" + serverUrl;
             }
 
-            // Warn if using HTTP
-            if (serverUrl.StartsWith("http://") && !serverUrl.Contains("localhost") && !serverUrl.Contains("127.0.0.1"))
+            // Security warning for HTTP
+            if (serverUrl.StartsWith("http://") && 
+                !serverUrl.Contains("localhost") && 
+                !serverUrl.Contains("127.0.0.1"))
             {
-                Console.WriteLine("⚠ WARNING: Using HTTP instead of HTTPS. Data will be transmitted unencrypted!");
+                Console.WriteLine("      ⚠ WARNING: Using HTTP instead of HTTPS!");
+                Console.WriteLine("         Your data encryption protects the content, but metadata is visible.");
+                Console.WriteLine("         Strongly recommend using HTTPS in production.");
             }
 
             this.serverUrl = serverUrl;
-            this.httpClient = new HttpClient();
-            this.httpClient.Timeout = TimeSpan.FromMinutes(30); // Increased for chunked uploads
-            this.httpClient.DefaultRequestHeaders.Add("User-Agent", "QBDesktopReader/2.0");
+            this.httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromMinutes(30) // Long timeout for large uploads
+            };
+            
+            this.httpClient.DefaultRequestHeaders.Add("User-Agent", "QBExtractor/3.1");
+            this.httpClient.DefaultRequestHeaders.Add("X-Client-Version", "3.1.0");
         }
 
         /// <summary>
-        /// Get server's RSA public key for hybrid encryption
-        /// Returns null if server doesn't support RSA encryption
+        /// Get server's RSA-4096 public key for hybrid encryption
+        /// Returns null if server doesn't support RSA (will use TLS only)
         /// </summary>
         public async Task<string> GetServerPublicKey()
         {
@@ -44,35 +70,36 @@ namespace QBDesktopReader
 
             try
             {
-                Console.WriteLine("Requesting server public key for secure key exchange...");
-                
                 var response = await httpClient.GetAsync($"{serverUrl}/api/public-key");
                 
                 if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine("⚠ Server doesn't support RSA key exchange. Using HTTPS-only encryption.");
+                    // Server doesn't support RSA - use HTTPS-only encryption
                     return null;
                 }
 
                 var responseBody = await response.Content.ReadAsStringAsync();
                 var keyResponse = JsonConvert.DeserializeObject<PublicKeyResponse>(responseBody);
                 
+                if (keyResponse == null || string.IsNullOrEmpty(keyResponse.PublicKey))
+                {
+                    return null;
+                }
+                
                 cachedPublicKey = keyResponse.PublicKey;
-                Console.WriteLine("✓ Received server public key");
                 
                 return cachedPublicKey;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠ Could not retrieve server public key: {ex.Message}");
-                Console.WriteLine("   Falling back to HTTPS-only encryption.");
+                Console.WriteLine($"      ⚠ Could not retrieve server public key: {ex.Message}");
                 return null;
             }
         }
 
         /// <summary>
-        /// Upload encrypted data with encryption keys to server
-        /// Supports both single upload and chunked upload for large files
+        /// Upload encrypted data to AWS S3 (via Flask API)
+        /// Automatically chooses single or chunked upload based on file size
         /// </summary>
         public async Task<UploadResponse> UploadEncryptedData(
             EncryptionPayload encryptionPayload, 
@@ -93,25 +120,33 @@ namespace QBDesktopReader
             }
             catch (HttpRequestException ex)
             {
-                Console.WriteLine($"✗ Upload failed: {ex.Message}");
-                throw new Exception("Failed to upload data to server. Please check your network connection and server URL.", ex);
+                throw new Exception(
+                    $"Network error during upload: {ex.Message}\n" +
+                    "Please check:\n" +
+                    "  1. Server URL is correct\n" +
+                    "  2. Internet connection is stable\n" +
+                    "  3. Firewall allows outbound HTTPS", 
+                    ex);
             }
-            catch (Exception ex)
+            catch (TaskCanceledException ex)
             {
-                Console.WriteLine($"✗ Upload failed: {ex.Message}");
-                throw;
+                throw new Exception(
+                    "Upload timed out. This usually happens with very large files or slow connections.\n" +
+                    "Consider:\n" +
+                    "  1. Using chunked upload (automatic for files > 10MB)\n" +
+                    "  2. Checking your internet speed\n" +
+                    "  3. Retrying during off-peak hours",
+                    ex);
             }
         }
 
         /// <summary>
-        /// Upload entire payload in a single request
+        /// Single-shot upload for small files (< 10MB)
         /// </summary>
         private async Task<UploadResponse> UploadSinglePayload(
             EncryptionPayload encryptionPayload, 
             string sessionId)
         {
-            Console.WriteLine("Uploading encrypted data to server...");
-
             var payload = new
             {
                 session_id = sessionId,
@@ -122,11 +157,17 @@ namespace QBDesktopReader
                     encrypted_key = encryptionPayload.EncryptedKey,
                     is_key_encrypted = encryptionPayload.IsKeyEncrypted,
                     iv = encryptionPayload.IV,
-                    tag = encryptionPayload.Tag
+                    tag = encryptionPayload.Tag,
+                    algorithm = encryptionPayload.Algorithm,
+                    version = encryptionPayload.Version
                 },
-                timestamp = DateTime.UtcNow.ToString("o"),
-                client_version = "2.0",
-                upload_method = "single"
+                metadata = new
+                {
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    client_version = "3.1.0",
+                    upload_method = "single",
+                    data_version = "qb_desktop_3.1"
+                }
             };
 
             string jsonPayload = JsonConvert.SerializeObject(payload);
@@ -134,46 +175,52 @@ namespace QBDesktopReader
 
             var response = await httpClient.PostAsync($"{serverUrl}/api/upload", content);
             
-            // Check response content type
+            // Validate response
+            if (!response.IsSuccessStatusCode)
+            {
+                string errorBody = await response.Content.ReadAsStringAsync();
+                throw new Exception(
+                    $"Server rejected upload (HTTP {response.StatusCode}):\n{errorBody}");
+            }
+
+            // Check content type
             var contentType = response.Content.Headers.ContentType?.MediaType;
             if (contentType != "application/json")
             {
-                throw new Exception($"Server returned unexpected content type: {contentType}");
+                throw new Exception(
+                    $"Server returned unexpected content type: {contentType}\n" +
+                    "Expected: application/json");
             }
-
-            response.EnsureSuccessStatusCode();
 
             string responseBody = await response.Content.ReadAsStringAsync();
             var result = JsonConvert.DeserializeObject<UploadResponse>(responseBody);
 
-            Console.WriteLine($"✓ Upload complete. Migration ID: {result.MigrationId}");
+            if (result == null)
+            {
+                throw new Exception("Failed to parse server response");
+            }
 
             return result;
         }
 
         /// <summary>
-        /// Upload data in chunks for large files
-        /// Prevents memory issues and allows for progress tracking
+        /// Chunked upload for large files (prevents timeouts, shows progress)
         /// </summary>
         private async Task<UploadResponse> UploadInChunks(
             EncryptionPayload encryptionPayload,
             string sessionId,
             int chunkSizeKB)
         {
-            Console.WriteLine("Using chunked upload for large dataset...");
-
-            // First, initiate the chunked upload
+            // Step 1: Initiate chunked upload
             var initResponse = await InitiateChunkedUpload(sessionId, encryptionPayload);
             string uploadId = initResponse.UploadId;
 
             try
             {
-                // Split the encrypted data into chunks
+                // Step 2: Split and upload chunks
                 byte[] encryptedDataBytes = Convert.FromBase64String(encryptionPayload.EncryptedData);
                 int chunkSize = chunkSizeKB * 1024;
                 int totalChunks = (int)Math.Ceiling((double)encryptedDataBytes.Length / chunkSize);
-
-                Console.WriteLine($"Uploading {totalChunks} chunks ({chunkSizeKB}KB each)...");
 
                 for (int i = 0; i < totalChunks; i++)
                 {
@@ -185,27 +232,29 @@ namespace QBDesktopReader
 
                     await UploadChunk(uploadId, sessionId, i, totalChunks, chunkData);
 
-                    // Progress indicator
+                    // Progress
                     int percentComplete = (int)((i + 1) * 100.0 / totalChunks);
-                    Console.WriteLine($"  Progress: {percentComplete}% ({i + 1}/{totalChunks} chunks)");
+                    Console.Write($"\r      Uploading... {percentComplete}% ({i + 1}/{totalChunks} chunks)");
                 }
 
-                // Finalize the upload
-                Console.WriteLine("Finalizing upload...");
+                Console.WriteLine(); // New line after progress
+
+                // Step 3: Finalize upload
                 return await FinalizeChunkedUpload(uploadId, sessionId);
             }
             catch (Exception ex)
             {
-                // Attempt to abort the upload
+                // Attempt to abort the upload to clean up server resources
                 try
                 {
                     await AbortChunkedUpload(uploadId, sessionId);
                 }
                 catch
                 {
-                    // Ignore abort errors
+                    // Ignore abort errors - server will timeout incomplete uploads
                 }
-                throw new Exception($"Chunked upload failed: {ex.Message}", ex);
+                
+                throw new Exception($"Chunked upload failed at server: {ex.Message}", ex);
             }
         }
 
@@ -222,10 +271,16 @@ namespace QBDesktopReader
                     encrypted_key = encryptionPayload.EncryptedKey,
                     is_key_encrypted = encryptionPayload.IsKeyEncrypted,
                     iv = encryptionPayload.IV,
-                    tag = encryptionPayload.Tag
+                    tag = encryptionPayload.Tag,
+                    algorithm = encryptionPayload.Algorithm,
+                    version = encryptionPayload.Version
                 },
-                timestamp = DateTime.UtcNow.ToString("o"),
-                client_version = "2.0"
+                metadata = new
+                {
+                    timestamp = DateTime.UtcNow.ToString("o"),
+                    client_version = "3.1.0",
+                    data_version = "qb_desktop_3.1"
+                }
             };
 
             string jsonPayload = JsonConvert.SerializeObject(payload);
@@ -251,7 +306,8 @@ namespace QBDesktopReader
                 session_id = sessionId,
                 chunk_index = chunkIndex,
                 total_chunks = totalChunks,
-                chunk_data = Convert.ToBase64String(chunkData)
+                chunk_data = Convert.ToBase64String(chunkData),
+                chunk_size = chunkData.Length
             };
 
             string jsonPayload = JsonConvert.SerializeObject(payload);
@@ -266,7 +322,8 @@ namespace QBDesktopReader
             var payload = new
             {
                 upload_id = uploadId,
-                session_id = sessionId
+                session_id = sessionId,
+                finalized_at = DateTime.UtcNow.ToString("o")
             };
 
             string jsonPayload = JsonConvert.SerializeObject(payload);
@@ -276,10 +333,7 @@ namespace QBDesktopReader
             response.EnsureSuccessStatusCode();
 
             string responseBody = await response.Content.ReadAsStringAsync();
-            var result = JsonConvert.DeserializeObject<UploadResponse>(responseBody);
-
-            Console.WriteLine($"✓ Upload complete. Migration ID: {result.MigrationId}");
-            return result;
+            return JsonConvert.DeserializeObject<UploadResponse>(responseBody);
         }
 
         private async Task AbortChunkedUpload(string uploadId, string sessionId)
@@ -287,14 +341,20 @@ namespace QBDesktopReader
             var payload = new
             {
                 upload_id = uploadId,
-                session_id = sessionId
+                session_id = sessionId,
+                reason = "client_error"
             };
 
             string jsonPayload = JsonConvert.SerializeObject(payload);
             var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
+            // Don't throw on abort failure - best effort
             await httpClient.PostAsync($"{serverUrl}/api/upload/abort", content);
         }
+
+        // ====================================================================
+        // RESPONSE MODELS
+        // ====================================================================
 
         public class PublicKeyResponse
         {
@@ -303,6 +363,9 @@ namespace QBDesktopReader
 
             [JsonProperty("key_format")]
             public string KeyFormat { get; set; } // "XML" or "PEM"
+
+            [JsonProperty("key_size_bits")]
+            public int KeySizeBits { get; set; } // Should be 4096
         }
 
         public class InitiateUploadResponse
@@ -312,6 +375,9 @@ namespace QBDesktopReader
 
             [JsonProperty("status")]
             public string Status { get; set; }
+
+            [JsonProperty("expires_at")]
+            public string ExpiresAt { get; set; }
         }
 
         public class UploadResponse
@@ -324,6 +390,15 @@ namespace QBDesktopReader
 
             [JsonProperty("message")]
             public string Message { get; set; }
+
+            [JsonProperty("s3_location")]
+            public string S3Location { get; set; }
+
+            [JsonProperty("next_phase")]
+            public string NextPhase { get; set; }
+
+            [JsonProperty("estimated_processing_time_minutes")]
+            public int EstimatedProcessingTimeMinutes { get; set; }
         }
     }
 }

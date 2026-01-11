@@ -8,7 +8,13 @@ from typing import Dict, List, Tuple, Optional
 
 class SecurityManager:
     """
-    Enhanced security with:
+    Enhanced security with $25M FIXES:
+    
+    CRITICAL FIX #1: FAIL-CLOSED policy on OAuth verification
+    - Old: If check fails → assume OK (SECURITY VIOLATION)
+    - New: If check fails → HARD ABORT (SECURE)
+    
+    Other features:
     - Pre-migration data scan
     - Naming collision detection
     - Permission scope verification
@@ -136,7 +142,7 @@ class SecurityManager:
             if len(name_collisions) > 5:
                 print(f"     ... and {len(name_collisions) - 5} more")
         else:
-            print("  ✓ No naming collisions")
+            print("  ✅ No naming collisions")
         
         # Check 2: Duplicate DocNumbers
         print("\n[2/6] Checking for duplicate DocNumbers...")
@@ -148,7 +154,7 @@ class SecurityManager:
             )
             print(f"  ⚠️  Found {len(duplicate_docs)} duplicate DocNumbers")
         else:
-            print("  ✓ No duplicate DocNumbers")
+            print("  ✅ No duplicate DocNumbers")
         
         # Check 3: Invalid characters
         print("\n[3/6] Checking for invalid characters...")
@@ -160,7 +166,7 @@ class SecurityManager:
             )
             print(f"  ⚠️  Found {len(invalid_chars)} names with invalid characters")
         else:
-            print("  ✓ No invalid characters")
+            print("  ✅ No invalid characters")
         
         # Check 4: Data size warnings
         print("\n[4/6] Checking data volume...")
@@ -171,7 +177,7 @@ class SecurityManager:
             print(f"  ⚠️  {warning}")
         
         if not size_warnings:
-            print("  ✓ Data volume is reasonable")
+            print("  ✅ Data volume is reasonable")
         
         # Check 5: Inactive records with zero balances
         print("\n[5/6] Checking for cleanable records...")
@@ -183,7 +189,7 @@ class SecurityManager:
             )
             print(f"  💡 Found {cleanable['count']} inactive records that could be removed")
         else:
-            print("  ✓ No unnecessary records found")
+            print("  ✅ No unnecessary records found")
         
         # Check 6: Multi-user mode detection
         print("\n[6/6] Checking file status...")
@@ -194,7 +200,7 @@ class SecurityManager:
             scan_result['should_proceed'] = False
             print("  ❌ File is in Multi-user mode")
         else:
-            print("  ✓ File is in single-user mode")
+            print("  ✅ File is in single-user mode")
         
         # Print summary
         print("\n" + "=" * 80)
@@ -205,7 +211,7 @@ class SecurityManager:
         print(f"  Recommendations: {len(scan_result['recommendations'])}")
         
         if scan_result['should_proceed']:
-            print("\n  ✓ PRE-MIGRATION SCAN PASSED")
+            print("\n  ✅ PRE-MIGRATION SCAN PASSED")
         else:
             print("\n  ❌ PRE-MIGRATION SCAN FAILED")
             print("\n  Please fix the following errors before proceeding:")
@@ -336,16 +342,30 @@ class SecurityManager:
         }
     
     # ========================================================================
-    # PERMISSION VERIFICATION
+    # PERMISSION VERIFICATION - $25M CRITICAL FIX
     # ========================================================================
     
     @staticmethod
     def verify_oauth_scopes(access_token: str) -> Tuple[bool, List[str]]:
         """
-        Verify OAuth token has required scopes
+        $25M FIX: FAIL-CLOSED policy on OAuth verification
         
+        OLD BEHAVIOR (SECURITY VIOLATION):
+            except Exception: return True, []  # Assume OK
+        
+        NEW BEHAVIOR (SECURE):
+            except Exception: raise SecurityError  # HARD ABORT
+        
+        Verify OAuth token has required scopes.
+        
+        Args:
+            access_token: OAuth access token
+            
         Returns:
             (has_required_scopes, actual_scopes)
+            
+        Raises:
+            SecurityError: If verification cannot be completed
         """
         import requests
         
@@ -362,7 +382,7 @@ class SecurityManager:
         }
         
         try:
-            response = requests.post(url, headers=headers, data=data)
+            response = requests.post(url, headers=headers, data=data, timeout=10)
             
             if response.status_code == 200:
                 result = response.json()
@@ -373,10 +393,53 @@ class SecurityManager:
                 required = "com.intuit.quickbooks.accounting"
                 has_required = required in actual_scopes
                 
-                return has_required, actual_scopes
-            else:
-                return False, []
+                if not has_required:
+                    print(f"❌ Missing required OAuth scope: {required}")
+                    print(f"   Available scopes: {actual_scopes}")
                 
+                return has_required, actual_scopes
+            
+            elif response.status_code == 401:
+                # Token is invalid or expired
+                raise SecurityError(
+                    "OAuth token is invalid or expired. Please re-authenticate."
+                )
+            
+            else:
+                # Unknown error - FAIL CLOSED
+                raise SecurityError(
+                    f"OAuth scope verification failed with status {response.status_code}. "
+                    f"Cannot proceed without confirming permissions."
+                )
+                
+        except requests.exceptions.Timeout:
+            # Network timeout - FAIL CLOSED
+            raise SecurityError(
+                "OAuth verification timed out. Cannot proceed without confirming permissions. "
+                "Check your internet connection and try again."
+            )
+        
+        except requests.exceptions.ConnectionError:
+            # Network error - FAIL CLOSED
+            raise SecurityError(
+                "Cannot connect to OAuth server. Cannot proceed without confirming permissions. "
+                "Check your internet connection and try again."
+            )
+        
         except Exception as e:
-            print(f"Warning: Could not verify token scopes: {e}")
-            return True, []  # Assume OK if check fails
+            # $25M CRITICAL FIX: FAIL CLOSED
+            # Any error in security check → HARD ABORT
+            raise SecurityError(
+                f"OAuth scope verification failed: {str(e)}. "
+                f"Cannot proceed without confirming permissions. "
+                f"This is a security requirement."
+            )
+
+
+class SecurityError(Exception):
+    """
+    Custom exception for security failures
+    
+    Used to enforce FAIL-CLOSED policy
+    """
+    pass
