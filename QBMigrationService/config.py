@@ -164,6 +164,30 @@ MAX_PARALLEL_WORKERS = get_env_int("MAX_PARALLEL_WORKERS", 5)
 if MAX_PARALLEL_WORKERS > 10:
     print(f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting")
 
+# Redis configuration (for rate limiting and job queue)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+ENABLE_REDIS = get_env_bool("ENABLE_REDIS", "false")
+
+# QBO Plan-specific worker limits
+# These are conservative limits to avoid rate limiting
+QBO_PLAN_WORKER_LIMITS = {
+    "Simple Start": 2,
+    "Essentials": 3,
+    "Plus": 5,
+    "Advanced": 8
+}
+
+def get_qbo_plan_worker_limit(plan_name: str = None) -> int:
+    """
+    $25M FIX: Get worker limit based on QBO plan tier.
+    
+    Prevents rate limiting by adjusting concurrency to plan capabilities.
+    """
+    if plan_name is None:
+        plan_name = os.getenv("QBO_PLAN", "Plus")  # Default to Plus
+    
+    return QBO_PLAN_WORKER_LIMITS.get(plan_name, 5)
+
 # ============================================================================
 # QBO API LIMITS
 # ============================================================================

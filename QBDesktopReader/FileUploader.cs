@@ -55,8 +55,8 @@ namespace QBDesktopExtractor
                 Timeout = TimeSpan.FromMinutes(30) // Long timeout for large uploads
             };
             
-            this.httpClient.DefaultRequestHeaders.Add("User-Agent", "QBExtractor/3.1");
-            this.httpClient.DefaultRequestHeaders.Add("X-Client-Version", "3.1.0");
+            this.httpClient.DefaultRequestHeaders.Add("User-Agent", "QBExtractor/4.0");
+            this.httpClient.DefaultRequestHeaders.Add("X-Client-Version", "4.0.0");
         }
 
         /// <summary>
@@ -164,9 +164,9 @@ namespace QBDesktopExtractor
                 metadata = new
                 {
                     timestamp = DateTime.UtcNow.ToString("o"),
-                    client_version = "3.1.0",
+                    client_version = "4.0.0",
                     upload_method = "single",
-                    data_version = "qb_desktop_3.1"
+                    data_version = "qb_desktop_4.0"
                 }
             };
 
@@ -278,8 +278,8 @@ namespace QBDesktopExtractor
                 metadata = new
                 {
                     timestamp = DateTime.UtcNow.ToString("o"),
-                    client_version = "3.1.0",
-                    data_version = "qb_desktop_3.1"
+                    client_version = "4.0.0",
+                    data_version = "qb_desktop_4.0"
                 }
             };
 

@@ -3,6 +3,7 @@ import hmac
 import secrets
 import pyotp
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 
@@ -69,9 +70,51 @@ class SecurityManager:
         return hmac.compare_digest(signature, expected)
     
     @staticmethod
-    def rate_limit_check(user_id, max_requests=10, window_minutes=1):
-        """Simple in-memory rate limiting"""
-        # In production, use Redis
+    def rate_limit_check(user_id, max_requests=10, window_minutes=1, redis_client=None):
+        """
+        $25M FIX: Production-grade rate limiting with Redis backend.
+        
+        Supports:
+        - Multi-instance deployments (auto-scaling)
+        - Atomic operations
+        - Automatic expiry
+        - Graceful fallback to local store
+        
+        Args:
+            user_id: User identifier for rate limiting
+            max_requests: Maximum requests allowed in window
+            window_minutes: Time window in minutes
+            redis_client: Optional Redis client (pass if available)
+            
+        Returns:
+            True if request allowed, False if rate limited
+        """
+        # Try Redis first (production)
+        if redis_client is not None:
+            try:
+                import redis
+                
+                window_key = f"ratelimit:{user_id}:{int(time.time() / (window_minutes * 60))}"
+                
+                # Atomic increment
+                count = redis_client.incr(window_key)
+                
+                # Set expiry on first request
+                if count == 1:
+                    redis_client.expire(window_key, window_minutes * 60)
+                
+                # Check limit
+                if count > max_requests:
+                    return False
+                
+                return True
+                
+            except Exception as e:
+                # Redis failure - fallback to local store
+                print(f"⚠️  Redis rate limiting failed: {e}")
+                print("   Falling back to local rate limiting")
+        
+        # Fallback: In-memory rate limiting (single instance only)
         if not hasattr(SecurityManager, '_rate_limit_store'):
             SecurityManager._rate_limit_store = {}
         

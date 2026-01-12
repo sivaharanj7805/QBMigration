@@ -6,6 +6,66 @@ from datetime import datetime, timedelta
 from encryption import EncryptionManager
 from audit_logger import AuditLogger
 
+# $25M FIX: Try to import Celery for production job queue
+try:
+    from celery import Celery
+    
+    # Initialize Celery app
+    celery_app = Celery(
+        'qb_migration',
+        broker=os.getenv('REDIS_URL', 'redis://localhost:6379/0'),
+        backend=os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    )
+    
+    celery_app.conf.update(
+        task_serializer='json',
+        accept_content=['json'],
+        result_serializer='json',
+        timezone='UTC',
+        enable_utc=True,
+    )
+    
+    CELERY_AVAILABLE = True
+    print("✅ Celery available - using production job queue")
+    
+except ImportError:
+    CELERY_AVAILABLE = False
+    celery_app = None
+    print("⚠️  Celery not available - using fallback threading")
+
+
+# Celery task for deletion (only defined if Celery available)
+if CELERY_AVAILABLE:
+    @celery_app.task(name='qb_migration.execute_deletion')
+    def celery_execute_deletion(job_data):
+        """Celery task for scheduled deletion (survives server restarts)"""
+        from encryption import EncryptionManager
+        from audit_logger import AuditLogger
+        
+        logger = AuditLogger()
+        deleted_count = 0
+        failed_count = 0
+        
+        for file_path in job_data['file_paths']:
+            if os.path.exists(file_path):
+                try:
+                    EncryptionManager.secure_delete(file_path)
+                    logger.log_deletion(
+                        job_data['migration_id'],
+                        file_path,
+                        method="secure_7pass"
+                    )
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"❌ Failed to delete {file_path}: {e}")
+                    failed_count += 1
+        
+        return {
+            'deleted_count': deleted_count,
+            'failed_count': failed_count,
+            'migration_id': job_data['migration_id']
+        }
+
 class DataRetentionManager:
     """
     Enhanced data retention with:
@@ -75,7 +135,14 @@ class DataRetentionManager:
             print(f"Warning: Could not save deletion jobs: {e}")
     
     def schedule_deletion(self, migration_id, file_paths, delay_hours=None):
-        """Schedule files for deletion after delay"""
+        """
+        $25M FIX: Schedule files for deletion using Celery (if available) or threading.
+        
+        Celery provides:
+        - Persistent job queue (survives server restarts)
+        - Distributed execution
+        - Automatic retry on failure
+        """
         if delay_hours is None:
             delay_hours = self.retention_hours
         
@@ -92,16 +159,29 @@ class DataRetentionManager:
         self.deletion_jobs.append(job)
         self._save_jobs()
         
-        # Start background thread to delete
-        delay_seconds = delay_hours * 3600
-        self._start_deletion_thread(job, delay_seconds)
-        
-        print(f"✓ Scheduled deletion in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
+        # Use Celery if available (production), otherwise threading (development)
+        if CELERY_AVAILABLE:
+            delay_seconds = delay_hours * 3600
+            
+            # Schedule Celery task with ETA
+            celery_execute_deletion.apply_async(
+                args=[job],
+                eta=deletion_time,
+                task_id=f"deletion_{migration_id}"
+            )
+            
+            print(f"✓ Scheduled deletion via Celery in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
+        else:
+            # Fallback to threading
+            delay_seconds = delay_hours * 3600
+            self._start_deletion_thread(job, delay_seconds)
+            print(f"✓ Scheduled deletion via threading in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
         
         self.logger.log_security_event("DELETION_SCHEDULED", {
             "migration_id": migration_id,
             "file_count": len(job['file_paths']),
             "deletion_time": deletion_time.isoformat(),
+            "method": "celery" if CELERY_AVAILABLE else "threading",
             "message": f"Files scheduled for deletion in {delay_hours} hour(s)"
         })
     

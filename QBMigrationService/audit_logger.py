@@ -126,7 +126,14 @@ class AuditLogger:
         """
         Remove SSNs and sensitive patterns from strings
         
-        SECURITY FIX: Multiple SSN formats, phone numbers, emails
+        $25M FIX: Extended PII redaction for SOC2 compliance
+        - SSN patterns (multiple formats)
+        - Phone numbers
+        - Email addresses
+        - Physical addresses
+        - Full names (partial redaction)
+        - Driver's license numbers
+        - Passport numbers
         """
         # SSN patterns (various formats)
         # With hyphens: XXX-XX-XXXX
@@ -157,6 +164,41 @@ class AuditLogger:
             r'\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b',
             r'\1(XXX) XXX-XXXX',
             text
+        )
+        
+        # $25M FIX: Physical addresses
+        # Match patterns like "123 Main Street" or "456 Oak Ave"
+        text = re.sub(
+            r'\b\d+\s+[\w\s]+\s+(Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Court|Ct\.?|Circle|Cir\.?|Way|Place|Pl\.?)',
+            '[ADDRESS-REDACTED]',
+            text,
+            flags=re.IGNORECASE
+        )
+        
+        # $25M FIX: Full names (partial redaction)
+        # Match "John Doe" pattern - keep first name, redact last
+        text = re.sub(
+            r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b',
+            r'\1 [NAME-REDACTED]',
+            text
+        )
+        
+        # $25M FIX: Driver's License (various state formats)
+        # Generic pattern: alphanumeric 6-12 characters
+        text = re.sub(
+            r'\b(?:DL|Driver(?:\'s)?\s+Lic(?:ense)?)[:\s]+([A-Z0-9]{6,12})\b',
+            'DL: [DL-REDACTED]',
+            text,
+            flags=re.IGNORECASE
+        )
+        
+        # $25M FIX: Passport numbers
+        # US Passport: 9 digits, sometimes with letters
+        text = re.sub(
+            r'\b(?:Passport)[:\s]+([A-Z0-9]{6,9})\b',
+            'Passport: [PASSPORT-REDACTED]',
+            text,
+            flags=re.IGNORECASE
         )
         
         return text

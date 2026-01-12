@@ -12,7 +12,7 @@ FEATURES:
 ✓ 31 entity types (100% coverage)
 ✓ v3.1 QB Extractor format support  
 ✓ Backward compatible with original format
-✓ Assembly → Inventory conversion
+✓ Assembly → Bundle conversion (FUNCTIONAL - preserves BOM)
 ✓ Group → Bundle conversion
 ✓ Multi-currency support
 ✓ Trial balance validation
@@ -104,98 +104,279 @@ class QBDataTransformer:
         logger.info(f"QBDataTransformer v{self.VERSION} initialized (Region: {self.region})")
     
     # ========================================================================
-    # $25M FIX: PARALLEL TRANSFORMATION (Solves GIL bottleneck)
+    # $25M FIX: PARALLEL TRANSFORMATION (Phase-Based, Production-Grade)
     # ========================================================================
     
     def transform_parallel(self, qb_data: Dict, max_workers: int = None) -> Dict:
         """
-        Parallel transformation using multiprocessing
+        PRODUCTION-GRADE parallel transformation with shared state.
         
-        Solves Python GIL bottleneck for large datasets (2GB+ files).
-        Transforms independent entity types across multiple CPU cores.
+        Strategy:
+        - Phase 1 (Foundation): Sequential - fast anyway (~100 entities)
+        - Phase 2 (Accounts): Sequential - MUST accumulate trial_balance
+        - Phase 3 (Master Lists): PARALLEL with Manager() - 50-70% of entities
+        - Phase 4 (Transactions): Sequential - safe, correct
         
-        Speed improvement: 5-10x faster on multi-core systems
+        Expected speedup: 2.5-3x on Phase 3, 1.3x overall
+        
+        Uses multiprocessing.Manager() to share:
+        - used_display_names (for uniqueness)
+        - id_mapping (for foreign keys)
+        
+        Trial balance accumulated sequentially (no race conditions).
         """
         if max_workers is None:
             max_workers = max(1, mp.cpu_count() - 1)
         
-        print(f"\n🚀 Parallel transformation with {max_workers} workers")
+        print(f"\n🚀 Smart parallel transformation ({max_workers} workers)")
         
-        # Entity groups (by dependencies)
-        groups = {
-            'foundation': ['Accounts', 'TaxCodes', 'TaxRates', 'PaymentMethods', 'Terms'],
-            'lists': ['Customers', 'Vendors', 'Employees', 'Items', 'Classes', 'Departments'],
-            'transactions': ['Invoices', 'Bills', 'Payments', 'SalesReceipts', 'JournalEntries']
-        }
+        from multiprocessing import Manager
         
-        all_transformed = []
-        
-        # Process each group
-        for group_name, entity_types in groups.items():
-            print(f"  Processing {group_name}...")
-            
-            # Collect entities for this group
-            batch = [(et, qb_data.get(et, [])) for et in entity_types if et in qb_data]
-            
-            # Transform in parallel
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                futures = {
-                    executor.submit(self._transform_batch, et, entities): et
-                    for et, entities in batch
-                }
-                
-                for future in as_completed(futures):
-                    entity_type = futures[future]
-                    try:
-                        results = future.result()
-                        all_transformed.extend(results)
-                        print(f"    ✓ {entity_type}: {len(results)} entities")
-                    except Exception as e:
-                        print(f"    ✗ {entity_type}: {e}")
-        
-        # Build final result (same format as transform())
-        return self._build_transform_result(all_transformed, qb_data)
-    
-    @staticmethod
-    def _transform_batch(entity_type: str, entities: List[Dict]) -> List[Dict]:
-        """Worker function for parallel transformation (must be static for pickling)"""
-        # Create new transformer instance in this process
-        transformer = QBDataTransformer()
-        
-        method_name = f"transform_{entity_type.lower().rstrip('s')}"
-        if not hasattr(transformer, method_name):
-            return []
-        
-        transform_func = getattr(transformer, method_name)
-        results = []
-        
-        for entity in entities:
-            try:
-                result = transform_func(entity)
-                if result:
-                    results.append(result)
-            except:
-                pass
-        
-        return results
-    
-    def _build_transform_result(self, entities: List[Dict], original_data: Dict) -> Dict:
-        """Build result structure from parallel transformation"""
-        return {
+        # Initialize result structure
+        result = {
             'metadata': {
                 'version': self.VERSION,
                 'region': self.region,
                 'timestamp': datetime.now().isoformat(),
                 'mode': 'parallel'
             },
-            'entities': entities,
-            'summary': {
-                'total_entities': len(entities),
-                'skipped_entities': 0
-            },
-            'trial_balance': self.trial_balance,
-            'manual_review': self.manual_review
+            'entities': {},
+            'summary': {},
+            'trial_balance': {},
+            'manual_review': []
         }
+        
+        # Phase 1: Foundation (Sequential - too fast to parallelize)
+        print("  Phase 1: Foundation (sequential)...")
+        foundation_types = ['CompanyCurrency', 'TaxAgency', 'TaxRate', 'TaxCode', 
+                          'Term', 'PaymentMethod', 'CustomerType', 'JournalCode']
+        
+        for entity_type in foundation_types:
+            if entity_type not in qb_data:
+                continue
+            result['entities'][entity_type] = self._transform_entity_batch(
+                qb_data[entity_type],
+                entity_type
+            )
+        
+        # Phase 2: Accounts (Sequential - MUST accumulate trial_balance)
+        print("  Phase 2: Accounts (sequential for trial balance)...")
+        if 'Account' in qb_data:
+            result['entities']['Account'] = self._transform_entity_batch(
+                qb_data['Account'],
+                'Account'
+            )
+        
+        # Phase 3: Master Lists (PARALLEL with shared state)
+        print(f"  Phase 3: Master Lists (parallel with {max_workers} workers)...")
+        
+        # Create shared state using Manager
+        manager = Manager()
+        shared_names = manager.dict()
+        shared_id_mapping = manager.dict()
+        
+        # Initialize shared state from current state
+        for name in self.used_display_names:
+            shared_names[name] = True
+        
+        for entity_type, mappings in self.id_mapping.items():
+            shared_id_mapping[entity_type] = manager.dict(mappings)
+        
+        # Entity types that can be processed in parallel
+        master_list_types = ['Customer', 'Vendor', 'Employee', 'Item', 'Class', 'Department']
+        
+        # Prepare batches for parallel processing
+        batches = []
+        for entity_type in master_list_types:
+            if entity_type in qb_data:
+                batches.append((
+                    qb_data[entity_type],
+                    entity_type,
+                    shared_names,
+                    shared_id_mapping,
+                    self.region
+                ))
+        
+        # Process in parallel
+        if batches:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                future_to_type = {
+                    executor.submit(
+                        self._parallel_transform_batch,
+                        entities,
+                        entity_type,
+                        shared_names,
+                        shared_id_mapping,
+                        region
+                    ): entity_type
+                    for entities, entity_type, shared_names, shared_id_mapping, region in batches
+                }
+                
+                for future in as_completed(future_to_type):
+                    entity_type = future_to_type[future]
+                    try:
+                        transformed_entities, type_stats = future.result()
+                        result['entities'][entity_type] = transformed_entities
+                        
+                        # Update stats
+                        self.stats['total_processed'] += type_stats['processed']
+                        self.stats['total_skipped'] += type_stats['skipped']
+                        self.stats['by_entity_type'][entity_type] = type_stats['processed']
+                        self.stats['errors'].extend(type_stats['errors'])
+                        
+                        print(f"    ✓ {entity_type}: {len(transformed_entities)} entities")
+                    except Exception as e:
+                        print(f"    ✗ {entity_type}: {e}")
+                        self.stats['errors'].append({
+                            'entity': entity_type,
+                            'error': str(e)
+                        })
+        
+        # Update main process state from shared state
+        self.used_display_names = set(shared_names.keys())
+        for entity_type, mappings in shared_id_mapping.items():
+            self.id_mapping[entity_type] = dict(mappings)
+        
+        # Phase 4: Transactions (Sequential - heavy id_mapping usage, safer sequential)
+        print("  Phase 4: Transactions (sequential)...")
+        transaction_types = [
+            'Estimate', 'Invoice', 'SalesReceipt',
+            'PurchaseOrder', 'Purchase', 'Bill',
+            'Payment', 'BillPayment', 'CreditCardPayment',
+            'Deposit', 'Transfer', 'JournalEntry',
+            'CreditMemo', 'VendorCredit', 'RefundReceipt',
+            'TimeActivity', 'TaxPayment', 'InventoryAdjustment',
+            'Attachable'
+        ]
+        
+        for entity_type in transaction_types:
+            if entity_type not in qb_data:
+                continue
+            result['entities'][entity_type] = self._transform_entity_batch(
+                qb_data[entity_type],
+                entity_type
+            )
+        
+        # Generate summary
+        result['summary'] = self._generate_summary()
+        result['trial_balance'] = {
+            'debits': str(self.trial_balance['debits']),
+            'credits': str(self.trial_balance['credits']),
+            'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
+            'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
+        }
+        result['manual_review'] = self.manual_review
+        
+        logger.info("\n" + "="*60)
+        logger.info("PARALLEL TRANSFORMATION COMPLETE!")
+        logger.info(f"✅ Processed: {self.stats['total_processed']}")
+        logger.info(f"⚠️  Skipped: {self.stats['total_skipped']}")
+        logger.info(f"📋 Manual Review: {len(self.manual_review)}")
+        logger.info("="*60)
+        
+        return result
+    
+    @staticmethod
+    def _parallel_transform_batch(
+        entities: List[Dict],
+        entity_type: str,
+        shared_names: Any,
+        shared_id_mapping: Any,
+        region: str
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Worker function for parallel transformation (must be static for pickling).
+        
+        Uses shared state via Manager() for:
+        - name uniqueness checking
+        - id_mapping storage
+        
+        Returns: (transformed_entities, stats)
+        """
+        # Create transformer instance in this worker process
+        transformer = QBDataTransformer(region=region)
+        
+        # Replace local state with shared state
+        # Note: shared_names is dict (name -> True), convert to set for compatibility
+        transformer.used_display_names = set(shared_names.keys())
+        
+        # Copy shared id_mapping to local (for fast reads)
+        for et, mappings in shared_id_mapping.items():
+            transformer.id_mapping[et] = dict(mappings)
+        
+        # Get transformation method
+        method_name = f'transform_{entity_type.lower()}'
+        if not hasattr(transformer, method_name):
+            return [], {'processed': 0, 'skipped': 0, 'errors': []}
+        
+        transform_func = getattr(transformer, method_name)
+        
+        # Transform entities
+        transformed = []
+        stats = {
+            'processed': 0,
+            'skipped': 0,
+            'errors': []
+        }
+        
+        for entity in entities:
+            try:
+                result = transform_func(entity)
+                if result:
+                    transformed.append(result)
+                    stats['processed'] += 1
+                    
+                    # Sync display name back to shared state
+                    if 'DisplayName' in result:
+                        shared_names[result['DisplayName'].lower()] = True
+                    elif 'Name' in result:
+                        shared_names[result['Name'].lower()] = True
+                else:
+                    stats['skipped'] += 1
+            except Exception as e:
+                stats['skipped'] += 1
+                stats['errors'].append({
+                    'entity': entity.get('Name', 'Unknown'),
+                    'error': str(e)
+                })
+        
+        # Sync id_mapping back to shared state
+        for et, mappings in transformer.id_mapping.items():
+            if et not in shared_id_mapping:
+                shared_id_mapping[et] = {}
+            for qbd_id, qbo_id in mappings.items():
+                shared_id_mapping[et][qbd_id] = qbo_id
+        
+        return transformed, stats
+    
+    def _transform_entity_batch(self, entities: Any, entity_type: str) -> List[Dict]:
+        """Transform a batch of entities sequentially"""
+        if not isinstance(entities, list):
+            entities = [entities]
+        
+        method_name = f'transform_{entity_type.lower()}'
+        if not hasattr(self, method_name):
+            return []
+        
+        transform_func = getattr(self, method_name)
+        
+        transformed = []
+        for entity in entities:
+            try:
+                result = transform_func(entity)
+                if result:
+                    transformed.append(result)
+                    self.stats['total_processed'] += 1
+                    self.stats['by_entity_type'][entity_type] += 1
+            except Exception as e:
+                self.stats['total_skipped'] += 1
+                self.stats['errors'].append({
+                    'entity': entity_type,
+                    'name': entity.get('Name', 'Unknown'),
+                    'error': str(e)
+                })
+        
+        return transformed
 
     
     def _init_account_mapping(self):

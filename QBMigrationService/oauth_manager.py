@@ -77,12 +77,9 @@ class OAuthManager:
         else:
             self.encryption_manager = encryption_manager
         
-        # Derive encryption key from client_secret
+        # $25M FIX: Use KMS for token encryption (not derived from client_secret)
         if self.encryption_manager:
-            self.token_encryption_key, self.token_salt = self.encryption_manager.derive_key_from_password(
-                self.client_secret,
-                iterations=100000
-            )
+            self.token_encryption_key, self.token_salt = self._get_token_encryption_key()
         
         # Thread safety for token refresh
         self._refresh_lock = Lock()
@@ -95,6 +92,84 @@ class OAuthManager:
         
         # Load existing tokens
         self.load_tokens()
+    
+    def _get_token_encryption_key(self):
+        """
+        $25M FIX: Get encryption key from KMS (not derived from client_secret).
+        
+        Priority order:
+        1. AWS KMS (if AWS_KMS_KEY_ID set)
+        2. Azure Key Vault (if AZURE_KEYVAULT_URL set)
+        3. Fallback: Derive from client_secret (not recommended for production)
+        
+        Returns:
+            (key, salt) tuple
+        """
+        import os
+        
+        # Try AWS KMS first
+        aws_kms_key_id = os.getenv('AWS_KMS_KEY_ID')
+        if aws_kms_key_id:
+            try:
+                import boto3
+                
+                kms = boto3.client('kms')
+                
+                # Generate data key
+                response = kms.generate_data_key(
+                    KeyId=aws_kms_key_id,
+                    KeySpec='AES_256'
+                )
+                
+                # Use plaintext key for encryption
+                key = response['Plaintext']
+                
+                # Store encrypted key for future use
+                self.encrypted_data_key = response['CiphertextBlob']
+                
+                print("✅ Using AWS KMS for token encryption")
+                return key, None
+                
+            except Exception as e:
+                print(f"⚠️  AWS KMS failed: {e}")
+                print("   Falling back to derived key")
+        
+        # Try Azure Key Vault
+        azure_keyvault_url = os.getenv('AZURE_KEYVAULT_URL')
+        azure_key_name = os.getenv('AZURE_KEY_NAME', 'qb-token-encryption')
+        
+        if azure_keyvault_url:
+            try:
+                from azure.identity import DefaultAzureCredential
+                from azure.keyvault.keys.crypto import CryptographyClient
+                
+                credential = DefaultAzureCredential()
+                client = CryptographyClient(
+                    f"{azure_keyvault_url}/keys/{azure_key_name}",
+                    credential
+                )
+                
+                # Generate random key and encrypt with Key Vault
+                key = os.urandom(32)
+                result = client.encrypt('RSA-OAEP', key)
+                
+                self.encrypted_data_key = result.ciphertext
+                
+                print("✅ Using Azure Key Vault for token encryption")
+                return key, None
+                
+            except Exception as e:
+                print(f"⚠️  Azure Key Vault failed: {e}")
+                print("   Falling back to derived key")
+        
+        # Fallback: Derive from client_secret (not ideal but better than nothing)
+        print("⚠️  Using fallback key derivation (not recommended for production)")
+        print("   Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption")
+        
+        return self.encryption_manager.derive_key_from_password(
+            self.client_secret,
+            iterations=100000
+        )
     
     # ========================================================================
     # TOKEN STORAGE (ENCRYPTED)

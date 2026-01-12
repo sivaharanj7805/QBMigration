@@ -186,6 +186,112 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
+        /// TRUE STREAMING ENCRYPTION - Solves the "RAM Bomb" issue (v4.0 FIX)
+        /// Uses AES-256-CBC + HMAC-SHA256 for files that are too large for GCM
+        /// CRITICAL: Never loads full file in memory - processes in 64KB chunks
+        /// </summary>
+        public static EncryptionResult EncryptStreamToStreamChunked(
+            Stream inputStream, 
+            Stream outputStream,
+            long maxFileSizeMB = 2048,
+            Action<long, long> progressCallback = null)
+        {
+            if (inputStream == null) throw new ArgumentNullException(nameof(inputStream));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+
+            // CRITICAL: Validate file size BEFORE processing
+            long inputLength = inputStream.CanSeek ? inputStream.Length : -1;
+            long maxBytes = maxFileSizeMB * 1024 * 1024;
+            
+            if (inputLength > maxBytes)
+            {
+                throw new ArgumentException(
+                    $"File size ({inputLength / 1024 / 1024}MB) exceeds maximum allowed size ({maxFileSizeMB}MB). " +
+                    $"This is a safety limit to prevent out-of-memory crashes.",
+                    nameof(inputStream));
+            }
+
+            try
+            {
+                // Generate encryption components
+                byte[] key = new byte[32];
+                byte[] iv = new byte[16];
+                
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(key);
+                    rng.GetBytes(iv);
+                }
+
+                byte[] hmacKey = new byte[32];
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(hmacKey);
+                }
+
+                using (var hmac = new HMACSHA256(hmacKey))
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = key;
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.PKCS7;
+
+                    outputStream.Write(iv, 0, iv.Length);
+
+                    using (var cryptoStream = new CryptoStream(outputStream, aes.CreateEncryptor(), CryptoStreamMode.Write, leaveOpen: true))
+                    using (var hmacStream = new CryptoStream(cryptoStream, hmac, CryptoStreamMode.Write, leaveOpen: true))
+                    {
+                        byte[] buffer = new byte[65536]; // 64KB chunks
+                        int bytesRead;
+                        long totalBytesRead = 0;
+
+                        while ((bytesRead = inputStream.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            hmacStream.Write(buffer, 0, bytesRead);
+                            totalBytesRead += bytesRead;
+                            progressCallback?.Invoke(totalBytesRead, inputLength);
+                        }
+
+                        hmacStream.FlushFinalBlock();
+                        cryptoStream.FlushFinalBlock();
+                        
+                        // Clear buffer
+                        Array.Clear(buffer, 0, buffer.Length);
+                    }
+
+                    byte[] tag = hmac.Hash;
+                    outputStream.Write(tag, 0, tag.Length);
+                    outputStream.Flush();
+
+                    var result = new EncryptionResult
+                    {
+                        IV = Convert.ToBase64String(iv),
+                        Tag = Convert.ToBase64String(tag),
+                        Key = Convert.ToBase64String(key) + "|" + Convert.ToBase64String(hmacKey),
+                        EncryptedData = null,
+                        DataHashSHA256 = "calculated_separately",
+                        EncryptedHashSHA256 = "calculated_separately",
+                        Algorithm = "AES-256-CBC+HMAC-SHA256",
+                        KeySizeBits = 256
+                    };
+
+                    Array.Clear(key, 0, key.Length);
+                    Array.Clear(hmacKey, 0, hmacKey.Length);
+
+                    return result;
+                }
+            }
+            catch (OutOfMemoryException ex)
+            {
+                throw new OutOfMemoryException(
+                    $"Out of memory during encryption. File may be too large. Current limit: {maxFileSizeMB}MB.",
+                    ex);
+            }
+        }
+
+
+        /// <summary>
         /// LEGACY SUPPORT: File-based encryption (for backwards compatibility)
         /// WARNING: This creates a temporary encrypted file on disk
         /// Use EncryptStreamToStream for zero-footprint operation

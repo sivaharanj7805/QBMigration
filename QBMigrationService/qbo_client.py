@@ -38,7 +38,8 @@ class PremiumQBOClient:
         access_token: Optional[str] = None,
         db_path: Optional[str] = None,
         base_url: str = None,
-        minor_version: int = 65
+        minor_version: int = 65,
+        qbo_plan: Optional[str] = None
     ):
         # FIX #17, #18: Don't store mutable headers - create per-request
         self._base_access_token = access_token
@@ -74,9 +75,21 @@ class PremiumQBOClient:
         self.batch_counter = 0
         self.batch_lock = Lock()
         
-        # Parallel processing configuration
-        self.max_workers = 5
+        # $25M FIX: Plan-aware parallel processing configuration
+        # Different QBO plans have different API rate limits
+        # Advanced: 500 req/min → 8 workers
+        # Plus: 500 req/min → 5 workers
+        # Essentials: 100 req/min → 3 workers
+        # Simple Start: 100 req/min → 2 workers
+        if qbo_plan is None:
+            import os
+            qbo_plan = os.getenv("QBO_PLAN", "Plus")
+        
+        self.qbo_plan = qbo_plan
+        self.max_workers = self._get_plan_worker_limit(qbo_plan)
         self.enable_parallel = True
+        
+        print(f"✓ QBO Plan: {qbo_plan} → {self.max_workers} upload workers")
         
         # Failed items storage (FIX #243, #389)
         self.failed_items: List[Dict] = []
@@ -85,6 +98,38 @@ class PremiumQBOClient:
         # Graceful shutdown flag (FIX #251, #386)
         self.shutdown_requested = False
         self._register_signal_handlers()
+    
+    @staticmethod
+    def _get_plan_worker_limit(plan_name: str) -> int:
+        """
+        $25M FIX: Get worker limit based on QBO plan tier.
+        
+        Conservative limits to avoid rate limiting:
+        - Advanced: 8 workers (premium API access)
+        - Plus: 5 workers (standard)
+        - Essentials: 3 workers (limited API)
+        - Simple Start: 2 workers (minimal API)
+        """
+        plan_limits = {
+            "Advanced": 8,
+            "Plus": 5,
+            "Essentials": 3,
+            "Simple Start": 2
+        }
+        
+        limit = plan_limits.get(plan_name, 5)
+        
+        # Also check environment override
+        import os
+        env_override = os.getenv("QBO_UPLOAD_WORKERS")
+        if env_override:
+            try:
+                limit = int(env_override)
+                print(f"   Using environment override: {limit} workers")
+            except ValueError:
+                pass
+        
+        return limit
     
     def _register_signal_handlers(self):
         """
@@ -891,4 +936,7 @@ class PremiumQBOClient:
         try:
             self.session.close()
         except:
-            pass
+            pass 
+
+# Alias for backward compatibility
+QBOClient = PremiumQBOClient

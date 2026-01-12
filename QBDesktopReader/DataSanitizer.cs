@@ -89,11 +89,22 @@ namespace QBDesktopExtractor
                 changes.Add("Normalized whitespace");
             }
 
-            // Step 4: Truncate if too long
+            // Step 4: Truncate if too long (ENHANCED v4.0 - Explicit warnings)
             if (sanitized.Length > MAX_NAME_LENGTH)
             {
                 sanitized = sanitized.Substring(0, MAX_NAME_LENGTH).TrimEnd();
-                changes.Add($"Truncated from {original.Length} to {MAX_NAME_LENGTH} characters");
+                int charsLost = original.Length - MAX_NAME_LENGTH;
+                string truncationMsg = $"⚠️ TRUNCATED: {original.Length} chars → {MAX_NAME_LENGTH} chars (LOST {charsLost} chars)";
+                changes.Add(truncationMsg);
+                
+                // Log as HIGH SEVERITY if significant data loss
+                if (charsLost > 50)
+                {
+                    Console.WriteLine($"      ⚠️ WARNING: Significant truncation in {entityType} {entityId}");
+                    Console.WriteLine($"         Original length: {original.Length} chars");
+                    Console.WriteLine($"         Truncated to: {MAX_NAME_LENGTH} chars");
+                    Console.WriteLine($"         Data loss: {charsLost} chars");
+                }
             }
 
             // Step 5: Remove leading/trailing whitespace
@@ -564,12 +575,22 @@ namespace QBDesktopExtractor
 
         private string DetermineSeverity(List<string> changes)
         {
+            // HIGH_SEVERITY: Significant truncation (data loss > 20 chars)
+            if (changes.Any(c => c.Contains("TRUNCATED") && c.Contains("LOST")))
+            {
+                var lostMatch = System.Text.RegularExpressions.Regex.Match(
+                    changes.First(c => c.Contains("LOST")), 
+                    @"LOST (\d+) chars");
+                if (lostMatch.Success && int.Parse(lostMatch.Groups[1].Value) > 20)
+                    return "HIGH_SEVERITY";
+            }
+            
             // Critical: if we had to replace XML chars that could break APIs
             if (changes.Any(c => c.Contains("'&'") || c.Contains("'<'") || c.Contains("'>'")))
                 return "CRITICAL";
             
             // Warning: if we truncated
-            if (changes.Any(c => c.Contains("Truncated")))
+            if (changes.Any(c => c.Contains("Truncated") || c.Contains("TRUNCATED")))
                 return "WARNING";
             
             // Info: everything else
