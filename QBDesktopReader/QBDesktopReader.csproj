@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- CRITICAL: QBFC16 is 32-bit only - must target x86 -->
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <LangVersion>9.0</LangVersion>
+    
+    <!-- Application settings -->
+    <AssemblyName>QBExtractor</AssemblyName>
+    <RootNamespace>QBDesktopExtractor</RootNamespace>
+    <Version>4.3.0</Version>
+    <Description>QuickBooks Desktop to Cloud Migration Tool</Description>
+    
+    <!-- Enable nullable types -->
+    <Nullable>enable</Nullable>
+    
+    <!-- Generate COM interop wrapper -->
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+
+  <!-- 
+    QBFC16 COM Reference
+    IMPORTANT: The QuickBooks Desktop SDK must be installed first!
+    Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop
+    
+    After SDK installation, QBFC16 is registered as a COM component.
+    The SDK installs to: C:\Program Files (x86)\Intuit\IDN\
+  -->
+  <ItemGroup>
+    <COMReference Include="QBFC16Lib">
+      <Guid>{4EADF8C9-0D1E-4F68-83D6-3F9F0E6FE0FE}</Guid>
+      <VersionMajor>1</VersionMajor>
+      <VersionMinor>0</VersionMinor>
+      <Lcid>0</Lcid>
+      <WrapperTool>tlbimp</WrapperTool>
+      <Isolated>False</Isolated>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </COMReference>
+  </ItemGroup>
+
+  <!-- NuGet packages -->
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="JsonSchema.Net" Version="7.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Copy config files to output -->
+  <ItemGroup>
+    <None Update="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="config_production.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="config_schema.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

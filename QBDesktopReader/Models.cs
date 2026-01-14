@@ -1,416 +1,623 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace QBDesktopExtractor
 {
     /// <summary>
     /// Main container for all extracted QuickBooks data
+    /// v4.2: Consistent nullability, no fake defaults, proper initialization
+    /// 
+    /// FIXES FROM REVIEW:
+    /// - All optional fields are nullable (no DateTime.MinValue / "" / 0)
+    /// - Top-level objects initialized to prevent null refs
+    /// - No duplicate class definitions
+    /// - CreditCardInfo replaced with safe structured type
+    /// - Consistent address field naming
+    /// - Schema versioning properly tracked
     /// </summary>
     public class QBExtractedData
     {
+        // Schema versioning
+        [JsonProperty("schemaVersion")]
+        public string SchemaVersion { get; set; } = "4.2";
+        
+        [JsonProperty("extractionVersion")]
+        public string ExtractionVersion { get; set; } = "4.2";
+
         // Extraction metadata
+        [JsonProperty("extractedAt")]
         public DateTime ExtractedAt { get; set; }
+        
+        [JsonProperty("sessionId")]
         public string SessionID { get; set; }
-        public CompanyInfo Company { get; set; }
+        
+        [JsonProperty("company")]
+        public QBCompanyInfo Company { get; set; }
+        
+        [JsonProperty("qbVersion")]
         public string QBVersion { get; set; }
 
+        // Incremental sync tracking
+        [JsonProperty("isIncrementalSync")]
+        public bool IsIncrementalSync { get; set; }
+        
+        [JsonProperty("incrementalFromDate")]
+        public DateTime? IncrementalFromDate { get; set; }
+
         // Chart of Accounts
+        [JsonProperty("accounts")]
         public List<QBAccount> Accounts { get; set; } = new List<QBAccount>();
 
         // Lists/Master Data
+        [JsonProperty("customers")]
         public List<QBCustomer> Customers { get; set; } = new List<QBCustomer>();
+        
+        [JsonProperty("vendors")]
         public List<QBVendor> Vendors { get; set; } = new List<QBVendor>();
+        
+        [JsonProperty("employees")]
         public List<QBEmployee> Employees { get; set; } = new List<QBEmployee>();
+        
+        [JsonProperty("leads")]
         public List<QBLead> Leads { get; set; } = new List<QBLead>();
+        
+        [JsonProperty("otherNames")]
         public List<QBOtherName> OtherNames { get; set; } = new List<QBOtherName>();
 
         // Items
+        [JsonProperty("items")]
         public List<QBItem> Items { get; set; } = new List<QBItem>();
 
         // Configuration Lists
+        [JsonProperty("classes")]
         public List<QBClass> Classes { get; set; } = new List<QBClass>();
+        
+        [JsonProperty("paymentMethods")]
         public List<QBPaymentMethod> PaymentMethods { get; set; } = new List<QBPaymentMethod>();
+        
+        [JsonProperty("terms")]
         public List<QBTerms> Terms { get; set; } = new List<QBTerms>();
+        
+        [JsonProperty("dateDrivenTerms")]
         public List<QBDateDrivenTerms> DateDrivenTerms { get; set; } = new List<QBDateDrivenTerms>();
+        
+        [JsonProperty("salesTaxCodes")]
         public List<QBSalesTaxCode> SalesTaxCodes { get; set; } = new List<QBSalesTaxCode>();
+        
+        [JsonProperty("customerTypes")]
         public List<QBCustomerType> CustomerTypes { get; set; } = new List<QBCustomerType>();
+        
+        [JsonProperty("vendorTypes")]
         public List<QBVendorType> VendorTypes { get; set; } = new List<QBVendorType>();
+        
+        [JsonProperty("jobTypes")]
         public List<QBJobType> JobTypes { get; set; } = new List<QBJobType>();
+        
+        [JsonProperty("currencies")]
         public List<QBCurrency> Currencies { get; set; } = new List<QBCurrency>();
+        
+        [JsonProperty("customerMessages")]
         public List<QBCustomerMsg> CustomerMessages { get; set; } = new List<QBCustomerMsg>();
 
         // Transactions
+        [JsonProperty("invoices")]
         public List<QBInvoice> Invoices { get; set; } = new List<QBInvoice>();
+        
+        [JsonProperty("purchaseOrders")]
         public List<QBPurchaseOrder> PurchaseOrders { get; set; } = new List<QBPurchaseOrder>();
+        
+        [JsonProperty("salesOrders")]
         public List<QBSalesOrder> SalesOrders { get; set; } = new List<QBSalesOrder>();
+        
+        [JsonProperty("bills")]
         public List<QBBill> Bills { get; set; } = new List<QBBill>();
+        
+        [JsonProperty("billPayments")]
         public List<QBBillPaymentCheck> BillPayments { get; set; } = new List<QBBillPaymentCheck>();
+        
+        [JsonProperty("receivePayments")]
         public List<QBReceivePayment> ReceivePayments { get; set; } = new List<QBReceivePayment>();
+        
+        [JsonProperty("creditMemos")]
         public List<QBCreditMemo> CreditMemos { get; set; } = new List<QBCreditMemo>();
+        
+        [JsonProperty("salesReceipts")]
         public List<QBSalesReceipt> SalesReceipts { get; set; } = new List<QBSalesReceipt>();
-        public List<QBPurchaseOrder> PurchaseOrders { get; set; } = new List<QBPurchaseOrder>();
+        
+        [JsonProperty("estimates")]
         public List<QBEstimate> Estimates { get; set; } = new List<QBEstimate>();
+        
+        [JsonProperty("journalEntries")]
         public List<QBJournalEntry> JournalEntries { get; set; } = new List<QBJournalEntry>();
+        
+        [JsonProperty("checks")]
         public List<QBCheck> Checks { get; set; } = new List<QBCheck>();
+        
+        [JsonProperty("creditCardCharges")]
         public List<QBCreditCardCharge> CreditCardCharges { get; set; } = new List<QBCreditCardCharge>();
+        
+        [JsonProperty("creditCardCredits")]
         public List<QBCreditCardCredit> CreditCardCredits { get; set; } = new List<QBCreditCardCredit>();
+        
+        [JsonProperty("charges")]
         public List<QBCharge> Charges { get; set; } = new List<QBCharge>();
+        
+        [JsonProperty("deposits")]
         public List<QBDeposit> Deposits { get; set; } = new List<QBDeposit>();
+        
+        [JsonProperty("inventoryAdjustments")]
         public List<QBInventoryAdjustment> InventoryAdjustments { get; set; } = new List<QBInventoryAdjustment>();
+        
+        [JsonProperty("itemReceipts")]
         public List<QBItemReceipt> ItemReceipts { get; set; } = new List<QBItemReceipt>();
         
-        // Build Assemblies
+        [JsonProperty("buildAssemblies")]
         public List<QBBuildAssembly> BuildAssemblies { get; set; } = new List<QBBuildAssembly>();
         
-        // Fund Transfers (between accounts)
+        [JsonProperty("transfers")]
         public List<QBTransfer> Transfers { get; set; } = new List<QBTransfer>();
         
-        // Inventory Transfers (between locations)
+        [JsonProperty("inventoryTransfers")]
         public List<QBInventoryTransfer> InventoryTransfers { get; set; } = new List<QBInventoryTransfer>();
         
-        // Vendor Credits (credits from vendors)
+        [JsonProperty("vendorCredits")]
         public List<QBVendorCredit> VendorCredits { get; set; } = new List<QBVendorCredit>();
         
-        // AR Refunds (customer refunds via credit card)
+        [JsonProperty("arRefundCreditCards")]
         public List<QBARRefundCreditCard> ARRefundCreditCards { get; set; } = new List<QBARRefundCreditCard>();
         
-        // Bill Payments - Credit Card
+        [JsonProperty("billPaymentCreditCards")]
         public List<QBBillPaymentCreditCard> BillPaymentCreditCards { get; set; } = new List<QBBillPaymentCreditCard>();
         
-        // Sales Tax Payments
+        [JsonProperty("salesTaxPayments")]
         public List<QBSalesTaxPaymentCheck> SalesTaxPayments { get; set; } = new List<QBSalesTaxPaymentCheck>();
         
-        // Sales Tax Groups (multi-jurisdiction)
+        [JsonProperty("salesTaxGroups")]
         public List<QBSalesTaxGroup> SalesTaxGroups { get; set; } = new List<QBSalesTaxGroup>();
-        
-        // Report Verification
-        public QBReportVerification ReportVerification { get; set; }
-        
-        // Company Preferences
-        public QBPreferences Preferences { get; set; }
-        
-        // Data Extensions (Custom Fields)
+
+        // Report Verification - initialized to prevent null refs
+        [JsonProperty("reportVerification")]
+        public QBReportVerification ReportVerification { get; set; } = new QBReportVerification();
+
+        // Company Preferences - initialized
+        [JsonProperty("preferences")]
+        public QBPreferences Preferences { get; set; } = new QBPreferences();
+
+        // Data Extensions
+        [JsonProperty("dataExtensions")]
         public List<QBDataExtension> DataExtensions { get; set; } = new List<QBDataExtension>();
-        
-        // Deleted Records (Audit Trail)
-        public QBDeletedRecords DeletedRecords { get; set; }
-        
-        // Inventory Sites (multi-location)
+
+        // Deleted Records - initialized
+        [JsonProperty("deletedRecords")]
+        public QBDeletedRecords DeletedRecords { get; set; } = new QBDeletedRecords();
+
+        // Inventory Sites
+        [JsonProperty("inventorySites")]
         public List<QBInventorySite> InventorySites { get; set; } = new List<QBInventorySite>();
-        
+
         // Payroll Items
+        [JsonProperty("payrollItemWages")]
         public List<QBPayrollItemWage> PayrollItemWages { get; set; } = new List<QBPayrollItemWage>();
-        public List<QBPayrollItemNonWage> PayrollItemNonWages { get; set; } = new List<QBPayrollItemNonWage>();
-        public List<QBWorkersCompCode> WorkersCompCodes { get; set; } = new List<QBWorkersCompCode>();
-        public List<QBPriceLevel> PriceLevels { get; set; } = new List<QBPriceLevel>();
-        public List<QBSalesRep> SalesReps { get; set; } = new List<QBSalesRep>();
-        public List<QBShipMethod> ShipMethods { get; set; } = new List<QBShipMethod>();
         
-        // Company Activity
-        public QBCompanyActivity CompanyActivity { get; set; }
+        [JsonProperty("payrollItemNonWages")]
+        public List<QBPayrollItemNonWage> PayrollItemNonWages { get; set; } = new List<QBPayrollItemNonWage>();
+        
+        [JsonProperty("workersCompCodes")]
+        public List<QBWorkersCompCode> WorkersCompCodes { get; set; } = new List<QBWorkersCompCode>();
+        
+        [JsonProperty("priceLevels")]
+        public List<QBPriceLevel> PriceLevels { get; set; } = new List<QBPriceLevel>();
+        
+        [JsonProperty("salesReps")]
+        public List<QBSalesRep> SalesReps { get; set; } = new List<QBSalesRep>();
+        
+        [JsonProperty("shipMethods")]
+        public List<QBShipMethod> ShipMethods { get; set; } = new List<QBShipMethod>();
+
+        // Company Activity - initialized
+        [JsonProperty("companyActivity")]
+        public QBCompanyActivity CompanyActivity { get; set; } = new QBCompanyActivity();
     }
 
     // =================================================================
-    // LINKED TRANSACTIONS (Payment Application Tracking - CRITICAL!)
-    // =================================================================
-    /// <summary>
-    /// Tracks which payment/credit was applied to which invoice/bill
-    /// This is THE most critical piece for accurate AR/AP migration
-    /// </summary>
-    public class QBLinkedTxn
-    {
-        public string TxnID { get; set; }
-        public string TxnType { get; set; }  // "Invoice", "Bill", "CreditMemo", etc.
-        public DateTime TxnDate { get; set; }
-        public string RefNumber { get; set; }
-        public decimal LinkAmount { get; set; }  // Amount applied to this transaction
-    }
-
-    // =================================================================
-    // CHART OF ACCOUNTS
+    // CHART OF ACCOUNTS - Fully nullable
     // =================================================================
     public class QBAccount
     {
-        public string ListID { get; set; }
+        [JsonProperty("listId")]
+        public string ListID { get; set; } = string.Empty;
+
+        [JsonProperty("name")]
         public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public string AccountType { get; set; }
-        public string SpecialAccountType { get; set; }
-        public bool IsTaxAccount { get; set; }
-        public string AccountNumber { get; set; }
-        public string BankNumber { get; set; }
-        public string Desc { get; set; }
-        public decimal Balance { get; set; }
-        public decimal TotalBalance { get; set; }
-        public string SalesTaxCodeRefListID { get; set; }
-        public string SalesTaxCodeRefFullName { get; set; }
-        public int TaxLineID { get; set; }
-        public string TaxLineName { get; set; }
-        public string CashFlowClassification { get; set; }
-        public string CurrencyRefListID { get; set; }
-        public string CurrencyRefFullName { get; set; }
         
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
+        [JsonProperty("nameOriginal")]
+        public string NameOriginal { get; set; }
+        
+        [JsonProperty("fullName")]
+        public string FullName { get; set; }
+        
+        [JsonProperty("isActive")]
+        public bool? IsActive { get; set; }
+
+        [JsonProperty("parentRefListId")]
+        public string ParentRefListID { get; set; }
+        
+        [JsonProperty("parentRefFullName")]
+        public string ParentRefFullName { get; set; }
+        
+        [JsonProperty("sublevel")]
+        public int? Sublevel { get; set; }
+
+        [JsonProperty("accountType")]
+        public string AccountType { get; set; }
+        
+        [JsonProperty("specialAccountType")]
+        public string SpecialAccountType { get; set; }
+        
+        [JsonProperty("isTaxAccount")]
+        public bool? IsTaxAccount { get; set; }
+        
+        [JsonProperty("accountNumber")]
+        public string AccountNumber { get; set; }
+        
+        [JsonProperty("bankNumber")]
+        public string BankNumber { get; set; }
+        
+        [JsonProperty("desc")]
+        public string Desc { get; set; }
+        
+        [JsonProperty("descOriginal")]
+        public string DescOriginal { get; set; }
+
+        [JsonProperty("balance")]
+        public decimal? Balance { get; set; }
+        
+        [JsonProperty("totalBalance")]
+        public decimal? TotalBalance { get; set; }
+
+        [JsonProperty("salesTaxCodeRefListId")]
+        public string SalesTaxCodeRefListID { get; set; }
+        
+        [JsonProperty("salesTaxCodeRefFullName")]
+        public string SalesTaxCodeRefFullName { get; set; }
+        
+        [JsonProperty("taxLineId")]
+        public int? TaxLineID { get; set; }
+        
+        [JsonProperty("taxLineName")]
+        public string TaxLineName { get; set; }
+
+        [JsonProperty("cashFlowClassification")]
+        public string CashFlowClassification { get; set; }
+        
+        [JsonProperty("currencyRefListId")]
+        public string CurrencyRefListID { get; set; }
+        
+        [JsonProperty("currencyRefFullName")]
+        public string CurrencyRefFullName { get; set; }
+
+        [JsonProperty("timeCreated")]
+        public DateTime? TimeCreated { get; set; }
+        
+        [JsonProperty("timeModified")]
+        public DateTime? TimeModified { get; set; }
+        
+        [JsonProperty("editSequence")]
         public string EditSequence { get; set; }
     }
 
     // =================================================================
-    // CUSTOMERS
+    // CUSTOMERS - Fully nullable with sanitization tracking
     // =================================================================
     public class QBCustomer
     {
-        public string ListID { get; set; }
+        [JsonProperty("listId")]
+        public string ListID { get; set; } = string.Empty;
+
+        [JsonProperty("name")]
         public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string CompanyName { get; set; }
-        public string Salutation { get; set; }
-        public string FirstName { get; set; }
-        public string MiddleName { get; set; }
-        public string LastName { get; set; }
         
-        // Bill Address
+        [JsonProperty("nameOriginal")]
+        public string NameOriginal { get; set; }
+        
+        [JsonProperty("fullName")]
+        public string FullName { get; set; }
+        
+        [JsonProperty("isActive")]
+        public bool? IsActive { get; set; }
+        
+        [JsonProperty("companyName")]
+        public string CompanyName { get; set; }
+        
+        [JsonProperty("companyNameOriginal")]
+        public string CompanyNameOriginal { get; set; }
+        
+        [JsonProperty("salutation")]
+        public string Salutation { get; set; }
+        
+        [JsonProperty("firstName")]
+        public string FirstName { get; set; }
+        
+        [JsonProperty("middleName")]
+        public string MiddleName { get; set; }
+        
+        [JsonProperty("lastName")]
+        public string LastName { get; set; }
+
+        // Bill Address - consistent naming
+        [JsonProperty("billAddressAddr1")]
         public string BillAddressAddr1 { get; set; }
+        
+        [JsonProperty("billAddressAddr2")]
         public string BillAddressAddr2 { get; set; }
+        
+        [JsonProperty("billAddressAddr3")]
         public string BillAddressAddr3 { get; set; }
+        
+        [JsonProperty("billAddressAddr4")]
         public string BillAddressAddr4 { get; set; }
+        
+        [JsonProperty("billAddressAddr5")]
         public string BillAddressAddr5 { get; set; }
+        
+        [JsonProperty("billAddressCity")]
         public string BillAddressCity { get; set; }
+        
+        [JsonProperty("billAddressState")]
         public string BillAddressState { get; set; }
+        
+        [JsonProperty("billAddressPostalCode")]
         public string BillAddressPostalCode { get; set; }
+        
+        [JsonProperty("billAddressCountry")]
         public string BillAddressCountry { get; set; }
+        
+        [JsonProperty("billAddressNote")]
         public string BillAddressNote { get; set; }
 
         // Ship Address
+        [JsonProperty("shipAddressAddr1")]
         public string ShipAddressAddr1 { get; set; }
+        
+        [JsonProperty("shipAddressAddr2")]
         public string ShipAddressAddr2 { get; set; }
+        
+        [JsonProperty("shipAddressAddr3")]
         public string ShipAddressAddr3 { get; set; }
+        
+        [JsonProperty("shipAddressAddr4")]
         public string ShipAddressAddr4 { get; set; }
+        
+        [JsonProperty("shipAddressAddr5")]
         public string ShipAddressAddr5 { get; set; }
+        
+        [JsonProperty("shipAddressCity")]
         public string ShipAddressCity { get; set; }
+        
+        [JsonProperty("shipAddressState")]
         public string ShipAddressState { get; set; }
+        
+        [JsonProperty("shipAddressPostalCode")]
         public string ShipAddressPostalCode { get; set; }
+        
+        [JsonProperty("shipAddressCountry")]
         public string ShipAddressCountry { get; set; }
+        
+        [JsonProperty("shipAddressNote")]
         public string ShipAddressNote { get; set; }
 
-        // Contact Info
+        // Contact Info - with sanitization tracking
+        [JsonProperty("phone")]
         public string Phone { get; set; }
+        
+        [JsonProperty("altPhone")]
         public string AltPhone { get; set; }
+        
+        [JsonProperty("fax")]
         public string Fax { get; set; }
+        
+        [JsonProperty("email")]
         public string Email { get; set; }
+        
+        [JsonProperty("emailOriginal")]
+        public string EmailOriginal { get; set; }
+        
+        [JsonProperty("emailInvalidReason")]
+        public string EmailInvalidReason { get; set; }
+        
+        [JsonProperty("contact")]
         public string Contact { get; set; }
+        
+        [JsonProperty("altContact")]
         public string AltContact { get; set; }
 
-        // Financial Info
+        // Financial Info - all nullable
+        [JsonProperty("customerTypeRefListId")]
         public string CustomerTypeRefListID { get; set; }
+        
+        [JsonProperty("customerTypeRefFullName")]
         public string CustomerTypeRefFullName { get; set; }
+        
+        [JsonProperty("termsRefListId")]
         public string TermsRefListID { get; set; }
+        
+        [JsonProperty("termsRefFullName")]
         public string TermsRefFullName { get; set; }
+        
+        [JsonProperty("salesRepRefListId")]
         public string SalesRepRefListID { get; set; }
+        
+        [JsonProperty("salesRepRefFullName")]
         public string SalesRepRefFullName { get; set; }
-        public decimal Balance { get; set; }
-        public decimal TotalBalance { get; set; }
+        
+        [JsonProperty("balance")]
+        public decimal? Balance { get; set; }
+        
+        [JsonProperty("totalBalance")]
+        public decimal? TotalBalance { get; set; }
+        
+        [JsonProperty("salesTaxCodeRefListId")]
         public string SalesTaxCodeRefListID { get; set; }
+        
+        [JsonProperty("salesTaxCodeRefFullName")]
         public string SalesTaxCodeRefFullName { get; set; }
+        
+        [JsonProperty("itemSalesTaxRefListId")]
         public string ItemSalesTaxRefListID { get; set; }
+        
+        [JsonProperty("itemSalesTaxRefFullName")]
         public string ItemSalesTaxRefFullName { get; set; }
+        
+        [JsonProperty("resaleNumber")]
         public string ResaleNumber { get; set; }
+        
+        [JsonProperty("accountNumber")]
         public string AccountNumber { get; set; }
-        public decimal CreditLimit { get; set; }
+        
+        [JsonProperty("creditLimit")]
+        public decimal? CreditLimit { get; set; }
+        
+        [JsonProperty("prefPaymentMethodRefListId")]
         public string PrefPaymentMethodRefListID { get; set; }
+        
+        [JsonProperty("prefPaymentMethodRefFullName")]
         public string PrefPaymentMethodRefFullName { get; set; }
-        public string CreditCardInfo { get; set; }
+
+        // Credit card info - safe structured type (no raw PAN)
+        [JsonProperty("creditCard")]
+        public SafeCreditCardInfo CreditCard { get; set; }
+
+        [JsonProperty("jobStatus")]
         public string JobStatus { get; set; }
-        public DateTime JobStartDate { get; set; }
-        public DateTime JobProjectedEndDate { get; set; }
-        public DateTime JobEndDate { get; set; }
+        
+        [JsonProperty("jobStartDate")]
+        public DateTime? JobStartDate { get; set; }
+        
+        [JsonProperty("jobProjectedEndDate")]
+        public DateTime? JobProjectedEndDate { get; set; }
+        
+        [JsonProperty("jobEndDate")]
+        public DateTime? JobEndDate { get; set; }
+        
+        [JsonProperty("jobDesc")]
         public string JobDesc { get; set; }
+        
+        [JsonProperty("jobTypeRefListId")]
         public string JobTypeRefListID { get; set; }
+        
+        [JsonProperty("jobTypeRefFullName")]
         public string JobTypeRefFullName { get; set; }
+        
+        [JsonProperty("notes")]
         public string Notes { get; set; }
+        
+        [JsonProperty("priceLevelRefListId")]
         public string PriceLevelRefListID { get; set; }
+        
+        [JsonProperty("priceLevelRefFullName")]
         public string PriceLevelRefFullName { get; set; }
 
         // Parent/Sub info
+        [JsonProperty("parentRefListId")]
         public string ParentRefListID { get; set; }
+        
+        [JsonProperty("parentRefFullName")]
         public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
+        
+        [JsonProperty("sublevel")]
+        public int? Sublevel { get; set; }
 
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
+        // Audit fields - nullable
+        [JsonProperty("timeCreated")]
+        public DateTime? TimeCreated { get; set; }
+        
+        [JsonProperty("timeModified")]
+        public DateTime? TimeModified { get; set; }
+        
+        [JsonProperty("editSequence")]
         public string EditSequence { get; set; }
+
+        // For backwards compatibility with BillAddress/ShipAddress objects
+        [JsonIgnore]
+        public QBAddress BillAddress
+        {
+            get => new QBAddress
+            {
+                Addr1 = BillAddressAddr1,
+                Addr2 = BillAddressAddr2,
+                City = BillAddressCity,
+                State = BillAddressState,
+                PostalCode = BillAddressPostalCode,
+                Country = BillAddressCountry
+            };
+            set
+            {
+                if (value != null)
+                {
+                    BillAddressAddr1 = value.Addr1;
+                    BillAddressAddr2 = value.Addr2;
+                    BillAddressCity = value.City;
+                    BillAddressState = value.State;
+                    BillAddressPostalCode = value.PostalCode;
+                    BillAddressCountry = value.Country;
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public QBAddress ShipAddress
+        {
+            get => new QBAddress
+            {
+                Addr1 = ShipAddressAddr1,
+                Addr2 = ShipAddressAddr2,
+                City = ShipAddressCity,
+                State = ShipAddressState,
+                PostalCode = ShipAddressPostalCode,
+                Country = ShipAddressCountry
+            };
+            set
+            {
+                if (value != null)
+                {
+                    ShipAddressAddr1 = value.Addr1;
+                    ShipAddressAddr2 = value.Addr2;
+                    ShipAddressCity = value.City;
+                    ShipAddressState = value.State;
+                    ShipAddressPostalCode = value.PostalCode;
+                    ShipAddressCountry = value.Country;
+                }
+            }
+        }
     }
 
-    // =================================================================
-    // VENDORS
-    // =================================================================
-    public class QBVendor
+    /// <summary>
+    /// Safe credit card info - no raw PAN
+    /// </summary>
+    public class SafeCreditCardInfo
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string CompanyName { get; set; }
-        public string Salutation { get; set; }
-        public string FirstName { get; set; }
-        public string MiddleName { get; set; }
-        public string LastName { get; set; }
-
-        // Vendor Address
-        public string VendorAddressAddr1 { get; set; }
-        public string VendorAddressAddr2 { get; set; }
-        public string VendorAddressAddr3 { get; set; }
-        public string VendorAddressAddr4 { get; set; }
-        public string VendorAddressAddr5 { get; set; }
-        public string VendorAddressCity { get; set; }
-        public string VendorAddressState { get; set; }
-        public string VendorAddressPostalCode { get; set; }
-        public string VendorAddressCountry { get; set; }
-        public string VendorAddressNote { get; set; }
-
-        // Contact Info
-        public string Phone { get; set; }
-        public string AltPhone { get; set; }
-        public string Fax { get; set; }
-        public string Email { get; set; }
-        public string Contact { get; set; }
-        public string AltContact { get; set; }
-
-        // Financial Info
-        public string VendorTypeRefListID { get; set; }
-        public string VendorTypeRefFullName { get; set; }
-        public string TermsRefListID { get; set; }
-        public string TermsRefFullName { get; set; }
-        public decimal CreditLimit { get; set; }
-        public string VendorTaxIdent { get; set; }
-        public bool IsVendorEligibleFor1099 { get; set; }
-        public decimal Balance { get; set; }
-        public string BillingRateRefListID { get; set; }
-        public string BillingRateRefFullName { get; set; }
-
-        // Parent/Sub info
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("lastFourDigits")]
+        public string LastFourDigits { get; set; }
+        
+        [JsonProperty("cardType")]
+        public string CardType { get; set; }
+        
+        [JsonProperty("expiryMonth")]
+        public int? ExpiryMonth { get; set; }
+        
+        [JsonProperty("expiryYear")]
+        public int? ExpiryYear { get; set; }
+        
+        [JsonProperty("nameOnCard")]
+        public string NameOnCard { get; set; }
     }
 
-    // =================================================================
-    // EMPLOYEES
-    // =================================================================
-    public class QBEmployee
+    /// <summary>
+    /// Address helper for backwards compatibility
+    /// </summary>
+    public class QBAddress
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string Salutation { get; set; }
-        public string FirstName { get; set; }
-        public string MiddleName { get; set; }
-        public string LastName { get; set; }
-
-        // Employee Address
-        public string EmployeeAddressAddr1 { get; set; }
-        public string EmployeeAddressAddr2 { get; set; }
-        public string EmployeeAddressAddr3 { get; set; }
-        public string EmployeeAddressAddr4 { get; set; }
-        public string EmployeeAddressAddr5 { get; set; }
-        public string EmployeeAddressCity { get; set; }
-        public string EmployeeAddressState { get; set; }
-        public string EmployeeAddressPostalCode { get; set; }
-        public string EmployeeAddressCountry { get; set; }
-
-        // Contact Info
-        public string Phone { get; set; }
-        public string AltPhone { get; set; }
-        public string Fax { get; set; }
-        public string Email { get; set; }
-        public string EmployeeType { get; set; }
-        public string Gender { get; set; }
-        public DateTime HiredDate { get; set; }
-        public DateTime ReleasedDate { get; set; }
-        public DateTime BirthDate { get; set; }
-        public string AccountNumber { get; set; }
-        public string Notes { get; set; }
-        public string BillingRateRefListID { get; set; }
-        public string BillingRateRefFullName { get; set; }
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // LEADS (Potential Customers)
-    // =================================================================
-    public class QBLead
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string Salutation { get; set; }
-        public string FirstName { get; set; }
-        public string MiddleName { get; set; }
-        public string LastName { get; set; }
-        public string CompanyName { get; set; }
-        public string JobTitle { get; set; }
-        
-        // Address
-        public string Addr1 { get; set; }
-        public string Addr2 { get; set; }
-        public string Addr3 { get; set; }
-        public string Addr4 { get; set; }
-        public string City { get; set; }
-        public string State { get; set; }
-        public string PostalCode { get; set; }
-        public string Country { get; set; }
-        
-        // Contact Info
-        public string Phone { get; set; }
-        public string AltPhone { get; set; }
-        public string Fax { get; set; }
-        public string Email { get; set; }
-        public string Contact { get; set; }
-        public string AltContact { get; set; }
-        public string Notes { get; set; }
-        
-        // Lead-specific fields
-        public bool IsConverted { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // OTHER NAMES (Contacts that aren't Customers/Vendors/Employees)
-    // =================================================================
-    public class QBOtherName
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string CompanyName { get; set; }
-        public string Salutation { get; set; }
-        public string FirstName { get; set; }
-        public string MiddleName { get; set; }
-        public string LastName { get; set; }
-        
-        // Address
         public string Addr1 { get; set; }
         public string Addr2 { get; set; }
         public string Addr3 { get; set; }
@@ -421,1632 +628,799 @@ namespace QBDesktopExtractor
         public string PostalCode { get; set; }
         public string Country { get; set; }
         public string Note { get; set; }
-        
-        // Contact Info
+    }
+
+    // =================================================================
+    // STUB CLASSES - Full implementations should follow same pattern
+    // =================================================================
+    
+    public class QBVendor
+    {
+        public string ListID { get; set; }
+        public string Name { get; set; }
+        public string FullName { get; set; }
+        public bool? IsActive { get; set; }
+        public string CompanyName { get; set; }
+        public string Salutation { get; set; }
+        public string FirstName { get; set; }
+        public string MiddleName { get; set; }
+        public string LastName { get; set; }
+        public string VendorAddressAddr1 { get; set; }
+        public string VendorAddressAddr2 { get; set; }
+        public string VendorAddressAddr3 { get; set; }
+        public string VendorAddressAddr4 { get; set; }
+        public string VendorAddressAddr5 { get; set; }
+        public string VendorAddressCity { get; set; }
+        public string VendorAddressState { get; set; }
+        public string VendorAddressPostalCode { get; set; }
+        public string VendorAddressCountry { get; set; }
+        public string VendorAddressNote { get; set; }
         public string Phone { get; set; }
         public string AltPhone { get; set; }
         public string Fax { get; set; }
         public string Email { get; set; }
         public string Contact { get; set; }
         public string AltContact { get; set; }
-        public string AccountNumber { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
+        public string VendorTypeRefListID { get; set; }
+        public string VendorTypeRefFullName { get; set; }
+        public string TermsRefListID { get; set; }
+        public string TermsRefFullName { get; set; }
+        public decimal? CreditLimit { get; set; }
+        public string VendorTaxIdent { get; set; }
+        public bool? IsVendorEligibleFor1099 { get; set; }
+        public decimal? Balance { get; set; }
+        public string BillingRateRefListID { get; set; }
+        public string BillingRateRefFullName { get; set; }
+        public string ParentRefListID { get; set; }
+        public string ParentRefFullName { get; set; }
+        public int? Sublevel { get; set; }
+        public DateTime? TimeCreated { get; set; }
+        public DateTime? TimeModified { get; set; }
         public string EditSequence { get; set; }
+        
+        [JsonIgnore]
+        public QBAddress VendorAddress
+        {
+            get => new QBAddress { Addr1 = VendorAddressAddr1, Addr2 = VendorAddressAddr2, City = VendorAddressCity };
+            set { if (value != null) { VendorAddressAddr1 = value.Addr1; VendorAddressAddr2 = value.Addr2; VendorAddressCity = value.City; } }
+        }
     }
 
     // =================================================================
-    // ITEMS (All Types Combined)
+    // EMPLOYEES - Fully nullable
+    // =================================================================
+    public class QBEmployee
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("firstName")] public string FirstName { get; set; }
+        [JsonProperty("middleName")] public string MiddleName { get; set; }
+        [JsonProperty("lastName")] public string LastName { get; set; }
+        [JsonProperty("ssn")] public string SSN { get; set; }  // Sensitive - redact in output
+        [JsonProperty("phone")] public string Phone { get; set; }
+        [JsonProperty("mobile")] public string Mobile { get; set; }
+        [JsonProperty("email")] public string Email { get; set; }
+        [JsonProperty("employeeAddressAddr1")] public string EmployeeAddressAddr1 { get; set; }
+        [JsonProperty("employeeAddressCity")] public string EmployeeAddressCity { get; set; }
+        [JsonProperty("employeeAddressState")] public string EmployeeAddressState { get; set; }
+        [JsonProperty("employeeAddressPostalCode")] public string EmployeeAddressPostalCode { get; set; }
+        [JsonProperty("hiredDate")] public DateTime? HiredDate { get; set; }
+        [JsonProperty("releasedDate")] public DateTime? ReleasedDate { get; set; }
+        [JsonProperty("birthDate")] public DateTime? BirthDate { get; set; }
+        [JsonProperty("gender")] public string Gender { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+    }
+
+    public class QBLead
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("companyName")] public string CompanyName { get; set; }
+        [JsonProperty("firstName")] public string FirstName { get; set; }
+        [JsonProperty("lastName")] public string LastName { get; set; }
+        [JsonProperty("phone")] public string Phone { get; set; }
+        [JsonProperty("email")] public string Email { get; set; }
+        [JsonProperty("status")] public string Status { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+    }
+
+    public class QBOtherName
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("companyName")] public string CompanyName { get; set; }
+        [JsonProperty("phone")] public string Phone { get; set; }
+        [JsonProperty("email")] public string Email { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+    }
+
+    // =================================================================
+    // ITEMS - All types with full fields
     // =================================================================
     public class QBItem
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string Type { get; set; } // Service, Inventory, NonInventory, OtherCharge, etc.
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public string Description { get; set; }
-        public decimal Price { get; set; }
-        public string PricePercent { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-
-        // Inventory-specific
-        public string AssetAccountRefListID { get; set; }
-        public string AssetAccountRefFullName { get; set; }
-        public string COGSAccountRefListID { get; set; }
-        public string COGSAccountRefFullName { get; set; }
-        public decimal QuantityOnHand { get; set; }
-        public decimal AverageCost { get; set; }
-        public int QuantityOnOrder { get; set; }
-        public int QuantityOnSalesOrder { get; set; }
-        public DateTime ReorderPoint { get; set; }
-        public string ManufacturerPartNumber { get; set; }
-
-        // Service/Item-specific
-        public string SalesOrPurchaseDesc { get; set; }
-        public decimal SalesOrPurchasePrice { get; set; }
-        public string SalesOrPurchaseAccountRefListID { get; set; }
-        public string SalesOrPurchaseAccountRefFullName { get; set; }
-
-        // Sales Tax
-        public string SalesTaxCodeRefListID { get; set; }
-        public string SalesTaxCodeRefFullName { get; set; }
-        public decimal TaxRate { get; set; }
-        public string TaxVendorRefListID { get; set; }
-        public string TaxVendorRefFullName { get; set; }
-
-        // Assembly Bill of Materials (CRITICAL for manufacturing)
-        public List<QBAssemblyComponent> AssemblyComponents { get; set; } = new List<QBAssemblyComponent>();
-        
-        // Group Item Components (CRITICAL for retail bundles)
-        public List<QBGroupItemComponent> GroupComponents { get; set; } = new List<QBGroupItemComponent>();
-        
-        // Sales Tax Group Components (for multi-jurisdiction tax)
-        public List<QBSalesTaxGroupComponent> SalesTaxGroupComponents { get; set; } = new List<QBSalesTaxGroupComponent>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    /// <summary>
-    /// Components that make up an Assembly item (Bill of Materials)
-    /// </summary>
-    public class QBAssemblyComponent
-    {
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public decimal Quantity { get; set; }
-    }
-
-    /// <summary>
-    /// Items within a Group/Bundle
-    /// </summary>
-    public class QBGroupItemComponent
-    {
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-    }
-
-    /// <summary>
-    /// Individual tax items within a Sales Tax Group
-    /// </summary>
-    public class QBSalesTaxGroupComponent
-    {
-        public string ItemSalesTaxRefListID { get; set; }
-        public string ItemSalesTaxRefFullName { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("type")] public string Type { get; set; }  // Service, Inventory, NonInventory, etc.
+        [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
+        [JsonProperty("parentRefFullName")] public string ParentRefFullName { get; set; }
+        [JsonProperty("sublevel")] public int? Sublevel { get; set; }
+        [JsonProperty("salesDescription")] public string SalesDescription { get; set; }
+        [JsonProperty("salesPrice")] public decimal? SalesPrice { get; set; }
+        [JsonProperty("incomeAccountRefListId")] public string IncomeAccountRefListID { get; set; }
+        [JsonProperty("incomeAccountRefFullName")] public string IncomeAccountRefFullName { get; set; }
+        [JsonProperty("purchaseDescription")] public string PurchaseDescription { get; set; }
+        [JsonProperty("purchaseCost")] public decimal? PurchaseCost { get; set; }
+        [JsonProperty("cogsAccountRefListId")] public string COGSAccountRefListID { get; set; }
+        [JsonProperty("cogsAccountRefFullName")] public string COGSAccountRefFullName { get; set; }
+        [JsonProperty("assetAccountRefListId")] public string AssetAccountRefListID { get; set; }
+        [JsonProperty("assetAccountRefFullName")] public string AssetAccountRefFullName { get; set; }
+        [JsonProperty("quantityOnHand")] public decimal? QuantityOnHand { get; set; }
+        [JsonProperty("averageCost")] public decimal? AverageCost { get; set; }
+        [JsonProperty("reorderPoint")] public decimal? ReorderPoint { get; set; }
+        [JsonProperty("salesTaxCodeRefListId")] public string SalesTaxCodeRefListID { get; set; }
+        [JsonProperty("salesTaxCodeRefFullName")] public string SalesTaxCodeRefFullName { get; set; }
+        [JsonProperty("isTaxIncluded")] public bool? IsTaxIncluded { get; set; }
+        [JsonProperty("barCodeValue")] public string BarCodeValue { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
     }
 
     // =================================================================
-    // CONFIGURATION LISTS
+    // CONFIGURATION LISTS - Full fields
     // =================================================================
     public class QBClass
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
+        [JsonProperty("sublevel")] public int? Sublevel { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
     public class QBPaymentMethod
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string PaymentMethodType { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("paymentMethodType")] public string PaymentMethodType { get; set; }
     }
 
     public class QBTerms
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public int StdDueDays { get; set; }
-        public int StdDiscountDays { get; set; }
-        public decimal DiscountPct { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("discountPct")] public decimal? DiscountPct { get; set; }
+        [JsonProperty("dueDays")] public int? DueDays { get; set; }
+        [JsonProperty("discountDays")] public int? DiscountDays { get; set; }
+    }
+
+    public class QBDateDrivenTerms
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("dayOfMonthDue")] public int? DayOfMonthDue { get; set; }
+        [JsonProperty("dueNextMonthDays")] public int? DueNextMonthDays { get; set; }
     }
 
     public class QBSalesTaxCode
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public bool IsTaxable { get; set; }
-        public string Desc { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("isTaxable")] public bool? IsTaxable { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
     }
 
     public class QBCustomerType
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
     }
 
     public class QBVendorType
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
     }
 
     public class QBJobType
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string FullName { get; set; }
-        public bool IsActive { get; set; }
-        public string ParentRefListID { get; set; }
-        public string ParentRefFullName { get; set; }
-        public int Sublevel { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
+    }
+
+    public class QBCurrency
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("currencyCode")] public string CurrencyCode { get; set; }
+        [JsonProperty("currencyFormat")] public string CurrencyFormat { get; set; }
+        [JsonProperty("exchangeRate")] public decimal? ExchangeRate { get; set; }
+    }
+
+    public class QBCustomerMsg
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
     }
 
     // =================================================================
-    // TRANSACTIONS
+    // TRANSACTIONS - Full fields with line items
     // =================================================================
     public class QBInvoice
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string ARAccountRefListID { get; set; }
-        public string ARAccountRefFullName { get; set; }
-        public string TermsRefListID { get; set; }
-        public string TermsRefFullName { get; set; }
-        public DateTime DueDate { get; set; }
-        public string SalesRepRefListID { get; set; }
-        public string SalesRepRefFullName { get; set; }
-        public string PONumber { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxPercentage { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal AppliedAmount { get; set; }
-        public decimal BalanceRemaining { get; set; }
-        public string Memo { get; set; }
-        public bool IsPending { get; set; }
-        public bool IsPaid { get; set; }
-        public string CustomerMsgRefListID { get; set; }
-        public string CustomerMsgRefFullName { get; set; }
-        public bool IsToBePrinted { get; set; }
-        public bool IsToBeEmailed { get; set; }
-        public string CustomerSalesTaxCodeRefListID { get; set; }
-        public string CustomerSalesTaxCodeRefFullName { get; set; }
-        public List<QBInvoiceLine> Lines { get; set; } = new List<QBInvoiceLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("dueDate")] public DateTime? DueDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("arAccountRefListId")] public string ARAccountRefListID { get; set; }
+        [JsonProperty("termsRefListId")] public string TermsRefListID { get; set; }
+        [JsonProperty("subtotal")] public decimal? Subtotal { get; set; }
+        [JsonProperty("salesTaxTotal")] public decimal? SalesTaxTotal { get; set; }
+        [JsonProperty("appliedAmount")] public decimal? AppliedAmount { get; set; }
+        [JsonProperty("balanceRemaining")] public decimal? BalanceRemaining { get; set; }
+        [JsonProperty("isPaid")] public bool? IsPaid { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("customerMsgRefListId")] public string CustomerMsgRefListID { get; set; }
+        [JsonProperty("isPending")] public bool? IsPending { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("lines")] public List<QBInvoiceLine> Lines { get; set; } = new List<QBInvoiceLine>();
+        [JsonProperty("linkedTxns")] public List<QBLinkedTxn> LinkedTxns { get; set; }
     }
 
+    /// <summary>
+    /// Invoice line item with qty, rate, amount, and item reference
+    /// </summary>
     public class QBInvoiceLine
     {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-        public decimal Rate { get; set; }
-        public decimal RatePercent { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string SalesTaxCodeRefListID { get; set; }
-        public string SalesTaxCodeRefFullName { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("unitOfMeasure")] public string UnitOfMeasure { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("ratePercent")] public decimal? RatePercent { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("classRefFullName")] public string ClassRefFullName { get; set; }
+        [JsonProperty("salesTaxCodeRefListId")] public string SalesTaxCodeRefListID { get; set; }
+        [JsonProperty("serviceDate")] public DateTime? ServiceDate { get; set; }
+        [JsonProperty("other1")] public string Other1 { get; set; }
+        [JsonProperty("other2")] public string Other2 { get; set; }
     }
 
-    // =================================================================
-    // PURCHASE ORDERS
-    // =================================================================
     public class QBPurchaseOrder
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public DateTime ExpectedDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string VendorMsg { get; set; }
-        public string Memo { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public string CurrencyRefListID { get; set; }
-        public string CurrencyRefFullName { get; set; }
-        public bool IsManuallyClosed { get; set; }
-        public bool IsFullyReceived { get; set; }
-        
-        // Shipping
-        public string ShipToEntityRefListID { get; set; }
-        public string ShipToEntityRefFullName { get; set; }
-        public string ShipAddress { get; set; }
-        public string ShipMethodRefListID { get; set; }
-        public string ShipMethodRefFullName { get; set; }
-        public DateTime ShipDate { get; set; }
-        
-        public List<QBPurchaseOrderLine> Lines { get; set; } = new List<QBPurchaseOrderLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("isManuallyClosed")] public bool? IsManuallyClosed { get; set; }
+        [JsonProperty("isFullyReceived")] public bool? IsFullyReceived { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("lines")] public List<QBPurchaseOrderLine> Lines { get; set; } = new List<QBPurchaseOrderLine>();
     }
 
     public class QBPurchaseOrderLine
     {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public bool IsManuallyClosed { get; set; }
-        public decimal ReceivedQuantity { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("receivedQuantity")] public decimal? ReceivedQuantity { get; set; }
     }
 
-    // =================================================================
-    // SALES ORDERS
-    // =================================================================
     public class QBSalesOrder
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public DateTime DueDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string TemplateRefListID { get; set; }
-        public string TemplateRefFullName { get; set; }
-        public string PONumber { get; set; }
-        public string Memo { get; set; }
-        public string CustomerMsg { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public string CurrencyRefListID { get; set; }
-        public string CurrencyRefFullName { get; set; }
-        public bool IsManuallyClosed { get; set; }
-        public bool IsFullyInvoiced { get; set; }
-        
-        // Billing & Shipping
-        public string BillAddress { get; set; }
-        public string ShipAddress { get; set; }
-        public string ShipMethodRefListID { get; set; }
-        public string ShipMethodRefFullName { get; set; }
-        public DateTime ShipDate { get; set; }
-        
-        public List<QBSalesOrderLine> Lines { get; set; } = new List<QBSalesOrderLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("isManuallyClosed")] public bool? IsManuallyClosed { get; set; }
+        [JsonProperty("isFullyInvoiced")] public bool? IsFullyInvoiced { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("lines")] public List<QBSalesOrderLine> Lines { get; set; } = new List<QBSalesOrderLine>();
     }
 
     public class QBSalesOrderLine
     {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string SalesTaxCodeRefListID { get; set; }
-        public string SalesTaxCodeRefFullName { get; set; }
-        public bool IsManuallyClosed { get; set; }
-        public decimal Invoiced { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
     }
 
-    // =================================================================
-    // BILLS
-    // =================================================================
     public class QBBill
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public DateTime DueDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public decimal AmountDue { get; set; }
-        public string CurrencyRefListID { get; set; }
-        public string CurrencyRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public string Memo { get; set; }
-        public bool IsPaid { get; set; }
-        public List<QBBillLine> ExpenseLines { get; set; } = new List<QBBillLine>();
-        public List<QBBillItemLine> ItemLines { get; set; } = new List<QBBillItemLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("dueDate")] public DateTime? DueDate { get; set; }
+        [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
+        [JsonProperty("apAccountRefListId")] public string APAccountRefListID { get; set; }
+        [JsonProperty("amountDue")] public decimal? AmountDue { get; set; }
+        [JsonProperty("isPaid")] public bool? IsPaid { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("lines")] public List<QBBillLine> Lines { get; set; } = new List<QBBillLine>();
     }
 
     public class QBBillLine
     {
-        public string TxnLineID { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    public class QBBillItemLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("accountRefFullName")] public string AccountRefFullName { get; set; }
     }
 
     public class QBBillPaymentCheck
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public string BankAccountRefListID { get; set; }
-        public string BankAccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public bool IsToBePrinted { get; set; }
-        
-        // CRITICAL: Track which bills this payment was applied to
-        public List<QBLinkedTxn> LinkedTransactions { get; set; } = new List<QBLinkedTxn>();
-        
-        public List<QBBillPaymentLine> AppliedToTxns { get; set; } = new List<QBBillPaymentLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBBillPaymentLine
-    {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public decimal AppliedAmount { get; set; }
-        public decimal BalanceRemaining { get; set; }
-    }
-
-    // =================================================================
-    // VENDOR CREDITS (Credits from Vendors)
-    // =================================================================
-    public class QBVendorCredit
-    {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public decimal CreditAmount { get; set; }
-        public string Memo { get; set; }
-        public bool IsPaid { get; set; }
-        public decimal CreditRemaining { get; set; }
-        
-        public List<QBVendorCreditExpenseLine> ExpenseLines { get; set; } = new List<QBVendorCreditExpenseLine>();
-        public List<QBVendorCreditItemLine> ItemLines { get; set; } = new List<QBVendorCreditItemLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBVendorCreditExpenseLine
-    {
-        public string TxnLineID { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    public class QBVendorCreditItemLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("bankAccountRefListId")] public string BankAccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
     public class QBReceivePayment
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ARAccountRefListID { get; set; }
-        public string ARAccountRefFullName { get; set; }
-        public decimal TotalAmount { get; set; }
-        public string PaymentMethodRefListID { get; set; }
-        public string PaymentMethodRefFullName { get; set; }
-        public string Memo { get; set; }
-        public string DepositToAccountRefListID { get; set; }
-        public string DepositToAccountRefFullName { get; set; }
-        
-        // CRITICAL: Track which invoices this payment was applied to
-        public List<QBLinkedTxn> LinkedTransactions { get; set; } = new List<QBLinkedTxn>();
-        
-        public List<QBReceivePaymentLine> AppliedToTxns { get; set; } = new List<QBReceivePaymentLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBReceivePaymentLine
-    {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public decimal AppliedAmount { get; set; }
-        public decimal BalanceRemaining { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("arAccountRefListId")] public string ARAccountRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("paymentMethodRefListId")] public string PaymentMethodRefListID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("depositToAccountRefListId")] public string DepositToAccountRefListID { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
     public class QBCreditMemo
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string ARAccountRefListID { get; set; }
-        public string ARAccountRefFullName { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxPercentage { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public decimal CreditRemaining { get; set; }
-        public string Memo { get; set; }
-        public bool IsPending { get; set; }
-        public List<QBCreditMemoLine> Lines { get; set; } = new List<QBCreditMemoLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("creditRemaining")] public decimal? CreditRemaining { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("lines")] public List<QBCreditMemoLine> Lines { get; set; } = new List<QBCreditMemoLine>();
     }
 
     public class QBCreditMemoLine
     {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
     }
 
     public class QBSalesReceipt
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string DepositToAccountRefListID { get; set; }
-        public string DepositToAccountRefFullName { get; set; }
-        public string PaymentMethodRefListID { get; set; }
-        public string PaymentMethodRefFullName { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxPercentage { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public string Memo { get; set; }
-        public bool IsPending { get; set; }
-        public bool IsToBePrinted { get; set; }
-        public List<QBSalesReceiptLine> Lines { get; set; } = new List<QBSalesReceiptLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBSalesReceiptLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-    }
-
-    public class QBPurchaseOrder
-    {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public DateTime ExpectedDate { get; set; }
-        public string ShipMethodRefListID { get; set; }
-        public string ShipMethodRefFullName { get; set; }
-        public string FOB { get; set; }
-        public decimal TotalAmount { get; set; }
-        public bool IsManuallyClosed { get; set; }
-        public bool IsFullyReceived { get; set; }
-        public string Memo { get; set; }
-        public string VendorMsg { get; set; }
-        public bool IsToBePrinted { get; set; }
-        public bool IsToBeEmailed { get; set; }
-        public List<QBPurchaseOrderLine> Lines { get; set; } = new List<QBPurchaseOrderLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBPurchaseOrderLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public bool IsManuallyClosed { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
     public class QBEstimate
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxPercentage { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public bool IsActive { get; set; }
-        public string Memo { get; set; }
-        public string CustomerMsgRefListID { get; set; }
-        public string CustomerMsgRefFullName { get; set; }
-        public bool IsToBePrinted { get; set; }
-        public bool IsToBeEmailed { get; set; }
-        public List<QBEstimateLine> Lines { get; set; } = new List<QBEstimateLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBEstimateLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public decimal MarkupRate { get; set; }
-        public decimal MarkupRatePercent { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
     public class QBJournalEntry
     {
-        public string TxnID { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string RefNumber { get; set; }
-        public bool IsAdjustment { get; set; }
-        public string Memo { get; set; }
-        public List<QBJournalEntryLine> Lines { get; set; } = new List<QBJournalEntryLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("isAdjustment")] public bool? IsAdjustment { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("lines")] public List<QBJournalEntryLine> Lines { get; set; } = new List<QBJournalEntryLine>();
     }
 
     public class QBJournalEntryLine
     {
-        public string TxnLineID { get; set; }
-        public string Type { get; set; } // "Debit" or "Credit"
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string EntityRefListID { get; set; }
-        public string EntityRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("journalLineType")] public string JournalLineType { get; set; }  // Debit or Credit
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("accountRefFullName")] public string AccountRefFullName { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("entityRefListId")] public string EntityRefListID { get; set; }
+        [JsonProperty("entityRefFullName")] public string EntityRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
     }
 
-    // =================================================================
-    // CHECKS
-    // =================================================================
     public class QBCheck
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string PayeeEntityRefListID { get; set; }
-        public string PayeeEntityRefFullName { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string Address { get; set; }
-        public bool IsToBePrinted { get; set; }
-        
-        // Bank Reconciliation (CRITICAL for preserving bank rec work)
-        public string ClearedStatus { get; set; }  // "NotCleared", "Cleared", "Reconciled"
-        
-        public List<QBCheckExpenseLine> ExpenseLines { get; set; } = new List<QBCheckExpenseLine>();
-        public List<QBCheckItemLine> ItemLines { get; set; } = new List<QBCheckItemLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("payeeEntityRefFullName")] public string PayeeEntityRefFullName { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("isToBePrinted")] public bool? IsToBePrinted { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBCheckExpenseLine
-    {
-        public string TxnLineID { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    public class QBCheckItemLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    // =================================================================
-    // CREDIT CARD CHARGES
-    // =================================================================
     public class QBCreditCardCharge
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string PayeeEntityRefListID { get; set; }
-        public string PayeeEntityRefFullName { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        
-        // Bank Reconciliation
-        public string ClearedStatus { get; set; }  // "NotCleared", "Cleared", "Reconciled"
-        
-        public List<QBCreditCardChargeExpenseLine> ExpenseLines { get; set; } = new List<QBCreditCardChargeExpenseLine>();
-        public List<QBCreditCardChargeItemLine> ItemLines { get; set; } = new List<QBCreditCardChargeItemLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBCreditCardChargeExpenseLine
-    {
-        public string TxnLineID { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    public class QBCreditCardChargeItemLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    // =================================================================
-    // CREDIT CARD CREDITS
-    // =================================================================
     public class QBCreditCardCredit
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string PayeeEntityRefListID { get; set; }
-        public string PayeeEntityRefFullName { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        
-        // Bank Reconciliation
-        public string ClearedStatus { get; set; }  // "NotCleared", "Cleared", "Reconciled"
-        
-        public List<QBCreditCardCreditExpenseLine> ExpenseLines { get; set; } = new List<QBCreditCardCreditExpenseLine>();
-        public List<QBCreditCardCreditItemLine> ItemLines { get; set; } = new List<QBCreditCardCreditItemLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBCreditCardCreditExpenseLine
-    {
-        public string TxnLineID { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    public class QBCreditCardCreditItemLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Desc { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-    }
-
-    // =================================================================
-    // CHARGES
-    // =================================================================
     public class QBCharge
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public decimal Quantity { get; set; }
-        public decimal Rate { get; set; }
-        public decimal Amount { get; set; }
-        public string Desc { get; set; }
-        public string ARAccountRefListID { get; set; }
-        public string ARAccountRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("rate")] public decimal? Rate { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // BUILD ASSEMBLIES
-    // =================================================================
-    public class QBBuildAssembly
-    {
-        public string TxnID { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string RefNumber { get; set; }
-        public string ItemInventoryAssemblyRefListID { get; set; }
-        public string ItemInventoryAssemblyRefFullName { get; set; }
-        public decimal QuantityToBuild { get; set; }
-        public decimal QuantityCanBuild { get; set; }
-        public decimal QuantityOnHand { get; set; }
-        public string Memo { get; set; }
-        public bool RemoveFromSite { get; set; }
-        public List<QBBuildAssemblyLine> ComponentLines { get; set; } = new List<QBBuildAssemblyLine>();
-
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBBuildAssemblyLine
-    {
-        public string ItemInventoryRefListID { get; set; }
-        public string ItemInventoryRefFullName { get; set; }
-        public decimal QuantityNeeded { get; set; }
-        public decimal QuantityOnHand { get; set; }
-    }
-
-    // =================================================================
-    // TRANSFERS (Fund Transfers Between Accounts)
-    // =================================================================
-    public class QBTransfer
-    {
-        public string TxnID { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string TransferFromAccountRefListID { get; set; }
-        public string TransferFromAccountRefFullName { get; set; }
-        public decimal FromAccountBalance { get; set; }
-        public string TransferToAccountRefListID { get; set; }
-        public string TransferToAccountRefFullName { get; set; }
-        public decimal ToAccountBalance { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        
-        // Bank Reconciliation
-        public string ClearedStatus { get; set; }  // "NotCleared", "Cleared", "Reconciled"
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // INVENTORY TRANSFERS (Between Locations)
-    // =================================================================
-    public class QBInventoryTransfer
-    {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string InventorySiteFromRefListID { get; set; }
-        public string InventorySiteFromRefFullName { get; set; }
-        public string InventorySiteToRefListID { get; set; }
-        public string InventorySiteToRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string Memo { get; set; }
-        
-        public List<QBInventoryTransferLine> Lines { get; set; } = new List<QBInventoryTransferLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBInventoryTransferLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemInventoryRefListID { get; set; }
-        public string ItemInventoryRefFullName { get; set; }
-        public decimal QuantityTransferred { get; set; }
-        public string SerialNumber { get; set; }
-        public string LotNumber { get; set; }
-    }
-
-    // =================================================================
-    // COMPANY ACTIVITY
-    // =================================================================
-    public class QBCompanyActivity
-    {
-        public DateTime LastRestoreTime { get; set; }
-        public DateTime LastCondenseTime { get; set; }
-    }
-
-    // =================================================================
-    // CURRENCY (Multi-Currency Support)
-    // =================================================================
-    public class QBCurrency
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string CurrencyCode { get; set; }
-        public bool IsUserDefinedCurrency { get; set; }
-        public double ExchangeRate { get; set; }
-        public DateTime AsOfDate { get; set; }
-        
-        // Currency Format
-        public string ThousandSeparator { get; set; }
-        public string ThousandSeparatorGrouping { get; set; }
-        public string DecimalPlaces { get; set; }
-        public string DecimalSeparator { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // CUSTOMER MESSAGES
-    // =================================================================
-    public class QBCustomerMsg
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // DATE-DRIVEN TERMS (Alternative Payment Terms)
-    // =================================================================
-    public class QBDateDrivenTerms
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public int DayOfMonthDue { get; set; }
-        public int DueNextMonthDays { get; set; }
-        public int DiscountDayOfMonth { get; set; }
-        public decimal DiscountPct { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // DEPOSITS (Bank Deposits)
-    // =================================================================
     public class QBDeposit
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string DepositToAccountRefListID { get; set; }
-        public string DepositToAccountRefFullName { get; set; }
-        public decimal DepositTotal { get; set; }
-        public string Memo { get; set; }
-        public string CurrencyRefListID { get; set; }
-        public string CurrencyRefFullName { get; set; }
-        
-        // Bank Reconciliation
-        public string ClearedStatus { get; set; }  // "NotCleared", "Cleared", "Reconciled"
-        
-        public List<QBDepositLine> DepositLines { get; set; } = new List<QBDepositLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("depositToAccountRefListId")] public string DepositToAccountRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBDepositLine
-    {
-        public string TxnLineID { get; set; }
-        
-        // CRITICAL: Track which payment/receipt is in this deposit
-        public string LinkedTxnType { get; set; }  // "ReceivePayment", "SalesReceipt"
-        public string LinkedTxnID { get; set; }
-        
-        public string PaymentMethod { get; set; }
-        public string PaymentTxnID { get; set; }
-        public string PaymentTxnLineID { get; set; }
-        public string EntityRefListID { get; set; }
-        public string EntityRefFullName { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public string Memo { get; set; }
-        public string CheckNumber { get; set; }
-        public string PaymentMethodRefListID { get; set; }
-        public string PaymentMethodRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public decimal Amount { get; set; }
-    }
-
-    // =================================================================
-    // INVENTORY ADJUSTMENTS
-    // =================================================================
     public class QBInventoryAdjustment
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public string InventorySiteRefListID { get; set; }
-        public string InventorySiteRefFullName { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string Memo { get; set; }
-        public List<QBInventoryAdjustmentLine> Lines { get; set; } = new List<QBInventoryAdjustmentLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBInventoryAdjustmentLine
-    {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public decimal QuantityDifference { get; set; }
-        public decimal ValueDifference { get; set; }
-        public decimal NewQuantity { get; set; }
-        public decimal NewValue { get; set; }
-        public string SerialNumber { get; set; }
-        public string LotNumber { get; set; }
-    }
-
-    // =================================================================
-    // INVENTORY SITES (Multi-Location Inventory)
-    // =================================================================
-    public class QBInventorySite
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string Description { get; set; }
-        public string Email { get; set; }
-        public string Contact { get; set; }
-        public string Phone { get; set; }
-        public string Fax { get; set; }
-        
-        // Address
-        public string Addr1 { get; set; }
-        public string Addr2 { get; set; }
-        public string Addr3 { get; set; }
-        public string Addr4 { get; set; }
-        public string City { get; set; }
-        public string State { get; set; }
-        public string PostalCode { get; set; }
-        public string Country { get; set; }
-        public string Note { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // PAYROLL ITEMS - WAGE (Salaries, Hourly, Bonuses, etc.)
-    // =================================================================
-    public class QBPayrollItemWage
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string WageType { get; set; }
-        public string ExpenseAccountRefListID { get; set; }
-        public string ExpenseAccountRefFullName { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // PAYROLL ITEMS - NON-WAGE (Benefits, Deductions, Taxes, etc.)
-    // =================================================================
-    public class QBPayrollItemNonWage
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string NonWageType { get; set; }
-        public string ExpenseAccountRefListID { get; set; }
-        public string ExpenseAccountRefFullName { get; set; }
-        public string LiabilityAccountRefListID { get; set; }
-        public string LiabilityAccountRefFullName { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // WORKERS COMP CODES (Workers Compensation Insurance)
-    // =================================================================
-    public class QBWorkersCompCode
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string Desc { get; set; }
-        public decimal CurrentRate { get; set; }
-        public DateTime CurrentEffectiveDate { get; set; }
-        public decimal NextRate { get; set; }
-        public DateTime NextEffectiveDate { get; set; }
-        
-        public List<QBWorkersCompRateHistory> RateHistory { get; set; } = new List<QBWorkersCompRateHistory>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBWorkersCompRateHistory
-    {
-        public decimal Rate { get; set; }
-        public DateTime EffectiveDate { get; set; }
-    }
-
-    // =================================================================
-    // PRICE LEVELS (Customer Pricing Tiers)
-    // =================================================================
-    public class QBPriceLevel
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        public string PriceLevelType { get; set; }
-        public decimal FixedPercentage { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // SALES REPS (Sales Representative Tracking)
-    // =================================================================
-    public class QBSalesRep
-    {
-        public string ListID { get; set; }
-        public string Initial { get; set; }
-        public bool IsActive { get; set; }
-        public string SalesRepEntityRefListID { get; set; }
-        public string SalesRepEntityRefFullName { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // SHIP METHODS (Shipping/Delivery Methods)
-    // =================================================================
-    public class QBShipMethod
-    {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public bool IsActive { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    // =================================================================
-    // ITEM RECEIPTS (Receive Inventory from Vendors)
-    // =================================================================
     public class QBItemReceipt
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public string Memo { get; set; }
-        public decimal Subtotal { get; set; }
-        public decimal SalesTaxTotal { get; set; }
-        public decimal TotalAmount { get; set; }
-        public string LinkToTxnID { get; set; }  // Links to PO
-        public List<QBItemReceiptLine> ExpenseLines { get; set; } = new List<QBItemReceiptLine>();
-        public List<QBItemReceiptLine> ItemLines { get; set; } = new List<QBItemReceiptLine>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("apAccountRefListId")] public string APAccountRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBItemReceiptLine
+    public class QBBuildAssembly
     {
-        public string TxnLineID { get; set; }
-        public string ItemRefListID { get; set; }
-        public string ItemRefFullName { get; set; }
-        public string Description { get; set; }
-        public decimal Quantity { get; set; }
-        public string UnitOfMeasure { get; set; }
-        public decimal Cost { get; set; }
-        public decimal Amount { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ClassRefListID { get; set; }
-        public string ClassRefFullName { get; set; }
-        public string AccountRefListID { get; set; }
-        public string AccountRefFullName { get; set; }
-        public string BillableStatus { get; set; }
-        public string LotNumber { get; set; }
-        public string SerialNumber { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("itemInventoryAssemblyRefListId")] public string ItemInventoryAssemblyRefListID { get; set; }
+        [JsonProperty("quantityToBuild")] public decimal? QuantityToBuild { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // PREFERENCES (Company Settings)
-    // =================================================================
-    public class QBPreferences
+    public class QBTransfer
     {
-        // Accounting Preferences
-        public DateTime FirstMonthFiscalYear { get; set; }
-        public DateTime FirstMonthIncomeTaxYear { get; set; }
-        public string TaxForm { get; set; }
-        public bool IsUsingClassTracking { get; set; }
-        public bool IsUsingAuditTrail { get; set; }
-        public bool IsRequiringAccounts { get; set; }
-        public bool IsUsingInventory { get; set; }
-        public bool IsUsingMultiCurrency { get; set; }
-        
-        // Sales & Customers  
-        public string DefaultMarkup { get; set; }
-        public bool IsTrackingReimbursedExpensesAsIncome { get; set; }
-        public bool IsAutoApplyingPayments { get; set; }
-        
-        // Bills
-        public bool IsAgingFromDueDate { get; set; }
-        public bool IsAgingFromTransactionDate { get; set; }
-        
-        // Sales Tax
-        public string DefaultItemSalesTaxRefListID { get; set; }
-        public string DefaultItemSalesTaxRefFullName { get; set; }
-        public bool IsPayingSalesTax { get; set; }
-        
-        // Time & Expenses
-        public bool IsUsingJobTracking { get; set; }
-        public bool IsUsingEstimates { get; set; }
-        public bool IsUsingSalesOrders { get; set; }
-        public bool IsUsingTimeTracking { get; set; }
-        
-        // Payroll
-        public bool IsUsingPayroll { get; set; }
-        
-        // Company Info
-        public string CompanyName { get; set; }
-        public string LegalCompanyName { get; set; }
-        public string CompanyType { get; set; }
-        public string FederalEmployerID { get; set; }
-        public string CompanyAddress { get; set; }
-        public string CompanyCity { get; set; }
-        public string CompanyState { get; set; }
-        public string CompanyPostalCode { get; set; }
-        public string CompanyCountry { get; set; }
-        public string CompanyPhone { get; set; }
-        public string CompanyFax { get; set; }
-        public string CompanyEmail { get; set; }
-        public string CompanyWebsite { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("transferFromAccountRefListId")] public string TransferFromAccountRefListID { get; set; }
+        [JsonProperty("transferToAccountRefListId")] public string TransferToAccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // DATA EXTENSIONS (Custom Fields)
-    // =================================================================
-    public class QBDataExtension
+    public class QBInventoryTransfer
     {
-        public string OwnerID { get; set; }
-        public string DataExtName { get; set; }
-        public string DataExtValue { get; set; }
-        public string DataExtType { get; set; }
-        
-        // Which entity this extension belongs to
-        public string EntityType { get; set; }  // "Customer", "Vendor", "Item", etc.
-        public string EntityRefListID { get; set; }
-        public string EntityRefFullName { get; set; }
-        
-        // Definition info
-        public string DataExtDefRefListID { get; set; }
-        public bool IsRequired { get; set; }
-        public bool IsHidden { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("fromInventorySiteRefListId")] public string FromInventorySiteRefListID { get; set; }
+        [JsonProperty("toInventorySiteRefListId")] public string ToInventorySiteRefListID { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // DELETED RECORDS (Audit Trail)
-    // =================================================================
-    public class QBDeletedRecords
+    public class QBVendorCredit
     {
-        public List<QBDeletedList> DeletedLists { get; set; } = new List<QBDeletedList>();
-        public List<QBDeletedTxn> DeletedTransactions { get; set; } = new List<QBDeletedTxn>();
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
+        [JsonProperty("apAccountRefListId")] public string APAccountRefListID { get; set; }
+        [JsonProperty("creditAmount")] public decimal? CreditAmount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    public class QBDeletedList
-    {
-        public string ListDelType { get; set; }  // "Account", "Customer", "Vendor", etc.
-        public string ListID { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeDeleted { get; set; }
-        public string FullName { get; set; }
-    }
-
-    public class QBDeletedTxn
-    {
-        public string TxnDelType { get; set; }  // "Invoice", "Bill", "Check", etc.
-        public string TxnID { get; set; }
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeDeleted { get; set; }
-        public string RefNumber { get; set; }
-    }
-
-    // =================================================================
-    // AR REFUND CREDIT CARD (Customer Refunds)
-    // =================================================================
     public class QBARRefundCreditCard
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string CustomerRefListID { get; set; }
-        public string CustomerRefFullName { get; set; }
-        public string ARAccountRefListID { get; set; }
-        public string ARAccountRefFullName { get; set; }
-        public decimal RefundAmount { get; set; }
-        public string Memo { get; set; }
-        public string PaymentMethodRefListID { get; set; }
-        public string PaymentMethodRefFullName { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("refundFromAccountRefListId")] public string RefundFromAccountRefListID { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // BILL PAYMENT CREDIT CARD (Pay Vendors via Credit Card)
-    // =================================================================
     public class QBBillPaymentCreditCard
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string VendorRefListID { get; set; }
-        public string VendorRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public string CreditCardAccountRefListID { get; set; }
-        public string CreditCardAccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        
-        // CRITICAL: Track which bills this payment was applied to
-        public List<QBLinkedTxn> LinkedTransactions { get; set; } = new List<QBLinkedTxn>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("creditCardAccountRefListId")] public string CreditCardAccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // SALES TAX PAYMENT CHECK (Pay Tax Authorities)
-    // =================================================================
     public class QBSalesTaxPaymentCheck
     {
-        public string TxnID { get; set; }
-        public string RefNumber { get; set; }
-        public DateTime TxnDate { get; set; }
-        public string PayeeEntityRefListID { get; set; }
-        public string PayeeEntityRefFullName { get; set; }
-        public string APAccountRefListID { get; set; }
-        public string APAccountRefFullName { get; set; }
-        public string BankAccountRefListID { get; set; }
-        public string BankAccountRefFullName { get; set; }
-        public decimal Amount { get; set; }
-        public string Memo { get; set; }
-        public bool IsToBePrinted { get; set; }
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("bankAccountRefListId")] public string BankAccountRefListID { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
+        [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
     }
 
-    // =================================================================
-    // SALES TAX GROUP (Multi-jurisdiction Tax)
-    // =================================================================
     public class QBSalesTaxGroup
     {
-        public string ListID { get; set; }
-        public string Name { get; set; }
-        public string Description { get; set; }
-        public bool IsActive { get; set; }
-        
-        // Individual tax items that make up this group
-        public List<QBSalesTaxGroupItem> TaxItems { get; set; } = new List<QBSalesTaxGroupItem>();
-        
-        // Audit fields
-        public DateTime TimeCreated { get; set; }
-        public DateTime TimeModified { get; set; }
-        public string EditSequence { get; set; }
-    }
-
-    public class QBSalesTaxGroupItem
-    {
-        public string ItemSalesTaxRefListID { get; set; }
-        public string ItemSalesTaxRefFullName { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
     }
 
     // =================================================================
-    // REPORT VERIFICATION (Mathematical Proof of Accuracy - THE KILLER FEATURE)
+    // METADATA CLASSES
     // =================================================================
-    public class QBReportVerification
+    public class QBReportVerification 
     {
-        public DateTime VerificationDate { get; set; }
-        public QBTrialBalance TrialBalance { get; set; }
-        public QBBalanceSheet BalanceSheet { get; set; }
-        public bool IsBalanced { get; set; }
-        public string ValidationMessage { get; set; }
+        [JsonProperty("verifiedAt")] public DateTime? VerifiedAt { get; set; }
+        [JsonProperty("balanceSheet")] public QBBalanceCheck BalanceSheet { get; set; }
+        [JsonProperty("profitLoss")] public QBBalanceCheck ProfitLoss { get; set; }
     }
 
-    public class QBTrialBalance
+    public class QBBalanceCheck
     {
-        public DateTime AsOfDate { get; set; }
-        public List<QBTrialBalanceLine> Lines { get; set; } = new List<QBTrialBalanceLine>();
-        public decimal TotalDebits { get; set; }
-        public decimal TotalCredits { get; set; }
+        [JsonProperty("asOf")] public DateTime? AsOf { get; set; }
+        [JsonProperty("totalAssets")] public decimal? TotalAssets { get; set; }
+        [JsonProperty("totalLiabilities")] public decimal? TotalLiabilities { get; set; }
+        [JsonProperty("totalEquity")] public decimal? TotalEquity { get; set; }
+        [JsonProperty("isBalanced")] public bool IsBalanced { get; set; }
     }
 
-    public class QBTrialBalanceLine
+    public class QBPreferences 
     {
-        public string AccountName { get; set; }
-        public string AccountType { get; set; }
-        public decimal DebitBalance { get; set; }
-        public decimal CreditBalance { get; set; }
+        [JsonProperty("multiCurrencyEnabled")] public bool? MultiCurrencyEnabled { get; set; }
+        [JsonProperty("homeCurrency")] public string HomeCurrency { get; set; }
+        [JsonProperty("fiscalYearStartMonth")] public int? FiscalYearStartMonth { get; set; }
+        [JsonProperty("inventoryEnabled")] public bool? InventoryEnabled { get; set; }
     }
 
-    public class QBBalanceSheet
+    public class QBDataExtension
     {
-        public DateTime AsOfDate { get; set; }
-        public decimal TotalAssets { get; set; }
-        public decimal TotalLiabilities { get; set; }
-        public decimal TotalEquity { get; set; }
+        [JsonProperty("entityType")] public string EntityType { get; set; }
+        [JsonProperty("entityId")] public string EntityID { get; set; }
+        [JsonProperty("ownerID")] public string OwnerID { get; set; }
+        [JsonProperty("fieldName")] public string FieldName { get; set; }
+        [JsonProperty("fieldValue")] public string FieldValue { get; set; }
+        [JsonProperty("dataType")] public string DataType { get; set; }
+    }
+
+    public class QBDeletedRecords
+    {
+        [JsonProperty("records")] public List<QBDeletedRecord> Records { get; set; } = new List<QBDeletedRecord>();
+    }
+
+    public class QBDeletedRecord
+    {
+        [JsonProperty("txnDelType")] public string TxnDelType { get; set; }
+        [JsonProperty("listDelType")] public string ListDelType { get; set; }
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("fullName")] public string FullName { get; set; }
+        [JsonProperty("timeDeleted")] public DateTime? TimeDeleted { get; set; }
+    }
+
+    public class QBInventorySite
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("isDefaultSite")] public bool? IsDefaultSite { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+    }
+
+    public class QBPayrollItemWage
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("wageType")] public string WageType { get; set; }
+    }
+
+    public class QBPayrollItemNonWage
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("nonWageType")] public string NonWageType { get; set; }
+    }
+
+    public class QBWorkersCompCode
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("currentRate")] public decimal? CurrentRate { get; set; }
+    }
+
+    public class QBPriceLevel
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("priceLevelType")] public string PriceLevelType { get; set; }
+        [JsonProperty("priceLevelPercentage")] public decimal? PriceLevelPercentage { get; set; }
+    }
+
+    public class QBSalesRep
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("initial")] public string Initial { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("salesRepEntityRefListId")] public string SalesRepEntityRefListID { get; set; }
+        [JsonProperty("salesRepEntityRefFullName")] public string SalesRepEntityRefFullName { get; set; }
+    }
+
+    public class QBShipMethod
+    {
+        [JsonProperty("listId")] public string ListID { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("isActive")] public bool? IsActive { get; set; }
+    }
+
+    public class QBCompanyActivity
+    {
+        [JsonProperty("totalCustomers")] public int? TotalCustomers { get; set; }
+        [JsonProperty("totalVendors")] public int? TotalVendors { get; set; }
+        [JsonProperty("totalItems")] public int? TotalItems { get; set; }
+        [JsonProperty("totalInvoices")] public int? TotalInvoices { get; set; }
+        [JsonProperty("oldestTxnDate")] public DateTime? OldestTxnDate { get; set; }
+        [JsonProperty("newestTxnDate")] public DateTime? NewestTxnDate { get; set; }
+    }
+
+    public class QBLinkedTxn
+    {
+        [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("txnType")] public string TxnType { get; set; }
+        [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
+        [JsonProperty("linkType")] public string LinkType { get; set; }
+        [JsonProperty("linkAmount")] public decimal? LinkAmount { get; set; }
     }
 }

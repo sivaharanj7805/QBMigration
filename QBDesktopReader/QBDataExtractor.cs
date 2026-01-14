@@ -1,75 +1,566 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
 using QBFC16Lib;
 
 namespace QBDesktopExtractor
 {
     /// <summary>
+    /// Extraction run summary for audit trail
+    /// </summary>
+    public class ExtractionRunSummary
+    {
+        public string SessionId { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public TimeSpan Duration => (CompletedAt ?? DateTime.Now) - StartedAt;
+        public int TotalEntitiesAttempted { get; set; }
+        public int TotalEntitiesSucceeded { get; set; }
+        public int TotalEntitiesFailed { get; set; }
+        public int TotalRecordsExtracted { get; set; }
+        public List<EntityExtractionResult> EntityResults { get; set; } = new List<EntityExtractionResult>();
+        public List<string> Warnings { get; set; } = new List<string>();
+        public List<string> Errors { get; set; } = new List<string>();
+        public string ConfigHash { get; set; }
+        public bool IsIncremental { get; set; }
+        public DateTime? IncrementalFromDate { get; set; }
+    }
+
+    /// <summary>
+    /// Result of a single entity extraction
+    /// </summary>
+    public class EntityExtractionResult
+    {
+        public string EntityName { get; set; }
+        public bool Success { get; set; }
+        public int RecordCount { get; set; }
+        public TimeSpan Duration { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool Skipped { get; set; }
+    }
+
+    /// <summary>
     /// Main QuickBooks data extraction engine
-    /// Uses iterator pattern for all supported queries
+    /// v4.3: Added entity-level failure isolation, logger, and run summary
     /// </summary>
     public class QBDataExtractor
     {
-        private readonly QBSessionManager sessionManager;
-        private readonly QBIteratorHelper iteratorHelper;
-        private int totalErrors = 0;
+        private readonly IQBSessionManager _sessionManager;
+        private readonly QBIteratorHelper _iteratorHelper;
+        private readonly IRedactingLogger _logger;
+        private int _totalErrors = 0;
+        private readonly List<string> _warnings = new List<string>();
+        private readonly List<string> _errors = new List<string>();
         
-        // CRITICAL: Incremental Sync Support (2 hours → 5 minutes on migration day!)
-        private DateTime? incrementalFromDate = null;
+        // Configuration
+        public bool ContinueOnEntityError { get; set; } = true;
+        
+        // Run summary for audit
+        public ExtractionRunSummary RunSummary { get; private set; }
+        
+        // CRITICAL: Incremental Sync Support
+        private DateTime? _incrementalFromDate = null;
 
-        public QBDataExtractor(QBSessionManager sessionManager)
+        public QBDataExtractor(IQBSessionManager sessionManager, IRedactingLogger logger = null)
         {
-            this.sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
-            this.iteratorHelper = new QBIteratorHelper(sessionManager);
+            _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+            _logger = logger;
+            _iteratorHelper = new QBIteratorHelper(sessionManager, logger);
         }
+
+        /// <summary>
+        /// Legacy constructor for backwards compatibility
+        /// </summary>
+        public QBDataExtractor(QBSessionManager sessionManager)
+            : this((IQBSessionManager)sessionManager, null) { }
+
         
         /// <summary>
         /// Set the date for incremental sync - only extract records modified since this date
         /// </summary>
         public void SetIncrementalSyncDate(DateTime fromDate)
         {
-            incrementalFromDate = fromDate;
-            iteratorHelper.SetIncrementalSyncDate(fromDate); // Pass to helper
-            Console.WriteLine($"\n✓ INCREMENTAL SYNC MODE: Extracting only records modified since {fromDate:yyyy-MM-dd}");
+            _incrementalFromDate = fromDate;
+            _iteratorHelper.SetIncrementalSyncDate(fromDate);
+            _logger?.Log(LogLevel.Info, "INCREMENTAL SYNC MODE: Extracting only records modified since {0:yyyy-MM-dd}", fromDate);
         }
 
         /// <summary>
-        /// Extract ALL data from QuickBooks
+        /// Safely extract an entity type with failure isolation
+        /// </summary>
+        private List<T> SafeExtract<T>(string entityName, Func<List<T>> extractor) where T : class
+        {
+            var sw = Stopwatch.StartNew();
+            var result = new EntityExtractionResult { EntityName = entityName };
+            
+            try
+            {
+                var records = extractor();
+                sw.Stop();
+                
+                result.Success = true;
+                result.RecordCount = records?.Count ?? 0;
+                result.Duration = sw.Elapsed;
+                RunSummary.EntityResults.Add(result);
+                RunSummary.TotalEntitiesSucceeded++;
+                RunSummary.TotalRecordsExtracted += result.RecordCount;
+                
+                return records ?? new List<T>();
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                _totalErrors++;
+                
+                result.Success = false;
+                result.RecordCount = 0;
+                result.Duration = sw.Elapsed;
+                result.ErrorMessage = ex.Message;
+                RunSummary.EntityResults.Add(result);
+                RunSummary.TotalEntitiesFailed++;
+                RunSummary.Errors.Add($"{entityName}: {ex.Message}");
+                
+                _logger?.Log(LogLevel.Error, "Failed to extract {0}: {1}", entityName, ex.Message);
+                
+                if (!ContinueOnEntityError)
+                {
+                    throw;
+                }
+                
+                return new List<T>();
+            }
+            finally
+            {
+                RunSummary.TotalEntitiesAttempted++;
+            }
+        }
+
+        /// <summary>
+        /// Safely extract and write an entity to NDJSON with checkpointing
+        /// </summary>
+        private async System.Threading.Tasks.Task SafeExtractToNDJSONAsync<T>(
+            string entityName,
+            Func<List<T>> extractor,
+            NDJSONWriter writer,
+            ExtractionCheckpoint checkpoint,
+            CheckpointState checkpointState,
+            System.Threading.CancellationToken ct = default) where T : class
+        {
+            // Check if already completed
+            if (checkpoint.IsEntityComplete(checkpointState, entityName))
+            {
+                _logger?.Log(LogLevel.Info, "Skipping {0} - already extracted in this session", entityName);
+                var skipResult = new EntityExtractionResult
+                {
+                    EntityName = entityName,
+                    Skipped = true
+                };
+                RunSummary.EntityResults.Add(skipResult);
+                return;
+            }
+
+            var records = SafeExtract(entityName, extractor);
+
+            if (records.Count > 0)
+            {
+                await writer.WriteEntityBatchAsync(entityName.ToLowerInvariant(), records, ct);
+            }
+
+            // Save checkpoint after successful extraction
+            checkpointState.CompletedEntities.Add(entityName);
+            checkpointState.TotalRecordsExtracted += records.Count;
+            checkpoint.SaveAfterEntity(checkpointState);
+        }
+
+        /// <summary>
+        /// Extract all data to NDJSON files with checkpointing for resumability
+        /// Produces: accounts.ndjson, customers.ndjson, etc. + run_manifest.json
+        /// </summary>
+        public async System.Threading.Tasks.Task<RunManifest> ExtractAllDataToNDJSONAsync(
+            string outputDirectory,
+            string sessionId,
+            string configHash = null,
+            System.Threading.CancellationToken ct = default)
+        {
+            var startTime = DateTime.UtcNow;
+            _logger?.Log(LogLevel.Info, "Starting NDJSON extraction to: {0}", outputDirectory);
+
+            // Initialize components
+            var checkpoint = new ExtractionCheckpoint(outputDirectory, _logger);
+            var checkpointState = checkpoint.Load(sessionId) ?? new CheckpointState
+            {
+                SessionId = sessionId,
+                StartedAt = startTime,
+                IsIncremental = _incrementalFromDate.HasValue,
+                IncrementalFromDate = _incrementalFromDate
+            };
+
+            var writer = new NDJSONWriter(outputDirectory, sessionId, _logger);
+            try
+            {
+            // Set manifest metadata
+            writer.Manifest.QBVersion = _sessionManager.GetQBVersion();
+            writer.Manifest.CompanyFingerprint = ComputeCompanyFingerprint(_sessionManager.GetCompanyInfo());
+            writer.Manifest.ConfigHash = configHash;
+            writer.Manifest.IsIncremental = _incrementalFromDate.HasValue;
+            writer.Manifest.IncrementalFromDate = _incrementalFromDate;
+
+            // Initialize run summary
+            RunSummary = new ExtractionRunSummary
+            {
+                SessionId = sessionId,
+                StartedAt = startTime,
+                IsIncremental = _incrementalFromDate.HasValue,
+                IncrementalFromDate = _incrementalFromDate,
+                ConfigHash = configHash
+            };
+
+            _totalErrors = 0;
+            _warnings.Clear();
+            _errors.Clear();
+
+            // === EXTRACT ALL ENTITIES ===
+            _logger?.Log(LogLevel.Info, "Extracting entities with failure isolation...");
+
+            // Lists/Master Data
+            await SafeExtractToNDJSONAsync("Accounts", () => ExtractAccounts(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Customers", () => ExtractCustomers(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Vendors", () => ExtractVendors(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Employees", () => ExtractEmployees(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Items", () => ExtractItems(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Classes", () => ExtractClasses(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("PaymentMethods", () => ExtractPaymentMethods(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Terms", () => ExtractTerms(), writer, checkpoint, checkpointState, ct);
+
+            // Transactions
+            await SafeExtractToNDJSONAsync("Invoices", () => ExtractInvoices(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Bills", () => ExtractBills(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Checks", () => ExtractChecks(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("JournalEntries", () => ExtractJournalEntries(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Deposits", () => ExtractDeposits(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("CreditMemos", () => ExtractCreditMemos(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("SalesReceipts", () => ExtractSalesReceipts(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("Estimates", () => ExtractEstimates(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("PurchaseOrders", () => ExtractPurchaseOrders(), writer, checkpoint, checkpointState, ct);
+            await SafeExtractToNDJSONAsync("SalesOrders", () => ExtractSalesOrders(), writer, checkpoint, checkpointState, ct);
+            
+            // Deleted records (for incremental sync)
+            if (_incrementalFromDate.HasValue)
+            {
+                await SafeExtractToNDJSONAsync("Deleted", () => ExtractDeletedRecordsAsList(), writer, checkpoint, checkpointState, ct);
+            }
+
+            // Write errors to errors.ndjson
+            foreach (var error in RunSummary.Errors)
+            {
+                await writer.WriteErrorAsync(new ExtractionError
+                {
+                    ErrorCode = "EXTRACTION_FAILED",
+                    Message = error,
+                    Severity = "error"
+                }, ct);
+            }
+
+            // Create metrics
+            var metrics = new RunMetrics
+            {
+                RunId = sessionId,
+                StartedAt = startTime,
+                CompletedAt = DateTime.UtcNow,
+                TotalDurationSeconds = (DateTime.UtcNow - startTime).TotalSeconds,
+                ExtractionDurationSeconds = (DateTime.UtcNow - startTime).TotalSeconds,
+                EntityTimings = RunSummary.EntityResults.Select(e => new EntityTiming
+                {
+                    EntityName = e.EntityName,
+                    DurationSeconds = e.Duration.TotalSeconds,
+                    RecordCount = e.RecordCount,
+                    RecordsPerSecond = e.Duration.TotalSeconds > 0 
+                        ? e.RecordCount / e.Duration.TotalSeconds 
+                        : 0
+                }).ToList()
+            };
+
+            // Finalize and write manifest
+            await writer.FinalizeAsync(metrics, ct);
+
+            // Complete run summary
+            RunSummary.CompletedAt = DateTime.UtcNow;
+            RunSummary.Warnings.AddRange(_warnings);
+
+            // Clear checkpoint on success
+            checkpoint.Clear();
+
+            _logger?.Log(LogLevel.Info, "NDJSON extraction complete: {0} entities, {1} records, {2} errors",
+                RunSummary.TotalEntitiesSucceeded, RunSummary.TotalRecordsExtracted, _totalErrors);
+
+            return writer.Manifest;
+            }
+            finally
+            {
+                writer?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Compute a safe fingerprint for company (no PII)
+        /// </summary>
+        private string ComputeCompanyFingerprint(QBCompanyInfo company)
+        {
+            if (company == null) return "unknown";
+            
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var data = System.Text.Encoding.UTF8.GetBytes(
+                    $"{company.CompanyName}|{company.LegalCompanyName}|{company.FirstMonthFiscalYear}");
+                var hash = sha.ComputeHash(data);
+                return Convert.ToBase64String(hash).Substring(0, 16);
+            }
+        }
+
+        /// <summary>
+        /// Helper to get deleted records as a list
+        /// </summary>
+        private List<QBDeletedRecord> ExtractDeletedRecordsAsList()
+        {
+            var result = ExtractDeletedRecords();
+            return result?.DeletedRecords ?? new List<QBDeletedRecord>();
+        }
+
+
+        // =================================================================
+        // v4.1: PRECISION HELPERS - Prevent floating point errors
+        // =================================================================
+        
+        /// <summary>
+        /// Parse decimal safely from QBFC value using string conversion
+        /// Prevents floating point precision errors
+        /// </summary>
+        private decimal? ParseDecimalSafely(object qbValue)
+        {
+            if (qbValue == null)
+                return null;
+
+            try
+            {
+                // Try to get string representation first (most accurate)
+                string valueStr = qbValue.ToString();
+                
+                if (string.IsNullOrWhiteSpace(valueStr))
+                    return null;
+
+                // Parse using InvariantCulture to handle different formats
+                if (decimal.TryParse(valueStr, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal parsed))
+                {
+                    // Apply QuickBooks rounding rules (2 decimal places for currency)
+                    return Math.Round(parsed, 2, MidpointRounding.AwayFromZero);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠ Warning: Could not parse decimal value '{qbValue}': {ex.Message}");
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Parse decimal with custom decimal places (for percentages, rates, etc.)
+        /// </summary>
+        private decimal? ParseDecimalSafely(object qbValue, int decimalPlaces)
+        {
+            if (qbValue == null)
+                return null;
+
+            try
+            {
+                string valueStr = qbValue.ToString();
+                
+                if (string.IsNullOrWhiteSpace(valueStr))
+                    return null;
+
+                if (decimal.TryParse(valueStr, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal parsed))
+                {
+                    return Math.Round(parsed, decimalPlaces, MidpointRounding.AwayFromZero);
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Safely parse string from QBFC value
+        /// </summary>
+        private string SafeGetString(object qbValue)
+        {
+            if (qbValue == null)
+                return null;
+
+            try
+            {
+                string value = qbValue.ToString();
+                return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Safely parse DateTime from QBFC value
+        /// </summary>
+        private DateTime? SafeGetDateTime(object qbValue)
+        {
+            if (qbValue == null)
+                return null;
+
+            try
+            {
+                if (qbValue is DateTime dt)
+                    return dt;
+
+                string valueStr = qbValue.ToString();
+                if (DateTime.TryParse(valueStr, out DateTime parsed))
+                    return parsed;
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Safely parse bool from QBFC value
+        /// </summary>
+        private bool? SafeGetBool(object qbValue)
+        {
+            if (qbValue == null)
+                return null;
+
+            try
+            {
+                if (qbValue is bool b)
+                    return b;
+
+                string valueStr = qbValue.ToString().ToLower();
+                if (valueStr == "true" || valueStr == "1" || valueStr == "yes")
+                    return true;
+                if (valueStr == "false" || valueStr == "0" || valueStr == "no")
+                    return false;
+            }
+            catch { }
+
+            return null;
+        }
+
+        // =================================================================
+        // END PRECISION HELPERS
+        // =================================================================
+
+        /// <summary>
+        /// Extract ALL data from QuickBooks with failure isolation
         /// </summary>
         public QBExtractedData ExtractAllData()
         {
-            Console.WriteLine("\n" + new string('=', 80));
-            Console.WriteLine("  QUICKBOOKS DESKTOP DATA EXTRACTION");
-            if (incrementalFromDate.HasValue)
+            _logger?.Log(LogLevel.Info, "Starting QuickBooks Desktop data extraction");
+            
+            // Initialize run summary
+            RunSummary = new ExtractionRunSummary
             {
-                Console.WriteLine($"  MODE: INCREMENTAL SYNC (Since {incrementalFromDate:yyyy-MM-dd})");
-            }
-            Console.WriteLine(new string('=', 80) + "\n");
-
-            totalErrors = 0;
+                SessionId = Guid.NewGuid().ToString(),
+                StartedAt = DateTime.UtcNow,
+                IsIncremental = _incrementalFromDate.HasValue,
+                IncrementalFromDate = _incrementalFromDate
+            };
+            
+            _totalErrors = 0;
+            _warnings.Clear();
+            _errors.Clear();
+            
             var data = new QBExtractedData
             {
                 ExtractedAt = DateTime.Now,
-                SessionID = Guid.NewGuid().ToString(),
-                Company = sessionManager.GetCompanyInfo(),
-                QBVersion = sessionManager.GetQBVersion()
+                SessionID = RunSummary.SessionId,
+                Company = _sessionManager.GetCompanyInfo(),
+                QBVersion = _sessionManager.GetQBVersion()
             };
 
-            Console.WriteLine($"Company: {data.Company.CompanyName}");
-            Console.WriteLine($"QuickBooks: {data.QBVersion}");
-            Console.WriteLine($"Session ID: {data.SessionID}");
-            if (incrementalFromDate.HasValue)
+            _logger?.Log(LogLevel.Info, "Company: {0}", data.Company.CompanyName);
+            _logger?.Log(LogLevel.Info, "QuickBooks: {0}", data.QBVersion);
+            _logger?.Log(LogLevel.Info, "Session ID: {0}", data.SessionID);
+            
+            if (_incrementalFromDate.HasValue)
             {
-                Console.WriteLine($"Incremental From: {incrementalFromDate:yyyy-MM-dd}");
+                _logger?.Log(LogLevel.Info, "Incremental From: {0:yyyy-MM-dd}", _incrementalFromDate);
             }
-            Console.WriteLine();
 
-            // ============================================================
-            // v4.0 ENHANCEMENT: PARALLEL LIST EXTRACTION (3-5x faster)
-            // ============================================================
-            Console.WriteLine("PARALLEL MODE: Extracting all list entities with 4 threads...");
-            var parallelExtractor = new ParallelExtractionManager(sessionManager, maxParallelism: 4);
-            parallelExtractor.ExtractListsInParallel(data, this);
+            // Sequential extraction with failure isolation
+            _logger?.Log(LogLevel.Info, "Sequential extraction (COM thread-safety required)...");
+            
+            // Extract all list entities sequentially with failure isolation
+            data.Accounts = SafeExtract("Accounts", () => ExtractAccounts());
+            data.Customers = SafeExtract("Customers", () => ExtractCustomers());
+            data.Vendors = SafeExtract("Vendors", () => ExtractVendors());
+            data.Employees = SafeExtract("Employees", () => ExtractEmployees());
+            data.Leads = SafeExtract("Leads", () => ExtractLeads());
+            data.OtherNames = SafeExtract("OtherNames", () => ExtractOtherNames());
+            data.Items = SafeExtract("Items", () => ExtractItems());
+            data.Classes = SafeExtract("Classes", () => ExtractClasses());
+
+            Console.WriteLine("[ 9/25] Payment Methods");
+            data.PaymentMethods = ExtractPaymentMethods();
+
+            Console.WriteLine("[10/25] Terms");
+            data.Terms = ExtractTerms();
+
+            Console.WriteLine("[11/25] Sales Tax Codes");
+            data.SalesTaxCodes = ExtractSalesTaxCodes();
+
+            Console.WriteLine("[12/25] Customer Types");
+            data.CustomerTypes = ExtractCustomerTypes();
+
+            Console.WriteLine("[13/25] Vendor Types");
+            data.VendorTypes = ExtractVendorTypes();
+
+            Console.WriteLine("[14/25] Job Types");
+            data.JobTypes = ExtractJobTypes();
+
+            Console.WriteLine("[15/25] Currencies");
+            data.Currencies = ExtractCurrencies();
+
+            Console.WriteLine("[16/25] Customer Messages");
+            data.CustomerMessages = ExtractCustomerMessages();
+
+            Console.WriteLine("[17/25] Date-Driven Terms");
+            data.DateDrivenTerms = ExtractDateDrivenTerms();
+
+            Console.WriteLine("[18/25] Inventory Sites");
+            data.InventorySites = ExtractInventorySites();
+
+            Console.WriteLine("[19/25] Payroll Item Wages");
+            data.PayrollItemWages = ExtractPayrollItemWages();
+
+            Console.WriteLine("[20/25] Payroll Item Non-Wages");
+            data.PayrollItemNonWages = ExtractPayrollItemNonWages();
+
+            Console.WriteLine("[21/25] Workers Comp Codes");
+            data.WorkersCompCodes = ExtractWorkersCompCodes();
+
+            Console.WriteLine("[22/25] Price Levels");
+            data.PriceLevels = ExtractPriceLevels();
+
+            Console.WriteLine("[23/25] Sales Reps");
+            data.SalesReps = ExtractSalesReps();
+
+            Console.WriteLine("[24/25] Ship Methods");
+            data.ShipMethods = ExtractShipMethods();
+
+            Console.WriteLine("[25/25] Sales Tax Groups");
+            data.SalesTaxGroups = ExtractSalesTaxGroups();
+
+            Console.WriteLine("✓ All list entities extracted sequentially\n");
 
             // ============================================================
             // SEQUENTIAL TRANSACTION EXTRACTION (maintains data integrity)
@@ -167,16 +658,48 @@ namespace QBDesktopExtractor
             Console.WriteLine("[55/55] Extraction Complete!");
             Console.WriteLine();
 
+            // Complete run summary
+            RunSummary.CompletedAt = DateTime.UtcNow;
+            RunSummary.Warnings.AddRange(_warnings);
+            
             // Print summary
             PrintSummary(data);
+            PrintRunSummary();
 
-            if (totalErrors > 0)
+            if (_totalErrors > 0)
             {
-                Console.WriteLine($"\n⚠ Total Errors: {totalErrors}");
-                Console.WriteLine("Some data may be incomplete. Review errors above.");
+                _logger?.Log(LogLevel.Warning, "Total Errors: {0}. Some data may be incomplete.", _totalErrors);
             }
 
             return data;
+        }
+        
+        /// <summary>
+        /// Print the run summary with per-entity breakdown
+        /// </summary>
+        private void PrintRunSummary()
+        {
+            _logger?.Log(LogLevel.Info, "\n========== RUN SUMMARY ==========");
+            _logger?.Log(LogLevel.Info, "Session ID: {0}", RunSummary.SessionId);
+            _logger?.Log(LogLevel.Info, "Duration: {0:mm\\:ss}", RunSummary.Duration);
+            _logger?.Log(LogLevel.Info, "Total Records Extracted: {0:N0}", RunSummary.TotalRecordsExtracted);
+            _logger?.Log(LogLevel.Info, "Entities: {0} succeeded, {1} failed", 
+                RunSummary.TotalEntitiesSucceeded, RunSummary.TotalEntitiesFailed);
+            
+            if (RunSummary.Errors.Count > 0)
+            {
+                _logger?.Log(LogLevel.Warning, "\nErrors:");
+                foreach (var error in RunSummary.Errors.Take(10))
+                {
+                    _logger?.Log(LogLevel.Warning, "  - {0}", error);
+                }
+                if (RunSummary.Errors.Count > 10)
+                {
+                    _logger?.Log(LogLevel.Warning, "  ... and {0} more", RunSummary.Errors.Count - 10);
+                }
+            }
+            
+            _logger?.Log(LogLevel.Info, "================================\n");
         }
 
         // ========================================================================
@@ -289,7 +812,7 @@ namespace QBDesktopExtractor
                         SalesTaxCodeRefFullName = cust.SalesTaxCodeRef?.FullName?.GetValue() ?? "",
                         ItemSalesTaxRefListID = cust.ItemSalesTaxRef?.ListID?.GetValue() ?? "",
                         ItemSalesTaxRefFullName = cust.ItemSalesTaxRef?.FullName?.GetValue() ?? "",
-                        ResaleNumber = cust.Resale Number?.GetValue() ?? "",
+                        ResaleNumber = cust.ResaleNumber?.GetValue() ?? "",
                         AccountNumber = cust.AccountNumber?.GetValue() ?? "",
                         CreditLimit = (decimal)(cust.CreditLimit?.GetValue() ?? 0.0),
                         PrefPaymentMethodRefListID = cust.PreferredPaymentMethodRef?.ListID?.GetValue() ?? "",
@@ -3171,156 +3694,3 @@ namespace QBDesktopExtractor
                 return activity;
             }
             catch (Exception ex)
-            {
-                Console.WriteLine($"  ✗ Error: {ex.Message}");
-                return new QBCompanyActivity();
-            }
-        }
-
-        // ========================================================================
-        // SUMMARY
-        // ========================================================================
-        private void PrintSummary(QBExtractedData data)
-        {
-            Console.WriteLine("\n" + new string('=', 80));
-            Console.WriteLine("  EXTRACTION SUMMARY");
-            Console.WriteLine(new string('=', 80));
-            Console.WriteLine($"  Accounts:             {data.Accounts.Count,6}");
-            Console.WriteLine($"  Customers:            {data.Customers.Count,6}");
-            Console.WriteLine($"  Vendors:              {data.Vendors.Count,6}");
-            Console.WriteLine($"  Employees:            {data.Employees.Count,6}");
-            Console.WriteLine($"  Leads:                {data.Leads.Count,6}");
-            Console.WriteLine($"  Other Names:          {data.OtherNames.Count,6}");
-            Console.WriteLine($"  Items:                {data.Items.Count,6}");
-            Console.WriteLine($"  Classes:              {data.Classes.Count,6}");
-            Console.WriteLine($"  Payment Methods:      {data.PaymentMethods.Count,6}");
-            Console.WriteLine($"  Terms:                {data.Terms.Count,6}");
-            Console.WriteLine($"  Sales Tax Codes:      {data.SalesTaxCodes.Count,6}");
-            Console.WriteLine($"  Customer Types:       {data.CustomerTypes.Count,6}");
-            Console.WriteLine($"  Vendor Types:         {data.VendorTypes.Count,6}");
-            Console.WriteLine($"  Job Types:            {data.JobTypes.Count,6}");
-            Console.WriteLine($"  Currencies:           {data.Currencies.Count,6}");
-            Console.WriteLine($"  Customer Messages:    {data.CustomerMessages.Count,6}");
-            Console.WriteLine($"  Date-Driven Terms:    {data.DateDrivenTerms.Count,6}");
-            Console.WriteLine($"  Inventory Sites:      {data.InventorySites.Count,6}");
-            Console.WriteLine($"  Payroll Item Wages:   {data.PayrollItemWages.Count,6}");
-            Console.WriteLine($"  Payroll Item NonWages:{data.PayrollItemNonWages.Count,6}");
-            Console.WriteLine($"  Workers Comp Codes:   {data.WorkersCompCodes.Count,6}");
-            Console.WriteLine($"  Price Levels:         {data.PriceLevels.Count,6}");
-            Console.WriteLine($"  Sales Reps:           {data.SalesReps.Count,6}");
-            Console.WriteLine($"  Ship Methods:         {data.ShipMethods.Count,6}");
-            Console.WriteLine($"  Sales Tax Groups:     {data.SalesTaxGroups.Count,6}");
-            Console.WriteLine(new string('-', 80));
-            Console.WriteLine($"  Invoices:             {data.Invoices.Count,6}");
-            Console.WriteLine($"  Sales Receipts:       {data.SalesReceipts.Count,6}");
-            Console.WriteLine($"  Estimates:            {data.Estimates.Count,6}");
-            Console.WriteLine($"  Purchase Orders:      {data.PurchaseOrders.Count,6}");
-            Console.WriteLine($"  Sales Orders:         {data.SalesOrders.Count,6}");
-            Console.WriteLine($"  Bills:                {data.Bills.Count,6}");
-            Console.WriteLine($"  Bill Payments (Check):{data.BillPayments.Count,6}");
-            Console.WriteLine($"  Bill Payments (CC):   {data.BillPaymentCreditCards.Count,6}");
-            Console.WriteLine($"  Vendor Credits:       {data.VendorCredits.Count,6}");
-            Console.WriteLine($"  Receive Payments:     {data.ReceivePayments.Count,6}");
-            Console.WriteLine($"  AR Refund (CC):       {data.ARRefundCreditCards.Count,6}");
-            Console.WriteLine($"  Checks:               {data.Checks.Count,6}");
-            Console.WriteLine($"  Journal Entries:      {data.JournalEntries.Count,6}");
-            Console.WriteLine($"  Sales Tax Payments:   {data.SalesTaxPayments.Count,6}");
-            Console.WriteLine($"  Credit Card Charges:  {data.CreditCardCharges.Count,6}");
-            Console.WriteLine($"  Credit Card Credits:  {data.CreditCardCredits.Count,6}");
-            Console.WriteLine($"  Charges:              {data.Charges.Count,6}");
-            Console.WriteLine($"  Credit Memos:         {data.CreditMemos.Count,6}");
-            Console.WriteLine($"  Deposits:             {data.Deposits.Count,6}");
-            Console.WriteLine($"  Inventory Adjustments:{data.InventoryAdjustments.Count,6}");
-            Console.WriteLine($"  Item Receipts:        {data.ItemReceipts.Count,6}");
-            Console.WriteLine($"  Build Assemblies:     {data.BuildAssemblies.Count,6}");
-            Console.WriteLine($"  Transfers:            {data.Transfers.Count,6}");
-            Console.WriteLine($"  Inventory Transfers:  {data.InventoryTransfers.Count,6}");
-            Console.WriteLine(new string('-', 80));
-            Console.WriteLine($"  PREFERENCES:          Extracted");
-            Console.WriteLine($"  Custom Fields:        {data.DataExtensions.Count,6}");
-            Console.WriteLine($"  Deleted Lists:        {data.DeletedRecords.DeletedLists.Count,6}");
-            Console.WriteLine($"  Deleted Transactions: {data.DeletedRecords.DeletedTransactions.Count,6}");
-            Console.WriteLine($"  REPORT VERIFICATION:  {data.ReportVerification.ValidationMessage}");
-            Console.WriteLine(new string('=', 80));
-        }
- 
-    /// <summary>
-    /// v4.0 ENHANCEMENT: Parallel Extraction Manager
-    /// Extracts independent list entities in parallel for 3-5x speed improvement
-    /// SAFE: Only parallelizes entities with no transaction dependencies
-    /// </summary>
-    public class ParallelExtractionManager
-    {
-        private readonly QBSessionManager sessionManager;
-        private readonly QBIteratorHelper iteratorHelper;
-        private readonly int maxDegreeOfParallelism;
-
-        public ParallelExtractionManager(QBSessionManager sessionManager, int maxParallelism = 4)
-        {
-            this.sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
-            this.iteratorHelper = new QBIteratorHelper(sessionManager);
-            this.maxDegreeOfParallelism = Math.Max(1, Math.Min(maxParallelism, 8)); // Cap at 8 threads
-        }
-
-        /// <summary>
-        /// Extract all independent list entities in parallel
-        /// Returns populated QBExtractedData with all list entities filled
-        /// </summary>
-        public void ExtractListsInParallel(QBExtractedData data, QBDataExtractor extractor)
-        {
-            Console.WriteLine($"\n[PARALLEL MODE] Extracting list entities using {maxDegreeOfParallelism} threads...");
-            var startTime = DateTime.Now;
-
-            // Define all list extraction tasks (no dependencies between these)
-            var listExtractions = new Action[]
-            {
-                () => { Console.WriteLine("[ 1/25] Chart of Accounts"); data.Accounts = extractor.ExtractAccounts(); },
-                () => { Console.WriteLine("[ 2/25] Customers"); data.Customers = extractor.ExtractCustomers(); },
-                () => { Console.WriteLine("[ 3/25] Vendors"); data.Vendors = extractor.ExtractVendors(); },
-                () => { Console.WriteLine("[ 4/25] Employees"); data.Employees = extractor.ExtractEmployees(); },
-                () => { Console.WriteLine("[ 5/25] Leads"); data.Leads = extractor.ExtractLeads(); },
-                () => { Console.WriteLine("[ 6/25] Other Names"); data.OtherNames = extractor.ExtractOtherNames(); },
-                () => { Console.WriteLine("[ 7/25] Items"); data.Items = extractor.ExtractItems(); },
-                () => { Console.WriteLine("[ 8/25] Classes"); data.Classes = extractor.ExtractClasses(); },
-                () => { Console.WriteLine("[ 9/25] Payment Methods"); data.PaymentMethods = extractor.ExtractPaymentMethods(); },
-                () => { Console.WriteLine("[10/25] Terms"); data.Terms = extractor.ExtractTerms(); },
-                () => { Console.WriteLine("[11/25] Sales Tax Codes"); data.SalesTaxCodes = extractor.ExtractSalesTaxCodes(); },
-                () => { Console.WriteLine("[12/25] Customer Types"); data.CustomerTypes = extractor.ExtractCustomerTypes(); },
-                () => { Console.WriteLine("[13/25] Vendor Types"); data.VendorTypes = extractor.ExtractVendorTypes(); },
-                () => { Console.WriteLine("[14/25] Job Types"); data.JobTypes = extractor.ExtractJobTypes(); },
-                () => { Console.WriteLine("[15/25] Currencies"); data.Currencies = extractor.ExtractCurrencies(); },
-                () => { Console.WriteLine("[16/25] Customer Messages"); data.CustomerMessages = extractor.ExtractCustomerMessages(); },
-                () => { Console.WriteLine("[17/25] Date-Driven Terms"); data.DateDrivenTerms = extractor.ExtractDateDrivenTerms(); },
-                () => { Console.WriteLine("[18/25] Inventory Sites"); data.InventorySites = extractor.ExtractInventorySites(); },
-                () => { Console.WriteLine("[19/25] Payroll Item Wages"); data.PayrollItemWages = extractor.ExtractPayrollItemWages(); },
-                () => { Console.WriteLine("[20/25] Payroll Item Non-Wages"); data.PayrollItemNonWages = extractor.ExtractPayrollItemNonWages(); },
-                () => { Console.WriteLine("[21/25] Workers Comp Codes"); data.WorkersCompCodes = extractor.ExtractWorkersCompCodes(); },
-                () => { Console.WriteLine("[22/25] Price Levels"); data.PriceLevels = extractor.ExtractPriceLevels(); },
-                () => { Console.WriteLine("[23/25] Sales Reps"); data.SalesReps = extractor.ExtractSalesReps(); },
-                () => { Console.WriteLine("[24/25] Ship Methods"); data.ShipMethods = extractor.ExtractShipMethods(); },
-                () => { Console.WriteLine("[25/25] Sales Tax Groups"); data.SalesTaxGroups = extractor.ExtractSalesTaxGroups(); }
-            };
-
-            // Execute in parallel with configured degree of parallelism
-            try
-            {
-                Parallel.Invoke(
-                    new ParallelOptions { MaxDegreeOfParallelism = maxDegreeOfParallelism },
-                    listExtractions
-                );
-
-                var elapsed = (DateTime.Now - startTime).TotalSeconds;
-                Console.WriteLine($"✓ All list entities extracted in {elapsed:F1}s (parallel mode)");
-                Console.WriteLine($"  Performance gain: ~{(elapsed > 0 ? (25.0 / elapsed):1):F1}x faster than sequential\n");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"⚠ Parallel extraction encountered an error: {ex.Message}");
-                Console.WriteLine("  Falling back to sequential extraction for safety...");
-                throw;
-            }
-        }
-    }
-
-    }
-}

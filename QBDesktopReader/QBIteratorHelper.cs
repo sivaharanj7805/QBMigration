@@ -1,27 +1,89 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
+using System.Threading;
 using QBFC16Lib;
 
 namespace QBDesktopExtractor
 {
     /// <summary>
-    /// ENTERPRISE-GRADE Iterator Helper (v4.0)
+    /// Query capability result for tracking unsupported features
+    /// </summary>
+    public class QueryCapabilityResult
+    {
+        public bool Success { get; set; }
+        public string FeatureName { get; set; }
+        public string QueryType { get; set; }
+        public string Reason { get; set; }
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Defines what features each query type supports
+    /// </summary>
+    public class QueryCapabilities
+    {
+        public bool SupportsModifiedDateFilter { get; set; }
+        public bool SupportsMaxReturned { get; set; }
+        public bool SupportsIterator { get; set; }
+        public string QueryType { get; set; }
+    }
+
+    /// <summary>
+    /// Structured progress event for extraction
+    /// </summary>
+    public class ExtractionProgress
+    {
+        public string EntityType { get; set; }
+        public int CurrentPage { get; set; }
+        public int TotalRecordsExtracted { get; set; }
+        public int RemainingRecords { get; set; }
+        public TimeSpan Elapsed { get; set; }
+        public TimeSpan? EstimatedRemaining { get; set; }
+        public int CurrentBatchSize { get; set; }
+        public long LastRequestTimeMs { get; set; }
+    }
+
+    /// <summary>
+    /// Retry policy configuration
+    /// </summary>
+    public class RetryPolicy
+    {
+        public int MaxRetries { get; set; } = 3;
+        public int BaseDelayMs { get; set; } = 1000;
+        public int MaxDelayMs { get; set; } = 30000;
+        public bool UseExponentialBackoff { get; set; } = true;
+        public HashSet<int> RetryableStatusCodes { get; set; } = new HashSet<int> { -10, -11, 3180, 3100 };
+    }
+
+    /// <summary>
+    /// ENTERPRISE-GRADE Iterator Helper (v4.3)
     /// 
-    /// CRITICAL IMPROVEMENTS:
-    /// - ADAPTIVE BATCHING: Auto-adjusts batch size based on query performance
-    /// - TIMEOUT PREVENTION: Monitors request times and reduces batch size if slow
-    /// - PROGRESS HEARTBEAT: Shows real-time progress to prevent "frozen" appearance
-    /// - ROBUST CLEANUP: Ensures iterators are always closed, even on crash
-    /// - INCREMENTAL SYNC: Supports ModifiedDateRangeFilter for delta extraction
+    /// v4.3 IMPROVEMENTS:
+    /// - RETRY POLICY: Configurable retry with exponential backoff
+    /// - CANCELLATION: CancellationToken support for graceful abort
+    /// - MAX DURATION: Per-entity extraction timeout
+    /// - STRUCTURED PROGRESS: Event-based progress reporting
+    /// - FAILURE BOUNDARY: Page context recorded for resume
+    /// - INTERFACE-BASED: Uses IQBSessionManager for testing
     /// 
-    /// Prevents memory crashes on large datasets (50K+ records)
-    /// Provides resume capability for interrupted extractions
+    /// Prior features:
+    /// - Capability tracking, adaptive batching, timeout prevention
+    /// - Progress heartbeat, robust cleanup, incremental sync
     /// </summary>
     public class QBIteratorHelper
     {
-        private readonly QBSessionManager sessionManager;
+        private readonly IQBSessionManager _sessionManager;
+        private readonly IRedactingLogger _logger;
+        
+        // Configuration
+        public RetryPolicy RetryPolicy { get; set; } = new RetryPolicy();
+        public TimeSpan? MaxDurationPerEntity { get; set; } = TimeSpan.FromMinutes(30);
+        
+        // Progress event
+        public event Action<ExtractionProgress> OnProgress;
         
         // Adaptive batching parameters
         private const int MIN_BATCH_SIZE = 20;
@@ -32,10 +94,105 @@ namespace QBDesktopExtractor
         // CRITICAL: Incremental sync support
         public DateTime? IncrementalFromDate { get; set; }
 
-        public QBIteratorHelper(QBSessionManager sessionManager)
+        // Track capability warnings for metadata
+        public List<QueryCapabilityResult> CapabilityWarnings { get; private set; } = new List<QueryCapabilityResult>();
+
+        // Known capabilities per query type
+        private static readonly Dictionary<string, QueryCapabilities> KnownCapabilities = new Dictionary<string, QueryCapabilities>
         {
-            this.sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+            ["AccountQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "AccountQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["CustomerQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "CustomerQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["VendorQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "VendorQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["EmployeeQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "EmployeeQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["ItemQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "ItemQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["InvoiceQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "InvoiceQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["BillQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "BillQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            ["CheckQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "CheckQuery",
+                SupportsModifiedDateFilter = true,
+                SupportsMaxReturned = true,
+                SupportsIterator = true
+            },
+            // Queries with limited support
+            ["CompanyQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "CompanyQuery",
+                SupportsModifiedDateFilter = false,  // Company info doesn't support date filters
+                SupportsMaxReturned = false,
+                SupportsIterator = false
+            },
+            ["PreferencesQuery"] = new QueryCapabilities 
+            { 
+                QueryType = "PreferencesQuery",
+                SupportsModifiedDateFilter = false,
+                SupportsMaxReturned = false,
+                SupportsIterator = false
+            }
+        };
+
+        // Iterator-supporting query types
+        private static readonly HashSet<string> IteratorSupportedQueries = new HashSet<string>
+        {
+            "AccountQuery", "CustomerQuery", "VendorQuery", "EmployeeQuery", "ItemQuery",
+            "InvoiceQuery", "BillQuery", "CheckQuery", "SalesReceiptQuery", "CreditMemoQuery",
+            "PurchaseOrderQuery", "SalesOrderQuery", "EstimateQuery", "JournalEntryQuery",
+            "DepositQuery", "ChargeQuery", "CreditCardChargeQuery", "CreditCardCreditQuery"
+        };
+
+        public QBIteratorHelper(IQBSessionManager sessionManager, IRedactingLogger logger = null)
+        {
+            _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
+            _logger = logger;
         }
+
+        /// <summary>
+        /// Legacy constructor for backwards compatibility
+        /// </summary>
+        public QBIteratorHelper(QBSessionManager sessionManager) 
+            : this((IQBSessionManager)sessionManager, null) { }
         
         /// <summary>
         /// Set the date for incremental sync
@@ -46,16 +203,112 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
+        /// Execute a QBFC request with retry logic
+        /// Uses exponential backoff for retryable errors
+        /// </summary>
+        private IMsgSetResponse DoRequestsWithRetry(IMsgSetRequest request, string context)
+        {
+            int attempt = 0;
+            Exception lastException = null;
+
+            while (attempt < RetryPolicy.MaxRetries)
+            {
+                try
+                {
+                    return _sessionManager.DoRequests(request);
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    attempt++;
+
+                    // Check if error is retryable
+                    bool isRetryable = IsRetryableError(ex);
+                    
+                    if (!isRetryable || attempt >= RetryPolicy.MaxRetries)
+                    {
+                        _logger?.Log(LogLevel.Error, "{0}: Failed after {1} attempts: {2}", 
+                            context, attempt, ex.Message);
+                        throw;
+                    }
+
+                    // Calculate delay with exponential backoff
+                    int delay = CalculateRetryDelay(attempt);
+                    
+                    _logger?.Log(LogLevel.Warning, "{0}: Attempt {1} failed, retrying in {2}ms: {3}", 
+                        context, attempt, delay, ex.Message);
+                    
+                    System.Threading.Thread.Sleep(delay);
+                }
+            }
+
+            throw lastException ?? new Exception($"{context}: Failed after {attempt} retries");
+        }
+
+        /// <summary>
+        /// Check if an error is retryable
+        /// </summary>
+        private bool IsRetryableError(Exception ex)
+        {
+            // Check for QBFC status codes in exception message
+            string msg = ex.Message.ToLowerInvariant();
+            
+            // Transient errors that should be retried
+            if (msg.Contains("busy") || 
+                msg.Contains("timeout") || 
+                msg.Contains("connection") ||
+                msg.Contains("session") ||
+                msg.Contains("lock"))
+            {
+                return true;
+            }
+
+            // Check for known retryable status codes
+            foreach (int code in RetryPolicy.RetryableStatusCodes)
+            {
+                if (msg.Contains($"code: {code}") || msg.Contains($"code:{code}"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Calculate retry delay with exponential backoff and jitter
+        /// </summary>
+        private int CalculateRetryDelay(int attempt)
+        {
+            if (!RetryPolicy.UseExponentialBackoff)
+            {
+                return RetryPolicy.BaseDelayMs;
+            }
+
+            // Exponential backoff: baseDelay * 2^(attempt-1)
+            int delay = RetryPolicy.BaseDelayMs * (int)Math.Pow(2, attempt - 1);
+            
+            // Add jitter (10-30% random variation)
+            var random = new Random();
+            double jitter = 1.0 + (random.NextDouble() * 0.2);
+            delay = (int)(delay * jitter);
+            
+            // Cap at max delay
+            return Math.Min(delay, RetryPolicy.MaxDelayMs);
+        }
+
+
+        /// <summary>
         /// Extract records using iterator pattern with ADAPTIVE batching
-        /// Automatically adjusts batch size based on query performance
-        /// Supports incremental sync via FromModifiedDate filter
+        /// Supports cancellation, retry policy, and max duration timeout
         /// </summary>
         public List<T> ExtractWithIterator<T>(
             Func<IMsgSetRequest, object> queryAppender,
             Func<object, int, T> recordParser,
             string recordTypeName,
             int initialBatchSize = DEFAULT_BATCH_SIZE,
-            Action<List<T>, int> onBatchComplete = null)
+            Action<List<T>, int> onBatchComplete = null,
+            CancellationToken cancellationToken = default)
         {
             var allRecords = new List<T>();
             string iteratorID = null;
@@ -69,20 +322,38 @@ namespace QBDesktopExtractor
             try
             {
                 // FIRST REQUEST - Start iterator
-                IMsgSetRequest request = sessionManager.CreateMsgSetRequest();
+                IMsgSetRequest request = _sessionManager.CreateMsgSetRequest();
                 object query = queryAppender(request);
                 
                 // CRITICAL: Add incremental sync filter if enabled
                 if (IncrementalFromDate.HasValue)
                 {
-                    try
+                    string queryType = GetQueryType(query);
+                    if (KnownCapabilities.ContainsKey(queryType) && 
+                        KnownCapabilities[queryType].SupportsModifiedDateFilter)
                     {
-                        SetModifiedDateFilter(query, IncrementalFromDate.Value);
-                        Console.WriteLine($"      Incremental sync: Only extracting {recordTypeName} modified since {IncrementalFromDate:yyyy-MM-dd}");
+                        try
+                        {
+                            SetModifiedDateFilter(query, IncrementalFromDate.Value);
+                            Console.WriteLine($"      Incremental sync: Only extracting {recordTypeName} modified since {IncrementalFromDate:yyyy-MM-dd}");
+                        }
+                        catch (Exception ex)
+                        {
+                            // FIXED: Track capability failure, don't silently swallow
+                            var warning = new QueryCapabilityResult
+                            {
+                                Success = false,
+                                FeatureName = "ModifiedDateFilter",
+                                QueryType = queryType,
+                                Reason = ex.Message
+                            };
+                            CapabilityWarnings.Add(warning);
+                            Console.WriteLine($"⚠ {queryType} ModifiedDateFilter failed (first request): {ex.Message}");
+                        }
                     }
-                    catch
+                    else
                     {
-                        // Some queries don't support ModifiedDateRangeFilter - that's OK
+                        Console.WriteLine($"  Note: {queryType} doesn't support ModifiedDateFilter (incremental sync disabled for this entity)");
                     }
                 }
                 
@@ -93,7 +364,7 @@ namespace QBDesktopExtractor
                 
                 // Track request time
                 stopwatch.Start();
-                IMsgSetResponse response = sessionManager.DoRequests(request);
+                IMsgSetResponse response = DoRequestsWithRetry(request, $"{recordTypeName} initial request");
                 stopwatch.Stop();
                 long requestTimeMs = stopwatch.ElapsedMilliseconds;
                 
@@ -133,19 +404,51 @@ namespace QBDesktopExtractor
 
                 // CONTINUE REQUESTS - Process remaining batches
                 DateTime lastHeartbeat = DateTime.Now;
+                var entityStopwatch = Stopwatch.StartNew();
+                
                 while (remainingCount > 0)
                 {
-                    request = sessionManager.CreateMsgSetRequest();
+                    // Check for cancellation
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    // Check max duration
+                    if (MaxDurationPerEntity.HasValue && entityStopwatch.Elapsed > MaxDurationPerEntity.Value)
+                    {
+                        _logger?.Log(LogLevel.Warning, "Max duration exceeded for {0}, stopping at {1} records", recordTypeName, totalRecords);
+                        break;
+                    }
+                    
+                    request = _sessionManager.CreateMsgSetRequest();
                     query = queryAppender(request);
                     
-                    // CRITICAL: Add incremental sync filter to continuation requests too
+                    // CRITICAL: Add incremental sync filter to continuation requests
                     if (IncrementalFromDate.HasValue)
                     {
-                        try
+                        string queryType = GetQueryType(query);
+                        if (KnownCapabilities.ContainsKey(queryType) && 
+                            KnownCapabilities[queryType].SupportsModifiedDateFilter)
                         {
-                            SetModifiedDateFilter(query, IncrementalFromDate.Value);
+                            try
+                            {
+                                SetModifiedDateFilter(query, IncrementalFromDate.Value);
+                            }
+                            catch (Exception ex)
+                            {
+                                var warning = new QueryCapabilityResult
+                                {
+                                    Success = false,
+                                    FeatureName = "ModifiedDateFilter",
+                                    QueryType = queryType,
+                                    Reason = ex.Message
+                                };
+                                CapabilityWarnings.Add(warning);
+                                Console.WriteLine($"⚠ {queryType} ModifiedDateFilter failed: {ex.Message}");
+                            }
                         }
-                        catch { }
+                        else
+                        {
+                            Console.WriteLine($"  Note: {queryType} doesn't support ModifiedDateFilter (skipping)");
+                        }
                     }
                     
                     // Set iterator to CONTINUE with adaptive batch size
@@ -155,7 +458,7 @@ namespace QBDesktopExtractor
 
                     // Track request time
                     stopwatch.Restart();
-                    response = sessionManager.DoRequests(request);
+                    response = DoRequestsWithRetry(request, $"{recordTypeName} batch {batchNumber + 1}");
                     stopwatch.Stop();
                     requestTimeMs = stopwatch.ElapsedMilliseconds;
 
@@ -184,10 +487,24 @@ namespace QBDesktopExtractor
                         batch.Count,
                         recordTypeName);
 
+                    // Emit structured progress event
+                    var progress = new ExtractionProgress
+                    {
+                        EntityType = recordTypeName,
+                        CurrentPage = batchNumber,
+                        TotalRecordsExtracted = totalRecords,
+                        RemainingRecords = remainingCount,
+                        Elapsed = entityStopwatch.Elapsed,
+                        CurrentBatchSize = currentBatchSize,
+                        LastRequestTimeMs = requestTimeMs
+                    };
+                    OnProgress?.Invoke(progress);
+
                     // HEARTBEAT: Show progress every 10 seconds to prove app hasn't frozen
                     if ((DateTime.Now - lastHeartbeat).TotalSeconds > 10)
                     {
-                        Console.WriteLine($"  ⏱ HEARTBEAT: {totalRecords:N0} extracted, {remainingCount:N0} remaining...");
+                        _logger?.Log(LogLevel.Debug, "HEARTBEAT: {0} - {1:N0} extracted, {2:N0} remaining", 
+                            recordTypeName, totalRecords, remainingCount);
                         lastHeartbeat = DateTime.Now;
                     }
                 }
@@ -248,13 +565,19 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Set MaxReturned property (batch size) using reflection
+        /// <summary>
+        /// Set MaxReturned on query using reflection
+        /// v4.1 FIX: Removed CanWrite check - QBFC properties are often read-only
+        /// but return value wrappers that have SetValue() methods
         /// </summary>
         private void SetMaxReturned(object query, int maxReturned)
         {
             try
             {
                 PropertyInfo prop = query.GetType().GetProperty("MaxReturned");
-                if (prop != null && prop.CanWrite)
+                
+                // FIXED: Don't check CanWrite - QBFC properties are read-only but return settable wrappers
+                if (prop != null)
                 {
                     object propValue = prop.GetValue(query, null);
                     
@@ -268,9 +591,16 @@ namespace QBDesktopExtractor
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Some queries don't support MaxReturned - use default
+                // Track capability failure instead of silent swallow
+                CapabilityWarnings.Add(new QueryCapabilityResult
+                {
+                    Success = false,
+                    FeatureName = "MaxReturned",
+                    QueryType = query.GetType().Name,
+                    Reason = ex.Message
+                });
             }
         }
 
@@ -281,7 +611,7 @@ namespace QBDesktopExtractor
         {
             try
             {
-                IMsgSetRequest request = sessionManager.CreateMsgSetRequest();
+                IMsgSetRequest request = _sessionManager.CreateMsgSetRequest();
                 object query = queryAppender(request);
                 
                 SetIteratorProperty(query, "iterator", ENiteratorType.itStop);
@@ -350,27 +680,34 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Set iterator property using reflection (handles different query types)
+        /// v4.1 FIX: Removed CanWrite check - QBFC properties are read-only wrappers
         /// </summary>
         private void SetIteratorProperty(object query, string propertyName, object value)
         {
             try
             {
                 PropertyInfo prop = query.GetType().GetProperty(propertyName);
-                if (prop != null && prop.CanWrite)
+                
+                // FIXED: Don't check CanWrite - get the value wrapper and call SetValue on IT
+                if (prop != null)
                 {
                     object propValue = prop.GetValue(query, null);
                     
-                    // Call SetValue on the property object
-                    MethodInfo setValueMethod = propValue.GetType().GetMethod("SetValue", new[] { value.GetType() });
-                    if (setValueMethod != null)
+                    if (propValue != null)
                     {
-                        setValueMethod.Invoke(propValue, new[] { value });
+                        // Call SetValue on the property object
+                        MethodInfo setValueMethod = propValue.GetType().GetMethod("SetValue", new[] { value.GetType() });
+                        if (setValueMethod != null)
+                        {
+                            setValueMethod.Invoke(propValue, new[] { value });
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    ⚠ Warning: Could not set {propertyName}: {ex.Message}");
+                // Track failure but don't crash
+                System.Diagnostics.Debug.WriteLine($"Could not set {propertyName}: {ex.Message}");
             }
         }
 
@@ -386,10 +723,10 @@ namespace QBDesktopExtractor
 
             try
             {
-                IMsgSetRequest request = sessionManager.CreateMsgSetRequest();
+                IMsgSetRequest request = _sessionManager.CreateMsgSetRequest();
                 queryAppender(request);
 
-                IMsgSetResponse response = sessionManager.DoRequests(request);
+                IMsgSetResponse response = _sessionManager.DoRequests(request);
                 IResponse resp = response.ResponseList.GetAt(0);
 
                 if (resp.StatusCode != 0)
@@ -448,9 +785,76 @@ namespace QBDesktopExtractor
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Silently fail - not all queries support ModifiedDateRangeFilter
+                // This catch is acceptable - ModifiedDateRangeFilter support varies
+                // But we now track it in capability warnings
+                throw new Exception($"SetModifiedDateFilter failed: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Get query type name from query object
+        /// </summary>
+        private string GetQueryType(object query)
+        {
+            if (query == null)
+                return "UnknownQuery";
+            
+            string typeName = query.GetType().Name;
+            // Remove 'I' prefix if present (IAccountQuery -> AccountQuery)
+            if (typeName.StartsWith("I") && typeName.Length > 1)
+                typeName = typeName.Substring(1);
+            
+            return typeName;
+        }
+
+        /// <summary>
+        /// Validate response detail type before reflection
+        /// </summary>
+        private bool TryGetListCount(object detail, out int count)
+        {
+            count = 0;
+            
+            if (detail == null)
+            {
+                Console.WriteLine("⚠ Response detail is null");
+                return false;
+            }
+            
+            var detailType = detail.GetType();
+            var typeName = detailType.Name;
+            
+            // Expected return list types
+            var expectedTypes = new[]
+            {
+                "IAccountRetList", "ICustomerRetList", "IVendorRetList", "IEmployeeRetList",
+                "IItemRetList", "IInvoiceRetList", "IBillRetList", "ICheckRetList"
+                // Add more as needed
+            };
+            
+            if (!expectedTypes.Contains(typeName))
+            {
+                Console.WriteLine($"⚠ Unexpected response type: {typeName} (expected one of {string.Join(", ", expectedTypes)})");
+                // Try to continue anyway
+            }
+            
+            var countProperty = detailType.GetProperty("Count");
+            if (countProperty == null)
+            {
+                Console.WriteLine($"⚠ Type {typeName} has no Count property");
+                return false;
+            }
+            
+            try
+            {
+                count = (int)countProperty.GetValue(detail, null);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠ Failed to get Count from {typeName}: {ex.Message}");
+                return false;
             }
         }
     }
