@@ -1,0 +1,416 @@
+"""
+Migration Orchestrator - Single Entry Point for End-to-End Migration
+
+This module provides a unified interface for QBMigrationServer workers to call
+QBMigrationService functionality without needing to import individual modules.
+
+Usage:
+    from orchestrator import MigrationOrchestrator
+    
+    orchestrator = MigrationOrchestrator(
+        qbo_client_id="...",
+        qbo_client_secret="...",
+        qbo_refresh_token="...",
+        realm_id="...",
+        progress_callback=lambda pct, msg: print(f"{pct}%: {msg}")
+    )
+    
+    result = orchestrator.run_migration(encrypted_data, encryption_metadata)
+"""
+
+import os
+import sys
+import json
+import logging
+from typing import Dict, Any, Callable, Optional
+from datetime import datetime
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+class MigrationOrchestrator:
+    """
+    Unified orchestrator for QB Desktop → QBO migration.
+    
+    Handles:
+    1. Decryption of uploaded data
+    2. Data transformation (31 entity types)
+    3. QBO API operations with rate limiting
+    4. Trial balance verification
+    5. Progress reporting
+    """
+    
+    def __init__(
+        self,
+        qbo_client_id: str,
+        qbo_client_secret: str,
+        qbo_refresh_token: str,
+        realm_id: str,
+        qbo_environment: str = "sandbox",
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        log_level: int = logging.INFO
+    ):
+        """
+        Initialize the orchestrator with QBO credentials.
+        
+        Args:
+            qbo_client_id: QuickBooks Online OAuth client ID
+            qbo_client_secret: QuickBooks Online OAuth client secret
+            qbo_refresh_token: OAuth refresh token
+            realm_id: QBO company ID
+            qbo_environment: 'sandbox' or 'production'
+            progress_callback: Function(percent, message) called for progress updates
+            log_level: Logging level
+        """
+        self.qbo_client_id = qbo_client_id
+        self.qbo_client_secret = qbo_client_secret
+        self.qbo_refresh_token = qbo_refresh_token
+        self.realm_id = realm_id
+        self.qbo_environment = qbo_environment
+        self.progress_callback = progress_callback or (lambda p, m: None)
+        
+        logging.basicConfig(level=log_level)
+        
+        # Will be initialized lazily
+        self._encryption_manager = None
+        self._oauth_manager = None
+        self._qbo_client = None
+        self._transformer = None
+        self._verifier = None
+    
+    def _report_progress(self, percent: int, message: str):
+        """Report progress to callback"""
+        logger.info(f"[{percent}%] {message}")
+        self.progress_callback(percent, message)
+    
+    def _init_encryption(self):
+        """Initialize encryption manager"""
+        if self._encryption_manager is None:
+            from encryption import EncryptionManager
+            self._encryption_manager = EncryptionManager()
+        return self._encryption_manager
+    
+    def _init_oauth(self):
+        """Initialize OAuth manager"""
+        if self._oauth_manager is None:
+            from oauth_manager import OAuthManager
+            self._oauth_manager = OAuthManager(
+                client_id=self.qbo_client_id,
+                client_secret=self.qbo_client_secret,
+                refresh_token=self.qbo_refresh_token,
+                realm_id=self.realm_id,
+                environment=self.qbo_environment
+            )
+        return self._oauth_manager
+    
+    def _init_qbo_client(self, access_token: str):
+        """Initialize QBO client with token"""
+        if self._qbo_client is None:
+            from qbo_client import PremiumQBOClient
+            self._qbo_client = PremiumQBOClient(
+                access_token=access_token,
+                realm_id=self.realm_id,
+                environment=self.qbo_environment
+            )
+        return self._qbo_client
+    
+    def _init_transformer(self):
+        """Initialize data transformer"""
+        if self._transformer is None:
+            from data_transformer import QBDataTransformer
+            self._transformer = QBDataTransformer()
+        return self._transformer
+    
+    def _init_verifier(self, qbo_client):
+        """Initialize migration verifier"""
+        if self._verifier is None:
+            from verifier import MigrationVerifier
+            self._verifier = MigrationVerifier(qbo_client)
+        return self._verifier
+    
+    def run_migration(
+        self,
+        encrypted_data: bytes,
+        encryption_metadata: Dict[str, Any],
+        company_name: str = "Unknown"
+    ) -> Dict[str, Any]:
+        """
+        Run the complete migration process.
+        
+        Args:
+            encrypted_data: AES-256-GCM encrypted data from QBDesktopReader
+            encryption_metadata: Dict with iv, tag, algorithm, etc.
+            company_name: Company name for logging
+            
+        Returns:
+            Dict with migration results:
+            {
+                'success': bool,
+                'migration_id': str,
+                'entities_migrated': {
+                    'Customers': 100,
+                    'Vendors': 50,
+                    ...
+                },
+                'verification': {...},
+                'duration_seconds': float
+            }
+        """
+        start_time = datetime.utcnow()
+        migration_id = f"mig_{start_time.strftime('%Y%m%d_%H%M%S')}"
+        
+        logger.info(f"Starting migration {migration_id} for {company_name}")
+        
+        try:
+            # Step 1: Decrypt data (5%)
+            self._report_progress(5, "Decrypting data")
+            
+            enc_mgr = self._init_encryption()
+            decrypted_json = enc_mgr.decrypt_chunked(
+                encrypted_data,
+                key=encryption_metadata.get('key') or encryption_metadata.get('aes_key'),
+                iv=encryption_metadata.get('iv'),
+                tag=encryption_metadata.get('tag')
+            )
+            
+            data = json.loads(decrypted_json)
+            logger.info(f"Decrypted {len(decrypted_json):,} bytes")
+            
+            # Step 2: OAuth refresh (10%)
+            self._report_progress(10, "Authenticating with QuickBooks Online")
+            
+            oauth_mgr = self._init_oauth()
+            access_token = oauth_mgr.get_valid_access_token()
+            
+            if not access_token:
+                raise Exception("Failed to obtain valid access token")
+            
+            # Step 3: Initialize QBO client (15%)
+            self._report_progress(15, "Connecting to QuickBooks Online")
+            
+            qbo_client = self._init_qbo_client(access_token)
+            transformer = self._init_transformer()
+            
+            # Step 4: Migrate entities (20-85%)
+            entities_migrated = {}
+            
+            # Entity migration order (respects dependencies)
+            entity_order = [
+                ('Accounts', 20, 30),
+                ('Customers', 30, 40),
+                ('Vendors', 40, 50),
+                ('Items', 50, 60),
+                ('Employees', 60, 65),
+                ('Invoices', 65, 75),
+                ('Bills', 75, 80),
+                ('Payments', 80, 85)
+            ]
+            
+            for entity_name, start_pct, end_pct in entity_order:
+                if entity_name in data and data[entity_name]:
+                    self._report_progress(start_pct, f"Migrating {entity_name}")
+                    
+                    count = self._migrate_entity(
+                        qbo_client,
+                        transformer,
+                        entity_name,
+                        data[entity_name],
+                        entities_migrated
+                    )
+                    
+                    entities_migrated[entity_name] = count
+                    logger.info(f"Migrated {count} {entity_name}")
+            
+            # Step 5: Verify migration (85-95%)
+            self._report_progress(85, "Verifying migration")
+            
+            verifier = self._init_verifier(qbo_client)
+            verification_result = verifier.verify_all(data, entities_migrated)
+            
+            # Step 6: Complete (100%)
+            self._report_progress(100, "Migration complete")
+            
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            
+            result = {
+                'success': True,
+                'migration_id': migration_id,
+                'company_name': company_name,
+                'entities_migrated': entities_migrated,
+                'verification': verification_result,
+                'duration_seconds': duration,
+                'completed_at': datetime.utcnow().isoformat()
+            }
+            
+            logger.info(f"Migration {migration_id} completed in {duration:.1f}s")
+            return result
+            
+        except Exception as e:
+            logger.exception(f"Migration {migration_id} failed: {str(e)}")
+            
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            
+            return {
+                'success': False,
+                'migration_id': migration_id,
+                'error': str(e),
+                'duration_seconds': duration,
+                'failed_at': datetime.utcnow().isoformat()
+            }
+    
+    def _migrate_entity(
+        self,
+        qbo_client,
+        transformer,
+        entity_name: str,
+        source_data: list,
+        existing_maps: Dict[str, Dict]
+    ) -> int:
+        """
+        Migrate a single entity type.
+        
+        Args:
+            qbo_client: Initialized QBO client
+            transformer: Data transformer
+            entity_name: Name of entity type
+            source_data: List of source records
+            existing_maps: Maps of already-migrated entities (for references)
+            
+        Returns:
+            Number of entities migrated
+        """
+        count = 0
+        
+        for record in source_data:
+            try:
+                # Transform to QBO format
+                transformed = transformer.transform_single(
+                    entity_name,
+                    record,
+                    reference_maps=existing_maps
+                )
+                
+                if transformed:
+                    # Create in QBO
+                    result = qbo_client.create_entity(entity_name, transformed)
+                    
+                    if result and 'Id' in result:
+                        # Track mapping for references
+                        source_id = record.get('ListID') or record.get('TxnID') or record.get('Id')
+                        if source_id:
+                            if entity_name not in existing_maps:
+                                existing_maps[entity_name] = {}
+                            existing_maps[entity_name][source_id] = result['Id']
+                        
+                        count += 1
+                        
+            except Exception as e:
+                logger.warning(f"Failed to migrate {entity_name} record: {str(e)}")
+                continue
+        
+        return count
+    
+    def run_migration_from_s3(
+        self,
+        s3_uri: str,
+        aws_region: str = 'us-east-1'
+    ) -> Dict[str, Any]:
+        """
+        Run migration from S3-stored data.
+        
+        Args:
+            s3_uri: S3 URI (s3://bucket/key)
+            aws_region: AWS region
+            
+        Returns:
+            Migration result dict
+        """
+        import boto3
+        
+        # Parse S3 URI
+        parts = s3_uri.replace('s3://', '').split('/', 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ''
+        
+        s3 = boto3.client('s3', region_name=aws_region)
+        
+        # Download encrypted data
+        self._report_progress(2, "Downloading data from S3")
+        
+        response = s3.get_object(Bucket=bucket, Key=key)
+        encrypted_data = response['Body'].read()
+        
+        # Get metadata
+        metadata_key = key.replace('encrypted_data.bin', 'encryption_metadata.json')
+        response = s3.get_object(Bucket=bucket, Key=metadata_key)
+        encryption_metadata = json.loads(response['Body'].read().decode('utf-8'))
+        
+        # Get company name from S3 metadata
+        company_name = response.get('Metadata', {}).get('company-name', 'Unknown')
+        
+        return self.run_migration(encrypted_data, encryption_metadata, company_name)
+
+
+# CLI entry point for standalone execution
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Run QB Migration')
+    parser.add_argument('--migration-id', required=True)
+    parser.add_argument('--encrypted-data', required=True)
+    parser.add_argument('--metadata', required=True)
+    parser.add_argument('--credentials', required=True)
+    parser.add_argument('--server-url', required=True)
+    parser.add_argument('--webhook-secret', required=True)
+    
+    args = parser.parse_args()
+    
+    # Load credentials
+    with open(args.credentials, 'r') as f:
+        creds = json.load(f)
+    
+    # Load metadata
+    with open(args.metadata, 'r') as f:
+        metadata = json.load(f)
+    
+    # Load encrypted data
+    with open(args.encrypted_data, 'rb') as f:
+        encrypted_data = f.read()
+    
+    # Create orchestrator
+    orchestrator = MigrationOrchestrator(
+        qbo_client_id=creds['client_id'],
+        qbo_client_secret=creds['client_secret'],
+        qbo_refresh_token=creds['refresh_token'],
+        realm_id=creds.get('realm_id', ''),
+        qbo_environment=creds.get('environment', 'sandbox')
+    )
+    
+    # Run migration
+    result = orchestrator.run_migration(encrypted_data, metadata)
+    
+    # Report result to server via webhook
+    import requests
+    import hmac
+    import hashlib
+    
+    webhook_data = json.dumps(result)
+    signature = hmac.new(
+        args.webhook_secret.encode(),
+        webhook_data.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    
+    endpoint = 'migration-completed' if result['success'] else 'migration-failed'
+    
+    requests.post(
+        f"{args.server_url}/api/webhooks/{endpoint}",
+        json=result,
+        headers={
+            'X-Migration-Id': args.migration_id,
+            'X-Webhook-Signature': f'sha256={signature}'
+        }
+    )
+    
+    sys.exit(0 if result['success'] else 1)

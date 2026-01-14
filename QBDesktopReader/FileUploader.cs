@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -110,6 +111,176 @@ namespace QBDesktopExtractor
             }
 
             _logger?.Log(LogLevel.Info, "Upload complete");
+        }
+
+        /// <summary>
+        /// Upload using v3.1 JSON format (matches server's _handle_v31_upload)
+        /// This is the recommended method for new integrations
+        /// </summary>
+        public async Task<UploadResult> UploadV31FormatAsync(
+            byte[] encryptedData,
+            EncryptionManager.EncryptionResult encryptionResult,
+            string sessionId,
+            QBCompanyInfo companyInfo,
+            CancellationToken cancellationToken = default)
+        {
+            _logger?.Log(LogLevel.Info, "Uploading using v3.1 format...");
+
+            // Build v3.1 request payload (matches upload.py _handle_v31_upload)
+            var payload = new V31UploadPayload
+            {
+                SessionId = sessionId,
+                Encryption = new V31EncryptionBlock
+                {
+                    EncryptedData = Convert.ToBase64String(encryptedData),
+                    Key = encryptionResult.KeyBase64,  // TLS-protected
+                    EncryptedKey = null,  // Could use RSA if server provides public key
+                    IsKeyEncrypted = false,
+                    IV = encryptionResult.IVBase64,
+                    Tag = encryptionResult.TagBase64,
+                    Algorithm = encryptionResult.Algorithm ?? "AES-256-GCM",
+                    Version = "4.3"
+                },
+                Metadata = new V31Metadata
+                {
+                    ClientVersion = "4.3.0",
+                    DataVersion = "qb_desktop_4.3",
+                    SchemaVersion = "4.3",
+                    PlaintextHash = encryptionResult.DataHashSHA256,
+                    PlaintextSizeBytes = encryptionResult.PlaintextSizeBytes,
+                    EncryptedSizeBytes = encryptionResult.EncryptedSizeBytes,
+                    ExtractedAt = DateTime.UtcNow.ToString("o")
+                },
+                CompanyInfo = new V31CompanyInfo
+                {
+                    CompanyName = companyInfo?.CompanyName ?? "Unknown",
+                    QBFileName = companyInfo?.CompanyFile ?? "quickbooks.qbw",
+                    FiscalYearStart = companyInfo?.FirstMonthFiscalYear ?? 1
+                }
+            };
+
+            var json = JsonConvert.SerializeObject(payload, new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore
+            });
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(
+                $"{_serverUrl}/api/upload",
+                content,
+                cancellationToken);
+
+            await ValidateResponseAsync(response, "v3.1 Upload");
+
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var result = JsonConvert.DeserializeObject<V31UploadResponse>(responseJson);
+
+            _logger?.Log(LogLevel.Info, "v3.1 Upload complete - Migration ID: {0}", result?.MigrationId ?? "N/A");
+
+            return new UploadResult
+            {
+                Success = result?.Success ?? false,
+                MigrationId = result?.MigrationId,
+                Status = result?.Status,
+                IsDuplicate = result?.IsDuplicate ?? false
+            };
+        }
+
+        /// <summary>
+        /// Upload NDJSON bundle (multiple files from NDJSONWriter)
+        /// </summary>
+        public async Task<UploadResult> UploadNDJSONBundleAsync(
+            string outputDirectory,
+            RunManifest manifest,
+            EncryptionManager encryptionManager,
+            string sessionId,
+            QBCompanyInfo companyInfo,
+            CancellationToken cancellationToken = default)
+        {
+            _logger?.Log(LogLevel.Info, "Uploading NDJSON bundle ({0} entities)...", manifest.Entities.Count);
+
+            var bundleFiles = new List<BundleFileEntry>();
+
+            // Collect all NDJSON files
+            foreach (var entity in manifest.Entities)
+            {
+                var filePath = Path.Combine(outputDirectory, entity.FileName);
+                if (File.Exists(filePath))
+                {
+                    var fileBytes = File.ReadAllBytes(filePath);
+                    bundleFiles.Add(new BundleFileEntry
+                    {
+                        FileName = entity.FileName,
+                        EntityType = entity.EntityName,
+                        RecordCount = entity.RecordCount,
+                        ContentBase64 = Convert.ToBase64String(fileBytes),
+                        SHA256 = entity.SHA256
+                    });
+                }
+            }
+
+            // Add manifest, metrics, errors
+            var manifestPath = Path.Combine(outputDirectory, "run_manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                bundleFiles.Add(new BundleFileEntry
+                {
+                    FileName = "run_manifest.json",
+                    EntityType = "_manifest",
+                    ContentBase64 = Convert.ToBase64String(File.ReadAllBytes(manifestPath))
+                });
+            }
+
+            var errorsPath = Path.Combine(outputDirectory, "errors.ndjson");
+            if (File.Exists(errorsPath))
+            {
+                bundleFiles.Add(new BundleFileEntry
+                {
+                    FileName = "errors.ndjson",
+                    EntityType = "_errors",
+                    ContentBase64 = Convert.ToBase64String(File.ReadAllBytes(errorsPath))
+                });
+            }
+
+            // Build bundle payload
+            var payload = new NDJSONBundlePayload
+            {
+                SessionId = sessionId,
+                Format = "ndjson_bundle",
+                Version = "4.3",
+                TotalRecords = manifest.TotalRecords,
+                TotalEntities = manifest.Entities.Count,
+                CompanyFingerprint = manifest.CompanyFingerprint,
+                Files = bundleFiles,
+                CompanyInfo = new V31CompanyInfo
+                {
+                    CompanyName = companyInfo?.CompanyName ?? "Unknown",
+                    QBFileName = companyInfo?.CompanyFile ?? "quickbooks.qbw"
+                }
+            };
+
+            var json = JsonConvert.SerializeObject(payload);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.PostAsync(
+                $"{_serverUrl}/api/upload/ndjson-bundle",
+                content,
+                cancellationToken);
+
+            await ValidateResponseAsync(response, "NDJSON Bundle Upload");
+
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var result = JsonConvert.DeserializeObject<V31UploadResponse>(responseJson);
+
+            _logger?.Log(LogLevel.Info, "NDJSON bundle uploaded - {0} files, {1} records",
+                bundleFiles.Count, manifest.TotalRecords);
+
+            return new UploadResult
+            {
+                Success = result?.Success ?? false,
+                MigrationId = result?.MigrationId,
+                Status = result?.Status
+            };
         }
 
         /// <summary>
@@ -559,5 +730,169 @@ namespace QBDesktopExtractor
         public string Tag { get; set; }
         public string Algorithm { get; set; }
         public string Version { get; set; }
+    }
+
+    // ============================================================================
+    // v3.1 FORMAT CLASSES (matches upload.py _handle_v31_upload)
+    // ============================================================================
+
+    /// <summary>
+    /// v3.1 upload payload structure
+    /// </summary>
+    internal class V31UploadPayload
+    {
+        [JsonProperty("session_id")]
+        public string SessionId { get; set; }
+
+        [JsonProperty("encryption")]
+        public V31EncryptionBlock Encryption { get; set; }
+
+        [JsonProperty("metadata")]
+        public V31Metadata Metadata { get; set; }
+
+        [JsonProperty("company_info")]
+        public V31CompanyInfo CompanyInfo { get; set; }
+    }
+
+    internal class V31EncryptionBlock
+    {
+        [JsonProperty("encrypted_data")]
+        public string EncryptedData { get; set; }
+
+        [JsonProperty("key")]
+        public string Key { get; set; }
+
+        [JsonProperty("encrypted_key")]
+        public string EncryptedKey { get; set; }
+
+        [JsonProperty("is_key_encrypted")]
+        public bool IsKeyEncrypted { get; set; }
+
+        [JsonProperty("iv")]
+        public string IV { get; set; }
+
+        [JsonProperty("tag")]
+        public string Tag { get; set; }
+
+        [JsonProperty("algorithm")]
+        public string Algorithm { get; set; }
+
+        [JsonProperty("version")]
+        public string Version { get; set; }
+    }
+
+    internal class V31Metadata
+    {
+        [JsonProperty("client_version")]
+        public string ClientVersion { get; set; }
+
+        [JsonProperty("data_version")]
+        public string DataVersion { get; set; }
+
+        [JsonProperty("schema_version")]
+        public string SchemaVersion { get; set; }
+
+        [JsonProperty("plaintext_hash")]
+        public string PlaintextHash { get; set; }
+
+        [JsonProperty("plaintext_size_bytes")]
+        public long PlaintextSizeBytes { get; set; }
+
+        [JsonProperty("encrypted_size_bytes")]
+        public long EncryptedSizeBytes { get; set; }
+
+        [JsonProperty("extracted_at")]
+        public string ExtractedAt { get; set; }
+    }
+
+    internal class V31CompanyInfo
+    {
+        [JsonProperty("company_name")]
+        public string CompanyName { get; set; }
+
+        [JsonProperty("qb_file_name")]
+        public string QBFileName { get; set; }
+
+        [JsonProperty("fiscal_year_start")]
+        public int FiscalYearStart { get; set; }
+    }
+
+    internal class V31UploadResponse
+    {
+        [JsonProperty("success")]
+        public bool Success { get; set; }
+
+        [JsonProperty("migration_id")]
+        public string MigrationId { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; }
+
+        [JsonProperty("is_duplicate")]
+        public bool IsDuplicate { get; set; }
+
+        [JsonProperty("message")]
+        public string Message { get; set; }
+    }
+
+    // ============================================================================
+    // NDJSON BUNDLE CLASSES
+    // ============================================================================
+
+    internal class NDJSONBundlePayload
+    {
+        [JsonProperty("session_id")]
+        public string SessionId { get; set; }
+
+        [JsonProperty("format")]
+        public string Format { get; set; }
+
+        [JsonProperty("version")]
+        public string Version { get; set; }
+
+        [JsonProperty("total_records")]
+        public int TotalRecords { get; set; }
+
+        [JsonProperty("total_entities")]
+        public int TotalEntities { get; set; }
+
+        [JsonProperty("company_fingerprint")]
+        public string CompanyFingerprint { get; set; }
+
+        [JsonProperty("files")]
+        public List<BundleFileEntry> Files { get; set; }
+
+        [JsonProperty("company_info")]
+        public V31CompanyInfo CompanyInfo { get; set; }
+    }
+
+    internal class BundleFileEntry
+    {
+        [JsonProperty("file_name")]
+        public string FileName { get; set; }
+
+        [JsonProperty("entity_type")]
+        public string EntityType { get; set; }
+
+        [JsonProperty("record_count")]
+        public int RecordCount { get; set; }
+
+        [JsonProperty("content_base64")]
+        public string ContentBase64 { get; set; }
+
+        [JsonProperty("sha256")]
+        public string SHA256 { get; set; }
+    }
+
+    /// <summary>
+    /// Result of an upload operation
+    /// </summary>
+    public class UploadResult
+    {
+        public bool Success { get; set; }
+        public string MigrationId { get; set; }
+        public string Status { get; set; }
+        public bool IsDuplicate { get; set; }
+        public string ErrorMessage { get; set; }
     }
 }

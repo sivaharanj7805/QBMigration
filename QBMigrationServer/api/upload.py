@@ -477,6 +477,168 @@ def _handle_v31_upload(data, user):
 
 
 # ============================================================================
+# NEW: NDJSON BUNDLE UPLOAD ENDPOINT (v4.3)
+# ============================================================================
+
+@upload_bp.route('/ndjson-bundle', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+def upload_ndjson_bundle():
+    """
+    Upload NDJSON bundle (multiple files from NDJSONWriter)
+    
+    Format:
+        {
+            "session_id": "guid",
+            "format": "ndjson_bundle",
+            "version": "4.3",
+            "total_records": 1000,
+            "total_entities": 55,
+            "company_fingerprint": "sha256...",
+            "files": [
+                {
+                    "file_name": "customers.ndjson",
+                    "entity_type": "Customer",
+                    "record_count": 100,
+                    "content_base64": "...",
+                    "sha256": "..."
+                },
+                ...
+            ],
+            "company_info": {...}
+        }
+    
+    Returns:
+        201: Bundle uploaded successfully
+        400: Invalid input
+        401: Unauthorized
+        500: Server error
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({
+            'success': False,
+            'error': 'Authentication required'
+        }), 401
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'success': False,
+                'error': 'No data provided'
+            }), 400
+        
+        session_id = data.get('session_id', str(uuid.uuid4()))
+        files = data.get('files', [])
+        company_info = data.get('company_info', {})
+        total_records = data.get('total_records', 0)
+        company_fingerprint = data.get('company_fingerprint', '')
+        
+        if not files:
+            return jsonify({
+                'success': False,
+                'error': 'No files in bundle'
+            }), 400
+        
+        # Calculate total size
+        total_size = 0
+        for file_entry in files:
+            content_b64 = file_entry.get('content_base64', '')
+            if content_b64:
+                total_size += len(base64.b64decode(content_b64))
+        
+        # Generate migration ID
+        migration_id = str(uuid.uuid4())
+        
+        logger.info(f"NDJSON bundle upload: {len(files)} files, {total_records} records, "
+                   f"{total_size:,} bytes, session: {session_id}")
+        
+        # Get company name
+        company_name = company_info.get('company_name', 'Unknown Company')
+        
+        # Create migration record
+        migration = Migration(
+            migration_id=migration_id,
+            user_id=current_user.id,
+            company_name=company_name,
+            qb_file_name=company_info.get('qb_file_name', 'ndjson_bundle'),
+            file_hash=company_fingerprint,
+            data_size_bytes=total_size,
+            status='pending'
+        )
+        
+        db.session.add(migration)
+        db.session.commit()
+        
+        # Store bundle in S3
+        try:
+            aws = AWSMigrationManager()
+            
+            # Store each file with entity prefix
+            stored_files = []
+            for file_entry in files:
+                file_name = file_entry.get('file_name', 'unknown.ndjson')
+                content_b64 = file_entry.get('content_base64', '')
+                
+                if content_b64:
+                    content_bytes = base64.b64decode(content_b64)
+                    s3_key = f"migrations/{migration_id}/{file_name}"
+                    
+                    # Upload to S3
+                    result = aws.upload_to_s3(
+                        file_obj=BytesIO(content_bytes),
+                        migration_id=migration_id,
+                        file_name=file_name,
+                        metadata={
+                            'entity_type': file_entry.get('entity_type', 'unknown'),
+                            'record_count': str(file_entry.get('record_count', 0)),
+                            'sha256': file_entry.get('sha256', '')
+                        }
+                    )
+                    
+                    if result:
+                        stored_files.append({
+                            'file_name': file_name,
+                            's3_key': result.get('key'),
+                            'record_count': file_entry.get('record_count', 0)
+                        })
+            
+            # Update migration status
+            migration.status = 'uploaded'
+            migration.s3_uri = f"s3://{aws.bucket_name}/migrations/{migration_id}/"
+            db.session.commit()
+            
+            logger.info(f"✓ NDJSON bundle uploaded: {migration_id}, {len(stored_files)} files")
+            
+            return jsonify({
+                'success': True,
+                'migration_id': migration_id,
+                'status': 'uploaded_ndjson_bundle',
+                'total_files': len(stored_files),
+                'total_records': total_records,
+                'message': 'NDJSON bundle uploaded successfully'
+            }), 201
+            
+        except Exception as e:
+            logger.error(f"S3 upload error for NDJSON bundle {migration_id}: {str(e)}")
+            migration.status = 'failed'
+            migration.error_message = f'Bundle upload error: {str(e)}'
+            db.session.commit()
+            
+            return jsonify({
+                'success': False,
+                'error': 'Failed to upload bundle to secure storage'
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"NDJSON bundle upload error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'An error occurred during bundle upload'
+        }), 500
+
+
+# ============================================================================
 # ORIGINAL STATUS ENDPOINT - UNCHANGED
 # ============================================================================
 

@@ -207,6 +207,11 @@ class Config:
     MAX_PAGE_SIZE = 100
     MAX_OFFSET = 10000
     
+    @staticmethod
+    def init_app(app):
+        """Initialize app - override in subclasses for specific setup"""
+        pass
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""
