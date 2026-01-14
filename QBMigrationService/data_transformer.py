@@ -630,15 +630,80 @@ class QBDataTransformer:
         return name[:100]
     
     def format_date(self, date_value: Any) -> Optional[str]:
-        """Format date as YYYY-MM-DD."""
+        """
+        TESTING REPORT: Enhanced date formatting with auto-detection
+        
+        Supports multiple date formats based on region:
+        - US/CA: MM/DD/YYYY
+        - UK/AU/IN: DD/MM/YYYY
+        - ISO: YYYY-MM-DD (always preferred if detected)
+        
+        Features:
+        - Auto-detection of date format
+        - Validation of date ranges
+        - Region-aware parsing
+        """
         if not date_value:
             return None
+        
         if isinstance(date_value, str):
+            date_value = date_value.strip()
+            
+            # ISO format is always preferred and unambiguous
             if re.match(r'^\d{4}-\d{2}-\d{2}', date_value):
                 return date_value.split('T')[0]
+            
+            # Try auto-detection using config settings
+            try:
+                from . import config
+            except ImportError:
+                import config
+            
+            # Check if auto-detection is enabled
+            if getattr(config, 'DATE_FORMAT_AUTO_DETECT', True):
+                # Try each format in priority order
+                date_formats = getattr(config, 'DATE_FORMATS', [
+                    "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"
+                ])
+                
+                for fmt in date_formats:
+                    try:
+                        from datetime import datetime as dt
+                        parsed = dt.strptime(date_value.split('T')[0].split(' ')[0], fmt)
+                        
+                        # Optional: Validate date range
+                        if getattr(config, 'DATE_VALIDATION_STRICT', False):
+                            current_year = dt.now().year
+                            max_future = getattr(config, 'DATE_FUTURE_MAX_YEARS', 5)
+                            max_past = getattr(config, 'DATE_PAST_MAX_YEARS', 50)
+                            
+                            if parsed.year > current_year + max_future:
+                                continue  # Too far in future, try next format
+                            if parsed.year < current_year - max_past:
+                                continue  # Too far in past, try next format
+                        
+                        return parsed.strftime('%Y-%m-%d')
+                    except ValueError:
+                        continue
+            
+            # Fallback: Try the legacy MM/DD/YYYY parsing
             if re.match(r'^\d{1,2}/\d{1,2}/\d{4}', date_value):
-                m, d, y = date_value.split('/')
-                return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                parts = date_value.split('/')
+                if len(parts) == 3:
+                    # Use region-aware parsing
+                    region = getattr(config, 'REGION', 'US')
+                    if region in ('UK', 'AU', 'IN'):
+                        # DD/MM/YYYY format
+                        d, m, y = parts
+                    else:
+                        # MM/DD/YYYY format (US, CA)
+                        m, d, y = parts
+                    
+                    try:
+                        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                    except:
+                        pass
+        
         return None
     
     def to_decimal(self, value: Any) -> Decimal:

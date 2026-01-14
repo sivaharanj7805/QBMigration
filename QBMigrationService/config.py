@@ -148,6 +148,82 @@ if BCRYPT_ROUNDS < 10:
 TOKEN_REFRESH_BUFFER_SECONDS = get_env_int("TOKEN_REFRESH_BUFFER_SECONDS", 300)  # 5 minutes
 
 # ============================================================================
+# NETWORK TIMEOUT & RETRY CONFIGURATION (HIGH PRIORITY FROM TESTING REPORT)
+# ============================================================================
+
+# Network timeout settings (in seconds)
+# RECOMMENDATION: Make these configurable for different network conditions
+QBO_CONNECT_TIMEOUT = get_env_int("QBO_CONNECT_TIMEOUT", 10)  # Connection establishment timeout
+QBO_READ_TIMEOUT = get_env_int("QBO_READ_TIMEOUT", 30)  # Response read timeout
+QBO_TOTAL_TIMEOUT = get_env_int("QBO_TOTAL_TIMEOUT", 60)  # Total request timeout
+
+# Combined timeout tuple for requests library: (connect_timeout, read_timeout)
+QBO_REQUEST_TIMEOUT = (QBO_CONNECT_TIMEOUT, QBO_READ_TIMEOUT)
+
+# Retry configuration
+RETRY_MAX_ATTEMPTS = get_env_int("RETRY_MAX_ATTEMPTS", 3)
+RETRY_BACKOFF_BASE = get_env_float("RETRY_BACKOFF_BASE", 2.0)  # Exponential backoff base
+RETRY_BACKOFF_MAX = get_env_int("RETRY_BACKOFF_MAX", 60)  # Maximum retry delay in seconds
+RETRY_JITTER = get_env_bool("RETRY_JITTER", "true")  # Add random jitter to prevent thundering herd
+
+# Retryable status codes
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_EXCEPTIONS = ["ConnectionError", "Timeout", "ChunkedEncodingError"]
+
+# ============================================================================
+# CORRELATION ID & ENHANCED LOGGING (MEDIUM PRIORITY FROM TESTING REPORT)
+# ============================================================================
+
+# Enable correlation IDs for distributed tracing
+ENABLE_CORRELATION_IDS = get_env_bool("ENABLE_CORRELATION_IDS", "true")
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+
+# Enhanced logging settings
+LOG_REQUEST_HEADERS = get_env_bool("LOG_REQUEST_HEADERS", "false")  # Security: False by default
+LOG_REQUEST_BODY_SIZE = get_env_int("LOG_REQUEST_BODY_SIZE", 1000)  # Max chars to log
+LOG_RESPONSE_BODY_SIZE = get_env_int("LOG_RESPONSE_BODY_SIZE", 1000)  # Max chars to log
+LOG_INTUIT_TID = get_env_bool("LOG_INTUIT_TID", "true")  # Log Intuit Transaction ID
+
+# Correlation ID format (uuid, timestamp, or custom prefix)
+CORRELATION_ID_FORMAT = os.getenv("CORRELATION_ID_FORMAT", "uuid")
+
+# ============================================================================
+# DATE FORMAT AUTO-DETECTION (MEDIUM PRIORITY FROM TESTING REPORT)
+# ============================================================================
+
+# Date format detection settings
+DATE_FORMAT_AUTO_DETECT = get_env_bool("DATE_FORMAT_AUTO_DETECT", "true")
+
+# Supported date formats by priority (first match wins)
+DATE_FORMATS = [
+    "%Y-%m-%d",       # ISO 8601 (preferred)
+    "%m/%d/%Y",       # US format (MM/DD/YYYY)
+    "%d/%m/%Y",       # UK/EU format (DD/MM/YYYY)
+    "%Y/%m/%d",       # Alternative ISO
+    "%m-%d-%Y",       # US with dashes
+    "%d-%m-%Y",       # UK/EU with dashes
+    "%d.%m.%Y",       # EU with dots
+    "%Y.%m.%d",       # Alternative with dots
+]
+
+# Region-specific default date formats
+REGION_DATE_FORMATS = {
+    "US": "%m/%d/%Y",
+    "CA": "%m/%d/%Y",
+    "UK": "%d/%m/%Y",
+    "AU": "%d/%m/%Y",
+    "IN": "%d/%m/%Y",
+}
+
+# Get default date format based on region
+DEFAULT_DATE_FORMAT = REGION_DATE_FORMATS.get(REGION, "%m/%d/%Y")
+
+# Date validation settings
+DATE_VALIDATION_STRICT = get_env_bool("DATE_VALIDATION_STRICT", "false")
+DATE_FUTURE_MAX_YEARS = get_env_int("DATE_FUTURE_MAX_YEARS", 5)  # Max years in future allowed
+DATE_PAST_MAX_YEARS = get_env_int("DATE_PAST_MAX_YEARS", 50)  # Max years in past allowed
+
+# ============================================================================
 # MIGRATION SETTINGS
 # ============================================================================
 

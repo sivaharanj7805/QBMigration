@@ -6,12 +6,20 @@ import sqlite3
 import os
 import signal
 import sys
+import uuid
+import random
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from decimal import Decimal
 from pathlib import Path
+
+# Import configuration settings (HIGH PRIORITY FROM TESTING REPORT)
+try:
+    from . import config
+except ImportError:
+    import config
 
 logger = logging.getLogger(__name__)
 
@@ -445,9 +453,18 @@ class PremiumQBOClient:
         data: Optional[Dict] = None,
         retries: int = 0,
         oauth_manager: Optional[Any] = None,
-        idempotency_key: Optional[str] = None
+        idempotency_key: Optional[str] = None,
+        correlation_id: Optional[str] = None
     ) -> Dict:
         """
+        ENHANCED: Request with configurable timeout and correlation ID support
+        
+        TESTING REPORT FIXES APPLIED:
+        - HIGH: Configurable network timeout (config.QBO_REQUEST_TIMEOUT)
+        - HIGH: Configurable retry settings (config.RETRY_MAX_ATTEMPTS)
+        - MEDIUM: Correlation ID support for distributed tracing
+        - MEDIUM: Jitter in backoff to prevent thundering herd
+        
         FIX #39: Request timeout
         FIX #313: Honor Retry-After header
         FIX #318: Custom User-Agent
@@ -456,8 +473,16 @@ class PremiumQBOClient:
         """
         self._check_shutdown()
         
+        # TESTING REPORT: Generate or use provided correlation ID
+        if correlation_id is None and getattr(config, 'ENABLE_CORRELATION_IDS', True):
+            correlation_id = str(uuid.uuid4())
+        
         # FIX #17: Per-request headers
         headers = self._get_request_headers(oauth_manager)
+        
+        # TESTING REPORT: Add correlation ID header
+        if correlation_id:
+            headers[config.CORRELATION_ID_HEADER] = correlation_id
         
         # FIX #312: Add idempotency key if provided
         if idempotency_key:
@@ -467,13 +492,17 @@ class PremiumQBOClient:
         
         url = self._build_url(endpoint)
         
+        # TESTING REPORT: Use configurable timeout from config
+        request_timeout = getattr(config, 'QBO_REQUEST_TIMEOUT', (10, 30))
+        max_retries = getattr(config, 'RETRY_MAX_ATTEMPTS', 3)
+        
         try:
             if method == "POST":
-                response = self.session.post(url, headers=headers, json=data, timeout=30)
+                response = self.session.post(url, headers=headers, json=data, timeout=request_timeout)
             elif method == "GET":
-                response = self.session.get(url, headers=headers, timeout=30)
+                response = self.session.get(url, headers=headers, timeout=request_timeout)
             elif method == "DELETE":
-                response = self.session.delete(url, headers=headers, json=data, timeout=30)
+                response = self.session.delete(url, headers=headers, json=data, timeout=request_timeout)
             else:
                 raise ValueError(f"Unsupported method: {method}")
             
@@ -481,6 +510,10 @@ class PremiumQBOClient:
             
             # Log Intuit-TID for support correlation
             intuit_tid = response.headers.get('intuit_tid', 'N/A')
+            
+            # TESTING REPORT: Enhanced logging with correlation ID
+            if getattr(config, 'LOG_INTUIT_TID', True):
+                logger.debug(f"[{correlation_id}] Request {method} {endpoint} - Intuit TID: {intuit_tid}")
             
             # Handle errors
             if response.status_code == 429:
@@ -490,48 +523,48 @@ class PremiumQBOClient:
                     try:
                         wait_time = int(retry_after)
                     except ValueError:
-                        wait_time = 2 ** retries
+                        wait_time = self._calculate_backoff(retries)
                 else:
-                    wait_time = 2 ** retries
+                    wait_time = self._calculate_backoff(retries)
                 
-                if retries < 3:  # MAX_RETRIES
-                    logger.warning(f"Rate limited (429). Waiting {wait_time}s... (TID: {intuit_tid})")
+                if retries < max_retries:
+                    logger.warning(f"[{correlation_id}] Rate limited (429). Waiting {wait_time}s... (TID: {intuit_tid})")
                     time.sleep(wait_time)
-                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
                 else:
-                    raise Exception(f"Max retries exceeded for rate limit (TID: {intuit_tid})")
+                    raise Exception(f"Max retries exceeded for rate limit (TID: {intuit_tid}, CID: {correlation_id})")
             
             elif response.status_code == 401:
                 # FIX #263: Token might be expired, refresh and retry
                 if retries == 0 and oauth_manager:
-                    logger.warning("Token expired (401), refreshing...")
+                    logger.warning(f"[{correlation_id}] Token expired (401), refreshing...")
                     oauth_manager.refresh_access_token()
-                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
                 else:
-                    raise Exception(f"Authentication failed (TID: {intuit_tid})")
+                    raise Exception(f"Authentication failed (TID: {intuit_tid}, CID: {correlation_id})")
             
-            elif response.status_code == 503:
-                if retries < 3:
-                    wait_time = 2 ** retries
-                    logger.warning(f"Server timeout (503). Retry {retries+1}/3 in {wait_time}s... (TID: {intuit_tid})")
+            elif response.status_code in getattr(config, 'RETRYABLE_STATUS_CODES', {503}):
+                if retries < max_retries:
+                    wait_time = self._calculate_backoff(retries)
+                    logger.warning(f"[{correlation_id}] Server error ({response.status_code}). Retry {retries+1}/{max_retries} in {wait_time}s... (TID: {intuit_tid})")
                     time.sleep(wait_time)
-                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
                 else:
-                    raise Exception(f"Max retries exceeded for timeout (TID: {intuit_tid})")
+                    raise Exception(f"Max retries exceeded for server error (TID: {intuit_tid}, CID: {correlation_id})")
             
             elif response.status_code == 500:
                 try:
                     error_body = response.json()
                     if "busy" in str(error_body).lower():
-                        if retries < 3:
-                            logger.warning("QuickBooks is busy, waiting 30s...")
+                        if retries < max_retries:
+                            logger.warning(f"[{correlation_id}] QuickBooks is busy, waiting 30s...")
                             time.sleep(30)
-                            return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                            return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
                 except:
                     pass
                 
                 # FIX #8: Don't log full response (may contain sensitive data)
-                raise Exception(f"QBO server error (500) (TID: {intuit_tid})")
+                raise Exception(f"QBO server error (500) (TID: {intuit_tid}, CID: {correlation_id})")
             
             response.raise_for_status()
             
@@ -550,23 +583,44 @@ class PremiumQBOClient:
             return result
             
         except requests.exceptions.Timeout:
-            if retries < 3:
-                wait_time = 2 ** retries
-                logger.warning(f"Request timeout. Retry {retries+1}/3 in {wait_time}s...")
+            if retries < max_retries:
+                wait_time = self._calculate_backoff(retries)
+                logger.warning(f"[{correlation_id}] Request timeout. Retry {retries+1}/{max_retries} in {wait_time}s...")
                 time.sleep(wait_time)
-                return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
             else:
-                logger.error(f"Request timed out after 3 retries")
+                logger.error(f"[{correlation_id}] Request timed out after {max_retries} retries")
                 raise
         except requests.exceptions.RequestException as e:
-            if retries < 3:
-                wait_time = 2 ** retries
-                logger.warning(f"Request error. Retry {retries+1}/3 in {wait_time}s...")
+            if retries < max_retries:
+                wait_time = self._calculate_backoff(retries)
+                logger.warning(f"[{correlation_id}] Request error. Retry {retries+1}/{max_retries} in {wait_time}s...")
                 time.sleep(wait_time)
-                return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key)
+                return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
             else:
-                logger.error(f"Request failed after 3 retries")
+                logger.error(f"[{correlation_id}] Request failed after {max_retries} retries")
                 raise
+    
+    def _calculate_backoff(self, retries: int) -> float:
+        """
+        TESTING REPORT: Calculate retry backoff with optional jitter
+        
+        Implements exponential backoff with optional random jitter to prevent
+        thundering herd problems when multiple clients retry simultaneously.
+        """
+        base = getattr(config, 'RETRY_BACKOFF_BASE', 2.0)
+        max_backoff = getattr(config, 'RETRY_BACKOFF_MAX', 60)
+        use_jitter = getattr(config, 'RETRY_JITTER', True)
+        
+        # Exponential backoff: base^retries
+        wait_time = min(base ** retries, max_backoff)
+        
+        # Add random jitter (±25%) to prevent thundering herd
+        if use_jitter:
+            jitter = wait_time * 0.25 * (random.random() * 2 - 1)
+            wait_time = max(0.1, wait_time + jitter)
+        
+        return round(wait_time, 2)
     
     def delete_entity(
         self,
