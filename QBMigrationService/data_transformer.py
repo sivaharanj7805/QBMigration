@@ -944,741 +944,729 @@ class QBDataTransformer:
         if addr.get('PostalCode'): qbo_addr['PostalCode'] = addr['PostalCode'][:30]
         if addr.get('Country'): qbo_addr['Country'] = addr['Country'][:255]
         return qbo_addr
-"""
-QB Data Transformer - Part 2: Remaining Entity Methods
-=======================================================
 
-This file extends the QBDataTransformer class with methods for:
-- Batch 2: Estimate, Invoice, Item, CustomerType, Department, etc. (10 entities)
-- Batch 3: Payment, Purchase, PurchaseOrder, etc. (5 entities)
-- Batch 4: SalesReceipt, Vendor, Tax entities, Term, etc. (6 entities)
-- Batch 5: VendorCredit (1 entity)
+    # BATCH 2 METHODS (10 entities)
 
-Add these methods to the QBDataTransformer class in data_transformer.py
-"""
-
-# BATCH 2 METHODS (10 entities)
-
-def transform_estimate(self, qbd: Dict) -> Dict:
-    """Transform Estimate."""
-    qbo = {
-        'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('RefNumber'):
-        qbo['DocNumber'] = qbd['RefNumber']
-    
-    for line in qbd.get('EstimateLines', []):
-        qbo['Line'].append({
-            'DetailType': 'SalesItemLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'SalesItemLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'Qty': self.to_decimal(line.get('Quantity', 1)),
-                'UnitPrice': self.to_decimal(line.get('Rate', 0))
-            }
-        })
-    
-    return qbo
-
-
-def transform_invoice(self, qbd: Dict) -> Dict:
-    """Transform Invoice - CRITICAL METHOD."""
-    qbo = {
-        'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('RefNumber'):
-        qbo['DocNumber'] = qbd['RefNumber']
-    
-    if qbd.get('DueDate'):
-        qbo['DueDate'] = self.format_date(qbd['DueDate'])
-    
-    if qbd.get('TermRef'):
-        qbo['SalesTermRef'] = {'value': self.map_id('terms', qbd['TermRef'])}
-    
-    if qbd.get('Memo'):
-        qbo['PrivateNote'] = qbd['Memo'][:4000]
-    
-    # Transform lines
-    for line in qbd.get('InvoiceLines', []):
-        qbo_line = {
-            'DetailType': 'SalesItemLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'SalesItemLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'Qty': self.to_decimal(line.get('Quantity', 1)),
-                'UnitPrice': self.to_decimal(line.get('Rate', 0)),
-                'TaxCodeRef': {'value': self.map_id('tax_codes', line.get('TaxCodeRef')) or 'NON'}
-            }
+    def transform_estimate(self, qbd: Dict) -> Dict:
+        """Transform Estimate."""
+        qbo = {
+            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
         }
-        
-        if line.get('Description'):
-            qbo_line['Description'] = line['Description'][:4000]
-        
-        qbo['Line'].append(qbo_line)
     
-    return qbo
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber']
+    
+        for line in qbd.get('EstimateLines', []):
+            qbo['Line'].append({
+                'DetailType': 'SalesItemLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'SalesItemLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'Qty': self.to_decimal(line.get('Quantity', 1)),
+                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                }
+            })
+    
+        return qbo
 
 
-def transform_item(self, qbd: Dict) -> Dict:
-    """Transform Item - Handles 8 different types!"""
-    item_type = qbd.get('ItemType', 'Service')
+    def transform_invoice(self, qbd: Dict) -> Dict:
+        """Transform Invoice - CRITICAL METHOD."""
+        qbo = {
+            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
     
-    # Item type mapping
-    type_map = {
-        'ItemInventory': 'Inventory',
-        'ItemService': 'Service',
-        'ItemNonInventory': 'NonInventory',
-        'ItemInventoryAssembly': 'Inventory',  # Special handling
-        'ItemGroup': 'Bundle',
-        'ItemDiscount': 'Service',
-        'ItemFixedAsset': 'NonInventory'
-    }
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber']
     
-    qbo_type = type_map.get(item_type)
-    if not qbo_type:
-        return None  # Skip unsupported types
+        if qbd.get('DueDate'):
+            qbo['DueDate'] = self.format_date(qbd['DueDate'])
     
-    # Special handling for Assembly
-    if item_type == 'ItemInventoryAssembly':
-        return self._transform_assembly(qbd)
+        if qbd.get('TermRef'):
+            qbo['SalesTermRef'] = {'value': self.map_id('terms', qbd['TermRef'])}
     
-    qbo = {
-        'Name': self.ensure_unique_display_name(qbd.get('Name', 'Item'), 'item'),
-        'Type': qbo_type,
-        'Active': qbd.get('IsActive', True)
-    }
+        if qbd.get('Memo'):
+            qbo['PrivateNote'] = qbd['Memo'][:4000]
     
-    if qbd.get('Description'):
-        qbo['Description'] = qbd['Description'][:4000]
-    
-    if qbd.get('UnitPrice'):
-        qbo['UnitPrice'] = self.to_decimal(qbd['UnitPrice'])
-    
-    if qbo_type == 'Inventory':
-        qbo['TrackQtyOnHand'] = True
-        qbo['QtyOnHand'] = self.to_decimal(qbd.get('QuantityOnHand', 0))
-        qbo['InvStartDate'] = self.format_date(qbd.get('AsOfDate'))
+        # Transform lines
+        for line in qbd.get('InvoiceLines', []):
+            qbo_line = {
+                'DetailType': 'SalesItemLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'SalesItemLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'Qty': self.to_decimal(line.get('Quantity', 1)),
+                    'UnitPrice': self.to_decimal(line.get('Rate', 0)),
+                    'TaxCodeRef': {'value': self.map_id('tax_codes', line.get('TaxCodeRef')) or 'NON'}
+                }
+            }
         
-        if qbd.get('AssetAccountRef'):
-            qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
+            if line.get('Description'):
+                qbo_line['Description'] = line['Description'][:4000]
+        
+            qbo['Line'].append(qbo_line)
+    
+        return qbo
+
+
+    def transform_item(self, qbd: Dict) -> Dict:
+        """Transform Item - Handles 8 different types!"""
+        item_type = qbd.get('ItemType', 'Service')
+    
+        # Item type mapping
+        type_map = {
+            'ItemInventory': 'Inventory',
+            'ItemService': 'Service',
+            'ItemNonInventory': 'NonInventory',
+            'ItemInventoryAssembly': 'Inventory',  # Special handling
+            'ItemGroup': 'Bundle',
+            'ItemDiscount': 'Service',
+            'ItemFixedAsset': 'NonInventory'
+        }
+    
+        qbo_type = type_map.get(item_type)
+        if not qbo_type:
+            return None  # Skip unsupported types
+    
+        # Special handling for Assembly
+        if item_type == 'ItemInventoryAssembly':
+            return self._transform_assembly(qbd)
+    
+        qbo = {
+            'Name': self.ensure_unique_display_name(qbd.get('Name', 'Item'), 'item'),
+            'Type': qbo_type,
+            'Active': qbd.get('IsActive', True)
+        }
+    
+        if qbd.get('Description'):
+            qbo['Description'] = qbd['Description'][:4000]
+    
+        if qbd.get('UnitPrice'):
+            qbo['UnitPrice'] = self.to_decimal(qbd['UnitPrice'])
+    
+        if qbo_type == 'Inventory':
+            qbo['TrackQtyOnHand'] = True
+            qbo['QtyOnHand'] = self.to_decimal(qbd.get('QuantityOnHand', 0))
+            qbo['InvStartDate'] = self.format_date(qbd.get('AsOfDate'))
+        
+            if qbd.get('AssetAccountRef'):
+                qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
+            if qbd.get('IncomeAccountRef'):
+                qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
+            if qbd.get('ExpenseAccountRef'):
+                qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['ExpenseAccountRef'])}
+    
+        return qbo
+
+
+    def _transform_assembly(self, qbd: Dict) -> Dict:
+        """
+        $25M FIX: Transform QBDT Assembly to QBO Bundle (FUNCTIONAL)
+    
+        QBO Bundle Structure:
+            - Bundle is a "package" of other items
+            - When sold, automatically depletes component inventory
+            - COGS calculated automatically from components
+        """
+        assembly_name = qbd.get('Name', 'Assembly')
+        bom_components = qbd.get('Components', [])
+    
+        if not bom_components:
+            self.stats['warnings'].append(
+                f"Assembly '{assembly_name}' has no components - converting to Service item"
+            )
+            return self._assembly_fallback_to_service(qbd)
+    
+        # Create bundle lines
+        bundle_lines = []
+        missing_components = []
+    
+        for component in bom_components:
+            component_ref = component.get('ItemRef') or component.get('ItemName')
+            quantity = float(component.get('Quantity', 1.0))
+        
+            # Map to QBO item ID
+            qbo_item_id = self.id_mapping['items'].get(component_ref)
+        
+            if not qbo_item_id:
+                missing_components.append({
+                    'assembly': assembly_name,
+                    'missing_component': component_ref,
+                    'quantity': quantity
+                })
+                continue
+        
+            bundle_lines.append({
+                'DetailType': 'ItemBundleLineDetail',
+                'Amount': 0,
+                'ItemBundleLineDetail': {
+                    'ItemRef': {'value': qbo_item_id},
+                    'Quantity': quantity,
+                    'UnitPrice': 0
+                }
+            })
+    
+        # Handle missing components
+        if missing_components:
+            self.manual_review.append({
+                'type': 'ASSEMBLY_MISSING_COMPONENTS',
+                'assembly': assembly_name,
+                'missing_components': missing_components,
+                'action_required': 'Create missing component items in QBO'
+            })
+            return self._assembly_fallback_to_service(qbd)
+    
+        # Create QBO Bundle
+        qbo = {
+            'Name': self.ensure_unique_display_name(assembly_name, 'item'),
+            'Type': 'Bundle',
+            'Active': qbd.get('IsActive', True),
+            'Taxable': qbd.get('IsTaxable', False),
+            'TrackQtyOnHand': qbd.get('TrackQuantity', False),
+            'Line': bundle_lines
+        }
+    
+        if qbd.get('Description'):
+            qbo['Description'] = qbd['Description'][:4000]
+    
         if qbd.get('IncomeAccountRef'):
             qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
-        if qbd.get('ExpenseAccountRef'):
-            qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['ExpenseAccountRef'])}
     
-    return qbo
-
-
-def _transform_assembly(self, qbd: Dict) -> Dict:
-    """
-    $25M FIX: Transform QBDT Assembly to QBO Bundle (FUNCTIONAL)
+        if qbd.get('COGSAccountRef'):
+            qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['COGSAccountRef'])}
     
-    QBO Bundle Structure:
-        - Bundle is a "package" of other items
-        - When sold, automatically depletes component inventory
-        - COGS calculated automatically from components
-    """
-    assembly_name = qbd.get('Name', 'Assembly')
-    bom_components = qbd.get('Components', [])
+        if qbd.get('AssetAccountRef'):
+            qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
     
-    if not bom_components:
-        self.stats['warnings'].append(
-            f"Assembly '{assembly_name}' has no components - converting to Service item"
-        )
-        return self._assembly_fallback_to_service(qbd)
-    
-    # Create bundle lines
-    bundle_lines = []
-    missing_components = []
-    
-    for component in bom_components:
-        component_ref = component.get('ItemRef') or component.get('ItemName')
-        quantity = float(component.get('Quantity', 1.0))
-        
-        # Map to QBO item ID
-        qbo_item_id = self.id_mapping['items'].get(component_ref)
-        
-        if not qbo_item_id:
-            missing_components.append({
-                'assembly': assembly_name,
-                'missing_component': component_ref,
-                'quantity': quantity
-            })
-            continue
-        
-        bundle_lines.append({
-            'DetailType': 'ItemBundleLineDetail',
-            'Amount': 0,
-            'ItemBundleLineDetail': {
-                'ItemRef': {'value': qbo_item_id},
-                'Quantity': quantity,
-                'UnitPrice': 0
-            }
-        })
-    
-    # Handle missing components
-    if missing_components:
-        self.manual_review.append({
-            'type': 'ASSEMBLY_MISSING_COMPONENTS',
-            'assembly': assembly_name,
-            'missing_components': missing_components,
-            'action_required': 'Create missing component items in QBO'
-        })
-        return self._assembly_fallback_to_service(qbd)
-    
-    # Create QBO Bundle
-    qbo = {
-        'Name': self.ensure_unique_display_name(assembly_name, 'item'),
-        'Type': 'Bundle',
-        'Active': qbd.get('IsActive', True),
-        'Taxable': qbd.get('IsTaxable', False),
-        'TrackQtyOnHand': qbd.get('TrackQuantity', False),
-        'Line': bundle_lines
-    }
-    
-    if qbd.get('Description'):
-        qbo['Description'] = qbd['Description'][:4000]
-    
-    if qbd.get('IncomeAccountRef'):
-        qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
-    
-    if qbd.get('COGSAccountRef'):
-        qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['COGSAccountRef'])}
-    
-    if qbd.get('AssetAccountRef'):
-        qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
-    
-    if qbd.get('SalesPrice'):
-        qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
-        qbo['PrintGroupedItems'] = False
-    else:
-        qbo['PrintGroupedItems'] = True
-    
-    return qbo
-
-
-def _assembly_fallback_to_service(self, qbd: Dict) -> Dict:
-    """Fallback: Convert Assembly to Service with detailed notes"""
-    assembly_name = qbd.get('Name', 'Assembly')
-    
-    notes = []
-    notes.append(f"⚠️  CONVERTED FROM ASSEMBLY: {assembly_name}")
-    notes.append("ORIGINAL BILL OF MATERIALS:")
-    
-    for component in qbd.get('Components', []):
-        comp_name = component.get('ItemRef') or component.get('ItemName', 'Unknown')
-        quantity = component.get('Quantity', 1)
-        notes.append(f"  • {quantity}x {comp_name}")
-    
-    notes.append("\nACTION REQUIRED:")
-    notes.append("1. Create component items in QBO")
-    notes.append("2. Convert to Bundle")
-    
-    description = "\n".join(notes)[:4000]
-    
-    qbo = {
-        'Name': self.ensure_unique_display_name(assembly_name + ' (NEEDS BUNDLE)', 'item'),
-        'Type': 'Service',
-        'Active': qbd.get('IsActive', True),
-        'Description': description,
-        'Taxable': qbd.get('IsTaxable', False)
-    }
-    
-    if qbd.get('SalesPrice'):
-        qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
-    
-    if qbd.get('IncomeAccountRef'):
-        qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
-    
-    self.manual_review.append({
-        'type': 'ASSEMBLY_CONVERTED_TO_SERVICE',
-        'priority': 'HIGH',
-        'assembly': assembly_name,
-        'action_required': 'Convert to Bundle after creating components'
-    })
-    
-    return qbo
-
-
-def transform_customertype(self, qbd: Dict) -> Dict:
-    """Transform CustomerType."""
-    return {
-        'Name': self.sanitize_name(qbd.get('Name', 'Type')),
-        'Active': qbd.get('IsActive', True)
-    }
-
-
-def transform_department(self, qbd: Dict) -> Dict:
-    """Transform Department."""
-    qbo = {
-        'Name': self.sanitize_name(qbd.get('Name', 'Department')),
-        'Active': qbd.get('IsActive', True)
-    }
-    
-    if qbd.get('ParentRef'):
-        qbo['ParentRef'] = {'value': self.map_id('departments', qbd['ParentRef'])}
-        qbo['SubDepartment'] = True
-    
-    return qbo
-
-
-def transform_deposit(self, qbd: Dict) -> Dict:
-    """Transform Deposit."""
-    qbo = {
-        'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    for line in qbd.get('DepositLines', []):
-        qbo_line = {
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'DetailType': 'DepositLineDetail',
-            'DepositLineDetail': {
-                'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-            }
-        }
-        
-        if line.get('LinkedTxn'):
-            qbo_line['LinkedTxn'] = [{
-                'TxnId': self.map_id('payments', line['LinkedTxn'].get('TxnId')),
-                'TxnType': 'Payment'
-            }]
-        
-        qbo['Line'].append(qbo_line)
-    
-    return qbo
-
-
-def transform_employee(self, qbd: Dict) -> Dict:
-    """Transform Employee."""
-    qbo = {
-        'DisplayName': self.ensure_unique_display_name(
-            qbd.get('Name', 'Employee'), 'employee'
-        ),
-        'Active': qbd.get('IsActive', True)
-    }
-    
-    if qbd.get('FirstName'):
-        qbo['GivenName'] = qbd['FirstName'][:25]
-    if qbd.get('LastName'):
-        qbo['FamilyName'] = qbd['LastName'][:25]
-    
-    if qbd.get('Email'):
-        qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
-    
-    if qbd.get('Phone'):
-        qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
-    
-    # SSN - WILL BE MASKED in response
-    if qbd.get('SSN'):
-        qbo['SSN'] = qbd['SSN']  # Will show as XXX-XX-XXXX
-    
-    return qbo
-
-
-def transform_inventoryadjustment(self, qbd: Dict) -> Dict:
-    """Transform InventoryAdjustment."""
-    qbo = {
-        'AdjustAccountRef': {'value': self.map_id('accounts', qbd.get('AdjustAccountRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    for line in qbd.get('AdjustmentLines', []):
-        qbo['Line'].append({
-            'DetailType': 'ItemAdjustmentLineDetail',
-            'ItemAdjustmentLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'QtyDiff': self.to_decimal(line.get('QuantityDifference', 0))
-            }
-        })
-    
-    return qbo
-
-
-def transform_journalcode(self, qbd: Dict) -> Dict:
-    """Transform JournalCode (France only)."""
-    if self.region != 'FR':
-        return None
-    
-    return {
-        'Name': self.sanitize_name(qbd.get('Name', 'Code')),
-        'Type': qbd.get('Type', 'Sales'),
-        'Active': qbd.get('IsActive', True)
-    }
-
-
-def transform_journalentry(self, qbd: Dict) -> Dict:
-    """Transform JournalEntry with balance validation."""
-    qbo = {
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('RefNumber'):
-        qbo['DocNumber'] = qbd['RefNumber']
-    
-    debit_total = Decimal('0')
-    credit_total = Decimal('0')
-    
-    for line in qbd.get('JournalEntryLines', []):
-        amount = self.to_decimal(line.get('Amount', 0))
-        posting_type = line.get('PostingType', 'Debit')
-        
-        qbo_line = {
-            'Amount': amount,
-            'DetailType': 'JournalEntryLineDetail',
-            'JournalEntryLineDetail': {
-                'PostingType': posting_type,
-                'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-            }
-        }
-        
-        if line.get('Description'):
-            qbo_line['Description'] = line['Description'][:4000]
-        
-        qbo['Line'].append(qbo_line)
-        
-        if posting_type == 'Debit':
-            debit_total += amount
+        if qbd.get('SalesPrice'):
+            qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
+            qbo['PrintGroupedItems'] = False
         else:
-            credit_total += amount
+            qbo['PrintGroupedItems'] = True
     
-    # Validate balance
-    if abs(debit_total - credit_total) > Decimal('0.01'):
-        self.stats['warnings'].append({
-            'entity': 'JournalEntry',
-            'warning': f'Journal entry out of balance: Debits={debit_total}, Credits={credit_total}'
-        })
-    
-    return qbo
+        return qbo
 
 
-# BATCH 3 METHODS (5 entities)
-
-def transform_payment(self, qbd: Dict) -> Dict:
-    """Transform Payment (ReceivePayment) - CRITICAL!"""
-    qbo = {
-        'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
-        'TotalAmt': self.to_decimal(qbd.get('TotalAmount', 0)),
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
+    def _assembly_fallback_to_service(self, qbd: Dict) -> Dict:
+        """Fallback: Convert Assembly to Service with detailed notes"""
+        assembly_name = qbd.get('Name', 'Assembly')
     
-    if qbd.get('RefNumber'):
-        qbo['PaymentRefNum'] = qbd['RefNumber']
+        notes = []
+        notes.append(f"⚠️  CONVERTED FROM ASSEMBLY: {assembly_name}")
+        notes.append("ORIGINAL BILL OF MATERIALS:")
     
-    if qbd.get('PaymentMethodRef'):
-        qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
+        for component in qbd.get('Components', []):
+            comp_name = component.get('ItemRef') or component.get('ItemName', 'Unknown')
+            quantity = component.get('Quantity', 1)
+            notes.append(f"  • {quantity}x {comp_name}")
     
-    if qbd.get('DepositToAccountRef'):
-        qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
+        notes.append("\nACTION REQUIRED:")
+        notes.append("1. Create component items in QBO")
+        notes.append("2. Convert to Bundle")
     
-    # Transform applied transactions
-    for applied in qbd.get('AppliedToInvoices', []):
-        qbo['Line'].append({
-            'Amount': self.to_decimal(applied.get('Amount', 0)),
-            'LinkedTxn': [{
-                'TxnId': self.map_id('invoices', applied.get('InvoiceRef')),
-                'TxnType': 'Invoice'
-            }]
-        })
+        description = "\n".join(notes)[:4000]
     
-    return qbo
-
-
-def transform_purchase(self, qbd: Dict) -> Dict:
-    """Transform Purchase."""
-    qbo = {
-        'PaymentType': qbd.get('PaymentType', 'Cash'),
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('AccountRef'):
-        qbo['AccountRef'] = {'value': self.map_id('accounts', qbd['AccountRef'])}
-    
-    if qbd.get('VendorRef'):
-        qbo['EntityRef'] = {
-            'Type': 'Vendor',
-            'value': self.map_id('vendors', qbd['VendorRef'])
+        qbo = {
+            'Name': self.ensure_unique_display_name(assembly_name + ' (NEEDS BUNDLE)', 'item'),
+            'Type': 'Service',
+            'Active': qbd.get('IsActive', True),
+            'Description': description,
+            'Taxable': qbd.get('IsTaxable', False)
         }
     
-    for line in qbd.get('ExpenseLines', []):
-        qbo['Line'].append({
-            'DetailType': 'AccountBasedExpenseLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'AccountBasedExpenseLineDetail': {
-                'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-            }
+        if qbd.get('SalesPrice'):
+            qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
+    
+        if qbd.get('IncomeAccountRef'):
+            qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
+    
+        self.manual_review.append({
+            'type': 'ASSEMBLY_CONVERTED_TO_SERVICE',
+            'priority': 'HIGH',
+            'assembly': assembly_name,
+            'action_required': 'Convert to Bundle after creating components'
         })
     
-    return qbo
+        return qbo
 
 
-def transform_purchaseorder(self, qbd: Dict) -> Dict:
-    """Transform PurchaseOrder."""
-    qbo = {
-        'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('DueDate'):
-        qbo['DueDate'] = self.format_date(qbd['DueDate'])
-    
-    for line in qbd.get('POLines', []):
-        qbo['Line'].append({
-            'DetailType': 'ItemBasedExpenseLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'ItemBasedExpenseLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'Qty': self.to_decimal(line.get('Quantity', 1)),
-                'UnitPrice': self.to_decimal(line.get('Rate', 0))
-            }
-        })
-    
-    return qbo
+    def transform_customertype(self, qbd: Dict) -> Dict:
+        """Transform CustomerType."""
+        return {
+            'Name': self.sanitize_name(qbd.get('Name', 'Type')),
+            'Active': qbd.get('IsActive', True)
+        }
 
 
-def transform_paymentmethod(self, qbd: Dict) -> Optional[Dict]:
-    """Transform PaymentMethod (skip defaults)."""
-    name = qbd.get('Name', '').lower()
-    
-    # Skip default QB Online methods
-    if name in {'cash', 'check', 'visa', 'mastercard', 'american express', 'discover'}:
-        return None
-    
-    return {
-        'Name': self.sanitize_name(qbd.get('Name', 'Payment')),
-        'Active': qbd.get('IsActive', True)
-    }
-
-
-def transform_refundreceipt(self, qbd: Dict) -> Dict:
-    """Transform RefundReceipt."""
-    qbo = {
-        'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
-        'Line': []
-    }
-    
-    for line in qbd.get('RefundLines', []):
-        qbo['Line'].append({
-            'DetailType': 'SalesItemLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),  # Usually negative
-            'SalesItemLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'Qty': self.to_decimal(line.get('Quantity', -1)),
-                'UnitPrice': self.to_decimal(line.get('Rate', 0))
-            }
-        })
-    
-    return qbo
-
-
-# BATCH 4 METHODS (6 entities)
-
-def transform_salesreceipt(self, qbd: Dict) -> Dict:
-    """Transform SalesReceipt - CRITICAL for cash sales!"""
-    qbo = {
-        'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('PaymentMethodRef'):
-        qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
-    
-    if qbd.get('DepositToAccountRef'):
-        qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
-    
-    for line in qbd.get('SalesReceiptLines', []):
-        qbo['Line'].append({
-            'DetailType': 'SalesItemLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'SalesItemLineDetail': {
-                'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                'Qty': self.to_decimal(line.get('Quantity', 1)),
-                'UnitPrice': self.to_decimal(line.get('Rate', 0))
-            }
-        })
-    
-    return qbo
-
-
-def transform_vendor(self, qbd: Dict) -> Dict:
-    """Transform Vendor."""
-    qbo = {
-        'DisplayName': self.ensure_unique_display_name(qbd.get('Name', 'Vendor'), 'vendor'),
-        'Active': qbd.get('IsActive', True)
-    }
-    
-    if qbd.get('CompanyName'):
-        qbo['CompanyName'] = qbd['CompanyName'][:100]
-    
-    if qbd.get('FirstName'):
-        qbo['GivenName'] = qbd['FirstName'][:25]
-    if qbd.get('LastName'):
-        qbo['FamilyName'] = qbd['LastName'][:25]
-    
-    if qbd.get('Email'):
-        qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
-    
-    if qbd.get('Phone'):
-        qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
-    
-    if qbd.get('Address'):
-        qbo['BillAddr'] = self._transform_address(qbd['Address'])
-    
-    if qbd.get('Is1099'):
-        qbo['Vendor1099'] = True
-    
-    return qbo
-
-
-def transform_taxagency(self, qbd: Dict) -> Dict:
-    """Transform TaxAgency."""
-    return {
-        'DisplayName': self.sanitize_name(qbd.get('Name', 'Tax Agency'))
-    }
-
-
-def transform_taxcode(self, qbd: Dict) -> Optional[Dict]:
-    """Transform TaxCode (skip defaults)."""
-    name = qbd.get('Name', '').upper()
-    
-    # Skip default codes
-    if name in {'TAX', 'NON'}:
-        return None
-    
-    qbo = {
-        'Name': self.sanitize_name(qbd.get('Name', 'Tax')),
-        'Taxable': qbd.get('IsTaxable', True)
-    }
-    
-    if qbd.get('TaxRates'):
-        qbo['SalesTaxRateList'] = {
-            'TaxRateDetail': [
-                {'TaxRateRef': {'value': self.map_id('tax_rates', rate)}}
-                for rate in qbd['TaxRates']
-            ]
+    def transform_department(self, qbd: Dict) -> Dict:
+        """Transform Department."""
+        qbo = {
+            'Name': self.sanitize_name(qbd.get('Name', 'Department')),
+            'Active': qbd.get('IsActive', True)
         }
     
-    return qbo
+        if qbd.get('ParentRef'):
+            qbo['ParentRef'] = {'value': self.map_id('departments', qbd['ParentRef'])}
+            qbo['SubDepartment'] = True
+    
+        return qbo
 
 
-def transform_taxrate(self, qbd: Dict) -> Dict:
-    """Transform TaxRate."""
-    return {
-        'Name': self.sanitize_name(qbd.get('Name', 'Tax Rate')),
-        'RateValue': self.to_decimal(qbd.get('Rate', 0)),
-        'AgencyRef': {'value': self.map_id('tax_agencies', qbd.get('AgencyRef'))},
-        'Active': qbd.get('IsActive', True)
-    }
-
-
-def transform_term(self, qbd: Dict) -> Optional[Dict]:
-    """Transform Term (skip defaults)."""
-    name = qbd.get('Name', '').lower()
+    def transform_deposit(self, qbd: Dict) -> Dict:
+        """Transform Deposit."""
+        qbo = {
+            'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
     
-    # Skip default terms
-    if name in {'due on receipt', 'net 15', 'net 30', 'net 60'}:
-        return None
-    
-    qbo = {
-        'Name': self.sanitize_name(qbd.get('Name', 'Terms')),
-        'Active': qbd.get('IsActive', True)
-    }
-    
-    if qbd.get('DueDays') is not None:
-        qbo['DueDays'] = int(qbd['DueDays'])
-        qbo['Type'] = 'STANDARD'
-    
-    if qbd.get('DiscountDays') is not None:
-        qbo['DiscountDays'] = int(qbd['DiscountDays'])
-    
-    if qbd.get('DiscountPercent') is not None:
-        qbo['DiscountPercent'] = self.to_decimal(qbd['DiscountPercent'])
-    
-    return qbo
-
-
-def transform_timeactivity(self, qbd: Dict) -> Dict:
-    """Transform TimeActivity."""
-    qbo = {
-        'NameOf': qbd.get('NameOf', 'Employee'),
-        'TxnDate': self.format_date(qbd.get('TxnDate'))
-    }
-    
-    if qbo['NameOf'] == 'Employee':
-        qbo['EmployeeRef'] = {'value': self.map_id('employees', qbd.get('EmployeeRef'))}
-    else:
-        qbo['VendorRef'] = {'value': self.map_id('vendors', qbd.get('VendorRef'))}
-    
-    if qbd.get('Hours'):
-        qbo['Hours'] = int(qbd['Hours'])
-    if qbd.get('Minutes'):
-        qbo['Minutes'] = int(qbd['Minutes'])
-    
-    if qbd.get('CustomerRef'):
-        qbo['CustomerRef'] = {'value': self.map_id('customers', qbd['CustomerRef'])}
-    
-    if qbd.get('ItemRef'):
-        qbo['ItemRef'] = {'value': self.map_id('items', qbd['ItemRef'])}
-    
-    qbo['BillableStatus'] = qbd.get('BillableStatus', 'NotBillable')
-    
-    return qbo
-
-
-def transform_transfer(self, qbd: Dict) -> Dict:
-    """Transform Transfer."""
-    return {
-        'FromAccountRef': {'value': self.map_id('accounts', qbd.get('FromAccountRef'))},
-        'ToAccountRef': {'value': self.map_id('accounts', qbd.get('ToAccountRef'))},
-        'Amount': self.to_decimal(qbd.get('Amount', 0)),
-        'TxnDate': self.format_date(qbd.get('TxnDate'))
-    }
-
-
-def transform_taxpayment(self, qbd: Dict) -> Dict:
-    """Transform TaxPayment."""
-    return {
-        'PaymentAccountRef': {'value': self.map_id('accounts', qbd.get('PaymentAccountRef'))},
-        'PaymentAmount': self.to_decimal(qbd.get('PaymentAmount', 0)),
-        'PaymentDate': self.format_date(qbd.get('PaymentDate'))
-    }
-
-
-# BATCH 5 METHOD (1 entity)
-
-def transform_vendorcredit(self, qbd: Dict) -> Dict:
-    """Transform VendorCredit."""
-    qbo = {
-        'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
-        'TxnDate': self.format_date(qbd.get('TxnDate')),
-        'Line': []
-    }
-    
-    if qbd.get('APAccountRef'):
-        qbo['APAccountRef'] = {'value': self.map_id('accounts', qbd['APAccountRef'])}
-    
-    for line in qbd.get('ExpenseLines', []):
-        qbo['Line'].append({
-            'DetailType': 'AccountBasedExpenseLineDetail',
-            'Amount': self.to_decimal(line.get('Amount', 0)),
-            'AccountBasedExpenseLineDetail': {
-                'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+        for line in qbd.get('DepositLines', []):
+            qbo_line = {
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'DetailType': 'DepositLineDetail',
+                'DepositLineDetail': {
+                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+                }
             }
-        })
+        
+            if line.get('LinkedTxn'):
+                qbo_line['LinkedTxn'] = [{
+                    'TxnId': self.map_id('payments', line['LinkedTxn'].get('TxnId')),
+                    'TxnType': 'Payment'
+                }]
+        
+            qbo['Line'].append(qbo_line)
     
-    return qbo
+        return qbo
+
+
+    def transform_employee(self, qbd: Dict) -> Dict:
+        """Transform Employee."""
+        qbo = {
+            'DisplayName': self.ensure_unique_display_name(
+                qbd.get('Name', 'Employee'), 'employee'
+            ),
+            'Active': qbd.get('IsActive', True)
+        }
+    
+        if qbd.get('FirstName'):
+            qbo['GivenName'] = qbd['FirstName'][:25]
+        if qbd.get('LastName'):
+            qbo['FamilyName'] = qbd['LastName'][:25]
+    
+        if qbd.get('Email'):
+            qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
+    
+        if qbd.get('Phone'):
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
+    
+        # SSN - WILL BE MASKED in response
+        if qbd.get('SSN'):
+            qbo['SSN'] = qbd['SSN']  # Will show as XXX-XX-XXXX
+    
+        return qbo
+
+
+    def transform_inventoryadjustment(self, qbd: Dict) -> Dict:
+        """Transform InventoryAdjustment."""
+        qbo = {
+            'AdjustAccountRef': {'value': self.map_id('accounts', qbd.get('AdjustAccountRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        for line in qbd.get('AdjustmentLines', []):
+            qbo['Line'].append({
+                'DetailType': 'ItemAdjustmentLineDetail',
+                'ItemAdjustmentLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'QtyDiff': self.to_decimal(line.get('QuantityDifference', 0))
+                }
+            })
+    
+        return qbo
+
+
+    def transform_journalcode(self, qbd: Dict) -> Dict:
+        """Transform JournalCode (France only)."""
+        if self.region != 'FR':
+            return None
+    
+        return {
+            'Name': self.sanitize_name(qbd.get('Name', 'Code')),
+            'Type': qbd.get('Type', 'Sales'),
+            'Active': qbd.get('IsActive', True)
+        }
+
+
+    def transform_journalentry(self, qbd: Dict) -> Dict:
+        """Transform JournalEntry with balance validation."""
+        qbo = {
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber']
+    
+        debit_total = Decimal('0')
+        credit_total = Decimal('0')
+    
+        for line in qbd.get('JournalEntryLines', []):
+            amount = self.to_decimal(line.get('Amount', 0))
+            posting_type = line.get('PostingType', 'Debit')
+        
+            qbo_line = {
+                'Amount': amount,
+                'DetailType': 'JournalEntryLineDetail',
+                'JournalEntryLineDetail': {
+                    'PostingType': posting_type,
+                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+                }
+            }
+        
+            if line.get('Description'):
+                qbo_line['Description'] = line['Description'][:4000]
+        
+            qbo['Line'].append(qbo_line)
+        
+            if posting_type == 'Debit':
+                debit_total += amount
+            else:
+                credit_total += amount
+    
+        # Validate balance
+        if abs(debit_total - credit_total) > Decimal('0.01'):
+            self.stats['warnings'].append({
+                'entity': 'JournalEntry',
+                'warning': f'Journal entry out of balance: Debits={debit_total}, Credits={credit_total}'
+            })
+    
+        return qbo
+
+
+    # BATCH 3 METHODS (5 entities)
+
+    def transform_payment(self, qbd: Dict) -> Dict:
+        """Transform Payment (ReceivePayment) - CRITICAL!"""
+        qbo = {
+            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'TotalAmt': self.to_decimal(qbd.get('TotalAmount', 0)),
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('RefNumber'):
+            qbo['PaymentRefNum'] = qbd['RefNumber']
+    
+        if qbd.get('PaymentMethodRef'):
+            qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
+    
+        if qbd.get('DepositToAccountRef'):
+            qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
+    
+        # Transform applied transactions
+        for applied in qbd.get('AppliedToInvoices', []):
+            qbo['Line'].append({
+                'Amount': self.to_decimal(applied.get('Amount', 0)),
+                'LinkedTxn': [{
+                    'TxnId': self.map_id('invoices', applied.get('InvoiceRef')),
+                    'TxnType': 'Invoice'
+                }]
+            })
+    
+        return qbo
+
+
+    def transform_purchase(self, qbd: Dict) -> Dict:
+        """Transform Purchase."""
+        qbo = {
+            'PaymentType': qbd.get('PaymentType', 'Cash'),
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('AccountRef'):
+            qbo['AccountRef'] = {'value': self.map_id('accounts', qbd['AccountRef'])}
+    
+        if qbd.get('VendorRef'):
+            qbo['EntityRef'] = {
+                'Type': 'Vendor',
+                'value': self.map_id('vendors', qbd['VendorRef'])
+            }
+    
+        for line in qbd.get('ExpenseLines', []):
+            qbo['Line'].append({
+                'DetailType': 'AccountBasedExpenseLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+                }
+            })
+    
+        return qbo
+
+
+    def transform_purchaseorder(self, qbd: Dict) -> Dict:
+        """Transform PurchaseOrder."""
+        qbo = {
+            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('DueDate'):
+            qbo['DueDate'] = self.format_date(qbd['DueDate'])
+    
+        for line in qbd.get('POLines', []):
+            qbo['Line'].append({
+                'DetailType': 'ItemBasedExpenseLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'ItemBasedExpenseLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'Qty': self.to_decimal(line.get('Quantity', 1)),
+                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                }
+            })
+    
+        return qbo
+
+
+    def transform_paymentmethod(self, qbd: Dict) -> Optional[Dict]:
+        """Transform PaymentMethod (skip defaults)."""
+        name = qbd.get('Name', '').lower()
+    
+        # Skip default QB Online methods
+        if name in {'cash', 'check', 'visa', 'mastercard', 'american express', 'discover'}:
+            return None
+    
+        return {
+            'Name': self.sanitize_name(qbd.get('Name', 'Payment')),
+            'Active': qbd.get('IsActive', True)
+        }
+
+
+    def transform_refundreceipt(self, qbd: Dict) -> Dict:
+        """Transform RefundReceipt."""
+        qbo = {
+            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
+            'Line': []
+        }
+    
+        for line in qbd.get('RefundLines', []):
+            qbo['Line'].append({
+                'DetailType': 'SalesItemLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),  # Usually negative
+                'SalesItemLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'Qty': self.to_decimal(line.get('Quantity', -1)),
+                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                }
+            })
+    
+        return qbo
+
+
+    # BATCH 4 METHODS (6 entities)
+
+    def transform_salesreceipt(self, qbd: Dict) -> Dict:
+        """Transform SalesReceipt - CRITICAL for cash sales!"""
+        qbo = {
+            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('PaymentMethodRef'):
+            qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
+    
+        if qbd.get('DepositToAccountRef'):
+            qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
+    
+        for line in qbd.get('SalesReceiptLines', []):
+            qbo['Line'].append({
+                'DetailType': 'SalesItemLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'SalesItemLineDetail': {
+                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
+                    'Qty': self.to_decimal(line.get('Quantity', 1)),
+                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                }
+            })
+    
+        return qbo
+
+
+    def transform_vendor(self, qbd: Dict) -> Dict:
+        """Transform Vendor."""
+        qbo = {
+            'DisplayName': self.ensure_unique_display_name(qbd.get('Name', 'Vendor'), 'vendor'),
+            'Active': qbd.get('IsActive', True)
+        }
+    
+        if qbd.get('CompanyName'):
+            qbo['CompanyName'] = qbd['CompanyName'][:100]
+    
+        if qbd.get('FirstName'):
+            qbo['GivenName'] = qbd['FirstName'][:25]
+        if qbd.get('LastName'):
+            qbo['FamilyName'] = qbd['LastName'][:25]
+    
+        if qbd.get('Email'):
+            qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
+    
+        if qbd.get('Phone'):
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
+    
+        if qbd.get('Address'):
+            qbo['BillAddr'] = self._transform_address(qbd['Address'])
+    
+        if qbd.get('Is1099'):
+            qbo['Vendor1099'] = True
+    
+        return qbo
+
+
+    def transform_taxagency(self, qbd: Dict) -> Dict:
+        """Transform TaxAgency."""
+        return {
+            'DisplayName': self.sanitize_name(qbd.get('Name', 'Tax Agency'))
+        }
+
+
+    def transform_taxcode(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TaxCode (skip defaults)."""
+        name = qbd.get('Name', '').upper()
+    
+        # Skip default codes
+        if name in {'TAX', 'NON'}:
+            return None
+    
+        qbo = {
+            'Name': self.sanitize_name(qbd.get('Name', 'Tax')),
+            'Taxable': qbd.get('IsTaxable', True)
+        }
+    
+        if qbd.get('TaxRates'):
+            qbo['SalesTaxRateList'] = {
+                'TaxRateDetail': [
+                    {'TaxRateRef': {'value': self.map_id('tax_rates', rate)}}
+                    for rate in qbd['TaxRates']
+                ]
+            }
+    
+        return qbo
+
+
+    def transform_taxrate(self, qbd: Dict) -> Dict:
+        """Transform TaxRate."""
+        return {
+            'Name': self.sanitize_name(qbd.get('Name', 'Tax Rate')),
+            'RateValue': self.to_decimal(qbd.get('Rate', 0)),
+            'AgencyRef': {'value': self.map_id('tax_agencies', qbd.get('AgencyRef'))},
+            'Active': qbd.get('IsActive', True)
+        }
+
+
+    def transform_term(self, qbd: Dict) -> Optional[Dict]:
+        """Transform Term (skip defaults)."""
+        name = qbd.get('Name', '').lower()
+    
+        # Skip default terms
+        if name in {'due on receipt', 'net 15', 'net 30', 'net 60'}:
+            return None
+    
+        qbo = {
+            'Name': self.sanitize_name(qbd.get('Name', 'Terms')),
+            'Active': qbd.get('IsActive', True)
+        }
+    
+        if qbd.get('DueDays') is not None:
+            qbo['DueDays'] = int(qbd['DueDays'])
+            qbo['Type'] = 'STANDARD'
+    
+        if qbd.get('DiscountDays') is not None:
+            qbo['DiscountDays'] = int(qbd['DiscountDays'])
+    
+        if qbd.get('DiscountPercent') is not None:
+            qbo['DiscountPercent'] = self.to_decimal(qbd['DiscountPercent'])
+    
+        return qbo
+
+
+    def transform_timeactivity(self, qbd: Dict) -> Dict:
+        """Transform TimeActivity."""
+        qbo = {
+            'NameOf': qbd.get('NameOf', 'Employee'),
+            'TxnDate': self.format_date(qbd.get('TxnDate'))
+        }
+    
+        if qbo['NameOf'] == 'Employee':
+            qbo['EmployeeRef'] = {'value': self.map_id('employees', qbd.get('EmployeeRef'))}
+        else:
+            qbo['VendorRef'] = {'value': self.map_id('vendors', qbd.get('VendorRef'))}
+    
+        if qbd.get('Hours'):
+            qbo['Hours'] = int(qbd['Hours'])
+        if qbd.get('Minutes'):
+            qbo['Minutes'] = int(qbd['Minutes'])
+    
+        if qbd.get('CustomerRef'):
+            qbo['CustomerRef'] = {'value': self.map_id('customers', qbd['CustomerRef'])}
+    
+        if qbd.get('ItemRef'):
+            qbo['ItemRef'] = {'value': self.map_id('items', qbd['ItemRef'])}
+    
+        qbo['BillableStatus'] = qbd.get('BillableStatus', 'NotBillable')
+    
+        return qbo
+
+
+    def transform_transfer(self, qbd: Dict) -> Dict:
+        """Transform Transfer."""
+        return {
+            'FromAccountRef': {'value': self.map_id('accounts', qbd.get('FromAccountRef'))},
+            'ToAccountRef': {'value': self.map_id('accounts', qbd.get('ToAccountRef'))},
+            'Amount': self.to_decimal(qbd.get('Amount', 0)),
+            'TxnDate': self.format_date(qbd.get('TxnDate'))
+        }
+
+
+    def transform_taxpayment(self, qbd: Dict) -> Dict:
+        """Transform TaxPayment."""
+        return {
+            'PaymentAccountRef': {'value': self.map_id('accounts', qbd.get('PaymentAccountRef'))},
+            'PaymentAmount': self.to_decimal(qbd.get('PaymentAmount', 0)),
+            'PaymentDate': self.format_date(qbd.get('PaymentDate'))
+        }
+
+
+    # BATCH 5 METHOD (1 entity)
+
+    def transform_vendorcredit(self, qbd: Dict) -> Dict:
+        """Transform VendorCredit."""
+        qbo = {
+            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': []
+        }
+    
+        if qbd.get('APAccountRef'):
+            qbo['APAccountRef'] = {'value': self.map_id('accounts', qbd['APAccountRef'])}
+    
+        for line in qbd.get('ExpenseLines', []):
+            qbo['Line'].append({
+                'DetailType': 'AccountBasedExpenseLineDetail',
+                'Amount': self.to_decimal(line.get('Amount', 0)),
+                'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+                }
+            })
+    
+        return qbo

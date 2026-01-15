@@ -1,0 +1,577 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   ForensicBridge Design System
+   "Bank-Grade Authority" Theme
+   ============================================ */
+
+:root {
+  /* Primary Colors */
+  --navy-900: #0F172A;
+  --navy-800: #1E293B;
+  --navy-700: #334155;
+  --navy-600: #475569;
+
+  /* Accent Colors */
+  --bridge-blue: #3B82F6;
+  --bridge-blue-light: #60A5FA;
+
+  /* Status Colors */
+  --forensic-gold: #F59E0B;
+  --forensic-gold-light: #FBBF24;
+  --success: #10B981;
+  --success-light: #34D399;
+  --error: #DC2626;
+  --error-light: #F87171;
+  --warning: #F59E0B;
+
+  /* Neutral */
+  --gray-50: #F8FAFC;
+  --gray-100: #F1F5F9;
+  --gray-200: #E2E8F0;
+  --gray-300: #CBD5E1;
+  --gray-400: #94A3B8;
+  --gray-500: #64748B;
+
+  /* Semantic */
+  --background: var(--gray-50);
+  --foreground: var(--navy-900);
+  --card: #FFFFFF;
+  --card-foreground: var(--navy-800);
+  --primary: var(--bridge-blue);
+  --primary-foreground: #FFFFFF;
+  --muted: var(--gray-100);
+  --muted-foreground: var(--gray-500);
+  --accent: var(--forensic-gold);
+  --border: var(--gray-200);
+  --ring: var(--bridge-blue);
+
+  /* Sidebar */
+  --sidebar-bg: var(--navy-900);
+  --sidebar-text: var(--gray-300);
+  --sidebar-active: var(--bridge-blue);
+}
+
+/* Dark mode support */
+.dark {
+  --background: var(--navy-900);
+  --foreground: var(--gray-50);
+  --card: var(--navy-800);
+  --card-foreground: var(--gray-100);
+  --muted: var(--navy-700);
+  --muted-foreground: var(--gray-400);
+  --border: var(--navy-700);
+}
+
+/* Global Styles */
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Typography */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Tabular Numbers for financial data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--gray-100);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
+}
+
+/* ============================================
+   Component Styles
+   ============================================ */
+
+/* Sidebar */
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+
+.sidebar-link {
+  @apply flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200;
+  color: var(--sidebar-text);
+}
+
+.sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-link.active {
+  background: var(--sidebar-active);
+  color: white;
+}
+
+/* Cards */
+.card-forensic {
+  @apply rounded-xl border shadow-sm;
+  background: var(--card);
+  border-color: var(--border);
+}
+
+.card-forensic-gold {
+  @apply rounded-xl border-2 shadow-lg;
+  background: var(--card);
+  border-color: var(--forensic-gold);
+}
+
+/* Status Badges */
+.badge-success {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+}
+
+.badge-warning {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--warning);
+}
+
+.badge-error {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error);
+}
+
+.badge-processing {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--bridge-blue);
+}
+
+/* Forensic Terminal */
+.forensic-terminal {
+  @apply font-mono text-sm rounded-lg p-4 overflow-auto;
+  background: var(--navy-900);
+  color: var(--gray-300);
+  max-height: 300px;
+}
+
+.forensic-terminal .log-success {
+  color: var(--success);
+}
+
+.forensic-terminal .log-warning {
+  color: var(--forensic-gold);
+}
+
+.forensic-terminal .log-error {
+  color: var(--error);
+}
+
+.forensic-terminal .log-info {
+  color: var(--bridge-blue-light);
+}
+
+.forensic-terminal .log-hash {
+  color: var(--forensic-gold);
+  font-weight: 600;
+}
+
+/* Pizza Tracker Stepper */
+.stepper-phase {
+  @apply flex flex-col items-center relative;
+}
+
+.stepper-icon {
+  @apply w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300;
+}
+
+.stepper-icon.pending {
+  background: var(--gray-200);
+  color: var(--gray-400);
+}
+
+.stepper-icon.active {
+  background: var(--bridge-blue);
+  color: white;
+  animation: pulse 2s infinite;
+}
+
+.stepper-icon.completed {
+  background: var(--success);
+  color: white;
+}
+
+.stepper-connector {
+  @apply flex-1 h-1 mx-2;
+  background: var(--gray-200);
+}
+
+.stepper-connector.completed {
+  background: var(--success);
+}
+
+.stepper-connector.active {
+  background: linear-gradient(90deg, var(--success) 50%, var(--gray-200) 50%);
+}
+
+/* Reconciliation Shield */
+.reconciliation-shield {
+  @apply rounded-xl border-2 p-6 relative overflow-hidden;
+  border-color: var(--forensic-gold);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%);
+}
+
+.reconciliation-shield.balanced {
+  border-color: var(--success);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, transparent 100%);
+}
+
+.reconciliation-shield.discrepancy {
+  border-color: var(--error);
+  background: linear-gradient(135deg, rgba(220, 38, 38, 0.05) 0%, transparent 100%);
+}
+
+/* Gold Badge */
+.gold-badge {
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold;
+  background: linear-gradient(135deg, var(--forensic-gold) 0%, var(--forensic-gold-light) 100%);
+  color: white;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.3);
+}
+
+/* Animations */
+@keyframes pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Stat Cards */
+.stat-card {
+  @apply rounded-xl p-6 transition-all duration-200;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.stat-value {
+  @apply text-3xl font-bold tabular-nums;
+  color: var(--foreground);
+}
+
+.stat-label {
+  @apply text-sm font-medium;
+  color: var(--muted-foreground);
+}
+
+/* Table Styles */
+.data-table {
+  @apply w-full;
+}
+
+.data-table th {
+  @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider;
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.data-table td {
+  @apply px-4 py-4 text-sm;
+  color: var(--card-foreground);
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table tr:hover td {
+  background: var(--muted);
+}
+
+/* Progress Bar */
+.progress-bar {
+  @apply h-2 rounded-full overflow-hidden;
+  background: var(--gray-200);
+}
+
+.progress-bar-fill {
+  @apply h-full rounded-full transition-all duration-500;
+  background: var(--bridge-blue);
+}
+
+.progress-bar-fill.success {
+  background: var(--success);
+}
+
+.progress-bar-fill.warning {
+  background: var(--warning);
+}
+
+/* Utility Classes */
+.text-forensic-gold {
+  color: var(--forensic-gold);
+}
+
+.text-bridge-blue {
+  color: var(--bridge-blue);
+}
+
+.bg-navy-900 {
+  background: var(--navy-900);
+}
+
+.border-forensic-gold {
+  border-color: var(--forensic-gold);
+}
+
+/* ============================================
+   Mobile Responsive Styles
+   Tablet (768px) and Phone (480px) breakpoints
+   ============================================ */
+
+/* Tablet (iPad, etc.) */
+@media (max-width: 1024px) {
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
+  }
+
+  /* Pizza Tracker: Stack phases vertically on tablet */
+  .stepper-phase {
+    flex-direction: column;
+  }
+
+  .stepper-connector {
+    width: 2px;
+    height: 30px;
+    margin: 0.5rem 0;
+  }
+
+  /* Reconciliation Shield: Reduce padding */
+  .reconciliation-shield {
+    padding: 1rem;
+  }
+
+  /* Forensic Terminal: Smaller text */
+  .forensic-terminal {
+    font-size: 0.75rem;
+    max-height: 200px;
+  }
+}
+
+/* Phone (Mobile) */
+@media (max-width: 640px) {
+
+  /* Hide sidebar, show hamburger menu */
+  .sidebar {
+    position: fixed;
+    left: -100%;
+    width: 80%;
+    z-index: 100;
+    transition: left 0.3s ease;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+
+  /* Stat Cards: 2 columns on mobile */
+  .stat-card {
+    padding: 0.75rem;
+  }
+
+  .stat-value {
+    font-size: 1.5rem;
+  }
+
+  .stat-label {
+    font-size: 0.7rem;
+  }
+
+  /* Pizza Tracker: Compact mobile view */
+  .stepper-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .stepper-icon svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* Reconciliation Shield: Mobile optimized */
+  .reconciliation-shield {
+    padding: 0.75rem;
+  }
+
+  .reconciliation-shield .grid-cols-3 {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  /* Gold Badge: Smaller on mobile */
+  .gold-badge {
+    padding: 0.5rem 1rem;
+    font-size: 0.75rem;
+  }
+
+  /* Data Table: Horizontal scroll */
+  .data-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  /* Cards: Full width */
+  .card-forensic {
+    border-radius: 0.5rem;
+  }
+
+  /* Typography: Smaller headings */
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+  }
+
+  h3 {
+    font-size: 1rem;
+  }
+
+  /* Forensic Terminal: Minimal height */
+  .forensic-terminal {
+    max-height: 150px;
+    padding: 0.5rem;
+    font-size: 0.65rem;
+  }
+
+  /* Buttons: Larger touch targets */
+  button {
+    min-height: 44px;
+  }
+}
+
+/* Executive Dashboard View - Optimized for tablet in landscape */
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape) {
+  .stat-card {
+    padding: 1.25rem;
+  }
+
+  .stat-value {
+    font-size: 2rem;
+  }
+}
+
+/* Touch-friendly interactions */
+@media (hover: none) and (pointer: coarse) {
+  .stat-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .sidebar-link:hover {
+    background: transparent;
+  }
+
+  /* Larger touch targets */
+  .sidebar-link {
+    padding: 1rem;
+  }
+
+  /* Remove hover effects */
+  .data-table tr:hover td {
+    background: transparent;
+  }
+}
+
+/* Dark mode mobile adjustments */
+@media (max-width: 640px) {
+  .dark .card-forensic {
+    border-width: 1px;
+  }
+}
+
+/* Print styles for Audit Certificate */
+@media print {
+
+  .sidebar,
+  .forensic-terminal,
+  button {
+    display: none !important;
+  }
+
+  .card-forensic {
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+
+  .reconciliation-shield {
+    page-break-inside: avoid;
+  }
+}
