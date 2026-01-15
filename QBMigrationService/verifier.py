@@ -822,3 +822,148 @@ class PremiumMigrationVerifier:
         print(f"\n  Summary:")
         print(f"    Errors: {len(self.report['errors'])}")
         print(f"    Warnings: {len(self.report['warnings'])}")
+    
+    # ========================================================================
+    # PREMIUM FEATURE #5: DISCREPANCY DRILL-DOWN
+    # ========================================================================
+    
+    def generate_discrepancy_drilldown(
+        self,
+        qbd_accounts: List[Dict],
+        qbo_accounts: List[Dict],
+        tolerance: Decimal = Decimal('0.01')
+    ) -> Dict:
+        """
+        $60M FEATURE: Identify EXACTLY which accounts are off and by how much.
+        
+        If trial balance is off by even one cent, this method tells you:
+        - Which specific account(s) have variance
+        - The exact amount of variance per account
+        - Suggested remediation steps
+        
+        This is what Big 4 auditors look for in technical due diligence.
+        """
+        print("\n" + "=" * 80)
+        print("  DISCREPANCY DRILL-DOWN ANALYSIS")
+        print("=" * 80)
+        
+        drilldown = {
+            "total_variance": Decimal('0'),
+            "accounts_with_variance": [],
+            "accounts_matched": [],
+            "accounts_missing_in_qbo": [],
+            "accounts_extra_in_qbo": [],
+            "recommended_actions": []
+        }
+        
+        # Create QBO lookup by name
+        qbo_lookup = {
+            acc.get("Name", "").lower(): acc 
+            for acc in qbo_accounts
+        }
+        
+        # Track which QBO accounts we've matched
+        matched_qbo_names = set()
+        
+        # Compare each QBD account
+        for qbd_acc in qbd_accounts:
+            name = qbd_acc.get("Name", "Unknown")
+            name_lower = name.lower()
+            qbd_balance = Decimal(str(qbd_acc.get("Balance", 0)))
+            
+            if name_lower in qbo_lookup:
+                qbo_acc = qbo_lookup[name_lower]
+                qbo_balance = Decimal(str(qbo_acc.get("CurrentBalance", 0)))
+                matched_qbo_names.add(name_lower)
+                
+                variance = qbo_balance - qbd_balance
+                
+                if abs(variance) > tolerance:
+                    # Variance detected!
+                    drilldown["accounts_with_variance"].append({
+                        "account_name": name,
+                        "account_type": qbd_acc.get("AccountType", ""),
+                        "qbd_balance": float(qbd_balance),
+                        "qbo_balance": float(qbo_balance),
+                        "variance": float(variance),
+                        "severity": self._categorize_variance(variance)
+                    })
+                    drilldown["total_variance"] += abs(variance)
+                    
+                    print(f"  ❌ {name}: ${variance:+,.2f} variance")
+                else:
+                    drilldown["accounts_matched"].append({
+                        "account_name": name,
+                        "balance": float(qbd_balance)
+                    })
+                    print(f"  ✅ {name}: Matched (${qbd_balance:,.2f})")
+            else:
+                # Account missing in QBO
+                drilldown["accounts_missing_in_qbo"].append({
+                    "account_name": name,
+                    "account_type": qbd_acc.get("AccountType", ""),
+                    "balance": float(qbd_balance)
+                })
+                drilldown["total_variance"] += abs(qbd_balance)
+                print(f"  ⚠️  {name}: MISSING in QBO (${qbd_balance:,.2f})")
+        
+        # Find extra accounts in QBO (not in QBD)
+        for qbo_acc in qbo_accounts:
+            name = qbo_acc.get("Name", "Unknown")
+            if name.lower() not in [a.get("Name", "").lower() for a in qbd_accounts]:
+                balance = Decimal(str(qbo_acc.get("CurrentBalance", 0)))
+                if abs(balance) > tolerance:
+                    drilldown["accounts_extra_in_qbo"].append({
+                        "account_name": name,
+                        "balance": float(balance)
+                    })
+                    print(f"  ⚠️  {name}: EXTRA in QBO (${balance:,.2f})")
+        
+        # Generate recommended actions
+        if drilldown["accounts_with_variance"]:
+            drilldown["recommended_actions"].append(
+                f"Review {len(drilldown['accounts_with_variance'])} account(s) with balance discrepancies"
+            )
+            
+            # Find largest variance
+            largest = max(drilldown["accounts_with_variance"], 
+                         key=lambda x: abs(x["variance"]))
+            drilldown["recommended_actions"].append(
+                f"PRIORITY: Check '{largest['account_name']}' - ${abs(largest['variance']):,.2f} variance"
+            )
+        
+        if drilldown["accounts_missing_in_qbo"]:
+            drilldown["recommended_actions"].append(
+                f"Create {len(drilldown['accounts_missing_in_qbo'])} missing account(s) in QuickBooks Online"
+            )
+        
+        # Summary
+        print("\n" + "-" * 80)
+        print(f"  TOTAL VARIANCE: ${float(drilldown['total_variance']):,.2f}")
+        print(f"  Accounts Matched: {len(drilldown['accounts_matched'])}")
+        print(f"  Accounts with Variance: {len(drilldown['accounts_with_variance'])}")
+        print(f"  Missing in QBO: {len(drilldown['accounts_missing_in_qbo'])}")
+        print("=" * 80 + "\n")
+        
+        # Store in report
+        self.report["discrepancy_drilldown"] = {
+            "total_variance": float(drilldown["total_variance"]),
+            "variance_count": len(drilldown["accounts_with_variance"]),
+            "matched_count": len(drilldown["accounts_matched"]),
+            "missing_count": len(drilldown["accounts_missing_in_qbo"]),
+            "details": drilldown
+        }
+        
+        return drilldown
+    
+    def _categorize_variance(self, variance: Decimal) -> str:
+        """Categorize variance severity."""
+        abs_var = abs(variance)
+        if abs_var <= Decimal('1.00'):
+            return "TRIVIAL"  # Rounding
+        elif abs_var <= Decimal('100.00'):
+            return "MINOR"    # Likely entry error
+        elif abs_var <= Decimal('1000.00'):
+            return "MODERATE" # Transaction missing
+        else:
+            return "CRITICAL" # Major discrepancy

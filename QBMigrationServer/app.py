@@ -14,6 +14,7 @@ from api.auth import auth_bp, limiter as auth_limiter
 from api.upload import upload_bp, limiter as upload_limiter
 from api.migrations import migrations_bp
 from api.webhooks import webhooks_bp
+from api.dashboard_api import dashboard_bp
 from config import config
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
@@ -252,7 +253,8 @@ def create_app(config_name='development'):
     app.register_blueprint(migrations_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(health_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks')
+    app.register_blueprint(dashboard_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

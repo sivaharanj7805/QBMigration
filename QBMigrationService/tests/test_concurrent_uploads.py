@@ -45,17 +45,19 @@ class TestConcurrentUploads:
             return Mock()
     
     @pytest.fixture
-    def mock_qbo_client(self):
-        """Create mock QBO client for testing"""
+    def mock_qbo_client(self, tmp_path):
+        """Create real QBO client for testing (not a mock)"""
         try:
-            from QBMigrationService.qbo_client import PremiumQBOClient
+            # Use relative import path from tests directory
+            from qbo_client import PremiumQBOClient
+            db_path = str(tmp_path / "test_concurrent.db")
             return PremiumQBOClient(
                 access_token="test_token",
-                db_path=":memory:",
+                db_path=db_path,
                 base_url="https://test.api.intuit.com/v3/company/123"
             )
         except ImportError:
-            return Mock()
+            pytest.skip("qbo_client module not available")
     
     def test_concurrent_batch_id_generation(self, mock_qbo_client):
         """

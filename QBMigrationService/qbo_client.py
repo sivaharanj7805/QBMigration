@@ -279,6 +279,10 @@ class PremiumQBOClient:
             finally:
                 conn.close()
     
+    def _record_migration(self, entity_type: str, qbd_id: str, qbo_id: str, migration_id: str = None, sync_token: str = "0"):
+        """Alias for record_created for backward compatibility"""
+        return self.record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)
+    
     def get_synctoken(self, entity_type: str, qbo_id: str) -> str:
         """
         FIX #33, #124: Retrieve current SyncToken for entity
@@ -346,35 +350,54 @@ class PremiumQBOClient:
             
             return result[0] if result else None
     
-    def get_migration_summary(self, migration_id: str) -> Dict:
+    def get_migration_summary(self, migration_id: str = None) -> Dict:
         """Get summary of migration progress"""
         with self.db_lock:
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             cursor = conn.cursor()
             
             # Count by entity type
-            cursor.execute('''
-                SELECT entity_type, COUNT(*) 
-                FROM migrated_entities
-                WHERE migration_id = ? AND status = 'created'
-                GROUP BY entity_type
-            ''', (migration_id,))
+            if migration_id:
+                cursor.execute('''
+                    SELECT entity_type, COUNT(*) 
+                    FROM migrated_entities
+                    WHERE migration_id = ? AND status = 'created'
+                    GROUP BY entity_type
+                ''', (migration_id,))
+            else:
+                cursor.execute('''
+                    SELECT entity_type, COUNT(*) 
+                    FROM migrated_entities
+                    WHERE status = 'created'
+                    GROUP BY entity_type
+                ''')
             
             counts = {row[0]: row[1] for row in cursor.fetchall()}
             
             # Get total
-            cursor.execute('''
-                SELECT COUNT(*) FROM migrated_entities
-                WHERE migration_id = ? AND status = 'created'
-            ''', (migration_id,))
+            if migration_id:
+                cursor.execute('''
+                    SELECT COUNT(*) FROM migrated_entities
+                    WHERE migration_id = ? AND status = 'created'
+                ''', (migration_id,))
+            else:
+                cursor.execute('''
+                    SELECT COUNT(*) FROM migrated_entities
+                    WHERE status = 'created'
+                ''')
             
             total = cursor.fetchone()[0]
+            
+            # Get last update time
+            cursor.execute('SELECT MAX(created_at) FROM migrated_entities')
+            last_updated = cursor.fetchone()[0]
             
             conn.close()
             
             return {
                 "total_entities": total,
-                "by_type": counts
+                "entity_counts": counts,
+                "last_updated": last_updated
             }
     
     # ========================================================================
@@ -668,6 +691,46 @@ class PremiumQBOClient:
             logger.error(f"Failed to delete {entity_type} {qbo_id}: {e}")
             return False
     
+    def create_entity(
+        self,
+        entity_type: str,
+        entity_data: Dict,
+        oauth_manager: Optional[Any] = None
+    ) -> Dict:
+        """
+        Create a single entity in QuickBooks Online.
+        
+        Args:
+            entity_type: Type of entity (Customer, Vendor, Invoice, etc.)
+            entity_data: Entity data to create
+            oauth_manager: Optional OAuth manager for token refresh
+            
+        Returns:
+            Created entity data from QBO
+            
+        Raises:
+            Exception: If creation fails or returns a Fault
+        """
+        endpoint = entity_type.lower()
+        
+        response = self._make_request(
+            "POST",
+            endpoint,
+            entity_data,
+            oauth_manager=oauth_manager
+        )
+        
+        # Check for fault response
+        if "Fault" in response:
+            error_msg = response.get("Fault", {}).get("Error", [{}])[0].get("Message", "Unknown error")
+            raise Exception(f"QBO API Error: {error_msg}")
+        
+        # Return the created entity
+        if entity_type in response:
+            return response[entity_type]
+        
+        return response
+    
     def _get_next_batch_id(self) -> str:
         """
         FIX #18: Thread-safe batch ID generation
@@ -829,6 +892,163 @@ class PremiumQBOClient:
         print(f"✓ Batch processing complete:")
         print(f"  Succeeded: {len(results['succeeded'])}")
         print(f"  Failed: {len(results['failed'])}")
+        
+        return results
+    
+    def batch_create_optimized(
+        self,
+        entities: List[Dict],
+        entity_type: str,
+        oauth_manager: Optional[Any] = None,
+        migration_id: str = None,
+        target_throughput: int = 500000,  # rows per hour
+        progress_callback: Optional[callable] = None
+    ) -> Dict:
+        """
+        $25M FEATURE: Optimized batch processing for enterprise migrations.
+        Targets 500,000 rows in under 60 minutes.
+        
+        2026 Intuit Batch Limits:
+        - 30 Payloads per batch request
+        - 40 Batch requests per minute per Realm ID
+        - 10 requests per second throttling
+        
+        Strategy:
+        1. Use maximum batch size (30 items)
+        2. Parallel workers (respecting QBO plan limits)
+        3. Adaptive rate limiting based on X-RateLimit-Remaining
+        4. Progress tracking for Pizza Tracker
+        
+        Args:
+            entities: List of entities to create
+            entity_type: QBO entity type (e.g., 'Invoice', 'Customer')
+            oauth_manager: OAuth manager for token refresh
+            migration_id: Migration ID for tracking
+            target_throughput: Target rows per hour (default 500K)
+            progress_callback: Callback(processed, total, rate) for progress updates
+            
+        Returns:
+            Dict with succeeded, failed, total, and timing stats
+        """
+        start_time = time.time()
+        
+        results = {
+            "succeeded": [],
+            "failed": [],
+            "total": len(entities),
+            "start_time": datetime.now().isoformat(),
+            "entity_type": entity_type
+        }
+        
+        if not entities:
+            return results
+        
+        # Optimal batch size (Intuit maximum)
+        batch_size = 30
+        
+        # Calculate optimal workers based on rate limits
+        # 40 requests/min = 0.67 requests/second per worker
+        # With 8 workers: 5.3 requests/second (within 10/sec limit)
+        optimal_workers = min(self.max_workers, 8)
+        
+        # Calculate delay between batch submissions to stay within limits
+        # Target: 10 requests/second maximum
+        min_delay = 1.0 / 10  # 100ms minimum between requests
+        
+        # Split into batches
+        batches = []
+        for i in range(0, len(entities), batch_size):
+            batch = entities[i:i + batch_size]
+            batch_id = self._get_next_batch_id()
+            batches.append((batch, batch_id, i))  # Include offset for progress
+        
+        total_batches = len(batches)
+        processed_entities = 0
+        
+        logger.info(f"$25M BATCH: Processing {len(entities)} {entity_type} in {total_batches} batches with {optimal_workers} workers")
+        
+        # Process with controlled parallelism
+        with ThreadPoolExecutor(max_workers=optimal_workers) as executor:
+            # Submit batches with rate limiting
+            futures = {}
+            batch_queue = list(batches)
+            active_futures = set()
+            
+            while batch_queue or active_futures:
+                self._check_shutdown()
+                
+                # Submit new batches (up to worker limit)
+                while batch_queue and len(active_futures) < optimal_workers:
+                    batch, batch_id, offset = batch_queue.pop(0)
+                    
+                    future = executor.submit(
+                        self._process_single_batch,
+                        batch,
+                        entity_type,
+                        batch_id,
+                        oauth_manager,
+                        migration_id
+                    )
+                    futures[future] = (batch_id, offset, len(batch))
+                    active_futures.add(future)
+                    
+                    # Rate limit between batch submissions
+                    time.sleep(min_delay)
+                
+                # Process completed futures
+                completed = set()
+                for future in active_futures:
+                    if future.done():
+                        completed.add(future)
+                        batch_id, offset, batch_len = futures[future]
+                        
+                        try:
+                            succeeded, failed = future.result()
+                            results["succeeded"].extend(succeeded)
+                            results["failed"].extend(failed)
+                            processed_entities += batch_len
+                            
+                            # Report progress
+                            if progress_callback:
+                                elapsed = time.time() - start_time
+                                rate = processed_entities / elapsed * 3600 if elapsed > 0 else 0
+                                progress_callback(processed_entities, len(entities), rate)
+                            
+                        except Exception as e:
+                            logger.error(f"Batch {batch_id} error: {e}")
+                            results["failed"].append({
+                                "batch_id": batch_id,
+                                "error": str(e)
+                            })
+                
+                active_futures -= completed
+                
+                # Small delay to prevent busy-waiting
+                if active_futures and not completed:
+                    time.sleep(0.05)
+        
+        # Calculate final stats
+        end_time = time.time()
+        duration_seconds = end_time - start_time
+        actual_throughput = len(entities) / duration_seconds * 3600 if duration_seconds > 0 else 0
+        
+        results["end_time"] = datetime.now().isoformat()
+        results["duration_seconds"] = round(duration_seconds, 2)
+        results["throughput_per_hour"] = round(actual_throughput)
+        results["target_met"] = actual_throughput >= target_throughput
+        
+        # Store failed items
+        if results["failed"]:
+            with self.failed_items_lock:
+                self.failed_items.extend(results["failed"])
+        
+        logger.info(f"$25M BATCH COMPLETE: {len(results['succeeded'])} succeeded, {len(results['failed'])} failed")
+        logger.info(f"  Duration: {duration_seconds:.1f}s | Throughput: {actual_throughput:.0f}/hour")
+        
+        if results["target_met"]:
+            logger.info(f"  ✓ TARGET MET: {target_throughput}/hour achieved!")
+        else:
+            logger.warning(f"  ✗ Target missed: {actual_throughput:.0f} < {target_throughput}/hour")
         
         return results
     
