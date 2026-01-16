@@ -42,7 +42,7 @@ const phaseDescriptions = {
 
 export function PizzaTracker({
     phases,
-    currentPhase,
+    currentPhase: _currentPhase,
     overallPercentage,
     currentEntity,
     statusMessage,
@@ -107,10 +107,10 @@ export function PizzaTracker({
 
                                 <div className="mt-3 text-center">
                                     <p className={`text-sm font-medium ${phase.status === "completed"
-                                            ? "text-[var(--success)]"
-                                            : phase.status === "in_progress"
-                                                ? "text-[var(--bridge-blue)]"
-                                                : "text-gray-400"
+                                        ? "text-[var(--success)]"
+                                        : phase.status === "in_progress"
+                                            ? "text-[var(--bridge-blue)]"
+                                            : "text-gray-400"
                                         }`}>
                                         {label}
                                     </p>
@@ -149,10 +149,10 @@ export function PizzaTracker({
                             {index < phases.length - 1 && (
                                 <div
                                     className={`stepper-connector mt-6 ${phase.status === "completed"
-                                            ? "completed"
-                                            : phase.status === "in_progress"
-                                                ? "active"
-                                                : ""
+                                        ? "completed"
+                                        : phase.status === "in_progress"
+                                            ? "active"
+                                            : ""
                                         }`}
                                 />
                             )}

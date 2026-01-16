@@ -55,7 +55,7 @@ ACCESS_TOKEN = os.getenv("QBO_ACCESS_TOKEN", "")  # Optional for initial setup
 
 # Validate critical credentials
 if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
-    print("⚠️  WARNING: QBO credentials not configured. Set environment variables.")
+    print("WARNING: QBO credentials not configured. Set environment variables.")
 
 # ============================================================================
 # ENVIRONMENT & REGION CONFIGURATION
@@ -323,7 +323,7 @@ def initialize_directories():
         os.chmod(DATA_DIR, 0o700)  # Owner read/write/execute only
         
     except PermissionError as e:
-        print(f"⚠️  Warning: Cannot create directories: {e}")
+        print(f"Warning: Cannot create directories: {e}")
         print(f"   Ensure write permissions for: {DATA_DIR}")
 
 # ============================================================================
@@ -339,12 +339,12 @@ def validate_production_access():
     if ENVIRONMENT == "production":
         if PRODUCTION_GUARD_ENABLED and not PRODUCTION_CONFIRMATION_FLAG:
             raise Exception(
-                "⛔ PRODUCTION GUARD: Cannot run against production without explicit confirmation.\n"
+                "PRODUCTION GUARD: Cannot run against production without explicit confirmation.\n"
                 "Set environment variable: QBO_CONFIRM_PRODUCTION=true\n"
                 "Or disable guard with: QBO_PRODUCTION_GUARD=false"
             )
         
-        print("⚠️  WARNING: Running against PRODUCTION environment")
+        print("WARNING: Running against PRODUCTION environment")
         print(f"   Region: {REGION}")
         print(f"   Realm ID: {REALM_ID}")
         print(f"   Confirm this is correct before proceeding.\n")

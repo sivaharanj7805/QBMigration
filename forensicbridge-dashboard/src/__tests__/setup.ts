@@ -28,16 +28,16 @@ global.ResizeObserver = class ResizeObserver {
 };
 
 // Mock fetch for API tests
-global.fetch = async (url: string, options?: RequestInit) => {
+global.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
     return new Response(JSON.stringify({ success: true }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
     });
-};
+}) as typeof fetch;
 
 // Suppress console errors during tests
 const originalError = console.error;
-console.error = (...args: any[]) => {
+console.error = (...args: unknown[]) => {
     if (
         typeof args[0] === 'string' &&
         args[0].includes('Warning: ReactDOM.render is no longer supported')

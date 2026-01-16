@@ -2,15 +2,27 @@
 
 import { WhitelabelPreview } from "@/components/settings/WhitelabelPreview";
 import { useState } from "react";
-import { Settings, Palette, Bell, Shield, CreditCard, Users } from "lucide-react";
+import { Palette, Bell, Shield, CreditCard, Users } from "lucide-react";
 
 type SettingsTab = "branding" | "notifications" | "security" | "billing" | "team";
+
+// Match the WhitelabelConfig type from WhitelabelPreview
+interface WhitelabelConfig {
+    company_name: string;
+    logo_url: string | null;
+    primary_color: string;
+    secondary_color: string;
+    accent_color: string;
+    support_email: string;
+    support_phone: string;
+    website_url: string;
+}
 
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<SettingsTab>("branding");
     const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
-    const handleSaveWhitelabel = (config: any) => {
+    const handleSaveWhitelabel = (_config: WhitelabelConfig) => {
         setSaveStatus("saving");
         // Simulate API call
         setTimeout(() => {
@@ -52,8 +64,8 @@ export default function SettingsPage() {
                             key={id}
                             onClick={() => setActiveTab(id)}
                             className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === id
-                                    ? "border-[var(--bridge-blue)] text-[var(--bridge-blue)]"
-                                    : "border-transparent text-gray-500 hover:text-gray-700"
+                                ? "border-[var(--bridge-blue)] text-[var(--bridge-blue)]"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
                                 }`}
                         >
                             <Icon className="w-4 h-4" />

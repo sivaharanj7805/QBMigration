@@ -20,7 +20,7 @@ export default function MigrationDetailPage({ params }: PageProps) {
     const { id } = use(params);
     const { data: liveStatus, isLoading: statusLoading } = useLiveStatus(id);
     const { data: trialBalance } = useTrialBalance(id, liveStatus?.status === "completed");
-    const { data: certPreview } = useAuditCertificate(id, liveStatus?.status === "completed");
+    const { data: _certPreview } = useAuditCertificate(id, liveStatus?.status === "completed");
     const [isDownloading, setIsDownloading] = useState(false);
 
     const handleDownloadCertificate = async () => {
@@ -117,19 +117,18 @@ export default function MigrationDetailPage({ params }: PageProps) {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Reconciliation Shield */}
                 <ReconciliationShield
-                    sourceBalance={trialBalance?.source_trial_balance ?? null}
-                    destinationBalance={trialBalance?.destination_trial_balance ?? null}
-                    discrepancy={trialBalance?.discrepancy ?? null}
-                    isBalanced={trialBalance?.is_balanced ?? null}
+                    sourceBalance={trialBalance?.source_trial_balance ?? 0}
+                    destinationBalance={trialBalance?.destination_trial_balance ?? 0}
+                    discrepancy={trialBalance?.discrepancy ?? 0}
+                    isBalanced={trialBalance?.is_balanced ?? false}
                     forensicStatus={
                         (trialBalance?.forensic_status as "VERIFIED" | "PENDING" | "DISCREPANCY_DETECTED" | "NOT_AVAILABLE") ||
                         "PENDING"
                     }
-                    verificationTimestamp={trialBalance?.verification_timestamp}
+                    verificationTimestamp={trialBalance?.verification_timestamp || new Date().toISOString()}
                     sourceHash={trialBalance?.source_hash}
                     destinationHash={trialBalance?.destination_hash}
                     hashMatch={trialBalance?.hash_match}
-                    onDownloadCertificate={handleDownloadCertificate}
                     migrationId={id}
                 />
 
@@ -149,7 +148,6 @@ export default function MigrationDetailPage({ params }: PageProps) {
                 activities={demoActivities}
                 isLive={liveStatus?.status === "processing"}
                 title="Forensic Integrity Log"
-                maxHeight="400px"
             />
 
             {/* Discrepancy Doctor (shown if there are issues) */}

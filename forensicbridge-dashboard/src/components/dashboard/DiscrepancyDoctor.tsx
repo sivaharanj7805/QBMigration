@@ -9,7 +9,6 @@ import {
     Download,
     ArrowUpRight,
     ArrowDownRight,
-    DollarSign,
     Filter
 } from "lucide-react";
 
@@ -262,8 +261,8 @@ export function DiscrepancyDoctor({
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center ${account.variance > 0
-                                                ? "bg-green-100 text-green-600"
-                                                : "bg-red-100 text-red-600"
+                                            ? "bg-green-100 text-green-600"
+                                            : "bg-red-100 text-red-600"
                                             }`}>
                                             {account.variance > 0
                                                 ? <ArrowUpRight className="w-4 h-4" />
