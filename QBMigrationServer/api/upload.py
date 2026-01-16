@@ -14,6 +14,7 @@ from flask_limiter.util import get_remote_address
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
+from extensions import limiter
 import hashlib
 import logging
 import uuid
@@ -26,12 +27,6 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/api/upload')
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-# Initialize rate limiter
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
-)
 
 
 # ============================================================================

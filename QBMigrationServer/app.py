@@ -10,8 +10,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from models.database import db, init_db
 from models.user import User
-from api.auth import auth_bp, limiter as auth_limiter
-from api.upload import upload_bp, limiter as upload_limiter
+from api.auth import auth_bp
+from api.upload import upload_bp
+from extensions import limiter
 from api.migrations import migrations_bp
 from api.webhooks import webhooks_bp
 from api.dashboard_api import dashboard_bp
@@ -22,6 +23,10 @@ from sqlalchemy import text
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from api.health import health_bp
+from api.projects import projects_bp
+from api.health_check import health_check_bp
+from api.websocket import websocket_bp, init_socketio
+from api.s3_upload import s3_upload_bp
 import sys
 
 
@@ -208,17 +213,11 @@ def create_app(config_name='development'):
     
     # Setup rate limiting
     if app.config.get('RATELIMIT_ENABLED', True):
-        limiter = Limiter(
-            app=app,
-            key_func=get_remote_address,
-            storage_uri=app.config.get('RATELIMIT_STORAGE_URL', 'memory://'),
-            strategy=app.config.get('RATELIMIT_STRATEGY', 'fixed-window'),
-            headers_enabled=app.config.get('RATELIMIT_HEADERS_ENABLED', True)
-        )
-        
-        # Apply rate limiter to blueprints
-        auth_limiter.init_app(app)
-        upload_limiter.init_app(app)
+        limiter.init_app(app)
+        # Update config if needed
+        app.config.setdefault('RATELIMIT_STORAGE_URL', 'memory://')
+        app.config.setdefault('RATELIMIT_STRATEGY', 'fixed-window')
+        app.config.setdefault('RATELIMIT_HEADERS_ENABLED', True)
         
         app.logger.info('Rate limiting enabled')
     else:
@@ -254,7 +253,11 @@ def create_app(config_name='development'):
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(health_bp)
     app.register_blueprint(dashboard_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard')
+    app.register_blueprint(projects_bp)
+    app.register_blueprint(health_check_bp)
+    app.register_blueprint(websocket_bp)
+    app.register_blueprint(s3_upload_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

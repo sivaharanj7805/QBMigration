@@ -1,0 +1,89 @@
+name: Build ForensicBridge Installer
+
+# Trigger on push to main or manual dispatch
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Package
+    runs-on: windows-latest
+
+    steps:
+    # 1. Checkout Code
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    # 2. Setup .NET Framework 4.8
+    # GitHub hosted runners have .NET Framework installed by default, 
+    # but we can set up MSBuild to ensure we can build the solution.
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1.0.5
+
+    - name: Restore NuGet Packages (Launcher)
+      run: nuget restore QBMigrationLauncher/QBMigrationLauncher.csproj
+
+    - name: Restore NuGet Packages (Reader)
+      run: nuget restore QBDesktopReader/QBDesktopReader.csproj
+
+    # 3. Build & Publish C# Applications
+    - name: Build QBMigrationLauncher (WPF)
+      run: |
+        msbuild QBMigrationLauncher/QBMigrationLauncher.csproj /t:Build /p:Configuration=Release /p:Platform=x86 /p:OutputPath=bin/Release/
+        # Create a publish directory structure roughly mimicking what Inno Setup expects
+        mkdir publish/QBMigrationLauncher
+        copy QBMigrationLauncher/bin/Release/* publish/QBMigrationLauncher/ -Recurse -Force
+
+    - name: Build QBDesktopReader (Console)
+      run: |
+        msbuild QBDesktopReader/QBDesktopReader.csproj /t:Build /p:Configuration=Release /p:Platform=x86 /p:OutputPath=bin/Release/
+        mkdir publish/QBDesktopReader
+        copy QBDesktopReader/bin/Release/* publish/QBDesktopReader/ -Recurse -Force
+
+    # 4. Create dummy icon if missing (to prevent Inno Setup failure)
+    - name: Create Placeholder Icon
+      run: |
+        if (-not (Test-Path "QBDesktopReader/assets/icon.ico")) {
+           New-Item -ItemType Directory -Force -Path "QBDesktopReader/assets"
+           # Download a generic icon or create a dummy file
+           Invoke-WebRequest -Uri "https://github.com/microsoft/vscode-icons/raw/master/icons/dark/file-type-csharp.svg" -OutFile "QBDesktopReader/assets/icon.ico" 
+           # Note: SVG isn't ICO, but Inno might complain. 
+           # Better approach: Just create a valid zero-byte file or skip icon line if possible.
+           # Real solution: We'll assume the user will push a real icon, but for CI success we'll skip verification in Inno if possible? 
+           # Actually, let's just make sure the directory exists and warn if missing.
+           Write-Host "WARNING: icon.ico missing, using a placeholder file."
+           Set-Content -Path "QBDesktopReader/assets/icon.ico" -Value "Placeholder"
+        }
+
+    # 5. Compile Installer using Inno Setup
+    # Using a third-party action to run ISCC
+    - name: Compile Installer
+      uses: Minionguyjosh/INNO-Setup-Action@v1.2.2
+      with:
+        path: QBDesktopReader/ForensicBridge.iss
+        # We might need to adjust paths in .iss relative to the repo root if not handled correctly.
+        # But commonly ISCC checks relative to the .iss file. 
+        # The .iss file expects files in "publish/{#MyAppExeName}" which might be relative to itself.
+        # We need to ensure the "publish" directory is where the .iss expects it.
+        # Let's move our build output to match the expected structure relative to the .iss file.
+      
+    # Pre-step to move files for Inno Setup if needed. 
+    # Assuming ForensicBridge.iss looks for "Source: "publish\..." relative to itself.
+    - name: Move Build Artifacts for Inno Setup
+      run: |
+        # If .iss is in QBDesktopReader/, it looks for QBDesktopReader/publish
+        # Our previous step created 'publish' at root. Let's move it.
+        mkdir QBDesktopReader/publish
+        copy publish/* QBDesktopReader/publish/ -Recurse -Force
+
+    # 6. Upload the Result
+    - name: Upload Installer Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ForensicBridge-Setup
+        path: QBDesktopReader/Output/ForensicBridge-Setup.exe

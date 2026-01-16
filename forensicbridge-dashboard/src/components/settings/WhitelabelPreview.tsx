@@ -3,7 +3,6 @@
 import { useState, useRef } from "react";
 import {
     Upload,
-    Palette,
     Eye,
     Save,
     RefreshCw,
@@ -112,8 +111,8 @@ export function WhitelabelPreview({
                     <button
                         onClick={() => setIsPreviewMode(!isPreviewMode)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${isPreviewMode
-                                ? "bg-[var(--bridge-blue)] text-white border-[var(--bridge-blue)]"
-                                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+                            ? "bg-[var(--bridge-blue)] text-white border-[var(--bridge-blue)]"
+                            : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
                             }`}
                     >
                         <Eye className="w-4 h-4" />

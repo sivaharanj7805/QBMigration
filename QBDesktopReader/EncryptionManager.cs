@@ -148,7 +148,9 @@ namespace QBDesktopExtractor
                     ChunkSize = chunkSize,
                     TotalChunks = totalChunks,
                     DataHashSHA256 = Convert.ToBase64String(dataHasher.Hash),
-                    EncryptedHashSHA256 = Convert.ToBase64String(encryptedHasher.Hash)
+                    EncryptedHashSHA256 = Convert.ToBase64String(encryptedHasher.Hash),
+                    // v3.1 format - KeyBase64 for TLS-protected transmission
+                    KeyBase64 = Convert.ToBase64String(key)
                 };
             }
         }
@@ -388,6 +390,11 @@ namespace QBDesktopExtractor
             public int TotalChunks { get; set; }
             public string DataHashSHA256 { get; set; }
             public string EncryptedHashSHA256 { get; set; }
+            
+            // v3.1 Upload format properties (required by FileUploader.UploadV31FormatAsync)
+            public string KeyBase64 { get; set; }
+            public string IVBase64 { get; set; }
+            public string TagBase64 { get; set; }
         }
     }
 }
