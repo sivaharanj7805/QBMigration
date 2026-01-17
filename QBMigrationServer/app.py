@@ -27,6 +27,8 @@ from api.projects import projects_bp
 from api.health_check import health_check_bp
 from api.websocket import websocket_bp, init_socketio
 from api.s3_upload import s3_upload_bp
+from api.sso_provider import sso_bp
+from api.webhook_delivery_log import webhook_logs_bp
 import sys
 
 
@@ -257,7 +259,9 @@ def create_app(config_name='development'):
     app.register_blueprint(health_check_bp)
     app.register_blueprint(websocket_bp)
     app.register_blueprint(s3_upload_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload')
+    app.register_blueprint(sso_bp)
+    app.register_blueprint(webhook_logs_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

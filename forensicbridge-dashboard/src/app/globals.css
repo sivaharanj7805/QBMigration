@@ -1,0 +1,390 @@
+@import "tailwindcss";
+
+/* ================================================================
+   FORENSICBRIDGE DESIGN SYSTEM
+   Clean, Minimalistic, Professional - For Accountants
+   ================================================================ */
+
+:root {
+  /* Primary Colors - Professional Blue */
+  --bridge-blue: #1e40af;
+  --bridge-blue-light: #3b82f6;
+  --bridge-blue-dark: #1e3a8a;
+
+  /* Status Colors */
+  --success: #059669;
+  --success-light: #ecfdf5;
+  --warning: #d97706;
+  --warning-light: #fffbeb;
+  --error: #dc2626;
+  --error-light: #fef2f2;
+
+  /* Accent */
+  --forensic-gold: #b8860b;
+
+  /* Sizing */
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+/* ================================================================
+   CARD COMPONENTS
+   ================================================================ */
+
+.card-forensic {
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.card-forensic-hover {
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  transition: box-shadow 0.2s;
+}
+
+.card-forensic-hover:hover {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+/* ================================================================
+   BUTTON COMPONENTS
+   ================================================================ */
+
+.btn-primary {
+  padding: 0.625rem 1rem;
+  background-color: var(--bridge-blue);
+  color: white;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.btn-primary:hover {
+  background-color: var(--bridge-blue-dark);
+}
+
+.btn-secondary {
+  padding: 0.625rem 1rem;
+  background-color: white;
+  border: 1px solid #d1d5db;
+  color: #374151;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+.btn-secondary:hover {
+  background-color: #f9fafb;
+}
+
+.btn-success {
+  padding: 0.625rem 1rem;
+  background-color: var(--success);
+  color: white;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s;
+}
+
+/* ================================================================
+   PROGRESS BAR
+   ================================================================ */
+
+.progress-bar {
+  height: 0.5rem;
+  background-color: #e5e7eb;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background-color: var(--bridge-blue);
+  border-radius: 9999px;
+  transition: width 0.3s ease-out;
+}
+
+.progress-bar-fill.success {
+  background-color: var(--success);
+}
+
+/* ================================================================
+   STEPPER COMPONENT
+   ================================================================ */
+
+.stepper-phase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stepper-icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.stepper-icon.pending {
+  background-color: #f3f4f6;
+  color: #9ca3af;
+}
+
+.stepper-icon.in_progress {
+  background-color: var(--bridge-blue-light);
+  color: white;
+  box-shadow: 0 10px 15px -3px rgb(59 130 246 / 0.3);
+}
+
+.stepper-icon.completed {
+  background-color: var(--success);
+  color: white;
+}
+
+.stepper-connector {
+  flex: 1;
+  height: 2px;
+  background-color: #e5e7eb;
+  margin: 0 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.stepper-connector.completed {
+  background-color: var(--success);
+}
+
+.stepper-connector.active {
+  background-color: var(--bridge-blue-light);
+}
+
+/* ================================================================
+   DRAG & DROP ZONE
+   ================================================================ */
+
+.drop-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 0.75rem;
+  padding: 3rem;
+  text-align: center;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.drop-zone:hover {
+  border-color: var(--bridge-blue);
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.drop-zone.active {
+  border-color: var(--bridge-blue);
+  background-color: #eff6ff;
+  transform: scale(1.02);
+}
+
+.drop-zone.error {
+  border-color: #fca5a5;
+  background-color: rgba(254, 226, 226, 0.3);
+}
+
+/* ================================================================
+   STAT CARDS
+   ================================================================ */
+
+.stat-card {
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.stat-card-value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-top: 0.25rem;
+}
+
+.stat-card-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ================================================================
+   STATUS BADGES
+   ================================================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge-success {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.badge-warning {
+  background-color: #fef9c3;
+  color: #854d0e;
+}
+
+.badge-error {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-info {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.badge-gray {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+/* ================================================================
+   TABLE STYLES
+   ================================================================ */
+
+.table-forensic {
+  width: 100%;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.table-forensic thead {
+  background-color: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.table-forensic th {
+  padding: 0.75rem 1rem;
+  font-weight: 500;
+  color: #6b7280;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.table-forensic td {
+  padding: 1rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.table-forensic tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+/* ================================================================
+   SIDEBAR NAVIGATION
+   ================================================================ */
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  color: #4b5563;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+}
+
+.sidebar-link:hover {
+  background-color: #f3f4f6;
+}
+
+.sidebar-link.active {
+  background-color: var(--bridge-blue);
+  color: white;
+}
+
+.sidebar-link.active:hover {
+  background-color: var(--bridge-blue);
+}
+
+/* ================================================================
+   INPUT STYLES
+   ================================================================ */
+
+.input {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  color: #111827;
+}
+
+.input::placeholder {
+  color: #9ca3af;
+}
+
+.input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bridge-blue);
+  border-color: transparent;
+}
+
+/* ================================================================
+   ANIMATIONS
+   ================================================================ */
+
+@keyframes pulse-subtle {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* ================================================================
+   SCROLLBAR (Minimal)
+   ================================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+}

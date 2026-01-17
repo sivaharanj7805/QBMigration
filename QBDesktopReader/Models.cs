@@ -876,6 +876,7 @@ namespace QBDesktopExtractor
     public class QBInvoice
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
@@ -925,6 +926,7 @@ namespace QBDesktopExtractor
     public class QBPurchaseOrder
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
@@ -955,6 +957,7 @@ namespace QBDesktopExtractor
     public class QBSalesOrder
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
@@ -981,6 +984,7 @@ namespace QBDesktopExtractor
     public class QBBill
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
@@ -1012,6 +1016,7 @@ namespace QBDesktopExtractor
     public class QBBillPaymentCheck
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
         [JsonProperty("bankAccountRefListId")] public string BankAccountRefListID { get; set; }
@@ -1025,6 +1030,7 @@ namespace QBDesktopExtractor
     public class QBReceivePayment
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
         [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
@@ -1041,6 +1047,7 @@ namespace QBDesktopExtractor
     public class QBCreditMemo
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
@@ -1066,6 +1073,7 @@ namespace QBDesktopExtractor
     public class QBSalesReceipt
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
@@ -1078,6 +1086,7 @@ namespace QBDesktopExtractor
     public class QBEstimate
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
@@ -1091,6 +1100,7 @@ namespace QBDesktopExtractor
     public class QBJournalEntry
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
@@ -1116,6 +1126,7 @@ namespace QBDesktopExtractor
     public class QBCheck
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnNumber")] public int? TxnNumber { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
@@ -1170,6 +1181,7 @@ namespace QBDesktopExtractor
     public class QBDeposit
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("depositToAccountRefListId")] public string DepositToAccountRefListID { get; set; }
         [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
@@ -1216,6 +1228,7 @@ namespace QBDesktopExtractor
     public class QBTransfer
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("transferFromAccountRefListId")] public string TransferFromAccountRefListID { get; set; }
         [JsonProperty("transferToAccountRefListId")] public string TransferToAccountRefListID { get; set; }
@@ -1240,6 +1253,7 @@ namespace QBDesktopExtractor
     public class QBVendorCredit
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("sha256IntegrityHash")] public string Sha256IntegrityHash { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
         [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
@@ -1422,5 +1436,12 @@ namespace QBDesktopExtractor
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("linkType")] public string LinkType { get; set; }
         [JsonProperty("linkAmount")] public decimal? LinkAmount { get; set; }
+        
+        // Enhanced fields for Recursive Transaction Linking
+        [JsonProperty("linkSequence")] public int? LinkSequence { get; set; }
+        [JsonProperty("balanceAfterLink")] public decimal? BalanceAfterLink { get; set; }
+        [JsonProperty("isFullyApplied")] public bool? IsFullyApplied { get; set; }
+        [JsonProperty("discountAmount")] public decimal? DiscountAmount { get; set; }
+        [JsonProperty("originalAmount")] public decimal? OriginalAmount { get; set; }
     }
 }

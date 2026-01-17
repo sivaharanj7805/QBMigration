@@ -1859,6 +1859,9 @@ namespace QBDesktopExtractor
                         }
                     }
 
+                    // Compute forensic integrity hash (THE $60M COLUMN)
+                    invoice.Sha256IntegrityHash = ForensicHashingService.ComputeInvoiceHash(invoice);
+
                     return invoice;
                 },
                 recordTypeName: "Invoices"
@@ -2070,6 +2073,9 @@ namespace QBDesktopExtractor
                             });
                         }
                     }
+
+                    // Compute forensic integrity hash
+                    bill.Sha256IntegrityHash = ForensicHashingService.ComputeBillHash(bill);
 
                     return bill;
                 },

@@ -1670,3 +1670,54 @@ class QBDataTransformer:
             })
     
         return qbo
+    
+    # ========================================================================
+    # CASEWARE MODE: AUDIT BUNDLE GENERATION
+    # ========================================================================
+    
+    def transform_for_caseware(self, qb_data: Dict, output_dir: str,
+                                as_of_date: str = None,
+                                start_date: str = None,
+                                end_date: str = None) -> Dict:
+        """
+        Transform QB data for Caseware Audit Bundle output.
+        
+        Alternative to pushing to QBO - generates audit-ready CSVs with
+        SHA-256 integrity hashes for every transaction.
+        
+        OUTPUT FILES:
+        1. Audit_TB.csv - Trial Balance with Lead Sheet codes
+        2. Audit_GL.csv - General Ledger with forensic hashes
+        3. Audit_Mapping.cvw - Caseware column configuration
+        
+        Args:
+            qb_data: QB Desktop extraction data
+            output_dir: Directory for output files
+            as_of_date: Trial balance date
+            start_date: GL filter start
+            end_date: GL filter end
+            
+        Returns:
+            Dict with file paths and statistics
+        """
+        logger.info("🏛️ CASEWARE MODE ACTIVATED")
+        logger.info("Generating Audit-Ready CSV Bundle...")
+        
+        from caseware_exporter import CasewareExporter
+        
+        # Get company name
+        company_name = qb_data.get('company', {}).get('companyName', 'Company')
+        
+        # Create exporter
+        exporter = CasewareExporter(output_dir, company_name)
+        
+        # Generate bundle
+        result = exporter.generate_audit_bundle(
+            qb_data,
+            as_of_date=as_of_date,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        logger.info("🏛️ CASEWARE MODE COMPLETE")
+        return result

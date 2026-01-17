@@ -201,6 +201,36 @@ class Config:
     ENABLE_METRICS_DASHBOARD = os.getenv('ENABLE_METRICS_DASHBOARD', 'false').lower() == 'true'
     
     # ============================================================================
+    # ENTERPRISE FEATURES (v2.0)
+    # ============================================================================
+    # SSO / SAML 2.0
+    ENABLE_SSO = os.getenv('ENABLE_SSO', 'false').lower() == 'true'
+    SSO_PROVIDERS = os.getenv('SSO_PROVIDERS', '').split(',') if os.getenv('SSO_PROVIDERS') else []
+    SAML_SP_ENTITY_ID = os.getenv('SAML_SP_ENTITY_ID', 'https://forensicbridge.io')
+    SAML_ACS_URL = os.getenv('SAML_ACS_URL', '/api/sso/acs')
+    
+    # S3 Object Locking (WORM - Write Once, Read Many)
+    ENABLE_WORM_STORAGE = os.getenv('ENABLE_WORM_STORAGE', 'false').lower() == 'true'
+    WORM_RETENTION_YEARS = int(os.getenv('WORM_RETENTION_YEARS', '7'))
+    WORM_RETENTION_MODE = os.getenv('WORM_RETENTION_MODE', 'COMPLIANCE')  # GOVERNANCE or COMPLIANCE
+    
+    # Customer-Managed Keys (CMK)
+    ENABLE_CMK = os.getenv('ENABLE_CMK', 'false').lower() == 'true'
+    DEFAULT_CMK_ARN = os.getenv('DEFAULT_CMK_ARN', '')
+    
+    # Multi-AZ Deployment
+    ENABLE_MULTI_AZ = os.getenv('ENABLE_MULTI_AZ', 'false').lower() == 'true'
+    PREFERRED_AVAILABILITY_ZONES = os.getenv('PREFERRED_AZS', 'ca-central-1a,ca-central-1b,ca-central-1d').split(',')
+    
+    # Forensic Archival (Glacier)
+    ENABLE_FORENSIC_ARCHIVAL = os.getenv('ENABLE_FORENSIC_ARCHIVAL', 'false').lower() == 'true'
+    GLACIER_RETENTION_YEARS = int(os.getenv('GLACIER_RETENTION_YEARS', '7'))
+    
+    # Webhook Delivery Logging
+    ENABLE_WEBHOOK_LOGGING = os.getenv('ENABLE_WEBHOOK_LOGGING', 'true').lower() == 'true'
+    WEBHOOK_LOG_RETENTION_DAYS = int(os.getenv('WEBHOOK_LOG_RETENTION_DAYS', '90'))
+    
+    # ============================================================================
     # PAGINATION
     # ============================================================================
     DEFAULT_PAGE_SIZE = 50
