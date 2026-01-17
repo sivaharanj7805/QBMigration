@@ -2,14 +2,26 @@
 Health Check Blueprint
 =====================
 Provides health check endpoint for monitoring, load balancers, and testing.
+
+Enhanced with:
+- Canadian Data Residency Verification (ca-central-1)
+- S3 bucket location validation
+- Multi-AZ status
 """
 
 from flask import Blueprint, jsonify, current_app
 from sqlalchemy import text
 from models.database import db
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 health_bp = Blueprint('health', __name__)
+
+# Canadian Data Residency Enforcement
+REQUIRED_REGION = 'ca-central-1'  # Montreal
+
 
 @health_bp.route('/api/health', methods=['GET'])
 def health_check():
@@ -23,6 +35,7 @@ def health_check():
         'environment': current_app.config.get('ENV', 'unknown'),
         'database': 'unknown',
         'aws_configured': False,
+        'canadian_residency': False,
         'timestamp': None
     }
     
@@ -41,6 +54,15 @@ def health_check():
     if aws_bucket and aws_region:
         health_status['aws_configured'] = True
         health_status['aws_region'] = aws_region
+        
+        # Verify Canadian Data Residency
+        if aws_region == REQUIRED_REGION:
+            health_status['canadian_residency'] = True
+            health_status['data_residency_region'] = 'ca-central-1 (Montreal)'
+        else:
+            health_status['status'] = 'degraded'
+            health_status['canadian_residency'] = False
+            health_status['data_residency_warning'] = f"Region '{aws_region}' does not meet Canadian data residency requirements. Must use '{REQUIRED_REGION}'."
     
     # Add timestamp
     from datetime import datetime
@@ -50,3 +72,138 @@ def health_check():
     status_code = 200 if health_status['status'] == 'healthy' else 503
     
     return jsonify(health_status), status_code
+
+
+@health_bp.route('/api/health/detailed', methods=['GET'])
+def detailed_health_check():
+    """
+    Detailed health check with full compliance verification.
+    Used for enterprise deployment validation.
+    """
+    from datetime import datetime
+    
+    health_status = {
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'checks': {}
+    }
+    
+    # 1. Database Check
+    try:
+        db.session.execute(text('SELECT 1'))
+        health_status['checks']['database'] = {'status': 'pass', 'message': 'Connected'}
+    except Exception as e:
+        health_status['checks']['database'] = {'status': 'fail', 'message': str(e)}
+        health_status['status'] = 'unhealthy'
+    
+    # 2. Canadian Data Residency Check
+    aws_region = current_app.config.get('AWS_REGION', 'not_configured')
+    if aws_region == REQUIRED_REGION:
+        health_status['checks']['canadian_residency'] = {
+            'status': 'pass',
+            'region': aws_region,
+            'location': 'Montreal, Quebec, Canada'
+        }
+    else:
+        health_status['checks']['canadian_residency'] = {
+            'status': 'fail',
+            'region': aws_region,
+            'required': REQUIRED_REGION,
+            'message': 'Data residency violation - must use ca-central-1'
+        }
+        health_status['status'] = 'unhealthy'
+    
+    # 3. S3 Bucket Location Verification
+    aws_bucket = current_app.config.get('AWS_S3_BUCKET')
+    if aws_bucket:
+        try:
+            import boto3
+            s3 = boto3.client('s3', region_name=aws_region)
+            response = s3.get_bucket_location(Bucket=aws_bucket)
+            bucket_location = response.get('LocationConstraint') or 'us-east-1'
+            
+            if bucket_location == REQUIRED_REGION:
+                health_status['checks']['s3_bucket'] = {
+                    'status': 'pass',
+                    'bucket': aws_bucket,
+                    'location': bucket_location
+                }
+            else:
+                health_status['checks']['s3_bucket'] = {
+                    'status': 'fail',
+                    'bucket': aws_bucket,
+                    'location': bucket_location,
+                    'required': REQUIRED_REGION,
+                    'message': 'S3 bucket not in required region'
+                }
+                health_status['status'] = 'unhealthy'
+        except Exception as e:
+            health_status['checks']['s3_bucket'] = {
+                'status': 'warn',
+                'bucket': aws_bucket,
+                'message': f'Could not verify: {str(e)}'
+            }
+    
+    # 4. SSO Configuration Check
+    sso_enabled = current_app.config.get('ENABLE_SSO', False)
+    health_status['checks']['sso'] = {
+        'status': 'pass' if sso_enabled else 'info',
+        'enabled': sso_enabled,
+        'providers': current_app.config.get('SSO_PROVIDERS', [])
+    }
+    
+    # 5. WORM Storage Check
+    worm_enabled = current_app.config.get('ENABLE_WORM_STORAGE', False)
+    health_status['checks']['worm_storage'] = {
+        'status': 'pass' if worm_enabled else 'info',
+        'enabled': worm_enabled,
+        'retention_years': 7 if worm_enabled else None
+    }
+    
+    # 6. Multi-AZ Check
+    multi_az = current_app.config.get('ENABLE_MULTI_AZ', False)
+    health_status['checks']['multi_az'] = {
+        'status': 'pass' if multi_az else 'info',
+        'enabled': multi_az,
+        'availability_zones': ['ca-central-1a', 'ca-central-1b', 'ca-central-1d'] if multi_az else []
+    }
+    
+    status_code = 200 if health_status['status'] == 'healthy' else 503
+    return jsonify(health_status), status_code
+
+
+@health_bp.route('/api/health/compliance', methods=['GET'])
+def compliance_check():
+    """
+    Compliance verification endpoint for enterprise audits.
+    Returns all compliance-relevant configuration.
+    """
+    from datetime import datetime
+    
+    compliance = {
+        'timestamp': datetime.utcnow().isoformat(),
+        'data_residency': {
+            'requirement': 'Canadian Data Residency',
+            'region': current_app.config.get('AWS_REGION', 'not_configured'),
+            'required_region': REQUIRED_REGION,
+            'compliant': current_app.config.get('AWS_REGION') == REQUIRED_REGION
+        },
+        'encryption': {
+            's3_encryption': current_app.config.get('AWS_S3_ENCRYPTION', 'AES256'),
+            'customer_managed_keys': current_app.config.get('ENABLE_CMK', False)
+        },
+        'retention': {
+            'financial_data_ttl_hours': current_app.config.get('AWS_S3_FILE_TTL_HOURS', 24),
+            'metadata_archival_years': 7,
+            'worm_enabled': current_app.config.get('ENABLE_WORM_STORAGE', False)
+        },
+        'authentication': {
+            'sso_enabled': current_app.config.get('ENABLE_SSO', False),
+            'mfa_enabled': current_app.config.get('ENABLE_2FA', False)
+        },
+        'high_availability': {
+            'multi_az_enabled': current_app.config.get('ENABLE_MULTI_AZ', False)
+        }
+    }
+    
+    return jsonify(compliance)
