@@ -11,12 +11,11 @@ import { DiscrepancyDoctor } from "@/components/migrations/DiscrepancyDoctor";
 import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-// import { api } from "@/lib/api"; // Commented out to avoid crash
+import { api } from "@/lib/api";
 
 export default function MigrationDetailPage() {
-    // const params = useParams();
-    // const id = params?.id as string;
-    const id = "MIG-2026-001"; // HARDCODED for debugging
+    const params = useParams();
+    const id = params?.id as string;
 
     // Hooks using forced mocks
     const { data: liveStatus, isLoading: statusLoading } = useLiveStatus(id);
@@ -26,10 +25,26 @@ export default function MigrationDetailPage() {
     const [isDownloading, setIsDownloading] = useState(false);
     const handleDownloadCertificate = async () => {
         setIsDownloading(true);
-        setTimeout(() => {
-            alert("This is a mock download. In production, this connects to AWS S3.");
+        try {
+            const blob = await api.downloadAuditCertificate(id);
+            if (blob) {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Audit_Certificate_${id}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } else {
+                alert("Certificate download failed.");
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error downloading certificate.");
+        } finally {
             setIsDownloading(false);
-        }, 1000);
+        }
     };
 
     const getStatusIcon = () => {

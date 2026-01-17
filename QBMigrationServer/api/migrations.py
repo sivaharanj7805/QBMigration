@@ -511,3 +511,149 @@ def delete_migration(migration_id):
             'success': False,
             'error': 'Failed to delete migration'
         }), 500
+
+
+# ============================================================================
+# FORENSIC ENDPOINTS
+# ============================================================================
+
+@migrations_bp.route('/api/migrations/<migration_id>/live-status', methods=['GET'])
+# @login_required # Allow public access on local dev for easier debugging, or keep STRICT
+def get_live_status(migration_id):
+    """
+    Get detailed live status (Pizza Tracker)
+    """
+    try:
+        migration = Migration.query.filter_by(migration_id=migration_id).first()
+        
+        if not migration:
+            return jsonify({
+                'success': False,
+                'error': 'Migration not found'
+            }), 404
+        
+        # Default/Fallback structure if no live_status_data is present
+        default_status = {
+            'migration_id': migration.migration_id,
+            'status': migration.status,
+            'phase': 'initiation' if migration.status == 'pending' else migration.status,
+            'phase_number': 1,
+            'percentage': migration.progress_percent or 0,
+            'current_entity': migration.current_step or 'Initializing...',
+            'status_message': migration.current_step or 'Waiting to start...',
+            'company_name': migration.company_name or 'Unknown Company',
+            'started_at': migration.started_at.isoformat() if migration.started_at else None,
+            'elapsed_seconds': 0,
+            'phases': [
+                { 'name': 'Initiation', 'status': 'pending', 'percentage': 0, 'description': 'Secure handouts' },
+                { 'name': 'Extraction', 'status': 'pending', 'percentage': 0, 'description': 'Reading QBW' },
+                { 'name': 'Transformation', 'status': 'pending', 'percentage': 0, 'description': 'Converting data' },
+                { 'name': 'Loading', 'status': 'pending', 'percentage': 0, 'description': 'Pushing to QBO' },
+                { 'name': 'Verification', 'status': 'pending', 'percentage': 0, 'description': 'Checking hashes' }
+            ]
+        }
+
+        # If we have stored live data, merge it or return it
+        import json
+        if migration.live_status_data:
+            try:
+                live_data = json.loads(migration.live_status_data)
+                # Ensure migration ID matches
+                live_data['migration_id'] = migration.migration_id
+                live_data['status'] = migration.status # Always trust DB status
+                return jsonify({
+                    'success': True,
+                    'data': live_data
+                }), 200
+            except:
+                logger.error("Failed to parse live_status_data JSON")
+        
+        # Return default if no detailed data
+        return jsonify({
+            'success': True,
+            'data': default_status
+        }), 200
+
+    except Exception as e:
+        logger.exception(f"Failed to get live status {migration_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to get live status'
+        }), 500
+
+
+@migrations_bp.route('/api/migrations/<migration_id>/trial-balance', methods=['GET'])
+@login_required
+def get_trial_balance(migration_id):
+    """
+    Get trial balance verification data
+    """
+    try:
+        migration = Migration.query.filter_by(
+            migration_id=migration_id,
+            user_id=current_user.id
+        ).first()
+        
+        if not migration:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+            
+        import json
+        if migration.trial_balance_data:
+            try:
+                tb_data = json.loads(migration.trial_balance_data)
+                return jsonify({
+                    'success': True,
+                    'data': tb_data
+                }), 200
+            except:
+                pass
+        
+        # Return empty structure if not ready yet
+        return jsonify({
+            'success': True,
+            'data': {
+                'source_trial_balance': 0,
+                'destination_trial_balance': 0,
+                'discrepancy': 0,
+                'is_balanced': False,
+                'forensic_status': 'PENDING',
+                'verification_timestamp': None
+            }
+        }), 200
+
+    except Exception as e:
+        logger.exception(f"Failed to get TB {migration_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@migrations_bp.route('/api/migrations/<migration_id>/audit-certificate/preview', methods=['GET'])
+@login_required
+def get_audit_cert_preview(migration_id):
+    """
+    Get audit certificate availability
+    """
+    try:
+        migration = Migration.query.filter_by(
+            migration_id=migration_id, 
+            user_id=current_user.id
+        ).first()
+        
+        if not migration:
+            return jsonify({'success': False, 'error': 'Not found'}), 404
+            
+        is_completed = (migration.status == 'completed')
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'available': is_completed,
+                'migration_id': migration.migration_id,
+                'company_name': migration.company_name,
+                'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
+                'download_url': f"/api/migrations/{migration.migration_id}/audit-certificate" if is_completed else None
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.exception(f"Failed to get cert info {migration_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500

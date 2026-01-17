@@ -66,6 +66,10 @@ class Migration(db.Model):
     actual_cost_usd = db.Column(db.Numeric(10, 4))
     cost_breakdown = db.Column(db.Text)  # JSON: {ec2: X, s3: Y, data_transfer: Z}
     
+    # Forensic Data (Stored as JSON Text)
+    trial_balance_data = db.Column(db.Text) # JSON: Source/Dest balances, variance, hash
+    live_status_data = db.Column(db.Text)   # JSON: Detailed phase tracking, logs
+    
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     started_at = db.Column(db.DateTime)
@@ -416,6 +420,19 @@ class Migration(db.Model):
             if self.cost_breakdown:
                 try:
                     data['cost_breakdown'] = json.loads(self.cost_breakdown)
+                except:
+                    pass
+            
+            # Parse forensic data
+            if hasattr(self, 'trial_balance_data') and self.trial_balance_data:
+                try:
+                    data['trial_balance_data'] = json.loads(self.trial_balance_data)
+                except:
+                    pass
+            
+            if hasattr(self, 'live_status_data') and self.live_status_data:
+                try:
+                    data['live_status_data'] = json.loads(self.live_status_data)
                 except:
                     pass
         
