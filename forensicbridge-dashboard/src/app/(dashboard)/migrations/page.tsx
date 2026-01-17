@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import {
     FileSpreadsheet,
     Clock,
@@ -12,72 +14,29 @@ import {
     Calendar,
     Timer,
     Loader2,
-    Filter
 } from "lucide-react";
-
-// Mock migrations
-const migrations = [
-    {
-        id: "MIG-2026-001",
-        companyName: "ABC Corporation",
-        fileName: "ABCCorp_2024.QBW",
-        startTime: "Jan 15, 2026 10:30 AM",
-        duration: "4m 32s",
-        status: "completed",
-        recordsProcessed: 12847,
-        verified: true
-    },
-    {
-        id: "MIG-2026-002",
-        companyName: "Smith & Associates",
-        fileName: "SmithAssoc.QBW",
-        startTime: "Jan 14, 2026 2:15 PM",
-        duration: "2m 15s",
-        status: "completed",
-        recordsProcessed: 5621,
-        verified: true
-    },
-    {
-        id: "MIG-2026-003",
-        companyName: "Northern Manufacturing",
-        fileName: "NorthMfg.QBW",
-        startTime: "Jan 16, 2026 9:00 AM",
-        duration: "In progress",
-        status: "processing",
-        recordsProcessed: 19234,
-        progress: 67,
-        verified: false
-    },
-    {
-        id: "MIG-2026-004",
-        companyName: "Coastal Exports Ltd",
-        fileName: "CoastalExports.QBB",
-        startTime: "Jan 13, 2026 11:45 AM",
-        duration: "3m 08s",
-        status: "failed",
-        recordsProcessed: 4521,
-        error: "QBO API rate limit exceeded",
-        verified: false
-    },
-    {
-        id: "MIG-2026-005",
-        companyName: "Downtown Retail",
-        fileName: "DowntownRetail.QBW",
-        startTime: "Jan 12, 2026 3:30 PM",
-        duration: "1m 45s",
-        status: "completed",
-        recordsProcessed: 3456,
-        verified: true
-    }
-];
 
 export default function MigrationsPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
 
-    const filteredMigrations = migrations.filter(m => {
-        const matchesSearch = m.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            m.id.toLowerCase().includes(searchTerm.toLowerCase());
+    // Real Backend Connection
+    const { data, isLoading } = useQuery({
+        queryKey: ["migrations"],
+        queryFn: async () => {
+            const response = await api.getMigrations();
+            if (!response.success || !response.data) {
+                throw new Error(response.error || "Failed to fetch migrations");
+            }
+            return response.data;
+        }
+    });
+
+    const migrations = data?.migrations || [];
+
+    const filteredMigrations = migrations.filter((m: any) => {
+        const matchesSearch = (m.company_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (m.migration_id || "").toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === "all" || m.status === statusFilter;
         return matchesSearch && matchesStatus;
     });
@@ -87,22 +46,31 @@ export default function MigrationsPage() {
             case "completed":
                 return <span className="badge badge-success"><CheckCircle2 className="w-3 h-3 mr-1" />Completed</span>;
             case "processing":
+            case "in_progress":
                 return (
                     <span className="badge badge-info flex items-center gap-1">
                         <Loader2 className="w-3 h-3 animate-spin" />
-                        {progress}%
+                        {progress || 0}%
                     </span>
                 );
             case "failed":
                 return <span className="badge badge-error"><AlertCircle className="w-3 h-3 mr-1" />Failed</span>;
             default:
-                return <span className="badge badge-gray">Unknown</span>;
+                return <span className="badge badge-gray">{status}</span>;
         }
     };
 
-    const completedCount = migrations.filter(m => m.status === "completed").length;
-    const processingCount = migrations.filter(m => m.status === "processing").length;
-    const failedCount = migrations.filter(m => m.status === "failed").length;
+    const completedCount = migrations.filter((m: any) => m.status === "completed").length;
+    const processingCount = migrations.filter((m: any) => m.status === "processing" || m.status === "in_progress").length;
+    const failedCount = migrations.filter((m: any) => m.status === "failed").length;
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-[var(--bridge-blue)]" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -193,40 +161,33 @@ export default function MigrationsPage() {
                             <th>Company</th>
                             <th>Records</th>
                             <th>Started</th>
-                            <th>Duration</th>
                             <th>Status</th>
                             <th>Verified</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredMigrations.map((migration) => (
-                            <tr key={migration.id}>
+                        {filteredMigrations.map((migration: any) => (
+                            <tr key={migration.migration_id}>
                                 <td>
-                                    <code className="text-[var(--bridge-blue)] text-sm">{migration.id}</code>
+                                    <code className="text-[var(--bridge-blue)] text-sm">{migration.migration_id}</code>
                                 </td>
                                 <td>
                                     <div>
-                                        <p className="font-medium text-gray-900">{migration.companyName}</p>
-                                        <p className="text-xs text-gray-500">{migration.fileName}</p>
+                                        <p className="font-medium text-gray-900">{migration.company_name}</p>
+                                        <p className="text-xs text-gray-500">{migration.qb_file_name}</p>
                                     </div>
                                 </td>
-                                <td className="tabular-nums">{migration.recordsProcessed.toLocaleString()}</td>
+                                <td className="tabular-nums">{(migration.records_processed || 0).toLocaleString()}</td>
                                 <td>
                                     <span className="text-gray-500 flex items-center gap-1 text-sm">
                                         <Calendar className="w-3 h-3" />
-                                        {migration.startTime}
+                                        {new Date(migration.created_at).toLocaleDateString()}
                                     </span>
                                 </td>
+                                <td>{getStatusBadge(migration.status, migration.progress_percent)}</td>
                                 <td>
-                                    <span className="text-gray-600 flex items-center gap-1 tabular-nums">
-                                        <Timer className="w-3 h-3" />
-                                        {migration.duration}
-                                    </span>
-                                </td>
-                                <td>{getStatusBadge(migration.status, migration.progress)}</td>
-                                <td>
-                                    {migration.verified ? (
+                                    {migration.integrity_verified ? (
                                         <span className="text-green-600">✓ Verified</span>
                                     ) : (
                                         <span className="text-gray-400">—</span>
@@ -234,7 +195,7 @@ export default function MigrationsPage() {
                                 </td>
                                 <td>
                                     <Link
-                                        href={`/migrations/${migration.id}`}
+                                        href={`/migrations/${migration.migration_id}`}
                                         className="btn-secondary text-sm py-1.5 flex items-center gap-1"
                                     >
                                         View <ArrowUpRight className="w-3 h-3" />
