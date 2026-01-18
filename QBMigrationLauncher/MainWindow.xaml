@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:QBMigrationLauncher"
         mc:Ignorable="d"
-        Title="QuickBooks Migration Tool - Enterprise Edition" Height="600" Width="800"
+        Title="ForensicBridge Migration Suite - Enterprise Edition" Height="600" Width="800"
         WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize"
         Background="#F5F5F5">
     
@@ -27,8 +27,8 @@
             <Grid>
                 <StackPanel Orientation="Horizontal">
                     <!-- Logo Placeholder -->
-                    <TextBlock Text="Q" FontSize="28" FontWeight="Bold" Foreground="#2CA01C" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="QuickBooks Migration Tool" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#333333"/>
+                    <TextBlock Text="FOB" FontSize="28" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="ForensicBridge Migration" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#333333"/>
                 </StackPanel>
                 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -50,11 +50,11 @@
                 </Grid.ColumnDefinitions>
                 
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="Configuration" FontSize="18" FontWeight="Bold" Foreground="#2CA01C" Margin="0,0,0,15"/>
+                    <TextBlock Text="Configuration" FontSize="18" FontWeight="Bold" Foreground="#0F172A" Margin="0,0,0,15"/>
                     
                     <TextBlock Text="Company File" FontSize="14" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,0,5"/>
                     <ComboBox ItemsSource="{Binding DetectedFiles}" SelectedItem="{Binding SelectedFile}" 
-                              Height="40" FontSize="14" Padding="10" Background="#F4F8F4" BorderBrush="#2CA01C">
+                              Height="40" FontSize="14" Padding="10" Background="#F4F8F4" BorderBrush="#0F172A">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
@@ -117,7 +117,7 @@
                     <TextBlock Text="{Binding ProgressPercentage, StringFormat={}{0}%}" FontWeight="Bold" Foreground="White" 
                                HorizontalAlignment="Left" VerticalAlignment="Bottom" Panel.ZIndex="1" Margin="5,0,0,25"/>
                     <!-- Custom Progress Bar -->
-                     <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="30" Foreground="#2CA01C" Background="#EEEEEE" BorderThickness="0"/>
+                     <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="30" Foreground="#3B82F6" Background="#EEEEEE" BorderThickness="0"/>
                 </Grid>
                 
                 <TextBlock Text="{Binding CurrentStatusMessage}" FontSize="14" Foreground="#555555"/>

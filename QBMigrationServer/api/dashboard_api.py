@@ -532,7 +532,7 @@ def download_audit_certificate(migration_id):
                 sys.path.insert(0, os.path.join(os.path.dirname(current_app.root_path), 'QBMigrationService'))
                 from verifier import PremiumMigrationVerifier
                 
-                # Create a mock verifier for certificate generation
+                # Create verifier instance for certificate generation
                 verifier = PremiumMigrationVerifier(qbo_client=None)
                 
                 # Get verification data

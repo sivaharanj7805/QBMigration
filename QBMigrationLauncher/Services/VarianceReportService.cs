@@ -71,7 +71,7 @@ namespace QBMigrationLauncher.Services
     <div class='report'>
         <div class='header'>
             <div>
-                <span class='logo'>Q</span>
+                <span class='logo'>FOB</span>
                 <h1 style='display:inline; margin-left:20px;'>Post-Migration Variance Report</h1>
             </div>
             <div>

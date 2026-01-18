@@ -49,7 +49,7 @@ namespace QBMigrationLauncher.Services
 <body>
     <div class='certificate'>
         <div class='header'>
-            <div class='logo'>Q</div>
+            <div class='logo'>FOB</div>
             <h1>Certificate of Data Migration</h1>
         </div>
         
@@ -146,7 +146,7 @@ namespace QBMigrationLauncher.Services
 <body>
     <div class='report'>
         <div class='header'>
-            <span class='logo'>Q</span>
+            <span class='logo'>FOB</span>
             <h1>Pre-Migration Health Check Report</h1>
         </div>
         

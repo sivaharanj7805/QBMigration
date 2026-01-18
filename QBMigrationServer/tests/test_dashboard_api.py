@@ -55,19 +55,25 @@ class TestDashboardAPI:
             from models.user import User
             user = User(
                 email='test@forensicbridge.com',
-                username='testuser'
+                first_name='Test',
+                last_name='User',
+                company_name='ForensicBridge'
             )
             user.set_password('TestPass123!')
             db.session.add(user)
             db.session.commit()
         
         # Login to get session
-        client.post('/api/auth/login', json={
+        response = client.post('/api/auth/login', json={
             'email': 'test@forensicbridge.com',
             'password': 'TestPass123!'
         })
         
-        return {}
+        # Get JWT token from response
+        data = response.get_json()
+        token = data.get('token', '') if data else ''
+        
+        return {'Authorization': f'Bearer {token}'}
     
     @pytest.fixture
     def sample_migration(self, app):
@@ -432,10 +438,11 @@ class TestAPIPerformance:
             db.create_all()
             
             from models.user import User
-            user = User(email='perf@test.com', username='perftest')
+            user = User(email='perf@test.com', first_name='Perf', last_name='Test')
             user.set_password('Test123!')
             db.session.add(user)
             db.session.commit()
+            
             
             # Create 100 migrations for performance testing
             for i in range(100):

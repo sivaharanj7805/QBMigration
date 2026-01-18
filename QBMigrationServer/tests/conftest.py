@@ -106,64 +106,33 @@ def client(app):
 @pytest.fixture(scope='function', autouse=True)
 def db_session(app):
     """
-    Create clean database session for each test with transaction isolation
+    Create clean database session for each test.
     
-    SAFETY FEATURES:
-    - Each test runs in isolated transaction
-    - Automatic rollback after test
-    - No cross-test data contamination
-    - Connection pooling prevents deadlocks
-    
-    autouse=True ensures this runs for EVERY test automatically
+    PRODUCTION-GRADE APPROACH:
+    - Truncates all tables before each test
+    - No complex transaction nesting
+    - Data is actually visible within tests
+    - Clean slate for each test
     """
-    # SAFETY CHECK: Ensure we're in app context
-    if not app.app_context():
-        raise RuntimeError("No application context! This should never happen.")
-    
-    # Create isolated connection for this test
-    connection = db.engine.connect()
-    transaction = connection.begin()
-    
-    # Create session bound to this isolated connection
-    session_factory = sessionmaker(bind=connection)
-    Session = scoped_session(session_factory)
-    
-    # Replace global session with test-isolated session
-    old_session = db.session
-    db.session = Session
-    
-    # SAFETY: Clear any existing data before test starts
-    try:
-        # Truncate all tables in reverse order (respects foreign keys)
-        for table in reversed(db.metadata.sorted_tables):
-            Session.execute(table.delete())
-        Session.commit()
-    except Exception as e:
-        logger.warning(f"Could not clear tables: {str(e)}")
-    
-    yield Session
-    
-    # Cleanup after test
-    try:
-        # Remove session
-        Session.remove()
-        
-        # SAFETY: Always rollback to prevent data leakage
-        transaction.rollback()
-        
-        # Close connection
-        connection.close()
-        
-        # Restore original session
-        db.session = old_session
-        
-    except Exception as e:
-        logger.error(f"Session cleanup error: {str(e)}")
-        # Still try to close connection
+    # Clear all data before test
+    for table in reversed(db.metadata.sorted_tables):
         try:
-            connection.close()
-        except:
+            db.session.execute(table.delete())
+        except Exception:
             pass
+    db.session.commit()
+    
+    yield db.session
+    
+    # Clear all data after test
+    for table in reversed(db.metadata.sorted_tables):
+        try:
+            db.session.execute(table.delete())
+        except Exception:
+            pass
+    db.session.commit()
+
+
 
 
 @pytest.fixture
