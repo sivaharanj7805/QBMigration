@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
     LayoutDashboard,
@@ -9,9 +10,9 @@ import {
     FileSpreadsheet,
     Database,
     Settings,
-    Shield,
     LogOut,
-    ChevronLeft
+    ChevronLeft,
+    ExternalLink
 } from "lucide-react";
 import { useState } from "react";
 
@@ -33,21 +34,46 @@ export function Sidebar() {
     const [collapsed, setCollapsed] = useState(false);
 
     return (
-        <aside className={`flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 ${collapsed ? "w-16" : "w-64"
+        <aside className={`flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 ${collapsed ? "w-20" : "w-64"
             }`}>
             {/* Logo */}
-            <div className="flex items-center justify-between h-16 px-4 border-b border-gray-100">
-                {!collapsed && (
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-[var(--bridge-blue)] rounded-lg flex items-center justify-center">
-                            <Shield className="w-5 h-5 text-white" />
+            <div className="flex items-center justify-between h-20 px-3 border-b border-gray-100">
+                {collapsed ? (
+                    <div className="flex items-center justify-center w-full">
+                        <Image
+                            src="/new-logo.png"
+                            alt="ForensicBridge"
+                            width={48}
+                            height={48}
+                            className="rounded-lg object-contain"
+                        />
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-3">
+                        <Image
+                            src="/new-logo.png"
+                            alt="ForensicBridge"
+                            width={56}
+                            height={56}
+                            className="rounded-lg object-contain"
+                        />
+                        <div className="flex flex-col">
+                            <span className="font-bold text-gray-900 text-sm">ForensicBridge</span>
+                            <a
+                                href="https://forensicbridge.ca"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-[var(--forensic-gold)] hover:underline flex items-center gap-1"
+                            >
+                                forensicbridge.ca
+                                <ExternalLink className="w-3 h-3" />
+                            </a>
                         </div>
-                        <span className="font-bold text-gray-900">ForensicBridge</span>
                     </div>
                 )}
                 <button
                     onClick={() => setCollapsed(!collapsed)}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors flex-shrink-0"
                 >
                     <ChevronLeft className={`w-5 h-5 text-gray-400 transition-transform ${collapsed ? "rotate-180" : ""}`} />
                 </button>

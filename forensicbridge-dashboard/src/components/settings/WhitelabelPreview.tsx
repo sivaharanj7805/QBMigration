@@ -31,13 +31,13 @@ interface WhitelabelPreviewProps {
 
 const DEFAULT_CONFIG: WhitelabelConfig = {
     company_name: "ForensicBridge",
-    logo_url: null,
+    logo_url: "/new-logo.png",
     primary_color: "#3B82F6",
     secondary_color: "#0F172A",
-    accent_color: "#F59E0B",
-    support_email: "support@forensicbridge.com",
+    accent_color: "#B8860B",
+    support_email: "support@forensicbridge.ca",
     support_phone: "",
-    website_url: ""
+    website_url: "https://forensicbridge.ca"
 };
 
 export function WhitelabelPreview({

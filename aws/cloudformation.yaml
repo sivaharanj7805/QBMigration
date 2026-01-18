@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'ForensicBridge - QB Migration Infrastructure'
+Description: 'ForensicBridge - QB Migration Infrastructure (Production-Hardened)'
 
 Parameters:
   Environment:
@@ -17,6 +17,19 @@ Parameters:
     Type: String
     Default: api.forensicbridge.io
     Description: Domain for the API server
+  
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: ARN of ACM certificate for HTTPS (leave empty to skip HTTPS)
+  
+  AllowedSSHCidr:
+    Type: String
+    Default: '10.0.0.0/8'
+    Description: CIDR block allowed for SSH access (restrict to VPN/office IP)
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
 
 Resources:
   # ============================================================================
@@ -109,62 +122,144 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
 
   # ============================================================================
-  # SECURITY GROUPS
+  # SECURITY GROUPS (HARDENED)
   # ============================================================================
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: ALB Security Group
+      GroupDescription: ALB Security Group - HTTPS and HTTP (for redirect)
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
+          Description: HTTPS from anywhere
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
+          Description: HTTP (redirects to HTTPS)
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-alb-sg
 
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: EC2 Instance Security Group
+      GroupDescription: EC2 Instance Security Group - Restricted Access
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5000
           ToPort: 5000
           SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Flask app from ALB only
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0  # Restrict to your IP in production
+          CidrIp: !Ref AllowedSSHCidr
+          Description: SSH from VPN/office only
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-ec2-sg
 
   RDSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: RDS Security Group
+      GroupDescription: RDS Security Group - Private Access Only
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
           SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: PostgreSQL from EC2 only
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-rds-sg
 
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Redis Security Group
+      GroupDescription: Redis Security Group - Private Access Only
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 6379
           ToPort: 6379
           SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: Redis from EC2 only
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-redis-sg
 
   # ============================================================================
-  # S3 BUCKET (Encrypted Migration Data)
+  # AWS WAF (Web Application Firewall)
+  # ============================================================================
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub forensicbridge-${Environment}-waf
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub forensicbridge-${Environment}-waf
+      Rules:
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: CommonRuleSetMetric
+        - Name: AWSManagedRulesSQLiRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: SQLiRuleSetMetric
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: KnownBadInputsMetric
+        - Name: RateLimitRule
+          Priority: 4
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 2000
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitMetric
+
+  # ============================================================================
+  # S3 BUCKET (Encrypted Migration Data - Hardened)
   # ============================================================================
   MigrationBucket:
     Type: AWS::S3::Bucket
@@ -179,20 +274,51 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldMigrations
             Status: Enabled
             ExpirationInDays: 90
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transitions:
+              - StorageClass: GLACIER
+                TransitionInDays: 30
       CorsConfiguration:
         CorsRules:
-          - AllowedHeaders: ['*']
+          - AllowedHeaders: ['Content-Type', 'Authorization', 'x-amz-date']
             AllowedMethods: [GET, PUT, POST]
-            AllowedOrigins: ['*']
+            AllowedOrigins:
+              - !Sub 'https://${DomainName}'
+              - 'https://localhost:3000'
             MaxAge: 3000
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LogBucket
+        LogFilePrefix: s3-access-logs/
+
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub forensicbridge-logs-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 365
 
   # ============================================================================
-  # RDS POSTGRESQL
+  # RDS POSTGRESQL (Production-Ready)
   # ============================================================================
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -206,20 +332,42 @@ Resources:
     Type: AWS::RDS::DBInstance
     Properties:
       DBInstanceIdentifier: !Sub forensicbridge-${Environment}
-      DBInstanceClass: db.t3.micro
+      DBInstanceClass: db.t3.small
       Engine: postgres
-      EngineVersion: '14'
+      EngineVersion: '15'
       MasterUsername: forensicbridge
       MasterUserPassword: !Ref DBPassword
-      AllocatedStorage: 20
-      StorageType: gp2
+      AllocatedStorage: 50
+      MaxAllocatedStorage: 200
+      StorageType: gp3
       StorageEncrypted: true
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
-      BackupRetentionPeriod: 1
-      DeletionProtection: false
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      DeletionProtection: true
       PubliclyAccessible: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      EnableCloudwatchLogsExports:
+        - postgresql
+
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
 
   # ============================================================================
   # ELASTICACHE REDIS (Celery Broker)
@@ -257,8 +405,42 @@ Resources:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonS3FullAccess
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ForensicBridgeS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt MigrationBucket.Arn
+                  - !Sub '${MigrationBucket.Arn}/*'
+        - PolicyName: ForensicBridgeSecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:forensicbridge/*'
+        - PolicyName: ForensicBridgeKMSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -292,11 +474,12 @@ Resources:
           mkdir -p /opt/forensicbridge
           
           # Set environment variables
-          cat > /opt/forensicbridge/.env << EOF
+          cat > /opt/forensicbridge/.env <<EOF
           FLASK_ENV=production
           DATABASE_URL=postgresql://forensicbridge:${DBPassword}@${Database.Endpoint.Address}:5432/forensicbridge
           REDIS_URL=redis://${RedisCluster.RedisEndpoint.Address}:6379
           AWS_S3_BUCKET=${MigrationBucket}
+          SECRETS_MANAGER_NAME=forensicbridge/production
           EOF
           
           echo "ForensicBridge server ready for deployment"
@@ -305,7 +488,7 @@ Resources:
           Value: !Sub forensicbridge-${Environment}-server
 
   # ============================================================================
-  # APPLICATION LOAD BALANCER
+  # APPLICATION LOAD BALANCER (with HTTPS)
   # ============================================================================
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -318,6 +501,12 @@ Resources:
         - !Ref ALBSecurityGroup
       Scheme: internet-facing
 
+  WebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref ALB
+      WebACLArn: !GetAtt WebACL.Arn
+
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -325,22 +514,96 @@ Resources:
       Port: 5000
       Protocol: HTTP
       VpcId: !Ref VPC
-      HealthCheckPath: /health
+      HealthCheckPath: /api/health
       HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
       TargetType: instance
       Targets:
         - Id: !Ref EC2Instance
           Port: 5000
 
-  ALBListener:
+  ALBHTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref ALB
       Port: 80
       Protocol: HTTP
       DefaultActions:
+        - !If
+          - HasCertificate
+          - Type: redirect
+            RedirectConfig:
+              Protocol: HTTPS
+              Port: '443'
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref ALBTargetGroup
+
+  ALBHTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref ALBTargetGroup
+
+  # ============================================================================
+  # CLOUDWATCH ALARMS
+  # ============================================================================
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-high-cpu
+      AlarmDescription: EC2 CPU utilization above 80%
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Period: 300
+      Statistic: Average
+      Threshold: 80
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref EC2Instance
+
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-db-connections
+      AlarmDescription: RDS connections above 50
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 50
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  ALB5xxErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-alb-5xx
+      AlarmDescription: ALB 5xx errors above threshold
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: HTTPCode_ELB_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Period: 300
+      Statistic: Sum
+      Threshold: 10
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ALB.LoadBalancerFullName
 
 # ============================================================================
 # OUTPUTS
@@ -375,3 +638,9 @@ Outputs:
     Value: !GetAtt EC2Instance.PublicIp
     Export:
       Name: !Sub ${AWS::StackName}-EC2-IP
+
+  WebACLArn:
+    Description: WAF Web ACL ARN
+    Value: !GetAtt WebACL.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-WAF-ARN

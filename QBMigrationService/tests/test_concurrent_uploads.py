@@ -177,7 +177,7 @@ class TestConcurrentUploads:
         - Thread-safe name generation
         """
         try:
-            from QBMigrationService.data_transformer import QBDataTransformer
+            from data_transformer import QBDataTransformer
         except ImportError:
             pytest.skip("QBDataTransformer not available")
         
@@ -186,7 +186,7 @@ class TestConcurrentUploads:
         lock = threading.Lock()
         
         def generate_name(base_name):
-            unique = transformer.ensure_display_name_unique(base_name)
+            unique = transformer.ensure_unique_display_name(base_name, "Customer")
             with lock:
                 generated_names.append(unique)
             return unique
@@ -234,7 +234,7 @@ class TestConcurrentApiRequests:
         Test that backoff calculation is consistent.
         """
         try:
-            from QBMigrationService.qbo_client import PremiumQBOClient
+            from qbo_client import PremiumQBOClient
             client = PremiumQBOClient(
                 access_token="test",
                 db_path=":memory:"

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function RegisterPage() {
     const router = useRouter();
@@ -63,8 +64,25 @@ export default function RegisterPage() {
             <div className="w-full max-w-md px-4">
                 {/* Logo */}
                 <div className="text-center mb-8">
+                    <div className="flex justify-center mb-4">
+                        <Image
+                            src="/new-logo.png"
+                            alt="ForensicBridge"
+                            width={120}
+                            height={120}
+                            className="rounded-xl"
+                        />
+                    </div>
                     <h1 className="text-3xl font-bold text-white mb-2">ForensicBridge</h1>
                     <p className="text-slate-400">Create your account</p>
+                    <a
+                        href="https://forensicbridge.ca"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-amber-500 hover:text-amber-400 text-sm mt-1 inline-block"
+                    >
+                        forensicbridge.ca
+                    </a>
                 </div>
 
                 {/* Register Card */}
@@ -183,7 +201,7 @@ export default function RegisterPage() {
 
                 {/* Footer */}
                 <p className="mt-8 text-center text-slate-500 text-sm">
-                    By creating an account, you agree to our Terms of Service
+                    By creating an account, you agree to our <a href="https://forensicbridge.ca/terms" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400">Terms of Service</a>
                 </p>
             </div>
         </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -47,8 +48,25 @@ export default function LoginPage() {
             <div className="w-full max-w-md">
                 {/* Logo */}
                 <div className="text-center mb-8">
+                    <div className="flex justify-center mb-4">
+                        <Image
+                            src="/new-logo.png"
+                            alt="ForensicBridge"
+                            width={120}
+                            height={120}
+                            className="rounded-xl"
+                        />
+                    </div>
                     <h1 className="text-3xl font-bold text-white mb-2">ForensicBridge</h1>
                     <p className="text-slate-400">Secure QuickBooks Migration</p>
+                    <a
+                        href="https://forensicbridge.ca"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-amber-500 hover:text-amber-400 text-sm mt-1 inline-block"
+                    >
+                        forensicbridge.ca
+                    </a>
                 </div>
 
                 {/* Login Card */}
@@ -123,7 +141,7 @@ export default function LoginPage() {
 
                 {/* Footer */}
                 <p className="mt-8 text-center text-slate-500 text-sm">
-                    &copy; 2026 ForensicBridge. Enterprise-grade migration.
+                    &copy; 2026 <a href="https://forensicbridge.ca" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400">forensicbridge.ca</a> - Enterprise-grade migration.
                 </p>
             </div>
         </div>

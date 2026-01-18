@@ -1,18 +1,18 @@
 """
 ForensicBridge Authentication API
-JWT-based authentication for dashboard users
+JWT-based authentication for dashboard users with full security features
+Compatible with models/user.py User model
 """
 
-from flask import Blueprint, request, jsonify, current_app
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Blueprint, request, jsonify, current_app, session
 from functools import wraps
 import jwt
 import datetime
-import secrets
 import re
 from typing import Optional, Tuple
 
-from models import db, User
+from models.database import db
+from models.user import User
 from extensions import limiter
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
@@ -41,33 +41,41 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def require_auth(f):
-    """Decorator to require authentication for an endpoint"""
+    """Decorator to require authentication for an endpoint (supports both JWT and session)"""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Check for JWT token in Authorization header
         auth_header = request.headers.get('Authorization')
         
-        if not auth_header:
-            return jsonify({'error': 'No authorization header'}), 401
+        if auth_header:
+            try:
+                # Expect "Bearer <token>"
+                parts = auth_header.split()
+                if len(parts) != 2 or parts[0].lower() != 'bearer':
+                    return jsonify({'success': False, 'error': 'Invalid authorization format'}), 401
+                
+                token = parts[1]
+                payload = decode_token(token)
+                
+                if not payload:
+                    return jsonify({'success': False, 'error': 'Invalid or expired token'}), 401
+                
+                # Add user info to request
+                request.current_user = payload
+                return f(*args, **kwargs)
+                
+            except Exception as e:
+                return jsonify({'success': False, 'error': 'Authentication failed'}), 401
         
-        try:
-            # Expect "Bearer <token>"
-            parts = auth_header.split()
-            if len(parts) != 2 or parts[0].lower() != 'bearer':
-                return jsonify({'error': 'Invalid authorization format'}), 401
-            
-            token = parts[1]
-            payload = decode_token(token)
-            
-            if not payload:
-                return jsonify({'error': 'Invalid or expired token'}), 401
-            
-            # Add user info to request
-            request.current_user = payload
-            
-        except Exception as e:
-            return jsonify({'error': 'Authentication failed'}), 401
+        # Check for session-based auth
+        if 'user_id' in session:
+            request.current_user = {
+                'user_id': session['user_id'],
+                'email': session.get('email', '')
+            }
+            return f(*args, **kwargs)
         
-        return f(*args, **kwargs)
+        return jsonify({'success': False, 'error': 'No authorization provided'}), 401
     return decorated
 
 
@@ -97,43 +105,56 @@ def register():
     data = request.get_json()
     
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
     
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
-    name = data.get('name', '').strip()
-    company = data.get('company', '').strip()
+    first_name = data.get('first_name', data.get('name', '')).strip()
+    last_name = data.get('last_name', '').strip()
+    company = data.get('company_name', data.get('company', '')).strip()
     
     # Validation
-    if not email or not password or not name:
-        return jsonify({'error': 'Email, password, and name are required'}), 400
+    if not email:
+        return jsonify({'success': False, 'error': 'Email is required'}), 400
+    
+    if not password:
+        return jsonify({'success': False, 'error': 'Password is required'}), 400
     
     if not validate_email(email):
-        return jsonify({'error': 'Invalid email format'}), 400
+        return jsonify({'success': False, 'error': 'Invalid email format'}), 400
     
     valid, msg = validate_password(password)
     if not valid:
-        return jsonify({'error': msg}), 400
+        return jsonify({'success': False, 'error': msg}), 400
     
     # Check if user exists
     existing = User.query.filter_by(email=email).first()
     if existing:
-        return jsonify({'error': 'Email already registered'}), 409
+        return jsonify({'success': False, 'error': 'Email already exists'}), 409
     
-    # Create user
+    # Create user using User model's set_password method (Argon2)
     user = User(
         email=email,
-        password_hash=generate_password_hash(password),
-        name=name,
-        company=company
+        first_name=first_name,
+        last_name=last_name,
+        company_name=company
     )
     
     try:
+        user.set_password(password)
         db.session.add(user)
         db.session.commit()
+    except ValueError as e:
+        # Password validation error
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': 'Failed to create user'}), 500
+        return jsonify({'success': False, 'error': 'Failed to create user'}), 500
+    
+    # Create session
+    session['user_id'] = user.id
+    session['email'] = user.email
     
     # Generate token
     token = create_token(user.id, user.email)
@@ -144,8 +165,9 @@ def register():
         'user': {
             'id': user.id,
             'email': user.email,
-            'name': user.name,
-            'company': user.company
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'company_name': user.company_name
         }
     }), 201
 
@@ -157,26 +179,60 @@ def login():
     data = request.get_json()
     
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
     
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
     
     if not email or not password:
-        return jsonify({'error': 'Email and password required'}), 400
+        return jsonify({'success': False, 'error': 'Email and password required'}), 400
     
     # Find user
     user = User.query.filter_by(email=email).first()
     
-    if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({'error': 'Invalid email or password'}), 401
+    # Check if user exists (constant-time comparison to prevent enumeration)
+    if not user:
+        # Still check a fake password to prevent timing attacks
+        from argon2 import PasswordHasher
+        ph = PasswordHasher()
+        try:
+            ph.verify("$argon2id$v=19$m=65536,t=3,p=4$dummy$dummyhash", password)
+        except:
+            pass
+        return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
+    
+    # Check if account is locked
+    if user.is_locked():
+        return jsonify({
+            'success': False, 
+            'error': 'Account is locked due to too many failed attempts. Please try again later.'
+        }), 401
+    
+    # Verify password
+    if not user.check_password(password):
+        # Track failed attempt
+        user.record_failed_login()
+        db.session.commit()
+        
+        # Check if now locked
+        if user.failed_login_attempts >= 5:
+            return jsonify({
+                'success': False,
+                'error': 'Account is locked due to too many failed attempts. Please try again later.'
+            }), 401
+        
+        return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
+    
+    # Successful login
+    user.record_successful_login()
+    db.session.commit()
+    
+    # Create session
+    session['user_id'] = user.id
+    session['email'] = user.email
     
     # Generate token
     token = create_token(user.id, user.email)
-    
-    # Update last login
-    user.last_login = datetime.datetime.utcnow()
-    db.session.commit()
     
     return jsonify({
         'success': True,
@@ -184,8 +240,9 @@ def login():
         'user': {
             'id': user.id,
             'email': user.email,
-            'name': user.name,
-            'company': user.company
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'company_name': user.company_name
         }
     })
 
@@ -198,13 +255,15 @@ def get_current_user():
     user = User.query.get(user_id)
     
     if not user:
-        return jsonify({'error': 'User not found'}), 404
+        return jsonify({'success': False, 'error': 'User not found'}), 404
     
     return jsonify({
+        'success': True,
         'id': user.id,
         'email': user.email,
-        'name': user.name,
-        'company': user.company,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'company_name': user.company_name,
         'created_at': user.created_at.isoformat() if user.created_at else None
     })
 
@@ -227,7 +286,10 @@ def refresh_token():
 @auth_bp.route('/logout', methods=['POST'])
 @require_auth
 def logout():
-    """Logout (client-side token handling)"""
-    # JWT tokens are stateless, so logout is handled client-side
-    # This endpoint exists for API consistency
+    """Logout - clears session"""
+    # Clear session
+    session.pop('user_id', None)
+    session.pop('email', None)
+    session.clear()
+    
     return jsonify({'success': True})
