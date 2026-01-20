@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
     FileSpreadsheet,
     Download,
@@ -9,48 +9,25 @@ import {
     FileCheck,
     AlertTriangle,
     Clock,
-    ChevronRight
+    ChevronRight,
+    RefreshCw,
+    Loader2,
+    FileX
 } from "lucide-react";
 
-// Mock report data
-const reports = [
-    {
-        id: "RPT-001",
-        type: "variance",
-        name: "Variance Report - ABC Corp",
-        company: "ABC Corporation",
-        date: "Jan 15, 2026",
-        status: "ready",
-        description: "3-year P&L and Balance Sheet comparison"
-    },
-    {
-        id: "RPT-002",
-        type: "health",
-        name: "Health Check - Smith Associates",
-        company: "Smith & Associates",
-        date: "Jan 14, 2026",
-        status: "ready",
-        description: "Pre-migration readiness assessment"
-    },
-    {
-        id: "RPT-003",
-        type: "discrepancy",
-        name: "Discrepancy Report - Northern Mfg",
-        company: "Northern Manufacturing",
-        date: "Jan 16, 2026",
-        status: "generating",
-        description: "Trial balance mismatch analysis"
-    },
-    {
-        id: "RPT-004",
-        type: "certificate",
-        name: "Audit Certificate - ABC Corp",
-        company: "ABC Corporation",
-        date: "Jan 15, 2026",
-        status: "ready",
-        description: "ForensicAuditCertificate.pdf"
-    }
-];
+// Types
+interface Report {
+    id: string;
+    type: string;
+    name: string;
+    company: string;
+    date: string;
+    status: string;
+    description: string;
+}
+
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const reportTypes = [
     {
@@ -85,6 +62,31 @@ const reportTypes = [
 
 export default function ReportsPage() {
     const [filter, setFilter] = useState<string>("all");
+    const [loading, setLoading] = useState(true);
+    const [reports, setReports] = useState<Report[]>([]);
+
+    useEffect(() => {
+        fetchReports();
+    }, []);
+
+    const fetchReports = async () => {
+        setLoading(true);
+        try {
+            // TODO: Fetch from real API endpoint when available
+            // const response = await fetch(`${API_URL}/api/reports`, { credentials: 'include' });
+            // if (response.ok) {
+            //     const data = await response.json();
+            //     setReports(data.reports || []);
+            // }
+
+            // For now, start with empty data
+            setReports([]);
+        } catch (error) {
+            console.error("Failed to fetch reports:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const filteredReports = filter === "all"
         ? reports
@@ -121,10 +123,20 @@ export default function ReportsPage() {
                     <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
                     <p className="text-gray-500 mt-1">Generate and download verification reports</p>
                 </div>
-                <button className="btn-primary flex items-center gap-2">
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Generate New Report
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={fetchReports}
+                        className="btn-secondary flex items-center gap-2"
+                        disabled={loading}
+                    >
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
+                    <button className="btn-primary flex items-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4" />
+                        Generate New Report
+                    </button>
+                </div>
             </div>
 
             {/* Report Type Cards */}
@@ -152,56 +164,69 @@ export default function ReportsPage() {
             <div className="card-forensic">
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                     <h2 className="font-semibold text-gray-900">Generated Reports</h2>
-                    <span className="text-sm text-gray-500">{filteredReports.length} reports</span>
+                    <span className="text-sm text-gray-500">{loading ? "--" : filteredReports.length} reports</span>
                 </div>
 
-                <table className="table-forensic">
-                    <thead>
-                        <tr>
-                            <th>Report</th>
-                            <th>Company</th>
-                            <th>Date</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredReports.map((report) => (
-                            <tr key={report.id}>
-                                <td>
-                                    <div className="flex items-center gap-3">
-                                        {getTypeIcon(report.type)}
-                                        <div>
-                                            <p className="font-medium text-gray-900">{report.name}</p>
-                                            <p className="text-xs text-gray-500">{report.description}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="text-gray-600">{report.company}</td>
-                                <td>
-                                    <span className="text-gray-500 flex items-center gap-1">
-                                        <Calendar className="w-3 h-3" />
-                                        {report.date}
-                                    </span>
-                                </td>
-                                <td>{getStatusBadge(report.status)}</td>
-                                <td>
-                                    {report.status === "ready" ? (
-                                        <button className="btn-secondary flex items-center gap-1 text-sm py-1.5">
-                                            <Download className="w-4 h-4" />
-                                            Download
-                                        </button>
-                                    ) : (
-                                        <button className="text-gray-400 cursor-not-allowed flex items-center gap-1 text-sm">
-                                            <Clock className="w-4 h-4" />
-                                            Processing
-                                        </button>
-                                    )}
-                                </td>
+                {loading ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <Loader2 className="w-8 h-8 mx-auto animate-spin mb-2" />
+                        Loading reports...
+                    </div>
+                ) : filteredReports.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <FileX className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                        <p className="text-lg font-medium text-gray-600">No reports generated yet</p>
+                        <p className="text-sm">Complete a migration to generate verification reports</p>
+                    </div>
+                ) : (
+                    <table className="table-forensic">
+                        <thead>
+                            <tr>
+                                <th>Report</th>
+                                <th>Company</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                                <th></th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {filteredReports.map((report) => (
+                                <tr key={report.id}>
+                                    <td>
+                                        <div className="flex items-center gap-3">
+                                            {getTypeIcon(report.type)}
+                                            <div>
+                                                <p className="font-medium text-gray-900">{report.name}</p>
+                                                <p className="text-xs text-gray-500">{report.description}</p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="text-gray-600">{report.company}</td>
+                                    <td>
+                                        <span className="text-gray-500 flex items-center gap-1">
+                                            <Calendar className="w-3 h-3" />
+                                            {report.date}
+                                        </span>
+                                    </td>
+                                    <td>{getStatusBadge(report.status)}</td>
+                                    <td>
+                                        {report.status === "ready" ? (
+                                            <button className="btn-secondary flex items-center gap-1 text-sm py-1.5">
+                                                <Download className="w-4 h-4" />
+                                                Download
+                                            </button>
+                                        ) : (
+                                            <button className="text-gray-400 cursor-not-allowed flex items-center gap-1 text-sm">
+                                                <Clock className="w-4 h-4" />
+                                                Processing
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
 
             {/* Info Card */}

@@ -1,71 +1,96 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
     Database,
     Search,
     Calendar,
     FileText,
-    Download,
     ChevronRight,
     Clock,
     Filter,
     RefreshCw,
     Lock,
-    Shield
+    Shield,
+    Archive,
+    Loader2
 } from "lucide-react";
 
-// Mock archived companies
-const archivedCompanies = [
-    {
-        id: "ARC-001",
-        companyName: "ABC Corporation",
-        archiveDate: "Dec 15, 2025",
-        recordCount: 45892,
-        storageClass: "GLACIER",
-        status: "archived",
-        retentionYears: 7,
-        lastAccessed: "Jan 10, 2026"
-    },
-    {
-        id: "ARC-002",
-        companyName: "Smith & Associates",
-        archiveDate: "Nov 20, 2025",
-        recordCount: 23456,
-        storageClass: "GLACIER",
-        status: "archived",
-        retentionYears: 7,
-        lastAccessed: "Dec 5, 2025"
-    },
-    {
-        id: "ARC-003",
-        companyName: "Northern Manufacturing",
-        archiveDate: "Oct 8, 2025",
-        recordCount: 78234,
-        storageClass: "GLACIER",
-        status: "restoring",
-        retentionYears: 7,
-        lastAccessed: "Restoring..."
-    },
-    {
-        id: "ARC-004",
-        companyName: "Coastal Exports Ltd",
-        archiveDate: "Sep 1, 2025",
-        recordCount: 12567,
-        storageClass: "STANDARD",
-        status: "available",
-        retentionYears: 7,
-        lastAccessed: "Available Now"
-    }
-];
+// Types
+interface ArchivedCompany {
+    id: string;
+    companyName: string;
+    archiveDate: string;
+    recordCount: number;
+    storageClass: string;
+    status: string;
+    retentionYears: number;
+    lastAccessed: string;
+}
+
+interface VaultStats {
+    archivedCompanies: number;
+    totalRecords: number;
+    storageSize: string;
+    monthlyCost: string;
+}
+
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export default function VaultPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedArchive, setSelectedArchive] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    // Real data from API - starts at 0/empty
+    const [archivedCompanies, setArchivedCompanies] = useState<ArchivedCompany[]>([]);
+    const [stats, setStats] = useState<VaultStats>({
+        archivedCompanies: 0,
+        totalRecords: 0,
+        storageSize: "0 GB",
+        monthlyCost: "$0.00"
+    });
+
+    useEffect(() => {
+        fetchVaultData();
+    }, []);
+
+    const fetchVaultData = async () => {
+        setLoading(true);
+        try {
+            // TODO: Fetch from real API endpoint when available
+            // const response = await fetch(`${API_URL}/api/vault`, { credentials: 'include' });
+            // if (response.ok) {
+            //     const data = await response.json();
+            //     setArchivedCompanies(data.companies || []);
+            //     setStats(data.stats || { archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
+            // }
+
+            // For now, start with empty data
+            setArchivedCompanies([]);
+            setStats({
+                archivedCompanies: 0,
+                totalRecords: 0,
+                storageSize: "0 GB",
+                monthlyCost: "$0.00"
+            });
+        } catch (error) {
+            console.error("Failed to fetch vault data:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const filteredArchives = archivedCompanies.filter(a =>
         a.companyName.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    const formatRecords = (count: number): string => {
+        if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+        if (count >= 1000) return `${(count / 1000).toFixed(0)}K`;
+        return count.toString();
+    };
 
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -91,9 +116,19 @@ export default function VaultPage() {
                     <h1 className="text-2xl font-bold text-gray-900">Data Museum</h1>
                     <p className="text-gray-500 mt-1">Browse and restore archived QuickBooks data</p>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Lock className="w-4 h-4" />
-                    <span>7-Year Legal Retention</span>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                        <Lock className="w-4 h-4" />
+                        <span>7-Year Legal Retention</span>
+                    </div>
+                    <button
+                        onClick={fetchVaultData}
+                        className="btn-secondary flex items-center gap-2"
+                        disabled={loading}
+                    >
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
                 </div>
             </div>
 
@@ -102,7 +137,7 @@ export default function VaultPage() {
                 <div className="stat-card">
                     <div className="flex items-start justify-between">
                         <div>
-                            <p className="stat-card-value">4</p>
+                            <p className="stat-card-value">{loading ? "--" : stats.archivedCompanies}</p>
                             <p className="stat-card-label">Archived Companies</p>
                         </div>
                         <div className="stat-card-icon bg-blue-50 text-blue-600">
@@ -113,7 +148,7 @@ export default function VaultPage() {
                 <div className="stat-card">
                     <div className="flex items-start justify-between">
                         <div>
-                            <p className="stat-card-value">160K</p>
+                            <p className="stat-card-value">{loading ? "--" : formatRecords(stats.totalRecords)}</p>
                             <p className="stat-card-label">Total Records</p>
                         </div>
                         <div className="stat-card-icon bg-green-50 text-green-600">
@@ -124,7 +159,7 @@ export default function VaultPage() {
                 <div className="stat-card">
                     <div className="flex items-start justify-between">
                         <div>
-                            <p className="stat-card-value">2.4 GB</p>
+                            <p className="stat-card-value">{loading ? "--" : stats.storageSize}</p>
                             <p className="stat-card-label">Glacier Storage</p>
                         </div>
                         <div className="stat-card-icon bg-purple-50 text-purple-600">
@@ -135,7 +170,7 @@ export default function VaultPage() {
                 <div className="stat-card">
                     <div className="flex items-start justify-between">
                         <div>
-                            <p className="stat-card-value">$0.12</p>
+                            <p className="stat-card-value">{loading ? "--" : stats.monthlyCost}</p>
                             <p className="stat-card-label">Monthly Cost</p>
                         </div>
                         <div className="stat-card-icon bg-yellow-50 text-yellow-600">
@@ -175,65 +210,78 @@ export default function VaultPage() {
                     <h2 className="font-semibold text-gray-900">Archived Companies</h2>
                 </div>
 
-                <div className="divide-y divide-gray-100">
-                    {filteredArchives.map((archive) => (
-                        <div
-                            key={archive.id}
-                            className={`p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 ${selectedArchive === archive.id ? "bg-blue-50" : ""
-                                }`}
-                            onClick={() => setSelectedArchive(archive.id)}
-                        >
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                                    <Database className="w-6 h-6 text-gray-500" />
+                {loading ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <Loader2 className="w-8 h-8 mx-auto animate-spin mb-2" />
+                        Loading archives...
+                    </div>
+                ) : filteredArchives.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <Archive className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                        <p className="text-lg font-medium text-gray-600">No archived companies yet</p>
+                        <p className="text-sm">Completed migrations will appear here after 7 days</p>
+                    </div>
+                ) : (
+                    <div className="divide-y divide-gray-100">
+                        {filteredArchives.map((archive) => (
+                            <div
+                                key={archive.id}
+                                className={`p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 ${selectedArchive === archive.id ? "bg-blue-50" : ""
+                                    }`}
+                                onClick={() => setSelectedArchive(archive.id)}
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                                        <Database className="w-6 h-6 text-gray-500" />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-900">{archive.companyName}</p>
+                                        <p className="text-sm text-gray-500">
+                                            {archive.recordCount.toLocaleString()} records • Archived {archive.archiveDate}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="font-medium text-gray-900">{archive.companyName}</p>
-                                    <p className="text-sm text-gray-500">
-                                        {archive.recordCount.toLocaleString()} records • Archived {archive.archiveDate}
-                                    </p>
+
+                                <div className="flex items-center gap-6">
+                                    <div className="text-right">
+                                        <p className="text-sm text-gray-500">{archive.retentionYears}-Year Retention</p>
+                                        <p className="text-xs text-gray-400">{archive.lastAccessed}</p>
+                                    </div>
+
+                                    {getStatusBadge(archive.status)}
+
+                                    {archive.status === "archived" && (
+                                        <button
+                                            className="btn-secondary text-sm py-1.5 flex items-center gap-1"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Would trigger restore
+                                            }}
+                                        >
+                                            <RefreshCw className="w-4 h-4" />
+                                            Restore
+                                        </button>
+                                    )}
+
+                                    {archive.status === "available" && (
+                                        <button
+                                            className="btn-primary text-sm py-1.5 flex items-center gap-1"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                // Would open browser
+                                            }}
+                                        >
+                                            <Search className="w-4 h-4" />
+                                            Browse
+                                        </button>
+                                    )}
+
+                                    <ChevronRight className="w-5 h-5 text-gray-400" />
                                 </div>
                             </div>
-
-                            <div className="flex items-center gap-6">
-                                <div className="text-right">
-                                    <p className="text-sm text-gray-500">{archive.retentionYears}-Year Retention</p>
-                                    <p className="text-xs text-gray-400">{archive.lastAccessed}</p>
-                                </div>
-
-                                {getStatusBadge(archive.status)}
-
-                                {archive.status === "archived" && (
-                                    <button
-                                        className="btn-secondary text-sm py-1.5 flex items-center gap-1"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            // Would trigger restore
-                                        }}
-                                    >
-                                        <RefreshCw className="w-4 h-4" />
-                                        Restore
-                                    </button>
-                                )}
-
-                                {archive.status === "available" && (
-                                    <button
-                                        className="btn-primary text-sm py-1.5 flex items-center gap-1"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            // Would open browser
-                                        }}
-                                    >
-                                        <Search className="w-4 h-4" />
-                                        Browse
-                                    </button>
-                                )}
-
-                                <ChevronRight className="w-5 h-5 text-gray-400" />
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Info Box */}
@@ -260,3 +308,4 @@ export default function VaultPage() {
         </div>
     );
 }
+
