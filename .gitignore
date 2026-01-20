@@ -48,7 +48,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -75,7 +75,8 @@ ENV/
 
 # Data files
 data/
-*.json
+# Specific data JSON files (not package.json, tsconfig.json, etc.)
+test_upload.json
 *.enc
 *.encrypted
 
