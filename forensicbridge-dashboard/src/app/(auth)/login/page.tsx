@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 
+// API configuration - must be set in environment
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 export default function LoginPage() {
     const router = useRouter();
     const [email, setEmail] = useState('');
@@ -18,9 +21,10 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/auth/login`, {
+            const response = await fetch(`${API_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ email, password }),
             });
 
@@ -37,7 +41,11 @@ export default function LoginPage() {
             // Redirect to dashboard
             router.push('/');
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Login failed');
+            if (err instanceof TypeError && err.message === 'Failed to fetch') {
+                setError('Cannot connect to server. Please check if the API is running.');
+            } else {
+                setError(err instanceof Error ? err.message : 'Login failed');
+            }
         } finally {
             setLoading(false);
         }

@@ -1,11 +1,53 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import Providers from "../providers";
+import { getAuthState, clearAuth } from "@/lib/auth";
+import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    const router = useRouter();
+    const [isLoading, setIsLoading] = useState(true);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+    useEffect(() => {
+        // Check authentication on mount
+        const authState = getAuthState();
+
+        if (!authState.isAuthenticated) {
+            // Not logged in - redirect to login
+            router.replace("/login");
+        } else {
+            setIsAuthenticated(true);
+            setIsLoading(false);
+        }
+    }, [router]);
+
+    // Show loading while checking auth
+    if (isLoading && !isAuthenticated) {
+        return (
+            <html lang="en">
+                <body className="flex h-screen items-center justify-center bg-gray-50">
+                    <div className="text-center">
+                        <Loader2 className="w-8 h-8 mx-auto animate-spin text-blue-600 mb-4" />
+                        <p className="text-gray-500">Checking authentication...</p>
+                    </div>
+                </body>
+            </html>
+        );
+    }
+
+    // Not authenticated - don't render anything (will redirect)
+    if (!isAuthenticated) {
+        return null;
+    }
+
     return (
         <html lang="en">
             <body className="flex h-screen overflow-hidden">
@@ -27,6 +69,15 @@ export default function DashboardLayout({
                                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
                                     🍁 ca-central-1
                                 </span>
+                                <button
+                                    onClick={() => {
+                                        clearAuth();
+                                        router.push("/login");
+                                    }}
+                                    className="text-xs text-gray-500 hover:text-red-600 transition-colors"
+                                >
+                                    Logout
+                                </button>
                             </div>
                         </header>
 
