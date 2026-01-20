@@ -10,19 +10,20 @@
 
 1. [Executive Summary](#executive-summary)
 2. [How ForensicBridge Works](#how-forensicbridge-works)
-3. [Architecture Deep Dive](#architecture-deep-dive)
-4. [What's Complete](#whats-complete)
-5. [Real Tests Performed (No Mocks)](#real-tests-performed)
-6. [Security Implementation](#security-implementation)
-7. [Potential Issues & Risks](#potential-issues--risks)
-8. [Remaining Tasks Checklist](#remaining-tasks-checklist)
-9. [AWS Setup Instructions](#aws-setup-instructions)
-10. [Intuit Registration Guide](#intuit-registration-guide)
-11. [Stripe Payment Setup](#stripe-payment-setup)
-12. [Deployment Commands](#deployment-commands)
-13. [Environment Variables](#environment-variables)
-14. [Post-Launch Monitoring](#post-launch-monitoring)
-15. [Progress Summary & Production Readiness Assessment](#progress-summary--production-readiness-assessment)
+3. [**Caseware Mode: QBD → Caseware Direct**](#caseware-mode-qbd--caseware-direct)
+4. [Architecture Deep Dive](#architecture-deep-dive)
+5. [What's Complete](#whats-complete)
+6. [Real Tests Performed (No Mocks)](#real-tests-performed)
+7. [Security Implementation](#security-implementation)
+8. [Potential Issues & Risks](#potential-issues--risks)
+9. [Remaining Tasks Checklist](#remaining-tasks-checklist)
+10. [AWS Setup Instructions](#aws-setup-instructions)
+11. [Intuit Registration Guide](#intuit-registration-guide)
+12. [Stripe Payment Setup](#stripe-payment-setup)
+13. [Deployment Commands](#deployment-commands)
+14. [Environment Variables](#environment-variables)
+15. [Post-Launch Monitoring](#post-launch-monitoring)
+16. [Progress Summary & Production Readiness Assessment](#progress-summary--production-readiness-assessment)
 
 ---
 
@@ -154,6 +155,210 @@
 | **Inventory** | Inventory Adjustments, Assembly Items, Build Assemblies |
 | **Reports** | Trial Balance, P&L, Balance Sheet |
 | **Settings** | Company Info, Preferences, Terms, Payment Methods |
+
+---
+
+## Caseware Mode: QBD → Caseware Direct
+
+> **Feature:** Users can choose to export QuickBooks Desktop data directly to Caseware Working Papers format, bypassing QuickBooks Online entirely.
+
+### Two Destination Modes
+
+| Mode | Destination | Output |
+|:-----|:------------|:-------|
+| **QBO Mode** | QuickBooks Online | Live migration via Intuit API |
+| **Caseware Mode** | Caseware Working Papers / OnPoint DAS | Downloadable Audit Bundle (.zip) |
+
+### The Caseware Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  CASEWARE MODE: QuickBooks Desktop → Caseware Direct                        │
+│                                                                              │
+│  ┌─────────────────────┐                                                    │
+│  │  QuickBooks Desktop │                                                    │
+│  │  (.QBW file)        │                                                    │
+│  └──────────┬──────────┘                                                    │
+│             │                                                               │
+│             ▼                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  STEP 1: QBDesktopReader.exe                                         │   │
+│  │  • Extracts 55 entity types via QBFC SDK                             │   │
+│  │  • Computes SHA-256 hash for EVERY financial record                  │   │
+│  │  • Encrypts payload with AES-256-GCM                                 │   │
+│  │  • Uploads encrypted JSON to server                                   │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                     │                                       │
+│                                     ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  STEP 2: QBMigrationServer (Flask)                                   │   │
+│  │  • Receives encrypted data                                           │   │
+│  │  • User selected destination = "caseware"                            │   │
+│  │  • Triggers Celery task for Caseware export                          │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                     │                                       │
+│                                     ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  STEP 3: QBMigrationService/caseware_exporter.py                     │   │
+│  │                                                                       │   │
+│  │  class CasewareExporter:                                              │   │
+│  │    ├── export_trial_balance() → Audit_TB.csv                         │   │
+│  │    ├── export_general_ledger() → Audit_GL.csv                        │   │
+│  │    ├── export_mapping_file()  → Audit_Mapping.cvw                    │   │
+│  │    └── generate_audit_bundle() → Full bundle with manifest           │   │
+│  └──────────────────────────────────┬──────────────────────────────────┘   │
+│                                     │                                       │
+│                                     ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  OUTPUT: Caseware Audit Bundle (.zip)                                │   │
+│  │                                                                       │   │
+│  │  📄 Audit_TB.csv    - Trial Balance with 58 Lead Sheet codes        │   │
+│  │  📄 Audit_GL.csv    - General Ledger with SHA-256 hashes            │   │
+│  │  📄 Audit_Mapping.cvw - Caseware column configuration               │   │
+│  │  📄 Manifest.json   - Verification metadata                          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Code Files
+
+| File | Purpose |
+|:-----|:--------|
+| `QBMigrationService/caseware_exporter.py` | Main Caseware export logic |
+| `QBMigrationService/data_transformer.py` | Contains `transform_for_caseware()` method |
+
+### CasewareExporter Class
+
+**Location:** `QBMigrationService/caseware_exporter.py`
+
+```python
+class CasewareExporter:
+    """Generates Caseware Audit Bundle from QB Desktop extracted data."""
+    
+    VERSION = "1.0.0"
+    
+    # 58 Lead Sheet Code Mappings
+    LEAD_SHEET_CODES = {
+        "Cash and Cash Equivalents": "A",
+        "Accounts Receivable": "B", 
+        "Inventory": "C",
+        # ... 55 more codes
+    }
+    
+    def export_trial_balance(self, accounts, as_of_date=None) -> Path:
+        """Generate Audit_TB.csv with Lead Sheet codes."""
+        
+    def export_general_ledger(self, transactions, start_date=None, end_date=None) -> Path:
+        """Generate Audit_GL.csv with SHA-256 forensic hashes."""
+        
+    def export_mapping_file(self) -> Path:
+        """Generate Audit_Mapping.cvw for Caseware column config."""
+        
+    def generate_audit_bundle(self, qb_data, as_of_date=None, start_date=None, end_date=None) -> Dict:
+        """Main entry point - generates complete Caseware Audit Bundle."""
+```
+
+### Output File Formats
+
+#### Audit_TB.csv (Trial Balance)
+
+```csv
+# Caseware Audit Trial Balance
+# Company: ABC Corporation
+# As Of: 2026-01-20
+# Generator: ForensicBridge CasewareExporter v1.0.0
+Account_Number,Account_Description,Type,Lead_Sheet_Code,Prior_Year,Current_Year,Variance,Forensic_Hash
+1000,Cash and Cash Equivalents,A,A,125000.00,132500.00,7500.00,7e2f8a9c3b4d5e6f...
+1100,Accounts Receivable,A,B,45000.00,52340.00,7340.00,8f3a9b2c4d5e6f7a...
+```
+
+#### Audit_GL.csv (General Ledger)
+
+```csv
+# Caseware Audit General Ledger
+# Company: ABC Corporation
+# Generator: ForensicBridge CasewareExporter v1.0.0
+Account_Number,Account_Description,Type,Transaction_Date,Reference,Description,Amount,Debit,Credit,Forensic_Integrity_Hash
+1000,Cash,A,2026-01-15,DEP001,Customer deposit,5000.00,5000.00,0.00,a1b2c3d4e5f6g7h8...
+```
+
+#### Audit_Mapping.cvw (Caseware Column Config)
+
+```json
+{
+    "FileFormat": "CasewareWorkingPapers",
+    "Version": "1.0",
+    "Generator": "ForensicBridge CasewareExporter v1.0.0",
+    "TrialBalanceMapping": {
+        "AccountNumber": 0,
+        "AccountDescription": 1,
+        "Type": 2,
+        "LeadSheetCode": 3
+    },
+    "GeneralLedgerMapping": {
+        "AccountNumber": 0,
+        "Date": 3,
+        "Reference": 4
+    }
+}
+```
+
+### Usage from Code
+
+**Option 1: Direct Usage**
+```bash
+python caseware_exporter.py extracted_data.json ./output_dir
+```
+
+**Option 2: Via Data Transformer**
+```python
+from data_transformer import QBDataTransformer
+from caseware_exporter import add_caseware_mode_to_transformer
+
+# Add Caseware capability to transformer
+add_caseware_mode_to_transformer()
+
+# Use transformer with Caseware mode
+transformer = QBDataTransformer()
+result = transformer.transform_for_caseware(
+    qb_data=extracted_data,
+    output_dir="./caseware_output",
+    company_name="ABC Corporation",
+    as_of_date="2026-01-20"
+)
+
+# Result contains:
+# {
+#     "success": True,
+#     "files": {
+#         "trial_balance": "/path/to/Audit_TB.csv",
+#         "general_ledger": "/path/to/Audit_GL.csv",
+#         "mapping": "/path/to/Audit_Mapping.cvw"
+#     },
+#     "stats": { "accounts": 150, "transactions": 12847 },
+#     "hashes": { "bundle_hash": "sha256:..." }
+# }
+```
+
+### Dashboard Integration
+
+Users select their destination in the Upload page before uploading:
+
+1. **Choose Destination:** QBO or Caseware
+2. **Upload File:** Drop .QBW file
+3. **Processing:** Server extracts, hashes, transforms
+4. **Download:** Get Caseware bundle .zip
+
+### Forensic Features in Caseware Mode
+
+| Feature | Included |
+|:--------|:---------|
+| SHA-256 hash per account | ✅ |
+| SHA-256 hash per transaction | ✅ |
+| 58 Lead Sheet code mappings | ✅ |
+| Prior year vs current year variance | ✅ |
+| Bundle integrity hash | ✅ |
+| Verification manifest | ✅ |
 
 ---
 
