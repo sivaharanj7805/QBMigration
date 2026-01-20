@@ -303,27 +303,25 @@ class TestAuthentication:
 class TestUpload:
     """Test file upload functionality - NO data leaks allowed"""
     
-    def test_upload_authenticated(self, client, test_user):
-        """Test file upload when authenticated"""
-        login_response = client.post('/api/auth/login', json={
-            'email': 'test@example.com',
-            'password': 'Test1234'
-        })
-        assert login_response.status_code == 200, "Login failed"
+    def test_upload_authenticated(self, authenticated_client, test_user):
+        """Test file upload when authenticated
         
+        Uses authenticated_client fixture which properly maintains session.
+        """
         fake_data = "IV:test123:TAG:abc:CIPHER:" + ("x" * 1000) + ":KEY:xyz"
         
-        response = client.post('/api/upload', json={
+        response = authenticated_client.post('/api/upload', json={
             'encrypted_data': fake_data,
             'company_name': 'Test Company'
         })
         
+        # 200 = success, 500 = AWS/S3 not configured, 401 should NOT happen
         assert response.status_code in [200, 500], \
-            f"Unexpected status code: {response.status_code}"
+            f"Unexpected status code: {response.status_code}. Response: {response.data}"
         
         if response.status_code == 500:
             data = json.loads(response.data)
-            # FIX: Accept any storage-related error message
+            # Accept any storage-related error message
             error_lower = data.get('error', '').lower()
             assert 'aws' in error_lower or 's3' in error_lower or 'storage' in error_lower or 'upload' in error_lower, \
                 f"Failed for wrong reason: {data.get('error')}"
@@ -346,7 +344,7 @@ class TestUpload:
         assert response.status_code == 401, \
             f"CRITICAL: Unauthenticated upload was accepted! Status: {response.status_code}"
     
-    def test_upload_invalid_format(self, client, test_user):
+    def test_upload_invalid_format(self, authenticated_client, test_user):
         """
         Test upload with invalid format
         
@@ -355,15 +353,10 @@ class TestUpload:
         - Plaintext data rejected
         - Clear error message
         """
-        client.post('/api/auth/login', json={
-            'email': 'test@example.com',
-            'password': 'Test1234'
-        })
-        
         # Send data that's long enough but wrong format
         invalid_data = 'invalid_plaintext_data_that_is_over_100_characters_long' * 5
         
-        response = client.post('/api/upload', json={
+        response = authenticated_client.post('/api/upload', json={
             'encrypted_data': invalid_data
         })
         
@@ -375,7 +368,7 @@ class TestUpload:
         assert 'format' in error_lower or 'invalid' in error_lower or 'encrypt' in error_lower, \
             f"Error message unclear: {data['error']}"
     
-    def test_upload_empty_data(self, client, test_user):
+    def test_upload_empty_data(self, authenticated_client, test_user):
         """
         Test upload with empty data
         
@@ -383,12 +376,7 @@ class TestUpload:
         - Empty data rejected
         - Returns 400 Bad Request
         """
-        client.post('/api/auth/login', json={
-            'email': 'test@example.com',
-            'password': 'Test1234'
-        })
-        
-        response = client.post('/api/upload', json={
+        response = authenticated_client.post('/api/upload', json={
             'encrypted_data': ''
         })
         
@@ -397,7 +385,7 @@ class TestUpload:
         assert 'required' in data['error'].lower() or 'empty' in data['error'].lower(), \
             "Error message unclear"
     
-    def test_upload_oversized_file(self, client, test_user):
+    def test_upload_oversized_file(self, authenticated_client, test_user):
         """
         Test upload file size limit
         
@@ -405,15 +393,10 @@ class TestUpload:
         - Files over MAX_CONTENT_LENGTH rejected
         - Prevents DoS via large uploads
         """
-        client.post('/api/auth/login', json={
-            'email': 'test@example.com',
-            'password': 'Test1234'
-        })
-        
         # Create data larger than 50MB limit
         huge_data = "IV:test:CIPHER:" + ("x" * 60 * 1024 * 1024) + ":KEY:test"
         
-        response = client.post('/api/upload', json={
+        response = authenticated_client.post('/api/upload', json={
             'encrypted_data': huge_data
         })
         
@@ -421,7 +404,7 @@ class TestUpload:
         assert response.status_code in [400, 413], \
             f"CRITICAL: Oversized file accepted! Status: {response.status_code}"
     
-    def test_upload_sql_injection(self, client, test_user):
+    def test_upload_sql_injection(self, authenticated_client, test_user):
         """
         Test SQL injection prevention in upload
         
@@ -429,11 +412,6 @@ class TestUpload:
         - Company name sanitized
         - No SQL injection possible
         """
-        client.post('/api/auth/login', json={
-            'email': 'test@example.com',
-            'password': 'Test1234'
-        })
-        
         malicious_names = [
             "'; DROP TABLE migrations; --",
             "' OR '1'='1",
@@ -444,7 +422,7 @@ class TestUpload:
         fake_data = "IV:test:CIPHER:" + ("x" * 500) + ":KEY:test"
         
         for malicious_name in malicious_names:
-            response = client.post('/api/upload', json={
+            response = authenticated_client.post('/api/upload', json={
                 'encrypted_data': fake_data,
                 'company_name': malicious_name
             })

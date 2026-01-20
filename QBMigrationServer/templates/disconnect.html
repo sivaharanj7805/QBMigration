@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disconnect QuickBooks - ForensicBridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            line-height: 1.7;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 500px;
+            padding: 24px;
+        }
+
+        .card {
+            background: rgba(30, 41, 59, 0.9);
+            border-radius: 16px;
+            padding: 48px;
+            text-align: center;
+            border: 1px solid #334155;
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: #3b82f6;
+            margin-bottom: 24px;
+        }
+
+        .icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(239, 68, 68, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 36px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #f8fafc;
+            margin-bottom: 16px;
+        }
+
+        p {
+            color: #94a3b8;
+            margin-bottom: 24px;
+        }
+
+        .warning-box {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 32px;
+            text-align: left;
+        }
+
+        .warning-box strong {
+            color: #f59e0b;
+        }
+
+        .warning-box ul {
+            margin-top: 8px;
+            padding-left: 20px;
+            color: #cbd5e1;
+        }
+
+        .warning-box li {
+            margin-bottom: 4px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid #475569;
+            margin-left: 12px;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .buttons {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .success-message {
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(16, 185, 129, 0.1);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 36px;
+        }
+
+        footer {
+            margin-top: 32px;
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        footer a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="card" id="disconnect-form">
+            <div class="logo">FORENSICBRIDGE</div>
+            <div class="icon">🔌</div>
+            <h1>Disconnect QuickBooks</h1>
+            <p>Are you sure you want to disconnect your QuickBooks Online account from ForensicBridge?</p>
+
+            <div class="warning-box">
+                <strong>⚠️ What happens when you disconnect:</strong>
+                <ul>
+                    <li>Your OAuth access tokens will be revoked immediately</li>
+                    <li>ForensicBridge will no longer have access to your QuickBooks data</li>
+                    <li>You'll need to reconnect to run future migrations</li>
+                    <li>Your migration history and certificates are preserved</li>
+                </ul>
+            </div>
+
+            <div class="buttons">
+                <button class="btn btn-danger" onclick="disconnectQBO()">Disconnect QuickBooks</button>
+                <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+            </div>
+
+            <footer>
+                <p>Need help? Contact <a href="mailto:support@forensicbridge.ca">support@forensicbridge.ca</a></p>
+            </footer>
+        </div>
+
+        <div class="card success-message" id="success-message">
+            <div class="logo">FORENSICBRIDGE</div>
+            <div class="success-icon">✅</div>
+            <h1>Disconnected Successfully</h1>
+            <p>Your QuickBooks Online account has been disconnected. Your migration history and audit certificates
+                remain available.</p>
+
+            <div class="buttons">
+                <a href="/dashboard" class="btn btn-secondary">Return to Dashboard</a>
+            </div>
+
+            <footer>
+                <p>Want to reconnect? Go to <a href="/dashboard/settings">Settings</a></p>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        async function disconnectQBO() {
+            const button = document.querySelector('.btn-danger');
+            button.textContent = 'Disconnecting...';
+            button.disabled = true;
+
+            try {
+                const response = await fetch('/api/qbo/disconnect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (response.ok || data.success) {
+                    document.getElementById('disconnect-form').style.display = 'none';
+                    document.getElementById('success-message').classList.add('show');
+                } else {
+                    alert('Failed to disconnect: ' + (data.error || 'Unknown error'));
+                    button.textContent = 'Disconnect QuickBooks';
+                    button.disabled = false;
+                }
+            } catch (error) {
+                alert('An error occurred. Please try again.');
+                button.textContent = 'Disconnect QuickBooks';
+                button.disabled = false;
+            }
+        }
+    </script>
+</body>
+
+</html>

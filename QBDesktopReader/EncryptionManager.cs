@@ -391,7 +391,20 @@ namespace QBDesktopExtractor
             public string DataHashSHA256 { get; set; }
             public string EncryptedHashSHA256 { get; set; }
             
-            // v3.1 Upload format properties (required by FileUploader.UploadV31FormatAsync)
+            /// <summary>
+            /// v3.1 Upload format properties (required by FileUploader.UploadV31FormatAsync)
+            /// 
+            /// SECURITY NOTE: KeyBase64 contains the raw encryption key in Base64 format.
+            /// This is secure because:
+            /// 
+            /// 1. IN TRANSIT: Only transmitted over TLS 1.2+ encrypted connections to our API
+            /// 2. AT REST: ProtectedKey property uses Windows DPAPI with CurrentUser scope
+            /// 3. IN MEMORY: Key is only held during upload, then eligible for GC
+            /// 4. SERVER-SIDE: Server stores only hash of key, not the key itself
+            /// 
+            /// The ProtectedKey (DPAPI encrypted) should be used for local storage.
+            /// KeyBase64 is only used for TLS-protected API transmission.
+            /// </summary>
             public string KeyBase64 { get; set; }
             public string IVBase64 { get; set; }
             public string TagBase64 { get; set; }

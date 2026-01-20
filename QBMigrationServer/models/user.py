@@ -82,6 +82,13 @@ class User(UserMixin, db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
     
+    # QuickBooks Online OAuth
+    qbo_access_token = db.Column(db.Text, nullable=True)  # Encrypted access token
+    qbo_refresh_token = db.Column(db.Text, nullable=True)  # Encrypted refresh token
+    qbo_realm_id = db.Column(db.String(50), nullable=True)  # Company ID in QBO
+    qbo_token_expires_at = db.Column(db.DateTime, nullable=True)
+    qbo_connected_at = db.Column(db.DateTime, nullable=True)
+    
     # Relationships
     migrations = db.relationship('Migration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     

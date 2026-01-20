@@ -9,6 +9,8 @@ Tests cover:
 4. Recent Activity API
 5. Trial Balance API
 6. Audit Certificate API
+
+FIXED: Uses authenticated_client fixture properly for all authenticated endpoints
 """
 
 import pytest
@@ -27,90 +29,46 @@ from models.migration import Migration
 
 
 class TestDashboardAPI:
-    """Test suite for dashboard_api.py endpoints"""
+    """Test suite for dashboard_api.py endpoints
+    
+    Uses shared fixtures from conftest.py:
+    - app (session-scoped)
+    - authenticated_client (function-scoped) - PREFERRED for authenticated endpoints
+    - db_session (function-scoped)
+    - test_user (function-scoped)
+    """
     
     @pytest.fixture
-    def app(self):
-        """Create test application"""
-        app = create_app(config_name='testing')
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-        app.config['WTF_CSRF_ENABLED'] = False
-        
-        with app.app_context():
-            db.create_all()
-            yield app
-            db.drop_all()
-    
-    @pytest.fixture
-    def client(self, app):
-        """Create test client"""
-        return app.test_client()
-    
-    @pytest.fixture
-    def auth_headers(self, app, client):
-        """Create authenticated session headers"""
-        # Create test user and login
-        with app.app_context():
-            from models.user import User
-            user = User(
-                email='test@forensicbridge.com',
-                first_name='Test',
-                last_name='User',
-                company_name='ForensicBridge'
-            )
-            user.set_password('TestPass123!')
-            db.session.add(user)
-            db.session.commit()
-        
-        # Login to get session
-        response = client.post('/api/auth/login', json={
-            'email': 'test@forensicbridge.com',
-            'password': 'TestPass123!'
-        })
-        
-        # Get JWT token from response
-        data = response.get_json()
-        token = data.get('token', '') if data else ''
-        
-        return {'Authorization': f'Bearer {token}'}
-    
-    @pytest.fixture
-    def sample_migration(self, app):
+    def sample_migration(self, authenticated_client, db_session, test_user):
         """Create sample migration for testing"""
-        with app.app_context():
-            from models.user import User
-            user = User.query.filter_by(email='test@forensicbridge.com').first()
-            
-            migration = Migration(
-                migration_id='mig_test_001',
-                user_id=user.id if user else 1,
-                status='processing',
-                progress_percent=65,
-                company_name='Waterloo Manufacturing',
-                qb_file_name='waterloo.qbw',
-                current_step='Migrating Invoices',
-                created_at=datetime.utcnow() - timedelta(minutes=30)
-            )
-            db.session.add(migration)
-            db.session.commit()
-            
-            return migration.migration_id
+        migration = Migration(
+            migration_id='mig_test_001',
+            user_id=test_user.id,
+            status='processing',
+            progress_percent=65,
+            company_name='Waterloo Manufacturing',
+            qb_file_name='waterloo.qbw',
+            current_step='Migrating Invoices',
+            created_at=datetime.utcnow() - timedelta(minutes=30)
+        )
+        db_session.add(migration)
+        db_session.commit()
+        
+        return migration.migration_id
 
 
 class TestLiveStatusAPI(TestDashboardAPI):
     """Tests for /api/migrations/<id>/live-status endpoint"""
     
-    def test_live_status_returns_correct_phase_extraction(self, client, auth_headers, sample_migration, app):
+    def test_live_status_returns_correct_phase_extraction(self, authenticated_client, sample_migration, app):
         """Test that progress 0-15% maps to EXTRACTION phase"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.progress_percent = 10
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         assert response.status_code == 200
@@ -119,59 +77,55 @@ class TestLiveStatusAPI(TestDashboardAPI):
         assert data['phase'] == 'EXTRACTION'
         assert data['phase_number'] == 1
     
-    def test_live_status_returns_correct_phase_transit(self, client, auth_headers, sample_migration, app):
+    def test_live_status_returns_correct_phase_transit(self, authenticated_client, sample_migration, app):
         """Test that progress 15-20% maps to TRANSIT phase"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.progress_percent = 18
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         data = response.get_json()
         assert data['phase'] == 'TRANSIT'
         assert data['phase_number'] == 2
     
-    def test_live_status_returns_correct_phase_transformation(self, client, auth_headers, sample_migration, app):
+    def test_live_status_returns_correct_phase_transformation(self, authenticated_client, sample_migration, app):
         """Test that progress 20-85% maps to TRANSFORMATION phase"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.progress_percent = 65
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         data = response.get_json()
         assert data['phase'] == 'TRANSFORMATION'
         assert data['phase_number'] == 3
     
-    def test_live_status_returns_correct_phase_verification(self, client, auth_headers, sample_migration, app):
+    def test_live_status_returns_correct_phase_verification(self, authenticated_client, sample_migration, app):
         """Test that progress 85-100% maps to VERIFICATION phase"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.progress_percent = 92
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         data = response.get_json()
         assert data['phase'] == 'VERIFICATION'
         assert data['phase_number'] == 4
     
-    def test_live_status_includes_all_four_phases(self, client, auth_headers, sample_migration):
+    def test_live_status_includes_all_four_phases(self, authenticated_client, sample_migration):
         """Test that response includes all 4 phases"""
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         data = response.get_json()
@@ -182,20 +136,18 @@ class TestLiveStatusAPI(TestDashboardAPI):
         assert 'TRANSFORMATION' in phase_names
         assert 'VERIFICATION' in phase_names
     
-    def test_live_status_not_found_returns_404(self, client, auth_headers):
+    def test_live_status_not_found_returns_404(self, authenticated_client):
         """Test that non-existent migration returns 404"""
-        response = client.get(
-            '/api/migrations/nonexistent_id/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/migrations/nonexistent_id/live-status'
         )
         
         assert response.status_code == 404
     
-    def test_live_status_includes_elapsed_time(self, client, auth_headers, sample_migration):
+    def test_live_status_includes_elapsed_time(self, authenticated_client, sample_migration):
         """Test that response includes elapsed time"""
-        response = client.get(
-            f'/api/migrations/{sample_migration}/live-status',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/live-status'
         )
         
         data = response.get_json()
@@ -206,12 +158,11 @@ class TestLiveStatusAPI(TestDashboardAPI):
 class TestBulkStatusAPI(TestDashboardAPI):
     """Tests for /api/migrations/bulk-status endpoint"""
     
-    def test_bulk_status_returns_all_migrations(self, client, auth_headers, sample_migration, app):
+    def test_bulk_status_returns_all_migrations(self, authenticated_client, sample_migration, app):
         """Test that bulk status returns all migrations when no IDs specified"""
-        response = client.post(
+        response = authenticated_client.post(
             '/api/migrations/bulk-status',
-            json={},
-            headers=auth_headers
+            json={}
         )
         
         assert response.status_code == 200
@@ -219,23 +170,21 @@ class TestBulkStatusAPI(TestDashboardAPI):
         assert data['success'] == True
         assert 'migrations' in data
     
-    def test_bulk_status_filters_by_ids(self, client, auth_headers, sample_migration, app):
+    def test_bulk_status_filters_by_ids(self, authenticated_client, sample_migration, app):
         """Test that bulk status filters by specified IDs"""
-        response = client.post(
+        response = authenticated_client.post(
             '/api/migrations/bulk-status',
-            json={'migration_ids': [sample_migration]},
-            headers=auth_headers
+            json={'migration_ids': [sample_migration]}
         )
         
         data = response.get_json()
         assert sample_migration in data['migrations']
     
-    def test_bulk_status_returns_correct_count(self, client, auth_headers, sample_migration, app):
+    def test_bulk_status_returns_correct_count(self, authenticated_client, sample_migration, app):
         """Test that count matches returned migrations"""
-        response = client.post(
+        response = authenticated_client.post(
             '/api/migrations/bulk-status',
-            json={'migration_ids': [sample_migration]},
-            headers=auth_headers
+            json={'migration_ids': [sample_migration]}
         )
         
         data = response.get_json()
@@ -245,11 +194,10 @@ class TestBulkStatusAPI(TestDashboardAPI):
 class TestDashboardOverviewAPI(TestDashboardAPI):
     """Tests for /api/dashboard/overview endpoint"""
     
-    def test_overview_returns_statistics(self, client, auth_headers):
+    def test_overview_returns_statistics(self, authenticated_client):
         """Test that overview returns all required statistics"""
-        response = client.get(
-            '/api/dashboard/overview',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/dashboard/overview'
         )
         
         assert response.status_code == 200
@@ -263,12 +211,10 @@ class TestDashboardOverviewAPI(TestDashboardAPI):
         assert 'success_rate' in overview
         assert 'avg_duration_minutes' in overview
     
-    def test_overview_success_rate_calculation(self, client, auth_headers, app):
+    def test_overview_success_rate_calculation(self, authenticated_client, app, test_user):
         """Test that success rate is calculated correctly"""
         with app.app_context():
-            from models.user import User
-            user = User.query.filter_by(email='test@forensicbridge.com').first()
-            user_id = user.id if user else 1
+            user_id = test_user.id
             
             # Create 8 completed and 2 failed migrations
             for i in range(8):
@@ -291,9 +237,8 @@ class TestDashboardOverviewAPI(TestDashboardAPI):
             
             db.session.commit()
         
-        response = client.get(
-            '/api/dashboard/overview',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/dashboard/overview'
         )
         
         data = response.get_json()
@@ -304,11 +249,10 @@ class TestDashboardOverviewAPI(TestDashboardAPI):
 class TestRecentActivityAPI(TestDashboardAPI):
     """Tests for /api/dashboard/recent-activity endpoint"""
     
-    def test_recent_activity_returns_activities(self, client, auth_headers, sample_migration):
+    def test_recent_activity_returns_activities(self, authenticated_client, sample_migration):
         """Test that recent activity returns activity list"""
-        response = client.get(
-            '/api/dashboard/recent-activity',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/dashboard/recent-activity'
         )
         
         assert response.status_code == 200
@@ -316,11 +260,10 @@ class TestRecentActivityAPI(TestDashboardAPI):
         assert 'activities' in data
         assert isinstance(data['activities'], list)
     
-    def test_recent_activity_includes_required_fields(self, client, auth_headers, sample_migration):
+    def test_recent_activity_includes_required_fields(self, authenticated_client, sample_migration):
         """Test that each activity has required fields"""
-        response = client.get(
-            '/api/dashboard/recent-activity',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/dashboard/recent-activity'
         )
         
         data = response.get_json()
@@ -335,37 +278,34 @@ class TestRecentActivityAPI(TestDashboardAPI):
 class TestTrialBalanceAPI(TestDashboardAPI):
     """Tests for /api/migrations/<id>/trial-balance endpoint"""
     
-    def test_trial_balance_returns_data(self, client, auth_headers, sample_migration):
+    def test_trial_balance_returns_data(self, authenticated_client, sample_migration):
         """Test that trial balance returns data structure"""
-        response = client.get(
-            f'/api/migrations/{sample_migration}/trial-balance',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/trial-balance'
         )
         
         assert response.status_code == 200
         data = response.get_json()
         assert 'forensic_status' in data
     
-    def test_trial_balance_pending_for_incomplete_migration(self, client, auth_headers, sample_migration, app):
+    def test_trial_balance_pending_for_incomplete_migration(self, authenticated_client, sample_migration, app):
         """Test that trial balance shows PENDING for incomplete migration"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.status = 'processing'
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/trial-balance',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/trial-balance'
         )
         
         data = response.get_json()
         assert data['forensic_status'] in ['PENDING', 'NOT_AVAILABLE']
     
-    def test_trial_balance_not_found(self, client, auth_headers):
+    def test_trial_balance_not_found(self, authenticated_client):
         """Test 404 for non-existent migration"""
-        response = client.get(
-            '/api/migrations/nonexistent/trial-balance',
-            headers=auth_headers
+        response = authenticated_client.get(
+            '/api/migrations/nonexistent/trial-balance'
         )
         
         assert response.status_code == 404
@@ -374,11 +314,10 @@ class TestTrialBalanceAPI(TestDashboardAPI):
 class TestAuditCertificateAPI(TestDashboardAPI):
     """Tests for /api/migrations/<id>/audit-certificate endpoints"""
     
-    def test_certificate_preview_returns_data(self, client, auth_headers, sample_migration):
+    def test_certificate_preview_returns_data(self, authenticated_client, sample_migration):
         """Test that certificate preview returns metadata"""
-        response = client.get(
-            f'/api/migrations/{sample_migration}/audit-certificate/preview',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/audit-certificate/preview'
         )
         
         assert response.status_code == 200
@@ -386,21 +325,20 @@ class TestAuditCertificateAPI(TestDashboardAPI):
         assert 'available' in data
         assert 'migration_id' in data
     
-    def test_certificate_download_requires_completion(self, client, auth_headers, sample_migration, app):
+    def test_certificate_download_requires_completion(self, authenticated_client, sample_migration, app):
         """Test that download is only available for completed migrations"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
             migration.status = 'processing'
             db.session.commit()
         
-        response = client.get(
-            f'/api/migrations/{sample_migration}/audit-certificate',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/audit-certificate'
         )
         
         assert response.status_code == 400
     
-    def test_certificate_download_for_completed_migration(self, client, auth_headers, sample_migration, app):
+    def test_certificate_download_for_completed_migration(self, authenticated_client, sample_migration, app):
         """Test that download works for completed migrations"""
         with app.app_context():
             migration = Migration.query.filter_by(migration_id=sample_migration).first()
@@ -410,9 +348,8 @@ class TestAuditCertificateAPI(TestDashboardAPI):
         
         # Note: This test may fail if PDF generation dependencies aren't available
         # In that case, it should at least not crash
-        response = client.get(
-            f'/api/migrations/{sample_migration}/audit-certificate',
-            headers=auth_headers
+        response = authenticated_client.get(
+            f'/api/migrations/{sample_migration}/audit-certificate'
         )
         
         # Should either succeed (200) or handle missing dependencies gracefully (500)
@@ -423,72 +360,48 @@ class TestAuditCertificateAPI(TestDashboardAPI):
 # Performance Tests
 # ============================================================================
 
-class TestAPIPerformance:
-    """Performance tests for API endpoints"""
+class TestAPIPerformance(TestDashboardAPI):
+    """Performance tests for API endpoints
+    
+    Uses shared fixtures to avoid creating separate database connections
+    """
     
     @pytest.fixture
-    def app_with_data(self):
-        """Create app with large dataset for performance testing"""
-        from app import create_app
-        app = create_app(config_name='testing')
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    def bulk_migrations(self, authenticated_client, db_session, test_user):
+        """Create 100 migrations for performance testing"""
+        migrations = []
+        for i in range(100):
+            m = Migration(
+                migration_id=f'perf_mig_{i}',
+                user_id=test_user.id,
+                status='completed' if i % 2 == 0 else 'failed',
+                progress_percent=100,
+                company_name=f'Company {i}',
+                created_at=datetime.utcnow() - timedelta(days=i)
+            )
+            db_session.add(m)
+            migrations.append(m.migration_id)
         
-        with app.app_context():
-            db.create_all()
-            
-            from models.user import User
-            user = User(email='perf@test.com', first_name='Perf', last_name='Test')
-            user.set_password('Test123!')
-            db.session.add(user)
-            db.session.commit()
-            
-            
-            # Create 100 migrations for performance testing
-            for i in range(100):
-                m = Migration(
-                    migration_id=f'perf_mig_{i}',
-                    user_id=user.id,
-                    status='completed' if i % 2 == 0 else 'failed',
-                    progress_percent=100,
-                    company_name=f'Company {i}',
-                    created_at=datetime.utcnow() - timedelta(days=i)
-                )
-                db.session.add(m)
-            
-            db.session.commit()
-            yield app
-            db.drop_all()
+        db_session.commit()
+        return migrations
     
-    def test_bulk_status_performance_100_migrations(self, app_with_data):
+    def test_bulk_status_performance_100_migrations(self, authenticated_client, bulk_migrations):
         """Test that bulk status handles 100 migrations efficiently"""
         import time
         
-        client = app_with_data.test_client()
-        client.post('/api/auth/login', json={
-            'email': 'perf@test.com',
-            'password': 'Test123!'
-        })
-        
         start = time.time()
-        response = client.post('/api/migrations/bulk-status', json={})
+        response = authenticated_client.post('/api/migrations/bulk-status', json={})
         duration = time.time() - start
         
         assert response.status_code == 200
         assert duration < 2.0  # Should complete in under 2 seconds
     
-    def test_overview_performance(self, app_with_data):
+    def test_overview_performance(self, authenticated_client, bulk_migrations):
         """Test that overview aggregation is efficient"""
         import time
         
-        client = app_with_data.test_client()
-        client.post('/api/auth/login', json={
-            'email': 'perf@test.com',
-            'password': 'Test123!'
-        })
-        
         start = time.time()
-        response = client.get('/api/dashboard/overview')
+        response = authenticated_client.get('/api/dashboard/overview')
         duration = time.time() - start
         
         assert response.status_code == 200
@@ -502,25 +415,10 @@ class TestAPIPerformance:
 class TestAPISecurity:
     """Security tests for API endpoints"""
     
-    @pytest.fixture
-    def app(self):
-        from app import create_app
-        app = create_app(config_name='testing')
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
-        
-        with app.app_context():
-            db.create_all()
-            yield app
-            db.drop_all()
-    
-    def test_unauthenticated_access_denied(self, app):
+    def test_unauthenticated_access_denied(self, client):
         """Test that unauthenticated requests are denied"""
-        client = app.test_client()
-        
         endpoints = [
             '/api/migrations/test/live-status',
-            '/api/migrations/bulk-status',
             '/api/dashboard/overview',
             '/api/dashboard/recent-activity',
             '/api/migrations/test/trial-balance',
@@ -528,13 +426,14 @@ class TestAPISecurity:
         ]
         
         for endpoint in endpoints:
-            if 'bulk' in endpoint:
-                response = client.post(endpoint, json={})
-            else:
-                response = client.get(endpoint)
-            
+            response = client.get(endpoint)
             # Should return 401 Unauthorized or redirect to login
-            assert response.status_code in [401, 302, 403]
+            assert response.status_code in [401, 302, 403], f"Endpoint {endpoint} returned {response.status_code}"
+    
+    def test_unauthenticated_post_denied(self, client):
+        """Test that unauthenticated POST requests are denied"""
+        response = client.post('/api/migrations/bulk-status', json={})
+        assert response.status_code in [401, 302, 403]
 
 
 if __name__ == '__main__':

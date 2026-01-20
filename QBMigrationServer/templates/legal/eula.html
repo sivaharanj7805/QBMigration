@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>End User License Agreement - ForensicBridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 48px;
+            padding-bottom: 32px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            color: #3b82f6;
+            letter-spacing: -0.5px;
+        }
+
+        h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: #f8fafc;
+            margin-top: 16px;
+        }
+
+        .effective-date {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+
+        .content {
+            background: rgba(30, 41, 59, 0.7);
+            border-radius: 16px;
+            padding: 48px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #334155;
+        }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #f8fafc;
+            margin-top: 32px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #3b82f6;
+        }
+
+        h2:first-child {
+            margin-top: 0;
+        }
+
+        h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin-top: 24px;
+            margin-bottom: 12px;
+        }
+
+        p {
+            margin-bottom: 16px;
+            color: #cbd5e1;
+        }
+
+        ul,
+        ol {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+
+        li {
+            margin-bottom: 8px;
+            color: #cbd5e1;
+        }
+
+        .highlight-box {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid #3b82f6;
+            padding: 16px 20px;
+            margin: 24px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .warning-box {
+            background: rgba(245, 158, 11, 0.1);
+            border-left: 4px solid #f59e0b;
+            padding: 16px 20px;
+            margin: 24px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 48px;
+            padding-top: 32px;
+            border-top: 1px solid #334155;
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .nav-links {
+            margin-top: 16px;
+        }
+
+        .nav-links a {
+            margin: 0 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">FORENSICBRIDGE</div>
+            <h1>End User License Agreement</h1>
+            <p class="effective-date">Effective Date: January 1, 2026 | Version 1.0</p>
+        </header>
+
+        <div class="content">
+            <h2>1. Acceptance of Terms</h2>
+            <p>This End User License Agreement ("Agreement") is a legal agreement between you ("User," "you," or "your")
+                and ForensicBridge Inc. ("Company," "we," "us," or "our") governing your use of the ForensicBridge
+                software application and related services (collectively, the "Service").</p>
+
+            <div class="highlight-box">
+                <strong>By using ForensicBridge, you agree to be bound by this Agreement.</strong> If you do not agree,
+                do not use the Service.
+            </div>
+
+            <h2>2. License Grant</h2>
+            <h3>2.1 Scope of License</h3>
+            <p>Subject to your compliance with this Agreement, we grant you a limited, non-exclusive, non-transferable,
+                revocable license to use the Service for your internal business purposes.</p>
+
+            <h3>2.2 Pricing Tiers</h3>
+            <p>ForensicBridge operates on a per-file pricing model:</p>
+            <ul>
+                <li><strong>Standard ($199/file):</strong> QuickBooks files under 100MB</li>
+                <li><strong>Industrial ($499/file):</strong> QuickBooks files 100MB - 1GB</li>
+                <li><strong>Forensic ($1,499/file):</strong> QuickBooks files over 1GB with full SHA-256 forensic
+                    pipeline</li>
+            </ul>
+
+            <h2>3. Restrictions</h2>
+            <p>You agree NOT to:</p>
+            <ul>
+                <li>Reverse engineer, decompile, or disassemble the Service</li>
+                <li>Share your account credentials with unauthorized parties</li>
+                <li>Use the Service for any unlawful purpose</li>
+                <li>Attempt to circumvent licensing or security measures</li>
+                <li>Redistribute or resell the Service without authorization</li>
+            </ul>
+
+            <h2>4. Data Processing</h2>
+            <h3>4.1 Zero-Persistence Architecture</h3>
+            <p>ForensicBridge implements a zero-persistence architecture for financial data. Your QuickBooks data is
+                encrypted during transit, processed in an isolated environment, and automatically deleted upon migration
+                completion.</p>
+
+            <h3>4.2 What We Store</h3>
+            <p>We retain only:</p>
+            <ul>
+                <li>Migration metadata (file size, entity counts, timestamps)</li>
+                <li>Cryptographic hashes for audit trail verification</li>
+                <li>Account information you provide during registration</li>
+            </ul>
+
+            <h2>5. Intellectual Property</h2>
+            <p>The Service, including all software, algorithms, designs, and documentation, is the exclusive property of
+                ForensicBridge Inc. and is protected by copyright, trade secret, and other intellectual property laws.
+            </p>
+
+            <h2>6. Security</h2>
+            <h3>6.1 Encryption Standards</h3>
+            <p>All data is encrypted using:</p>
+            <ul>
+                <li>AES-256-GCM for data at rest and in transit</li>
+                <li>SHA-256 cryptographic hashing for forensic verification</li>
+                <li>Argon2id for password hashing</li>
+                <li>TLS 1.3 for all network communications</li>
+            </ul>
+
+            <h2>7. Account Security</h2>
+            <p>You are responsible for maintaining the confidentiality of your account credentials. Notify us
+                immediately at <a href="mailto:security@forensicbridge.ca">security@forensicbridge.ca</a> of any
+                unauthorized access.</p>
+
+            <h2>8. Warranty Disclaimer</h2>
+            <div class="warning-box">
+                THE SERVICE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+                LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+            </div>
+
+            <h2>9. Limitation of Liability</h2>
+            <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, FORENSICBRIDGE INC. SHALL NOT BE LIABLE FOR ANY INDIRECT,
+                INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS OR REVENUES.</p>
+
+            <h2>10. Termination</h2>
+            <p>We may terminate your license immediately if you breach this Agreement. Upon termination, you must cease
+                all use of the Service and destroy any copies in your possession.</p>
+
+            <h2>11. Governing Law</h2>
+            <p>This Agreement shall be governed by the laws of the Province of Ontario, Canada, without regard to
+                conflict of law principles.</p>
+
+            <h2>12. Contact Information</h2>
+            <p>For questions about this Agreement, contact us at:</p>
+            <ul>
+                <li>Email: <a href="mailto:legal@forensicbridge.ca">legal@forensicbridge.ca</a></li>
+                <li>Website: <a href="https://forensicbridge.ca">forensicbridge.ca</a></li>
+            </ul>
+        </div>
+
+        <footer>
+            <p>&copy; 2026 ForensicBridge Inc. All rights reserved.</p>
+            <div class="nav-links">
+                <a href="/legal/privacy">Privacy Policy</a>
+                <a href="/legal/security">Security</a>
+                <a href="https://forensicbridge.ca">Home</a>
+            </div>
+        </footer>
+    </div>
+</body>
+
+</html>

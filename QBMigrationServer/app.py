@@ -29,6 +29,9 @@ from api.websocket import websocket_bp, init_socketio
 from api.s3_upload import s3_upload_bp
 from api.sso_provider import sso_bp
 from api.webhook_delivery_log import webhook_logs_bp
+from api.license_api import license_bp
+from api.qbo import qbo_bp
+from api.legal import legal_bp
 import sys
 
 
@@ -261,7 +264,10 @@ def create_app(config_name='development'):
     app.register_blueprint(s3_upload_bp)
     app.register_blueprint(sso_bp)
     app.register_blueprint(webhook_logs_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs')
+    app.register_blueprint(license_bp)
+    app.register_blueprint(qbo_bp)
+    app.register_blueprint(legal_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):
@@ -287,9 +293,9 @@ def create_app(config_name='development'):
     def index():
         """Root endpoint - basic server info"""
         return jsonify({
-            'message': 'QB Migration Server',
+            'message': 'ForensicBridge Migration Server',
             'status': 'running',
-            'version': '2.0.0',
+            'version': '4.3.0',
             'environment': os.getenv('FLASK_ENV', 'development'),
             'features': {
                 'aws_enabled': bool(app.config.get('AWS_S3_BUCKET')),
@@ -298,12 +304,23 @@ def create_app(config_name='development'):
             },
             'endpoints': {
                 'health': '/health',
+                'legal': {
+                    'eula': '/legal/eula',
+                    'privacy': '/legal/privacy',
+                    'security': '/legal/security'
+                },
                 'auth': {
                     'register': '/api/auth/register',
                     'login': '/api/auth/login',
                     'logout': '/api/auth/logout',
                     'me': '/api/auth/me',
                     'verify': '/api/auth/verify/<token>'
+                },
+                'qbo': {
+                    'connect': '/api/qbo/connect',
+                    'callback': '/api/qbo/callback',
+                    'disconnect': '/api/qbo/disconnect',
+                    'status': '/api/qbo/status'
                 },
                 'upload': '/api/upload',
                 'migrations': {
@@ -322,6 +339,13 @@ def create_app(config_name='development'):
                 }
             }
         }), 200
+    
+    # Disconnect page for Intuit OAuth compliance
+    @app.route('/disconnect')
+    def disconnect_page():
+        """Disconnect QuickBooks page - required by Intuit"""
+        from flask import render_template
+        return render_template('disconnect.html')
     
     # Health check endpoint
     @app.route('/health')

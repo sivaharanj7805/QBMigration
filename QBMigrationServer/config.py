@@ -53,7 +53,7 @@ class Config:
     # ============================================================================
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-    AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+    AWS_REGION = os.getenv('AWS_REGION', 'ca-central-1')  # Canadian data residency per legal docs
     
     # S3
     AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET', 'qb-migration-temp-files')
@@ -132,7 +132,7 @@ class Config:
     ORPHANED_INSTANCE_TIMEOUT_HOURS = int(os.getenv('ORPHANED_INSTANCE_TIMEOUT_HOURS', '6'))
     FORCE_CLEANUP_AFTER_HOURS = int(os.getenv('FORCE_CLEANUP_AFTER_HOURS', '48'))
     
-    MIGRATION_METADATA_RETENTION_DAYS = int(os.getenv('MIGRATION_METADATA_RETENTION_DAYS', '90'))
+    MIGRATION_METADATA_RETENTION_DAYS = int(os.getenv('MIGRATION_METADATA_RETENTION_DAYS', '2555'))  # 7 years per legal docs
     USER_DATA_RETENTION_DAYS = int(os.getenv('USER_DATA_RETENTION_DAYS', '365'))
     
     # ============================================================================
@@ -237,6 +237,47 @@ class Config:
     MAX_PAGE_SIZE = 100
     MAX_OFFSET = 10000
     
+    # ============================================================================
+    # LICENSING
+    # ============================================================================
+    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY', secrets.token_hex(32))
+    LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv('LICENSE_TOKEN_EXPIRY_HOURS', '24'))
+    
+    # License/Pricing tiers - Per-file pricing model
+    LICENSE_TIERS = {
+        'standard': {
+            'name': 'Standard',
+            'price_per_file': 199,
+            'max_file_size_mb': 100,
+            'description': 'Files under 100MB'
+        },
+        'industrial': {
+            'name': 'Industrial', 
+            'price_per_file': 499,
+            'max_file_size_mb': 1024,
+            'description': 'Files 100MB - 1GB'
+        },
+        'forensic': {
+            'name': 'Monster/Forensic',
+            'price_per_file': 1499,
+            'max_file_size_mb': -1,  # Unlimited
+            'description': 'Files over 1GB, full SHA-256 pipeline'
+        }
+    }
+    
+    # Legacy subscription tiers (for backwards compatibility)
+    SUBSCRIPTION_TIERS = {
+        'starter': {'migrations': 10, 'name': 'Starter'},
+        'professional': {'migrations': 50, 'name': 'Professional'},
+        'enterprise': {'migrations': -1, 'name': 'Enterprise'}  # -1 = unlimited
+    }
+    
+    # Admin emails for license management (properly parse empty values)
+    @staticmethod
+    def get_admin_emails():
+        raw = os.getenv('ADMIN_EMAILS', '')
+        return [e.strip() for e in raw.split(',') if e.strip()]
+    
     @staticmethod
     def init_app(app):
         """Initialize app - override in subclasses for specific setup"""
@@ -256,8 +297,10 @@ class TestingConfig(Config):
     TESTING = True
     DEBUG = False
     
-    # Don't define SQLALCHEMY_DATABASE_URI here yet!
-    # We'll use init_app to set it
+    # CRITICAL: Override the database URI directly as class attribute
+    # This MUST be set here, not in init_app, because the parent class
+    # already sets SQLALCHEMY_DATABASE_URI from DATABASE_URL env var
+    SQLALCHEMY_DATABASE_URI = 'postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_test'
     
     RATELIMIT_ENABLED = False
     AUTO_CLEANUP_ENABLED = False
@@ -266,11 +309,20 @@ class TestingConfig(Config):
     WTF_CSRF_ENABLED = False
     AWS_S3_BUCKET = None
     
+    # Use simpler connection pool for tests
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 5,
+        'pool_recycle': 1800,
+        'pool_pre_ping': True,
+        'pool_timeout': 10,
+        'max_overflow': 5,
+    }
+    
     @classmethod
     def init_app(cls, app):
         """Initialize app with test database"""
-        # CRITICAL: Set the database URI here, AFTER the class is loaded
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_test'
+        # Ensure the test database URI is set (belt and suspenders)
+        app.config['SQLALCHEMY_DATABASE_URI'] = cls.SQLALCHEMY_DATABASE_URI
 
 
 class ProductionConfig(Config):

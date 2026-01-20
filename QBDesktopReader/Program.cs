@@ -38,6 +38,7 @@ namespace QBDesktopExtractor
         {
             public const int Success = 0;
             public const int ConfigError = 10;
+            public const int LicenseInvalid = 15;
             public const int SDKNotInstalled = 20;
             public const int QBConnectionFailed = 30;
             public const int ExtractionFailed = 40;
@@ -153,7 +154,54 @@ namespace QBDesktopExtractor
         {
             try
             {
-                // PHASE 0: LOAD CONFIGURATION
+                // PHASE 0: LICENSE VALIDATION (CRITICAL - must come first)
+                _logger.Log(LogLevel.Info, "Validating license...");
+                
+                try
+                {
+                    var licenseResult = await LicenseValidator.ValidateAsync(options.LicenseKey);
+                    
+                    if (!licenseResult.Valid)
+                    {
+                        _logger.Log(LogLevel.Error, "License validation failed: {0}", licenseResult.Error);
+                        Console.WriteLine();
+                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                        Console.WriteLine("║  LICENSE REQUIRED                                                 ║");
+                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                        Console.WriteLine("║  Please purchase a license at: https://forensicbridge.ca         ║");
+                        Console.WriteLine("║  Use --license <key> to provide your license key                 ║");
+                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                        Console.WriteLine();
+                        return ExitCode.LicenseInvalid;
+                    }
+                    
+                    if (!licenseResult.HasMigrationsRemaining)
+                    {
+                        _logger.Log(LogLevel.Error, "No migrations remaining on license");
+                        Console.WriteLine();
+                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                        Console.WriteLine("║  MIGRATIONS EXHAUSTED                                             ║");
+                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                        Console.WriteLine("║  Your license has used all available migrations.                 ║");
+                        Console.WriteLine("║  Please upgrade at: https://forensicbridge.ca                    ║");
+                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                        Console.WriteLine();
+                        return ExitCode.LicenseInvalid;
+                    }
+                    
+                    _logger.Log(LogLevel.Info, "License validated: {0}", licenseResult.GetDisplayStatus());
+                    if (licenseResult.FromCache)
+                    {
+                        _logger.Log(LogLevel.Warning, "Using cached license (offline mode)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, "License check failed: {0}", ex.Message);
+                    return ExitCode.LicenseInvalid;
+                }
+                
+                // PHASE 1: LOAD CONFIGURATION
                 _logger.Log(LogLevel.Info, "Loading configuration...");
 
                 try
@@ -503,6 +551,9 @@ namespace QBDesktopExtractor
                     case "--output-dir": case "-o":
                         if (i + 1 < args.Length) options.OutputDirectory = args[++i];
                         break;
+                    case "--license": case "-l":
+                        if (i + 1 < args.Length) options.LicenseKey = args[++i];
+                        break;
                     case "--no-pause": options.NoPause = true; break;
                     case "--quiet": case "-q": options.Quiet = true; break;
                     case "--verbose": case "-v": options.Verbose = true; break;
@@ -552,6 +603,7 @@ namespace QBDesktopExtractor
     {
         public string ConfigPath { get; set; } = "config.json";
         public string OutputDirectory { get; set; } = "output";
+        public string? LicenseKey { get; set; }
         public bool NoPause { get; set; }
         public bool Quiet { get; set; }
         public bool Verbose { get; set; }

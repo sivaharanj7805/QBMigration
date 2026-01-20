@@ -103,7 +103,7 @@ def client(app):
         yield client
 
 
-@pytest.fixture(scope='function', autouse=True)
+@pytest.fixture(scope='function')
 def db_session(app):
     """
     Create clean database session for each test.
@@ -113,6 +113,9 @@ def db_session(app):
     - No complex transaction nesting
     - Data is actually visible within tests
     - Clean slate for each test
+    
+    NOTE: This fixture must be explicitly requested by tests that need it.
+    Removed autouse=True to prevent connection pool exhaustion.
     """
     # Clear all data before test
     for table in reversed(db.metadata.sorted_tables):
@@ -123,6 +126,13 @@ def db_session(app):
     db.session.commit()
     
     yield db.session
+    
+    # Rollback any pending transactions and expunge all objects to avoid StaleDataError
+    try:
+        db.session.rollback()
+        db.session.expunge_all()
+    except Exception:
+        pass
     
     # Clear all data after test
     for table in reversed(db.metadata.sorted_tables):
@@ -289,25 +299,19 @@ def verify_test_environment():
     Verify test environment setup before running any tests
     
     SAFETY: Prevents tests from running in unsafe conditions
+    
+    NOTE: This fixture MUST NOT create a Flask app or database connection!
+    The app fixture handles all database setup. Creating connections here
+    causes connection pool exhaustion and test hangs.
     """
     # SAFETY CHECK 1: Verify we're not in production
     if os.getenv('FLASK_ENV') == 'production':
         raise RuntimeError("DANGER: Cannot run tests in production environment!")
     
-    # SAFETY CHECK 2: Verify PostgreSQL is accessible
-    try:
-        from app import create_app
-        test_app = create_app('testing')
-        with test_app.app_context():
-            db.session.execute(text('SELECT 1'))
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot connect to test database!\n"
-            f"Error: {str(e)}\n"
-            f"Make sure PostgreSQL is running and test database exists."
-        )
+    # Force testing environment
+    os.environ['FLASK_ENV'] = 'testing'
     
-    # SAFETY CHECK 3: Warn about missing encryption key
+    # SAFETY CHECK 2: Warn about missing encryption key
     if not os.getenv('BACKUP_ENCRYPTION_KEY'):
         logger.warning(
             "BACKUP_ENCRYPTION_KEY not set - encryption tests may fail"

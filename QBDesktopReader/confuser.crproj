@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ConfuserEx Obfuscation Configuration
+  Protects ForensicBridge executables from reverse engineering
+  
+  Built with protections:
+  - Anti-tamper: Prevents modification of executable
+  - Anti-debug: Detects debuggers and crashes
+  - Constants: Encrypts string literals
+  - Control Flow: Obscures program logic
+  - Invalid Metadata: Breaks disassemblers
+  - Rename: Obfuscates symbol names
+  - Resources: Encrypts embedded resources
+-->
+<project outputDir="bin\Release\Protected" baseDir="bin\Release\net48" xmlns="http://confuser.codeplex.com">
+  <rule pattern="true">
+    <!-- Anti-Tamper: Crash if executable is modified -->
+    <protection id="anti tamper" />
+    
+    <!-- Anti-Debug: Detect and prevent debugging -->
+    <protection id="anti debug" />
+    
+    <!-- Constants Protection: Encrypt all strings and constants -->
+    <protection id="constants">
+      <argument name="mode" value="x86" />
+      <argument name="decoderCount" value="5" />
+    </protection>
+    
+    <!-- Control Flow Obfuscation: Make code flow hard to follow -->
+    <protection id="ctrl flow">
+      <argument name="type" value="switch" />
+      <argument name="intensity" value="50" />
+    </protection>
+    
+    <!-- Invalid Metadata: Break decompilers like dnSpy -->
+    <protection id="invalid metadata" />
+    
+    <!-- Symbol Renaming: Obfuscate class/method/variable names -->
+    <protection id="rename">
+      <argument name="mode" value="unicode" />
+      <argument name="renPublic" value="true" />
+    </protection>
+    
+    <!-- Resource Protection: Encrypt embedded resources -->
+    <protection id="resources">
+      <argument name="mode" value="dynamic" />
+    </protection>
+  </rule>
+  
+  <!-- Main executable -->
+  <module path="QBExtractor.exe" />
+  
+  <!-- Note: Add additional modules if building other components -->
+  <!-- <module path="QBMigrationLauncher.exe" /> -->
+</project>
