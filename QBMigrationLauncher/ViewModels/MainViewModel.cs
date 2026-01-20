@@ -152,12 +152,62 @@ namespace QBMigrationLauncher.ViewModels
         {
             if (IsMigrating) return;
 
+            // ============================================================================
+            // LICENSE VALIDATION - Required before any migration
+            // ============================================================================
+            LogOutput = "[INFO] Validating license...\n";
+            CurrentStatusMessage = "Validating license...";
+            
+            try
+            {
+                var licenseResult = await QBDesktopExtractor.LicenseValidator.ValidateAsync();
+                
+                if (!licenseResult.Valid)
+                {
+                    LogOutput += $"[ERROR] License validation failed: {licenseResult.Error}\n";
+                    CurrentStatusMessage = "License validation failed";
+                    System.Windows.MessageBox.Show(
+                        $"License validation failed:\n\n{licenseResult.Error}\n\nPlease activate a valid license to continue.",
+                        "License Required",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Warning
+                    );
+                    return;
+                }
+                
+                if (!licenseResult.HasMigrationsRemaining)
+                {
+                    LogOutput += "[ERROR] No migrations remaining on this license.\n";
+                    CurrentStatusMessage = "No migrations remaining";
+                    System.Windows.MessageBox.Show(
+                        "You have used all migrations on your current license.\n\nPlease upgrade your license at https://forensicbridge.ca/pricing",
+                        "Migrations Exhausted",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Warning
+                    );
+                    return;
+                }
+                
+                LogOutput += $"[INFO] License valid: {licenseResult.GetDisplayStatus()}\n";
+                App.LicenseResult = licenseResult;
+            }
+            catch (Exception ex)
+            {
+                LogOutput += $"[ERROR] License check failed: {ex.Message}\n";
+                CurrentStatusMessage = "License check failed";
+                return;
+            }
+            
+            // ============================================================================
+            // BEGIN MIGRATION
+            // ============================================================================
             IsMigrating = true;
             ButtonText = "MIGRATING...";
             ButtonColor = Brushes.Gray;
             ProgressPercentage = 0;
             CurrentStatusMessage = "Starting extraction engine...";
-            LogOutput = "";
+
+            string migrationId = Guid.NewGuid().ToString("N").Substring(0, 12).ToUpper();
 
             try
             {

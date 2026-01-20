@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Practices - ForensicBridge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 48px;
+            padding-bottom: 32px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            color: #3b82f6;
+        }
+
+        h1 {
+            font-size: 36px;
+            font-weight: 700;
+            color: #f8fafc;
+            margin-top: 16px;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            font-size: 18px;
+            margin-top: 8px;
+        }
+
+        .content {
+            background: rgba(30, 41, 59, 0.7);
+            border-radius: 16px;
+            padding: 48px;
+            border: 1px solid #334155;
+        }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #f8fafc;
+            margin-top: 32px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        h2:first-child {
+            margin-top: 0;
+        }
+
+        h2 .icon {
+            font-size: 24px;
+        }
+
+        p {
+            margin-bottom: 16px;
+            color: #cbd5e1;
+        }
+
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+            margin: 32px 0;
+        }
+
+        .security-card {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .security-card h3 {
+            color: #f8fafc;
+            font-size: 18px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .security-card p {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-green {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .compliance-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 24px 0;
+        }
+
+        .compliance-item {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid #3b82f6;
+            border-radius: 8px;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .compliance-item span {
+            color: #f8fafc;
+            font-weight: 500;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 48px;
+            padding-top: 32px;
+            border-top: 1px solid #334155;
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .nav-links {
+            margin-top: 16px;
+        }
+
+        .nav-links a {
+            margin: 0 12px;
+        }
+
+        .highlight-box {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 4px solid #10b981;
+            padding: 16px 20px;
+            margin: 24px 0;
+            border-radius: 0 8px 8px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">FORENSICBRIDGE</div>
+            <h1>Security Practices</h1>
+            <p class="subtitle">Enterprise-grade security for your financial data</p>
+        </header>
+
+        <div class="content">
+            <div class="highlight-box">
+                <strong>🛡️ Security First:</strong> ForensicBridge was designed from the ground up with security as a
+                core principle; not an afterthought.
+            </div>
+
+            <h2><span class="icon">🔐</span> Encryption</h2>
+            <div class="security-grid">
+                <div class="security-card">
+                    <h3>🔒 Data at Rest</h3>
+                    <p>All data is encrypted using AES-256-GCM with unique per-file keys. Encryption keys are protected
+                        using AWS KMS or DPAPI.</p>
+                    <span class="badge badge-green">AES-256-GCM</span>
+                </div>
+                <div class="security-card">
+                    <h3>🌐 Data in Transit</h3>
+                    <p>All network communications use TLS 1.3 with forward secrecy. We enforce HTTPS on all endpoints.
+                    </p>
+                    <span class="badge badge-green">TLS 1.3</span>
+                </div>
+                <div class="security-card">
+                    <h3>🔑 Password Storage</h3>
+                    <p>Passwords are hashed using Argon2id with memory-hard proof-of-work, the winner of the Password
+                        Hashing Competition.</p>
+                    <span class="badge badge-green">Argon2id</span>
+                </div>
+                <div class="security-card">
+                    <h3>📜 Forensic Integrity</h3>
+                    <p>Every record is hashed with SHA-256 to create an immutable audit trail for forensic verification.
+                    </p>
+                    <span class="badge badge-green">SHA-256</span>
+                </div>
+            </div>
+
+            <h2><span class="icon">🏗️</span> Architecture</h2>
+            <div class="security-grid">
+                <div class="security-card">
+                    <h3>🗑️ Zero-Persistence</h3>
+                    <p>Financial data is processed in isolated containers and automatically deleted within 24 hours of
+                        migration completion.</p>
+                </div>
+                <div class="security-card">
+                    <h3>🇨🇦 Canadian Data Residency</h3>
+                    <p>All data is processed and stored exclusively in Canadian data centers (AWS ca-central-1,
+                        Montreal).</p>
+                </div>
+                <div class="security-card">
+                    <h3>🔄 Isolated Environments</h3>
+                    <p>Each migration runs in its own isolated AWS environment, preventing cross-contamination between
+                        clients.</p>
+                </div>
+                <div class="security-card">
+                    <h3>🧹 Secure Deletion</h3>
+                    <p>Files are overwritten with cryptographic patterns (DoD 5220.22-M standard) before deletion.</p>
+                </div>
+            </div>
+
+            <h2><span class="icon">🔒</span> Access Control</h2>
+            <div class="security-grid">
+                <div class="security-card">
+                    <h3>🚫 Account Lockout</h3>
+                    <p>Accounts are automatically locked after 5 failed login attempts to prevent brute-force attacks.
+                    </p>
+                </div>
+                <div class="security-card">
+                    <h3>⏱️ Rate Limiting</h3>
+                    <p>API endpoints are rate-limited to prevent abuse and denial-of-service attacks.</p>
+                </div>
+                <div class="security-card">
+                    <h3>🎫 OAuth 2.0</h3>
+                    <p>QuickBooks integration uses Intuit's official OAuth 2.0 flow. We never see or store your QBO
+                        credentials.</p>
+                </div>
+                <div class="security-card">
+                    <h3>📝 Audit Logging</h3>
+                    <p>All authentication events, data access, and administrative actions are logged for security
+                        monitoring.</p>
+                </div>
+            </div>
+
+            <h2><span class="icon">✅</span> Compliance</h2>
+            <p>ForensicBridge is designed to help you meet regulatory requirements:</p>
+            <div class="compliance-list">
+                <div class="compliance-item">
+                    <span>🇨🇦 PIPEDA</span>
+                </div>
+                <div class="compliance-item">
+                    <span>🇪🇺 GDPR Ready</span>
+                </div>
+                <div class="compliance-item">
+                    <span>📊 SOC 2 Type II (Planned)</span>
+                </div>
+                <div class="compliance-item">
+                    <span>🔐 CPA Canada Standards</span>
+                </div>
+            </div>
+
+            <h2><span class="icon">📧</span> Security Contact</h2>
+            <p>To report a security vulnerability or concern:</p>
+            <ul style="padding-left: 24px; margin-bottom: 16px;">
+                <li>Email: <a href="mailto:security@forensicbridge.ca">security@forensicbridge.ca</a></li>
+                <li>Response Time: Within 24 hours for critical issues</li>
+            </ul>
+            <p>We appreciate responsible disclosure and will acknowledge security researchers who help us improve.</p>
+        </div>
+
+        <footer>
+            <p>&copy; 2026 ForensicBridge Inc. All rights reserved.</p>
+            <div class="nav-links">
+                <a href="/legal/eula">EULA</a>
+                <a href="/legal/privacy">Privacy Policy</a>
+                <a href="https://forensicbridge.ca">Home</a>
+            </div>
+        </footer>
+    </div>
+</body>
+
+</html>

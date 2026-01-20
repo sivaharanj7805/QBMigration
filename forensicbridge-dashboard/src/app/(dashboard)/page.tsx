@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
     Upload,
     FileSpreadsheet,
@@ -12,51 +12,130 @@ import {
     Database,
     Download,
     ChevronRight,
-    HardDrive
+    HardDrive,
+    RefreshCw,
+    Loader2
 } from "lucide-react";
 
-// Mock data for recent migrations
-const recentMigrations = [
-    {
-        id: "MIG-2026-001",
-        companyName: "ABC Corporation",
-        fileName: "ABCCorp_2024.QBW",
-        status: "completed",
-        records: 12847,
-        date: "Jan 15, 2026",
-        duration: "4m 32s"
-    },
-    {
-        id: "MIG-2026-002",
-        companyName: "Smith & Associates",
-        fileName: "SmithAssoc.QBW",
-        status: "completed",
-        records: 5621,
-        date: "Jan 14, 2026",
-        duration: "2m 15s"
-    },
-    {
-        id: "MIG-2026-003",
-        companyName: "Northern Manufacturing",
-        fileName: "NorthMfg.QBW",
-        status: "in_progress",
-        records: 28456,
-        date: "Jan 16, 2026",
-        progress: 67
-    }
-];
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-const stats = [
-    { label: "Migrations This Month", value: "24", icon: FileSpreadsheet, color: "bg-blue-50 text-blue-600" },
-    { label: "Records Migrated", value: "1.2M", icon: Database, color: "bg-green-50 text-green-600" },
-    { label: "Avg. Duration", value: "3m 42s", icon: Clock, color: "bg-purple-50 text-purple-600" },
-    { label: "Success Rate", value: "99.8%", icon: Shield, color: "bg-emerald-50 text-emerald-600" }
-];
+// Types
+interface Migration {
+    id: string;
+    migration_id: string;
+    companyName: string;
+    company_name?: string;
+    fileName: string;
+    qb_file_name?: string;
+    status: string;
+    records: number;
+    total_records?: number;
+    date: string;
+    created_at?: string;
+    duration?: string;
+    progress?: number;
+    progress_percent?: number;
+}
+
+interface Stats {
+    migrations_this_month: number;
+    total_records: string;
+    avg_duration: string;
+    success_rate: string;
+}
 
 export default function DashboardHome() {
     const [isDragActive, setIsDragActive] = useState(false);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-    const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "processing" | "complete">("idle");
+    const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "processing" | "complete" | "error">("idle");
+    const [uploadError, setUploadError] = useState<string | null>(null);
+
+    // Real data from API
+    const [migrations, setMigrations] = useState<Migration[]>([]);
+    const [stats, setStats] = useState<Stats>({
+        migrations_this_month: 0,
+        total_records: "0",
+        avg_duration: "--",
+        success_rate: "100%"
+    });
+    const [loading, setLoading] = useState(true);
+    const [apiConnected, setApiConnected] = useState<boolean | null>(null);
+
+    // Check API connection on mount
+    useEffect(() => {
+        checkApiConnection();
+        fetchDashboardData();
+    }, []);
+
+    const checkApiConnection = async () => {
+        try {
+            const response = await fetch(`${API_URL}/health`, {
+                method: 'GET',
+                credentials: 'include'
+            });
+            setApiConnected(response.ok);
+        } catch (error) {
+            console.error("API connection failed:", error);
+            setApiConnected(false);
+        }
+    };
+
+    const fetchDashboardData = async () => {
+        setLoading(true);
+        try {
+            // Fetch stats
+            const statsResponse = await fetch(`${API_URL}/api/migrations/stats`, {
+                credentials: 'include'
+            });
+            if (statsResponse.ok) {
+                const statsData = await statsResponse.json();
+                if (statsData.success) {
+                    setStats(statsData.stats);
+                }
+            }
+
+            // Fetch recent migrations
+            const migrationsResponse = await fetch(`${API_URL}/api/migrations?limit=5`, {
+                credentials: 'include'
+            });
+            if (migrationsResponse.ok) {
+                const migrationsData = await migrationsResponse.json();
+                if (migrationsData.success) {
+                    // Transform API data to our format
+                    const formattedMigrations = migrationsData.migrations.map((m: any) => ({
+                        id: m.migration_id || m.id,
+                        migration_id: m.migration_id,
+                        companyName: m.company_name || "Unknown Company",
+                        fileName: m.qb_file_name || "Unknown File",
+                        status: m.status,
+                        records: m.total_records || 0,
+                        date: formatDate(m.created_at),
+                        progress: m.progress_percent || 0
+                    }));
+                    setMigrations(formattedMigrations);
+                }
+            }
+        } catch (error) {
+            console.error("Failed to fetch dashboard data:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const formatDate = (isoDate: string | null): string => {
+        if (!isoDate) return "--";
+        try {
+            const date = new Date(isoDate);
+            return date.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            });
+        } catch {
+            return "--";
+        }
+    };
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -78,8 +157,9 @@ export default function DashboardHome() {
             const file = files[0];
             const ext = file.name.split('.').pop()?.toLowerCase();
             if (['qbw', 'qbb', 'qbm'].includes(ext || '')) {
-                setUploadedFile(file);
-                simulateUpload();
+                handleFileUpload(file);
+            } else {
+                setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file.");
             }
         }
     }, []);
@@ -87,45 +167,110 @@ export default function DashboardHome() {
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            setUploadedFile(file);
-            simulateUpload();
+            handleFileUpload(file);
         }
     };
 
-    const simulateUpload = () => {
+    const handleFileUpload = async (file: File) => {
+        setUploadedFile(file);
         setUploadStatus("uploading");
-        setTimeout(() => setUploadStatus("processing"), 1500);
-        setTimeout(() => setUploadStatus("complete"), 4000);
+        setUploadError(null);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch(`${API_URL}/api/upload`, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include'
+            });
+
+            if (response.ok) {
+                setUploadStatus("processing");
+                // Simulate processing time then complete
+                setTimeout(() => {
+                    setUploadStatus("complete");
+                    fetchDashboardData(); // Refresh data
+                }, 2000);
+            } else {
+                const errorData = await response.json();
+                setUploadError(errorData.error || "Upload failed");
+                setUploadStatus("error");
+            }
+        } catch (error) {
+            console.error("Upload error:", error);
+            setUploadError("Failed to connect to server. Please try again.");
+            setUploadStatus("error");
+        }
     };
 
     const getStatusBadge = (status: string) => {
         switch (status) {
             case "completed":
                 return <span className="badge badge-success"><CheckCircle2 className="w-3 h-3 mr-1" />Completed</span>;
-            case "in_progress":
+            case "processing":
+            case "queued":
                 return <span className="badge badge-info"><Clock className="w-3 h-3 mr-1 animate-spin" />In Progress</span>;
             case "failed":
                 return <span className="badge badge-error"><AlertCircle className="w-3 h-3 mr-1" />Failed</span>;
+            case "uploaded":
+                return <span className="badge badge-warning">Ready</span>;
             default:
-                return <span className="badge badge-gray">Unknown</span>;
+                return <span className="badge badge-gray">{status}</span>;
         }
     };
 
+    const statsDisplay = [
+        { label: "Migrations This Month", value: stats.migrations_this_month.toString(), icon: FileSpreadsheet, color: "bg-blue-50 text-blue-600" },
+        { label: "Records Migrated", value: stats.total_records, icon: Database, color: "bg-green-50 text-green-600" },
+        { label: "Avg. Duration", value: stats.avg_duration, icon: Clock, color: "bg-purple-50 text-purple-600" },
+        { label: "Success Rate", value: stats.success_rate, icon: Shield, color: "bg-emerald-50 text-emerald-600" }
+    ];
+
     return (
         <div className="space-y-8">
-            {/* Header */}
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900">Migration Dashboard</h1>
-                <p className="text-gray-500 mt-1">Securely migrate QuickBooks Desktop to Online</p>
+            {/* Header with API Status */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Migration Dashboard</h1>
+                    <p className="text-gray-500 mt-1">Securely migrate QuickBooks Desktop to Online</p>
+                </div>
+                <div className="flex items-center gap-4">
+                    {/* API Status Indicator */}
+                    <div className="flex items-center gap-2 text-sm">
+                        {apiConnected === null ? (
+                            <span className="text-gray-400">Checking connection...</span>
+                        ) : apiConnected ? (
+                            <span className="flex items-center gap-1 text-green-600">
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                                API Connected
+                            </span>
+                        ) : (
+                            <span className="flex items-center gap-1 text-red-600">
+                                <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+                                API Offline
+                            </span>
+                        )}
+                    </div>
+                    <button
+                        onClick={fetchDashboardData}
+                        className="btn-secondary flex items-center gap-2"
+                        disabled={loading}
+                    >
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {/* Stats Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {stats.map((stat) => (
+                {statsDisplay.map((stat) => (
                     <div key={stat.label} className="stat-card">
                         <div className="flex items-start justify-between">
                             <div>
-                                <p className="stat-card-value">{stat.value}</p>
+                                <p className="stat-card-value">{loading ? "--" : stat.value}</p>
                                 <p className="stat-card-label">{stat.label}</p>
                             </div>
                             <div className={`stat-card-icon ${stat.color}`}>
@@ -150,13 +295,13 @@ export default function DashboardHome() {
                 </div>
 
                 <div
-                    className={`drop-zone ${isDragActive ? "active" : ""} ${uploadStatus !== "idle" ? "pointer-events-none" : ""}`}
+                    className={`drop-zone ${isDragActive ? "active" : ""} ${uploadStatus !== "idle" && uploadStatus !== "error" ? "pointer-events-none" : ""}`}
                     onDragEnter={handleDrag}
                     onDragLeave={handleDrag}
                     onDragOver={handleDrag}
                     onDrop={handleDrop}
                 >
-                    {uploadStatus === "idle" && !uploadedFile && (
+                    {(uploadStatus === "idle" || uploadStatus === "error") && !uploadedFile && (
                         <>
                             <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center mb-4">
                                 <Upload className="w-8 h-8 text-[var(--bridge-blue)]" />
@@ -165,6 +310,9 @@ export default function DashboardHome() {
                                 Drag & Drop your QuickBooks file here
                             </p>
                             <p className="text-sm text-gray-400 mb-4">or click to browse</p>
+                            {uploadError && (
+                                <p className="text-sm text-red-500 mb-4">{uploadError}</p>
+                            )}
                             <label className="btn-primary cursor-pointer">
                                 Select File
                                 <input
@@ -180,7 +328,7 @@ export default function DashboardHome() {
                     {uploadStatus === "uploading" && (
                         <div className="text-center">
                             <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center mb-4 animate-pulse-subtle">
-                                <Upload className="w-8 h-8 text-[var(--bridge-blue)]" />
+                                <Loader2 className="w-8 h-8 text-[var(--bridge-blue)] animate-spin" />
                             </div>
                             <p className="text-lg font-medium text-gray-700 mb-2">Uploading {uploadedFile?.name}...</p>
                             <div className="w-64 mx-auto progress-bar">
@@ -205,7 +353,7 @@ export default function DashboardHome() {
                                 <CheckCircle2 className="w-8 h-8 text-[var(--success)]" />
                             </div>
                             <p className="text-lg font-medium text-gray-700 mb-2">Ready to Migrate!</p>
-                            <p className="text-sm text-gray-500 mb-4">{uploadedFile?.name} • 12,847 records detected</p>
+                            <p className="text-sm text-gray-500 mb-4">{uploadedFile?.name}</p>
                             <div className="flex items-center justify-center gap-3">
                                 <button className="btn-primary flex items-center gap-2">
                                     Migrate to QBO <ArrowRight className="w-4 h-4" />
@@ -228,51 +376,58 @@ export default function DashboardHome() {
                     </button>
                 </div>
 
-                <table className="table-forensic">
-                    <thead>
-                        <tr>
-                            <th>Company</th>
-                            <th>File</th>
-                            <th>Records</th>
-                            <th>Duration</th>
-                            <th>Date</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {recentMigrations.map((migration) => (
-                            <tr key={migration.id}>
-                                <td>
-                                    <span className="font-medium text-gray-900">{migration.companyName}</span>
-                                </td>
-                                <td>
-                                    <span className="text-gray-500 flex items-center gap-2">
-                                        <FileSpreadsheet className="w-4 h-4" />
-                                        {migration.fileName}
-                                    </span>
-                                </td>
-                                <td>
-                                    <span className="tabular-nums">{migration.records.toLocaleString()}</span>
-                                </td>
-                                <td>
-                                    <span className="tabular-nums text-gray-500">
-                                        {migration.duration || `${migration.progress}%`}
-                                    </span>
-                                </td>
-                                <td>
-                                    <span className="text-gray-500">{migration.date}</span>
-                                </td>
-                                <td>{getStatusBadge(migration.status)}</td>
-                                <td>
-                                    <button className="text-[var(--bridge-blue)] hover:underline text-sm">
-                                        View
-                                    </button>
-                                </td>
+                {loading ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <Loader2 className="w-8 h-8 mx-auto animate-spin mb-2" />
+                        Loading migrations...
+                    </div>
+                ) : migrations.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500">
+                        <FileSpreadsheet className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                        <p className="text-lg font-medium text-gray-600">No migrations yet</p>
+                        <p className="text-sm">Upload a QuickBooks file above to get started</p>
+                    </div>
+                ) : (
+                    <table className="table-forensic">
+                        <thead>
+                            <tr>
+                                <th>Company</th>
+                                <th>File</th>
+                                <th>Records</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                                <th></th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {migrations.map((migration) => (
+                                <tr key={migration.id}>
+                                    <td>
+                                        <span className="font-medium text-gray-900">{migration.companyName}</span>
+                                    </td>
+                                    <td>
+                                        <span className="text-gray-500 flex items-center gap-2">
+                                            <FileSpreadsheet className="w-4 h-4" />
+                                            {migration.fileName}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span className="tabular-nums">{migration.records.toLocaleString()}</span>
+                                    </td>
+                                    <td>
+                                        <span className="text-gray-500">{migration.date}</span>
+                                    </td>
+                                    <td>{getStatusBadge(migration.status)}</td>
+                                    <td>
+                                        <button className="text-[var(--bridge-blue)] hover:underline text-sm">
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
 
             {/* Quick Actions */}

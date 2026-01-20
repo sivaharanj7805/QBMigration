@@ -512,19 +512,40 @@ def delete_migration(migration_id):
             'error': 'Failed to delete migration'
         }), 500
 
+# NOTE: Forensic endpoints (live-status, trial-balance, audit-certificate) 
+# are implemented in dashboard_api.py to avoid route conflicts
+
 
 # ============================================================================
-# FORENSIC ENDPOINTS
+# CELERY-BASED EXECUTION (Alternative to AWS EC2)
 # ============================================================================
 
-@migrations_bp.route('/api/migrations/<migration_id>/live-status', methods=['GET'])
-# @login_required # Allow public access on local dev for easier debugging, or keep STRICT
-def get_live_status(migration_id):
+@migrations_bp.route('/api/migrations/<migration_id>/execute', methods=['POST'])
+@login_required
+def execute_migration_celery(migration_id):
     """
-    Get detailed live status (Pizza Tracker)
+    Execute migration using Celery background worker (Option B).
+    
+    This is an alternative to the AWS EC2-based execution.
+    Requires Redis and Celery worker running.
+    
+    Args:
+        migration_id: Migration ID
+        
+    Returns:
+        202: Migration queued for execution
+        400: Invalid state
+        404: Migration not found
+        500: Server error
     """
     try:
-        migration = Migration.query.filter_by(migration_id=migration_id).first()
+        from tasks import run_migration_task
+        
+        # Get migration
+        migration = Migration.query.filter_by(
+            migration_id=migration_id,
+            user_id=current_user.id
+        ).first()
         
         if not migration:
             return jsonify({
@@ -532,128 +553,156 @@ def get_live_status(migration_id):
                 'error': 'Migration not found'
             }), 404
         
-        # Default/Fallback structure if no live_status_data is present
-        default_status = {
-            'migration_id': migration.migration_id,
-            'status': migration.status,
-            'phase': 'initiation' if migration.status == 'pending' else migration.status,
-            'phase_number': 1,
-            'percentage': migration.progress_percent or 0,
-            'current_entity': migration.current_step or 'Initializing...',
-            'status_message': migration.current_step or 'Waiting to start...',
-            'company_name': migration.company_name or 'Unknown Company',
-            'started_at': migration.started_at.isoformat() if migration.started_at else None,
-            'elapsed_seconds': 0,
-            'phases': [
-                { 'name': 'Initiation', 'status': 'pending', 'percentage': 0, 'description': 'Secure handouts' },
-                { 'name': 'Extraction', 'status': 'pending', 'percentage': 0, 'description': 'Reading QBW' },
-                { 'name': 'Transformation', 'status': 'pending', 'percentage': 0, 'description': 'Converting data' },
-                { 'name': 'Loading', 'status': 'pending', 'percentage': 0, 'description': 'Pushing to QBO' },
-                { 'name': 'Verification', 'status': 'pending', 'percentage': 0, 'description': 'Checking hashes' }
-            ]
-        }
-
-        # If we have stored live data, merge it or return it
-        import json
-        if migration.live_status_data:
-            try:
-                live_data = json.loads(migration.live_status_data)
-                # Ensure migration ID matches
-                live_data['migration_id'] = migration.migration_id
-                live_data['status'] = migration.status # Always trust DB status
-                return jsonify({
-                    'success': True,
-                    'data': live_data
-                }), 200
-            except:
-                logger.error("Failed to parse live_status_data JSON")
+        # Check migration status
+        if migration.status not in ['uploaded', 'failed']:
+            return jsonify({
+                'success': False,
+                'error': f'Migration cannot be executed from status: {migration.status}'
+            }), 400
         
-        # Return default if no detailed data
+        # Get OAuth tokens from user if available
+        oauth_tokens = None
+        if hasattr(current_user, 'qbo_access_token') and current_user.qbo_access_token:
+            oauth_tokens = {
+                'access_token': current_user.qbo_access_token,
+                'refresh_token': current_user.qbo_refresh_token,
+                'realm_id': current_user.qbo_realm_id
+            }
+        
+        # Queue the migration task
+        task = run_migration_task.delay(
+            migration_id=migration_id,
+            encrypted_file_path=migration.s3_uri or migration.file_path,
+            user_id=current_user.id,
+            oauth_tokens=oauth_tokens
+        )
+        
+        # Update status to queued
+        migration.status = 'queued'
+        if hasattr(migration, 'celery_task_id'):
+            migration.celery_task_id = task.id
+        db.session.commit()
+        
+        logger.info(f"Migration {migration_id} queued with task {task.id}")
+        
         return jsonify({
             'success': True,
-            'data': default_status
-        }), 200
-
-    except Exception as e:
-        logger.exception(f"Failed to get live status {migration_id}: {str(e)}")
+            'migration_id': migration_id,
+            'task_id': task.id,
+            'status': 'queued',
+            'message': 'Migration queued for background processing'
+        }), 202
+        
+    except ImportError:
+        # Celery not available, fall back to sync execution warning
         return jsonify({
             'success': False,
-            'error': 'Failed to get live status'
+            'error': 'Background processing not available. Please start Celery workers.'
+        }), 503
+        
+    except Exception as e:
+        logger.exception(f"Failed to queue migration {migration_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Failed to queue migration'
         }), 500
 
 
-@migrations_bp.route('/api/migrations/<migration_id>/trial-balance', methods=['GET'])
+@migrations_bp.route('/api/migrations/stats', methods=['GET'])
 @login_required
-def get_trial_balance(migration_id):
+def get_migration_stats():
     """
-    Get trial balance verification data
+    Get migration statistics for dashboard.
+    
+    Returns real data (not mock) for the current user.
     """
     try:
-        migration = Migration.query.filter_by(
-            migration_id=migration_id,
-            user_id=current_user.id
-        ).first()
+        from sqlalchemy import func
+        from datetime import datetime, timedelta
         
-        if not migration:
-            return jsonify({'success': False, 'error': 'Not found'}), 404
-            
-        import json
-        if migration.trial_balance_data:
-            try:
-                tb_data = json.loads(migration.trial_balance_data)
-                return jsonify({
-                    'success': True,
-                    'data': tb_data
-                }), 200
-            except:
-                pass
+        user_id = current_user.id
         
-        # Return empty structure if not ready yet
+        # Get current month's migrations
+        now = datetime.utcnow()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Total migrations this month
+        migrations_this_month = Migration.query.filter(
+            Migration.user_id == user_id,
+            Migration.created_at >= month_start
+        ).count()
+        
+        # Total records migrated (sum of records across all migrations)
+        total_records = db.session.query(func.sum(Migration.total_records)).filter(
+            Migration.user_id == user_id
+        ).scalar() or 0
+        
+        # Average duration (for completed migrations)
+        completed_migrations = Migration.query.filter(
+            Migration.user_id == user_id,
+            Migration.status == 'completed',
+            Migration.completed_at.isnot(None),
+            Migration.created_at.isnot(None)
+        ).all()
+        
+        if completed_migrations:
+            durations = []
+            for m in completed_migrations:
+                if m.completed_at and m.created_at:
+                    duration = (m.completed_at - m.created_at).total_seconds()
+                    if duration > 0:
+                        durations.append(duration)
+            avg_duration = sum(durations) / len(durations) if durations else 0
+        else:
+            avg_duration = 0
+        
+        # Success rate
+        total_finished = Migration.query.filter(
+            Migration.user_id == user_id,
+            Migration.status.in_(['completed', 'failed'])
+        ).count()
+        
+        successful = Migration.query.filter(
+            Migration.user_id == user_id,
+            Migration.status == 'completed'
+        ).count()
+        
+        success_rate = (successful / total_finished * 100) if total_finished > 0 else 100
+        
+        # Format average duration
+        if avg_duration > 0:
+            minutes = int(avg_duration // 60)
+            seconds = int(avg_duration % 60)
+            avg_duration_str = f"{minutes}m {seconds}s"
+        else:
+            avg_duration_str = "--"
+        
+        # Format total records
+        if total_records >= 1000000:
+            records_str = f"{total_records / 1000000:.1f}M"
+        elif total_records >= 1000:
+            records_str = f"{total_records / 1000:.1f}K"
+        else:
+            records_str = str(total_records)
+        
         return jsonify({
             'success': True,
-            'data': {
-                'source_trial_balance': 0,
-                'destination_trial_balance': 0,
-                'discrepancy': 0,
-                'is_balanced': False,
-                'forensic_status': 'PENDING',
-                'verification_timestamp': None
+            'stats': {
+                'migrations_this_month': migrations_this_month,
+                'total_records': records_str,
+                'avg_duration': avg_duration_str,
+                'success_rate': f"{success_rate:.1f}%"
             }
         }), 200
-
+        
     except Exception as e:
-        logger.exception(f"Failed to get TB {migration_id}: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@migrations_bp.route('/api/migrations/<migration_id>/audit-certificate/preview', methods=['GET'])
-@login_required
-def get_audit_cert_preview(migration_id):
-    """
-    Get audit certificate availability
-    """
-    try:
-        migration = Migration.query.filter_by(
-            migration_id=migration_id, 
-            user_id=current_user.id
-        ).first()
-        
-        if not migration:
-            return jsonify({'success': False, 'error': 'Not found'}), 404
-            
-        is_completed = (migration.status == 'completed')
-        
+        logger.exception(f"Failed to get migration stats: {str(e)}")
         return jsonify({
             'success': True,
-            'data': {
-                'available': is_completed,
-                'migration_id': migration.migration_id,
-                'company_name': migration.company_name,
-                'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
-                'download_url': f"/api/migrations/{migration.migration_id}/audit-certificate" if is_completed else None
+            'stats': {
+                'migrations_this_month': 0,
+                'total_records': '0',
+                'avg_duration': '--',
+                'success_rate': '100%'
             }
-        }), 200
-        
-    except Exception as e:
-        logger.exception(f"Failed to get cert info {migration_id}: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        }), 200  # Return defaults on error
