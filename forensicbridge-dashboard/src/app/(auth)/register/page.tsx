@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 
+// API configuration - must be set in environment
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 export default function RegisterPage() {
     const router = useRouter();
     const [name, setName] = useState('');
@@ -34,9 +37,10 @@ export default function RegisterPage() {
         setLoading(true);
 
         try {
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/auth/register`, {
+            const response = await fetch(`${API_URL}/api/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ name, email, password, company }),
             });
 
@@ -53,7 +57,11 @@ export default function RegisterPage() {
             // Redirect to dashboard
             router.push('/');
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Registration failed');
+            if (err instanceof TypeError && err.message === 'Failed to fetch') {
+                setError('Cannot connect to server. Please check if the API is running.');
+            } else {
+                setError(err instanceof Error ? err.message : 'Registration failed');
+            }
         } finally {
             setLoading(false);
         }
