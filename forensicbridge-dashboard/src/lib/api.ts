@@ -279,6 +279,54 @@ class ApiClient {
             checks: Record<string, string>;
         }>("/health");
     }
+
+    // ==========================================
+    // Caseware Export Mode
+    // ==========================================
+
+    async exportCasewareBundle(migrationId: string) {
+        return this.request<{
+            success: boolean;
+            message: string;
+            bundle_id: string;
+            files: string[];
+            stats?: Record<string, number>;
+            download_url: string;
+        }>(`/api/migrations/${migrationId}/export-caseware`, {
+            method: "POST",
+        });
+    }
+
+    async downloadCasewareBundle(migrationId: string): Promise<Blob | null> {
+        const url = `${this.baseUrl}/api/migrations/${migrationId}/caseware-bundle`;
+
+        try {
+            const response = await fetch(url, {
+                credentials: "include",
+                headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+            });
+
+            if (!response.ok) {
+                console.error("Failed to download Caseware bundle");
+                return null;
+            }
+
+            return await response.blob();
+        } catch (error) {
+            console.error("Download error:", error);
+            return null;
+        }
+    }
+
+    async getCasewareStatus(migrationId: string) {
+        return this.request<{
+            migration_id: string;
+            destination: "qbo" | "caseware";
+            caseware_bundle_ready: boolean;
+            download_url: string | null;
+            can_generate: boolean;
+        }>(`/api/migrations/${migrationId}/caseware-status`);
+    }
 }
 
 // Export singleton instance

@@ -85,6 +85,13 @@ class Migration(db.Model):
     qbo_company_id = db.Column(db.String(50))
     qbo_company_name = db.Column(db.String(255))
     
+    # Destination mode: 'qbo' (QuickBooks Online) or 'caseware' (Caseware Working Papers)
+    destination = db.Column(db.String(20), default='qbo', nullable=False)
+    
+    # Caseware export path (when destination='caseware')
+    caseware_bundle_path = db.Column(db.String(500))
+    caseware_bundle_ready = db.Column(db.Boolean, default=False)
+    
     # Webhook tracking (prevent replay attacks)
     webhook_processed_ids = db.Column(db.Text)  # JSON array of processed webhook IDs
     last_webhook_at = db.Column(db.DateTime)
@@ -385,6 +392,8 @@ class Migration(db.Model):
             'current_step': self.current_step,
             'company_name': self.company_name,
             'qb_file_name': self.qb_file_name,
+            'destination': self.destination,  # 'qbo' or 'caseware'
+            'caseware_bundle_ready': self.caseware_bundle_ready if self.destination == 'caseware' else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
