@@ -8,10 +8,13 @@ import { AuditCertCard } from "@/components/dashboard/AuditCertCard";
 import { CasewareBundleCard } from "@/components/dashboard/CasewareBundleCard";
 import { ForensicIntegrityPulse } from "@/components/dashboard/ForensicIntegrityPulse";
 import { DiscrepancyDoctor } from "@/components/migrations/DiscrepancyDoctor";
-import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2, Cloud, FileBarChart2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
+
+// Destination type
+type DestinationType = "qbo" | "caseware";
 
 export default function MigrationDetailPage() {
     const params = useParams();
@@ -20,6 +23,10 @@ export default function MigrationDetailPage() {
     // Hooks using forced mocks
     const { data: liveStatus, isLoading: statusLoading } = useLiveStatus(id);
     const { data: trialBalance } = useTrialBalance(id, liveStatus?.status === "completed");
+
+    // Destination - would come from API in production
+    // For now, check if this is a caseware migration based on status or stored preference
+    const [destination] = useState<DestinationType>((liveStatus as any)?.destination || "qbo");
 
     // Mock download handler since api is removed
     const [isDownloading, setIsDownloading] = useState(false);
@@ -60,6 +67,23 @@ export default function MigrationDetailPage() {
         }
     };
 
+    const getDestinationBadge = () => {
+        if (destination === "caseware") {
+            return (
+                <span className="flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
+                    <FileBarChart2 className="w-4 h-4" />
+                    Caseware
+                </span>
+            );
+        }
+        return (
+            <span className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+                <Cloud className="w-4 h-4" />
+                QuickBooks Online
+            </span>
+        );
+    };
+
     if (statusLoading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -70,6 +94,7 @@ export default function MigrationDetailPage() {
 
     const isCompleted = liveStatus?.status === "completed";
     const isProcessing = liveStatus?.status === "processing";
+    const isCaseware = destination === "caseware";
 
     return (
         <div className="space-y-6">
@@ -83,14 +108,16 @@ export default function MigrationDetailPage() {
                         <ArrowLeft className="w-5 h-5 text-gray-500" />
                     </Link>
                     <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3">
                             {getStatusIcon()}
                             <h1 className="text-2xl font-bold text-gray-900">
                                 {liveStatus?.company_name || "Migration Details"}
                             </h1>
+                            {getDestinationBadge()}
                         </div>
                         <p className="text-sm text-gray-500 mt-1">
                             Session ID: <code className="text-[var(--bridge-blue)]">{id}</code>
+                            {isCaseware && <span className="ml-2 text-purple-600">• Caseware Audit Bundle Mode</span>}
                         </p>
                     </div>
                 </div>
