@@ -10,7 +10,10 @@ import {
     HardDrive,
     ArrowRight,
     Shield,
-    Clock
+    Clock,
+    Cloud,
+    FileBarChart2,
+    Building2
 } from "lucide-react";
 
 interface UploadedFile {
@@ -22,19 +25,22 @@ interface UploadedFile {
     records?: number;
 }
 
+type DestinationType = "qbo" | "caseware" | null;
+
 const supportedFormats = [
     { ext: ".QBW", name: "QuickBooks Company File", description: "Primary data file (recommended)" },
     { ext: ".QBB", name: "QuickBooks Backup", description: "Backup file format" },
     { ext: ".QBM", name: "QuickBooks Portable", description: "Smaller portable file" },
-    { ext: ".IIF", name: "Intuit Interchange Format", description: "Tab-delimited export" },
-    { ext: ".CSV", name: "QuickBooks CSV Export", description: "Comma-separated values" },
-    { ext: ".XLSX", name: "QuickBooks Excel Export", description: "Excel spreadsheet format" },
 ];
+
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export default function UploadPage() {
     const [isDragActive, setIsDragActive] = useState(false);
     const [files, setFiles] = useState<UploadedFile[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [destination, setDestination] = useState<DestinationType>(null);
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -92,9 +98,12 @@ export default function UploadPage() {
 
     const readyFiles = files.filter(f => f.status === "ready");
 
-    const handleStartMigration = () => {
+    const handleStartMigration = async () => {
+        if (!destination) return;
+
         setIsProcessing(true);
-        // Would trigger actual migration
+        // Would trigger actual migration with destination
+        // POST to /api/migrations with { destination: "qbo" | "caseware" }
     };
 
     return (
@@ -102,34 +111,138 @@ export default function UploadPage() {
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-gray-900">Upload Files</h1>
-                <p className="text-gray-500 mt-1">Upload QuickBooks files for migration or analysis</p>
+                <p className="text-gray-500 mt-1">Upload QuickBooks Desktop files for migration</p>
             </div>
 
-            {/* Drag & Drop Zone */}
-            <div
-                className={`drop-zone ${isDragActive ? "active" : ""}`}
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-            >
-                <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center mb-4">
-                    <Upload className="w-8 h-8 text-[var(--bridge-blue)]" />
+            {/* STEP 1: Choose Destination */}
+            <div className="card-forensic p-6">
+                <div className="flex items-center gap-3 mb-6">
+                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
+                        1
+                    </div>
+                    <h2 className="text-lg font-semibold text-gray-900">Choose Your Destination</h2>
                 </div>
-                <p className="text-lg font-medium text-gray-700 mb-1">
-                    Drag & Drop your QuickBooks files here
-                </p>
-                <p className="text-sm text-gray-400 mb-4">or click to browse</p>
-                <label className="btn-primary cursor-pointer">
-                    Select Files
-                    <input
-                        type="file"
-                        accept=".qbw,.qbb,.qbm,.iif,.csv,.xlsx"
-                        multiple
-                        className="hidden"
-                        onChange={handleFileSelect}
-                    />
-                </label>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* QuickBooks Online Option */}
+                    <button
+                        onClick={() => setDestination("qbo")}
+                        className={`p-6 rounded-xl border-2 text-left transition-all ${destination === "qbo"
+                                ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
+                                : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+                            }`}
+                    >
+                        <div className="flex items-start gap-4">
+                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${destination === "qbo" ? "bg-blue-500" : "bg-blue-100"
+                                }`}>
+                                <Cloud className={`w-7 h-7 ${destination === "qbo" ? "text-white" : "text-blue-600"}`} />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="font-semibold text-gray-900 text-lg">QuickBooks Online</h3>
+                                <p className="text-sm text-gray-600 mt-1">
+                                    Migrate your data directly to QuickBooks Online (Intuit cloud)
+                                </p>
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Live Migration</span>
+                                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">OAuth Secure</span>
+                                </div>
+                            </div>
+                            {destination === "qbo" && (
+                                <CheckCircle2 className="w-6 h-6 text-blue-500" />
+                            )}
+                        </div>
+                    </button>
+
+                    {/* Caseware Option */}
+                    <button
+                        onClick={() => setDestination("caseware")}
+                        className={`p-6 rounded-xl border-2 text-left transition-all ${destination === "caseware"
+                                ? "border-purple-500 bg-purple-50 ring-2 ring-purple-200"
+                                : "border-gray-200 hover:border-purple-300 hover:bg-gray-50"
+                            }`}
+                    >
+                        <div className="flex items-start gap-4">
+                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${destination === "caseware" ? "bg-purple-500" : "bg-purple-100"
+                                }`}>
+                                <FileBarChart2 className={`w-7 h-7 ${destination === "caseware" ? "text-white" : "text-purple-600"}`} />
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="font-semibold text-gray-900 text-lg">Caseware Working Papers</h3>
+                                <p className="text-sm text-gray-600 mt-1">
+                                    Export audit-ready files for Caseware or OnPoint DAS
+                                </p>
+                                <div className="flex flex-wrap gap-2 mt-3">
+                                    <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">Audit Bundle</span>
+                                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">58 Lead Sheets</span>
+                                </div>
+                            </div>
+                            {destination === "caseware" && (
+                                <CheckCircle2 className="w-6 h-6 text-purple-500" />
+                            )}
+                        </div>
+                    </button>
+                </div>
+
+                {/* Caseware Details (shown when selected) */}
+                {destination === "caseware" && (
+                    <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                        <h4 className="font-medium text-purple-900 mb-2">📦 Caseware Audit Bundle Includes:</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                            <div className="flex items-center gap-2 text-purple-700">
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span><code>Audit_TB.csv</code> - Trial Balance</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-purple-700">
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span><code>Audit_GL.csv</code> - General Ledger</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-purple-700">
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span><code>Audit_Mapping.cvw</code> - Column Config</span>
+                            </div>
+                        </div>
+                        <p className="text-xs text-purple-600 mt-3">
+                            All files include SHA-256 forensic integrity hashes and pre-mapped Lead Sheet codes.
+                        </p>
+                    </div>
+                )}
+            </div>
+
+            {/* STEP 2: Upload Files */}
+            <div className={`card-forensic p-6 transition-opacity ${!destination ? "opacity-50 pointer-events-none" : ""}`}>
+                <div className="flex items-center gap-3 mb-6">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${destination ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
+                        }`}>
+                        2
+                    </div>
+                    <h2 className="text-lg font-semibold text-gray-900">Upload QuickBooks Desktop File</h2>
+                </div>
+
+                {/* Drag & Drop Zone */}
+                <div
+                    className={`drop-zone ${isDragActive ? "active" : ""}`}
+                    onDragEnter={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDragOver={handleDrag}
+                    onDrop={handleDrop}
+                >
+                    <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                        <Upload className="w-8 h-8 text-[var(--bridge-blue)]" />
+                    </div>
+                    <p className="text-lg font-medium text-gray-700 mb-1">
+                        Drag & Drop your QuickBooks file here
+                    </p>
+                    <p className="text-sm text-gray-400 mb-4">Supports .QBW, .QBB, .QBM</p>
+                    <label className="btn-primary cursor-pointer">
+                        Select File
+                        <input
+                            type="file"
+                            accept=".qbw,.qbb,.qbm"
+                            className="hidden"
+                            onChange={handleFileSelect}
+                        />
+                    </label>
+                </div>
             </div>
 
             {/* Uploaded Files */}
@@ -187,24 +300,36 @@ export default function UploadPage() {
                         ))}
                     </div>
 
-                    {readyFiles.length > 0 && (
+                    {readyFiles.length > 0 && destination && (
                         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50">
-                            <p className="text-sm text-gray-600">
-                                {readyFiles.length} file(s) ready for migration
-                            </p>
+                            <div>
+                                <p className="text-sm text-gray-600">
+                                    {readyFiles.length} file(s) ready
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                    Destination: <span className="font-medium">
+                                        {destination === "qbo" ? "QuickBooks Online" : "Caseware Working Papers"}
+                                    </span>
+                                </p>
+                            </div>
                             <button
                                 onClick={handleStartMigration}
                                 disabled={isProcessing}
-                                className="btn-primary flex items-center gap-2"
+                                className={`btn-primary flex items-center gap-2 ${destination === "caseware" ? "!bg-purple-600 hover:!bg-purple-700" : ""
+                                    }`}
                             >
                                 {isProcessing ? (
                                     <>
                                         <Clock className="w-4 h-4 animate-spin" />
                                         Processing...
                                     </>
+                                ) : destination === "qbo" ? (
+                                    <>
+                                        Migrate to QBO <Cloud className="w-4 h-4" />
+                                    </>
                                 ) : (
                                     <>
-                                        Start Migration <ArrowRight className="w-4 h-4" />
+                                        Generate Caseware Bundle <FileBarChart2 className="w-4 h-4" />
                                     </>
                                 )}
                             </button>
@@ -213,27 +338,50 @@ export default function UploadPage() {
                 </div>
             )}
 
-            {/* Supported Formats */}
-            <div className="card-forensic">
-                <div className="px-6 py-4 border-b border-gray-100">
-                    <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <HardDrive className="w-5 h-5" />
-                        Supported File Formats
-                    </h2>
-                </div>
+            {/* How It Works */}
+            <div className="card-forensic p-6">
+                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Building2 className="w-5 h-5" />
+                    How It Works: QuickBooks Desktop → {destination === "caseware" ? "Caseware" : "Your Destination"}
+                </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
-                    {supportedFormats.map((format) => (
-                        <div key={format.ext} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                            <div className="w-10 h-10 bg-white rounded border border-gray-200 flex items-center justify-center flex-shrink-0">
-                                <span className="text-xs font-mono font-bold text-gray-600">{format.ext}</span>
-                            </div>
-                            <div>
-                                <p className="font-medium text-gray-900 text-sm">{format.name}</p>
-                                <p className="text-xs text-gray-500">{format.description}</p>
-                            </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <span className="font-bold text-blue-600">1</span>
                         </div>
-                    ))}
+                        <p className="font-medium text-sm">Extract</p>
+                        <p className="text-xs text-gray-500">QBDesktopReader extracts 55 entity types from .QBW file</p>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                        <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <span className="font-bold text-green-600">2</span>
+                        </div>
+                        <p className="font-medium text-sm">Hash & Encrypt</p>
+                        <p className="text-xs text-gray-500">SHA-256 forensic hash per record, AES-256 encryption</p>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                        <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <span className="font-bold text-purple-600">3</span>
+                        </div>
+                        <p className="font-medium text-sm">Transform</p>
+                        <p className="text-xs text-gray-500">Server decrypts, verifies hashes, transforms data</p>
+                    </div>
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2 ${destination === "caseware" ? "bg-purple-100" : "bg-amber-100"
+                            }`}>
+                            <span className={`font-bold ${destination === "caseware" ? "text-purple-600" : "text-amber-600"}`}>4</span>
+                        </div>
+                        <p className="font-medium text-sm">
+                            {destination === "caseware" ? "Export Bundle" : "Push to QBO"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                            {destination === "caseware"
+                                ? "Generate Audit_TB.csv, Audit_GL.csv with Lead Sheets"
+                                : "Push to QuickBooks Online via OAuth API"
+                            }
+                        </p>
+                    </div>
                 </div>
             </div>
 
@@ -244,11 +392,11 @@ export default function UploadPage() {
                         <Shield className="w-5 h-5 text-green-600" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-green-900">Secure Upload</h3>
+                        <h3 className="font-semibold text-green-900">Forensic Data Integrity</h3>
                         <p className="text-sm text-green-700 mt-1">
-                            All files are encrypted with AES-256-GCM before upload.
-                            Data is processed in Canadian data centers only (ca-central-1).
-                            Files are automatically deleted after 24 hours.
+                            Every record is SHA-256 hashed at extraction time. These hashes are verified after decryption
+                            to ensure <strong>zero data modification</strong> during transfer.
+                            {destination === "caseware" && " All hashes are included in your Caseware bundle."}
                         </p>
                     </div>
                 </div>
