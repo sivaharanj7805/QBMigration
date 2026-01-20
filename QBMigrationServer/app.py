@@ -211,7 +211,7 @@ def create_app(config_name='development'):
     # Enable CORS
     CORS(app, 
          supports_credentials=True,
-         origins=['http://localhost:3000', 'http://localhost:5000', 'https://yourdomain.com'],
+         origins=['http://localhost:3000', 'http://localhost:5000', 'https://app.forensicbridge.ca', 'https://forensicbridge.ca', 'https://api.forensicbridge.ca'],
          allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
     app.logger.info('CORS enabled')
