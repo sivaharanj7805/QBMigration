@@ -295,4 +295,39 @@ The frontend and backend are properly wired together. The 3 fixes above are mino
 | `/api/migrations/{id}/trial-balance` | GET | dashboard_api.py |
 | `/api/migrations/{id}/audit-certificate` | GET | dashboard_api.py |
 | `/api/migrations/{id}/audit-certificate/preview` | GET | dashboard_api.py |
+| `/api/migrations/{id}/export-caseware` | POST | dashboard_api.py |
+| `/api/migrations/{id}/caseware-bundle` | GET | dashboard_api.py |
+| `/api/migrations/{id}/caseware-status` | GET | dashboard_api.py |
 | `/health` | GET | health.py |
+
+---
+
+## Caseware Mode: Full Connection Status
+
+### ✅ NOW FULLY CONNECTED
+
+| Layer | Component | Status |
+|:------|:----------|:-------|
+| **Database** | Migration model has `destination` field | ✅ |
+| **Backend** | `POST /api/migrations/{id}/export-caseware` | ✅ |
+| **Backend** | `GET /api/migrations/{id}/caseware-bundle` | ✅ |
+| **Backend** | `GET /api/migrations/{id}/caseware-status` | ✅ |
+| **Frontend** | `api.exportCasewareBundle()` | ✅ |
+| **Frontend** | `api.downloadCasewareBundle()` | ✅ |
+| **Frontend** | `api.getCasewareStatus()` | ✅ |
+| **UI** | Upload page destination selector | ✅ |
+| **UI** | Migration detail destination badge | ✅ |
+
+### Flow: QBD → Caseware
+
+```
+1. User selects "Caseware" destination on Upload page
+2. File uploads to server (normal flow)
+3. User clicks "Generate Caseware Bundle"
+   → POST /api/migrations/{id}/export-caseware
+4. Server generates Audit_TB.csv, Audit_GL.csv, Audit_Mapping.cvw
+5. User downloads bundle
+   → GET /api/migrations/{id}/caseware-bundle
+   → Returns .zip file
+```
+
