@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "qb-extractor-config-v4.3",
+  "title": "QuickBooks Extractor Configuration",
+  "description": "Configuration schema for QBDesktopReader v4.3",
+  "type": "object",
+  "required": [
+    "serverUrl"
+  ],
+  "properties": {
+    "$comment": {
+      "type": "string",
+      "description": "Optional comment field"
+    },
+    "serverUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://",
+      "description": "API endpoint URL. Must be HTTPS for production."
+    },
+    "incrementalSyncFromDate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "If set, only extract records modified after this date (YYYY-MM-DD)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "default": "4.3",
+      "description": "Configuration version"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$",
+      "default": "4.3",
+      "description": "Schema version for compatibility"
+    },
+    "advanced": {
+      "type": "object",
+      "description": "Advanced settings",
+      "properties": {
+        "chunkSizeKB": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 10240,
+          "default": 1024,
+          "description": "Upload chunk size in KB"
+        },
+        "chunkedUploadThresholdMB": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10240,
+          "default": 10,
+          "description": "Use chunked upload above this size (MB)"
+        },
+        "secureDeletePasses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7,
+          "default": 3,
+          "description": "Number of secure overwrite passes"
+        },
+        "initialBatchSize": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 1000,
+          "default": 100,
+          "description": "Initial batch size for extraction"
+        },
+        "enableAdaptiveBatching": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically adjust batch size based on performance"
+        },
+        "enablePreFlightCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check server connectivity before extraction"
+        },
+        "enableForensicHashing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate SHA256 hashes for forensic verification"
+        },
+        "minimumServerVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "default": "4.0",
+          "description": "Minimum required server API version"
+        },
+        "enableVersionCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check server version compatibility"
+        },
+        "maxFileStreamSizeMB": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 102400,
+          "default": 2048,
+          "description": "Maximum file stream size in MB"
+        },
+        "enableLogRedaction": {
+          "type": "boolean",
+          "default": true,
+          "description": "Redact PII from logs"
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR"
+          ],
+          "default": "INFO",
+          "description": "Logging verbosity level"
+        },
+        "retryAttempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 3,
+          "description": "Number of retry attempts on failure"
+        },
+        "retryDelayMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 60000,
+          "default": 1000,
+          "description": "Initial retry delay in milliseconds"
+        },
+        "retryMaxDelayMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000,
+          "default": 30000,
+          "description": "Maximum retry delay in milliseconds"
+        },
+        "retryJitterPercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 20,
+          "description": "Random jitter percentage for retry delay"
+        },
+        "enableExponentialBackoff": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use exponential backoff for retries"
+        },
+        "allowInsecureHttpForLocalhost": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow HTTP for localhost (dev only)"
+        },
+        "maxQBXMLVersion": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 6.0,
+          "maximum": 16.0,
+          "default": null,
+          "description": "Maximum QBXML version to use (null = auto-detect)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

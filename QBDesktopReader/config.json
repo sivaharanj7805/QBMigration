@@ -1,0 +1,28 @@
+{
+  "$comment": "QuickBooks Extractor v4.3 Configuration",
+  "serverUrl": "https://localhost:5000",
+  "incrementalSyncFromDate": null,
+  "version": "4.3",
+  "schemaVersion": "4.3",
+  "advanced": {
+    "chunkSizeKB": 1024,
+    "chunkedUploadThresholdMB": 10,
+    "secureDeletePasses": 3,
+    "initialBatchSize": 100,
+    "enableAdaptiveBatching": true,
+    "enablePreFlightCheck": true,
+    "enableForensicHashing": true,
+    "minimumServerVersion": "4.0",
+    "enableVersionCheck": true,
+    "maxFileStreamSizeMB": 2048,
+    "enableLogRedaction": true,
+    "logLevel": "INFO",
+    "retryAttempts": 3,
+    "retryDelayMs": 1000,
+    "retryMaxDelayMs": 30000,
+    "retryJitterPercent": 20,
+    "enableExponentialBackoff": true,
+    "allowInsecureHttpForLocalhost": true,
+    "maxQBXMLVersion": null
+  }
+}
