@@ -7,6 +7,9 @@ import Providers from "../providers";
 import { getAuthState, clearAuth } from "@/lib/auth";
 import { Loader2 } from "lucide-react";
 
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 export default function DashboardLayout({
     children,
 }: {
@@ -28,6 +31,27 @@ export default function DashboardLayout({
             setIsLoading(false);
         }
     }, [router]);
+
+    // Logout handler - calls backend and clears local storage
+    const handleLogout = async () => {
+        try {
+            // Call backend logout to clear server session
+            await fetch(`${API_URL}/api/auth/logout`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                }
+            });
+        } catch (error) {
+            // Continue with local logout even if backend call fails
+            console.error("Backend logout failed:", error);
+        }
+
+        // Clear local auth state
+        clearAuth();
+        router.push("/login");
+    };
 
     // Show loading while checking auth
     if (isLoading && !isAuthenticated) {
@@ -70,10 +94,7 @@ export default function DashboardLayout({
                                     🍁 ca-central-1
                                 </span>
                                 <button
-                                    onClick={() => {
-                                        clearAuth();
-                                        router.push("/login");
-                                    }}
+                                    onClick={handleLogout}
                                     className="text-xs text-gray-500 hover:text-red-600 transition-colors"
                                 >
                                     Logout
