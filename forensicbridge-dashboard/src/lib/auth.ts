@@ -5,8 +5,11 @@
 export interface User {
     id: number;
     email: string;
-    name: string;
-    company?: string;
+    name?: string;           // Frontend format
+    first_name?: string;     // Backend format
+    last_name?: string;      // Backend format
+    company?: string;        // Frontend format
+    company_name?: string;   // Backend format
 }
 
 export interface AuthState {
