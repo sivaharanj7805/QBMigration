@@ -166,6 +166,35 @@ def verify_aws_configuration(app):
         return False
 
 
+def auto_migrate_database(app):
+    """
+    Auto-migrate database schema on startup.
+    Adds any missing columns to ensure code and database are in sync.
+    """
+    try:
+        with db.engine.connect() as conn:
+            # Add all potentially missing columns
+            conn.execute(text("""
+                ALTER TABLE users 
+                ADD COLUMN IF NOT EXISTS qbo_access_token TEXT,
+                ADD COLUMN IF NOT EXISTS qbo_refresh_token TEXT,
+                ADD COLUMN IF NOT EXISTS qbo_realm_id VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS qbo_token_expires_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS qbo_connected_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(50) DEFAULT 'free',
+                ADD COLUMN IF NOT EXISTS tier_purchased_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS migrations_purchased INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS migrations_used INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255),
+                ADD COLUMN IF NOT EXISTS stripe_payment_intent VARCHAR(255)
+            """))
+            conn.commit()
+            app.logger.info('Database schema verified/updated successfully')
+    except Exception as e:
+        # Log but don't crash - columns might already exist or other non-fatal issue
+        app.logger.warning(f'Schema migration note: {str(e)}')
+
+
 def create_app(config_name='development'):
     """Application factory pattern - creates and configures Flask app"""
     
@@ -207,6 +236,10 @@ def create_app(config_name='development'):
     except Exception as e:
         app.logger.error(f'Failed to initialize database: {str(e)}')
         raise
+    
+    # Auto-migrate database schema (add missing columns)
+    with app.app_context():
+        auto_migrate_database(app)
     
     # Enable CORS
     CORS(app, 

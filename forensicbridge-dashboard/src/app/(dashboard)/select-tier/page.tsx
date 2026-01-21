@@ -132,10 +132,10 @@ export default function TierSelectionPage() {
                 {/* Header */}
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-bold text-white mb-4">
-                        {isUpgrade ? 'Upgrade Your Plan' : 'Choose Your Migration Tier'}
+                        {isUpgrade ? 'Purchase Another Migration' : 'Purchase a Migration'}
                     </h1>
                     <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-                        Select the tier that matches your QuickBooks file size. Each tier includes 1 migration with full forensic verification.
+                        Select the migration that matches your QuickBooks file size. Pay once, migrate once. Buy more anytime you need.
                     </p>
                 </div>
 
@@ -156,8 +156,8 @@ export default function TierSelectionPage() {
                             <div
                                 key={tier.id}
                                 className={`relative rounded-2xl p-6 transition-all duration-300 ${tier.popular
-                                        ? 'bg-gradient-to-br from-emerald-600/20 to-teal-600/20 border-2 border-emerald-500/50 scale-105'
-                                        : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600'
+                                    ? 'bg-gradient-to-br from-emerald-600/20 to-teal-600/20 border-2 border-emerald-500/50 scale-105'
+                                    : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600'
                                     } ${isSelected ? 'ring-2 ring-emerald-500' : ''}`}
                             >
                                 {/* Popular Badge */}
@@ -217,8 +217,8 @@ export default function TierSelectionPage() {
                                     onClick={() => handleSelectTier(tier.id)}
                                     disabled={purchasing}
                                     className={`w-full py-3 rounded-lg font-medium transition-all ${tier.popular
-                                            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600'
-                                            : 'bg-slate-700 text-white hover:bg-slate-600'
+                                        ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600'
+                                        : 'bg-slate-700 text-white hover:bg-slate-600'
                                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
                                     {purchasing && isSelected ? (
@@ -230,7 +230,7 @@ export default function TierSelectionPage() {
                                             Processing...
                                         </span>
                                     ) : (
-                                        `Select ${tier.name}`
+                                        `Buy ${tier.name} Migration`
                                     )}
                                 </button>
                             </div>
@@ -240,9 +240,9 @@ export default function TierSelectionPage() {
 
                 {/* Footer Note */}
                 <p className="text-center text-slate-500 text-sm mt-12">
-                    All plans include AES-256 encryption, AWS-hosted processing, and 90-day data retention.
+                    All migrations include AES-256 encryption, AWS-hosted processing, and audit certificate.
                     <br />
-                    Need more migrations? You can purchase additional tiers anytime.
+                    Migrations never expire. Buy now, use whenever you're ready.
                 </p>
             </div>
         </div>
