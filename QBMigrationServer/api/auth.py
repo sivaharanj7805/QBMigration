@@ -276,21 +276,34 @@ def login():
 @auth_bp.route('/me', methods=['GET'])
 @require_auth
 def get_current_user():
-    """Get current user info"""
+    """Get current user info including tier and migration balance"""
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
+    # Get tier info
+    tier_info = user.get_tier_info()
+    
     return jsonify({
         'success': True,
-        'id': user.id,
-        'email': user.email,
-        'first_name': user.first_name,
-        'last_name': user.last_name,
-        'company_name': user.company_name,
-        'created_at': user.created_at.isoformat() if user.created_at else None
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'name': user.first_name,  # Alias for frontend compatibility
+            'company_name': user.company_name,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            # Tier info
+            'subscription_tier': tier_info['tier'],
+            'tier_name': tier_info['tier_name'],
+            'migrations_remaining': tier_info['migrations_remaining'],
+            'migrations_purchased': tier_info['migrations_purchased'],
+            'migrations_used': tier_info['migrations_used'],
+            'has_tier': tier_info['has_tier']
+        }
     })
 
 
@@ -319,3 +332,220 @@ def logout():
     session.clear()
     
     return jsonify({'success': True})
+
+
+# =============================================================================
+# TIER SELECTION & MANAGEMENT
+# =============================================================================
+
+@auth_bp.route('/tiers', methods=['GET'])
+def get_available_tiers():
+    """Get all available pricing tiers"""
+    tiers = [
+        {
+            'id': 'starter',
+            'name': 'Starter',
+            'price': 497,
+            'max_transactions': 5000,
+            'description': 'Small business, 1-2 years of data',
+            'migrations': 1
+        },
+        {
+            'id': 'business',
+            'name': 'Business',
+            'price': 997,
+            'max_transactions': 25000,
+            'description': 'Established business, 3-5 years of history',
+            'migrations': 1
+        },
+        {
+            'id': 'professional',
+            'name': 'Professional',
+            'price': 1997,
+            'max_transactions': 100000,
+            'description': 'Complex business, multi-year audit trail',
+            'migrations': 1
+        },
+        {
+            'id': 'enterprise',
+            'name': 'Enterprise',
+            'price': 3997,
+            'max_transactions': 500000,
+            'description': 'Large company, decade+ of records',
+            'migrations': 1
+        },
+        {
+            'id': 'forensic',
+            'name': 'Forensic',
+            'price': 7997,
+            'max_transactions': -1,
+            'description': 'Litigation-ready, expert documentation',
+            'migrations': 1
+        }
+    ]
+    return jsonify({'success': True, 'tiers': tiers})
+
+
+@auth_bp.route('/select-tier', methods=['POST'])
+@require_auth
+def select_tier():
+    """
+    Select/purchase a tier after registration.
+    In production, this would integrate with Stripe Checkout.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    tier_id = data.get('tier_id', '').lower()
+    
+    # Validate tier
+    valid_tiers = ['starter', 'business', 'professional', 'enterprise', 'forensic']
+    if tier_id not in valid_tiers:
+        return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
+    
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    
+    # Get tier config
+    tier_config = User.TIER_CONFIG.get(tier_id, {})
+    migrations_to_add = tier_config.get('migrations', 1)
+    
+    # In production: Create Stripe Checkout session here
+    # For now, we'll simulate successful payment
+    
+    # Add migrations and set tier
+    user.add_migrations(migrations_to_add, tier=tier_id)
+    db.session.commit()
+    
+    logger.info(f"User {user.email} selected tier {tier_id} with {migrations_to_add} migration(s)")
+    
+    return jsonify({
+        'success': True,
+        'message': f'Successfully selected {tier_config.get("name", tier_id)} tier',
+        'tier': tier_id,
+        'migrations_remaining': user.get_migrations_remaining(),
+        # In production: return Stripe checkout URL
+        'payment_required': True,
+        'checkout_url': None  # Would be Stripe checkout URL
+    })
+
+
+@auth_bp.route('/upgrade-tier', methods=['POST'])
+@require_auth
+def upgrade_tier():
+    """Upgrade to a higher tier (adds more migrations)"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    tier_id = data.get('tier_id', '').lower()
+    
+    valid_tiers = ['starter', 'business', 'professional', 'enterprise', 'forensic']
+    if tier_id not in valid_tiers:
+        return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
+    
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    
+    tier_config = User.TIER_CONFIG.get(tier_id, {})
+    migrations_to_add = tier_config.get('migrations', 1)
+    
+    # Add migrations and update tier
+    user.add_migrations(migrations_to_add, tier=tier_id)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': f'Successfully upgraded to {tier_config.get("name", tier_id)}',
+        'tier': tier_id,
+        'migrations_remaining': user.get_migrations_remaining()
+    })
+
+
+# =============================================================================
+# TEAM MANAGEMENT
+# =============================================================================
+
+@auth_bp.route('/team', methods=['GET'])
+@require_auth
+def list_team_members():
+    """List team members (placeholder - would query team membership table)"""
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    
+    # Placeholder: In production, this would query a team_members table
+    return jsonify({
+        'success': True,
+        'team_members': [
+            {
+                'id': user.id,
+                'email': user.email,
+                'name': user.first_name or user.email.split('@')[0],
+                'role': 'Owner',
+                'joined_at': user.created_at.isoformat() if user.created_at else None
+            }
+        ],
+        'pending_invites': []
+    })
+
+
+@auth_bp.route('/team/invite', methods=['POST'])
+@require_auth
+def invite_team_member():
+    """Invite a new team member (placeholder)"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    email = data.get('email', '').strip().lower()
+    role = data.get('role', 'member')
+    
+    if not email:
+        return jsonify({'success': False, 'error': 'Email is required'}), 400
+    
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    
+    # Check if user has Enterprise tier (required for team features)
+    if user.subscription_tier not in ['enterprise', 'forensic']:
+        return jsonify({
+            'success': False,
+            'error': 'Team management requires Enterprise or Forensic tier'
+        }), 403
+    
+    # Placeholder: In production, this would:
+    # 1. Create invite record in database
+    # 2. Send email invitation
+    # 3. Track pending invites
+    
+    logger.info(f"Team invite sent: {email} invited by {user.email} as {role}")
+    
+    return jsonify({
+        'success': True,
+        'message': f'Invitation sent to {email}',
+        'invite': {
+            'email': email,
+            'role': role,
+            'status': 'pending',
+            'invited_by': user.email
+        }
+    })

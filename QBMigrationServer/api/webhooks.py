@@ -281,6 +281,17 @@ def migration_completed():
         # Mark as completed
         migration.mark_as_completed(results)
         
+        # ===== DEDUCT MIGRATION FROM USER BALANCE =====
+        # Find the user and deduct one migration from their balance
+        from models.user import User
+        user = User.query.get(migration.user_id)
+        if user:
+            if user.use_migration():
+                logger.info(f"Migration deducted for user {user.email}. Remaining: {user.get_migrations_remaining()}")
+                db.session.commit()
+            else:
+                logger.warning(f"Could not deduct migration for user {user.email} - balance already at 0")
+        
         logger.info(f"Migration {migration_id} completed successfully")
         
         # Trigger cleanup (async in production)

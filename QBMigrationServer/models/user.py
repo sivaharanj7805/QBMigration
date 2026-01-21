@@ -89,6 +89,15 @@ class User(UserMixin, db.Model):
     qbo_token_expires_at = db.Column(db.DateTime, nullable=True)
     qbo_connected_at = db.Column(db.DateTime, nullable=True)
     
+    # Subscription Tier & Migration Tracking
+    # Tiers: starter ($497), business ($997), professional ($1997), enterprise ($3997), forensic ($7997+)
+    subscription_tier = db.Column(db.String(20), default=None, nullable=True)  # None = not selected yet
+    tier_purchased_at = db.Column(db.DateTime, nullable=True)
+    migrations_purchased = db.Column(db.Integer, default=0, nullable=False)  # Total purchased
+    migrations_used = db.Column(db.Integer, default=0, nullable=False)  # Total consumed
+    stripe_customer_id = db.Column(db.String(100), nullable=True)  # For payment integration
+    stripe_payment_intent = db.Column(db.String(100), nullable=True)  # Last payment
+    
     # Relationships
     migrations = db.relationship('Migration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
     
@@ -392,6 +401,73 @@ class User(UserMixin, db.Model):
         devices = devices[-5:]
         
         self.trusted_devices = json.dumps(devices)
+    
+    # ========================================================================
+    # SUBSCRIPTION TIER MANAGEMENT
+    # ========================================================================
+    
+    # Tier configuration with pricing and migrations
+    TIER_CONFIG = {
+        'starter': {'price': 497, 'migrations': 1, 'name': 'Starter', 'max_transactions': 5000},
+        'business': {'price': 997, 'migrations': 1, 'name': 'Business', 'max_transactions': 25000},
+        'professional': {'price': 1997, 'migrations': 1, 'name': 'Professional', 'max_transactions': 100000},
+        'enterprise': {'price': 3997, 'migrations': 1, 'name': 'Enterprise', 'max_transactions': 500000},
+        'forensic': {'price': 7997, 'migrations': 1, 'name': 'Forensic', 'max_transactions': -1}  # -1 = unlimited
+    }
+    
+    def get_migrations_remaining(self):
+        """Get number of migrations remaining for this user"""
+        return max(0, (self.migrations_purchased or 0) - (self.migrations_used or 0))
+    
+    def has_migrations_remaining(self):
+        """Check if user has migrations remaining"""
+        return self.get_migrations_remaining() > 0
+    
+    def use_migration(self):
+        """
+        Use one migration from the user's balance.
+        
+        Returns:
+            bool: True if migration was used, False if none remaining
+        """
+        if not self.has_migrations_remaining():
+            return False
+        self.migrations_used = (self.migrations_used or 0) + 1
+        return True
+    
+    def add_migrations(self, count, tier=None):
+        """
+        Add migrations to user's balance (for purchases/upgrades).
+        
+        Args:
+            count: Number of migrations to add
+            tier: Optional tier to set
+        """
+        self.migrations_purchased = (self.migrations_purchased or 0) + count
+        if tier:
+            self.subscription_tier = tier
+            self.tier_purchased_at = datetime.utcnow()
+    
+    def get_tier_info(self):
+        """
+        Get current tier information for the user.
+        
+        Returns:
+            dict with tier details and migrations info
+        """
+        tier = self.subscription_tier or 'none'
+        config = self.TIER_CONFIG.get(tier, {})
+        
+        return {
+            'tier': tier,
+            'tier_name': config.get('name', 'Free Trial'),
+            'price': config.get('price', 0),
+            'max_transactions': config.get('max_transactions', 0),
+            'migrations_purchased': self.migrations_purchased or 0,
+            'migrations_used': self.migrations_used or 0,
+            'migrations_remaining': self.get_migrations_remaining(),
+            'has_tier': self.subscription_tier is not None
+        }
     
     # ========================================================================
     # FLASK-LOGIN METHODS
