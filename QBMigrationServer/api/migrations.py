@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
+from extensions import limiter
 import logging
 
 migrations_bp = Blueprint('migrations', __name__)
@@ -159,6 +160,7 @@ def get_migration_status(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/start', methods=['POST'])
+@limiter.limit("5 per minute")
 @login_required
 def start_migration(migration_id):
     """
