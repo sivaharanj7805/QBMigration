@@ -27,10 +27,12 @@ import hashlib
 import json
 import logging
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Generator
 import os
+import chardet  # For encoding detection
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +145,8 @@ class CasewareExporter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.company_name = company_name
         
-        # Statistics
+        # Statistics (thread-safe)
+        self._stats_lock = threading.Lock()
         self.stats = {
             'accounts_exported': 0,
             'transactions_exported': 0,
@@ -153,6 +156,35 @@ class CasewareExporter:
         }
         
         logger.info(f"CasewareExporter v{self.VERSION} initialized. Output: {self.output_dir}")
+    
+    # ========================================================================
+    # HASH VERIFICATION (FIX #3: Independent verification method)
+    # ========================================================================
+    
+    @staticmethod
+    def verify_hash(data: Dict, expected_hash: str) -> bool:
+        """
+        Verify a record's integrity hash matches the expected value.
+        
+        CANONICAL FORMAT DOCUMENTATION:
+        1. Key fields are processed first in this order:
+           txnId, TxnID, listId, ListID, refNumber, RefNumber,
+           txnDate, TxnDate, amount, Amount, balance, Balance,
+           name, Name, fullName, FullName
+        2. Remaining fields are sorted alphabetically
+        3. Format: "field1:value1|field2:value2|..."
+        4. Numbers formatted to 2 decimal places
+        5. Dates formatted as YYYY-MM-DD
+        
+        Args:
+            data: The record dictionary to verify
+            expected_hash: The expected SHA-256 hash (64-char hex)
+            
+        Returns:
+            True if hash matches, False otherwise
+        """
+        computed_hash = CasewareExporter.compute_sha256_hash(data)
+        return computed_hash.lower() == expected_hash.lower()
     
     # ========================================================================
     # HASH GENERATION (THE $60M COLUMN)
@@ -235,7 +267,15 @@ class CasewareExporter:
             
         Returns:
             Path to generated CSV file
+            
+        Raises:
+            TypeError: If accounts is not a list
+            IOError: If file cannot be written
         """
+        # FIX #2: Input validation
+        if not isinstance(accounts, list):
+            raise TypeError(f"Expected list for accounts, got {type(accounts).__name__}")
+        
         if as_of_date is None:
             as_of_date = datetime.now().strftime('%Y-%m-%d')
         
@@ -259,9 +299,14 @@ class CasewareExporter:
         total_credits = Decimal('0')
         
         for account in accounts:
+            # FIX #2: Validate each account is a dict
+            if not isinstance(account, dict):
+                logger.warning(f"Skipping non-dict account: {type(account).__name__}")
+                continue
+            
             # Extract account details
-            acct_num = account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', '')
-            acct_name = account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account')
+            acct_num = self._sanitize_csv_value(account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', ''))
+            acct_name = self._sanitize_csv_value(account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account'))
             acct_type = account.get('accountType') or account.get('AccountType', 'Other')
             balance = self._to_decimal(account.get('balance') or account.get('Balance') or account.get('CurrentBalance', 0))
             
@@ -320,23 +365,31 @@ class CasewareExporter:
             ''
         ])
         
-        # Write CSV
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            
-            # Header comment with metadata
-            f.write(f"# Caseware Audit Trial Balance\n")
-            f.write(f"# Company: {self.company_name}\n")
-            f.write(f"# As Of Date: {as_of_date}\n")
-            f.write(f"# Generated: {datetime.now().isoformat()}\n")
-            f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-            f.write(f"#\n")
-            
-            writer.writerow(headers)
-            writer.writerows(rows)
+        # FIX #4: Write CSV with proper error handling
+        try:
+            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                
+                # Header comment with metadata
+                f.write(f"# Caseware Audit Trial Balance\n")
+                f.write(f"# Company: {self.company_name}\n")
+                f.write(f"# As Of Date: {as_of_date}\n")
+                f.write(f"# Generated: {datetime.now().isoformat()}\n")
+                f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
+                f.write(f"#\n")
+                
+                writer.writerow(headers)
+                writer.writerows(rows)
+        except IOError as e:
+            logger.error(f"Failed to write Trial Balance file: {e}")
+            raise IOError(f"Cannot write to {output_file}: {e}") from e
+        except PermissionError as e:
+            logger.error(f"Permission denied writing Trial Balance: {e}")
+            raise
         
-        self.stats['total_debits'] = total_debits
-        self.stats['total_credits'] = total_credits
+        with self._stats_lock:
+            self.stats['total_debits'] = total_debits
+            self.stats['total_credits'] = total_credits
         
         logger.info(f"Trial Balance exported: {output_file} ({len(rows)-1} accounts)")
         return str(output_file)
@@ -389,24 +442,37 @@ class CasewareExporter:
         rows = []
         
         for txn in transactions:
-            # Filter by date if specified
+            # FIX #2: Validate transaction is a dict
+            if not isinstance(txn, dict):
+                logger.warning(f"Skipping non-dict transaction: {type(txn).__name__}")
+                continue
+            
+            # FIX #5: Parse dates properly for comparison
             txn_date = txn.get('txnDate') or txn.get('TxnDate', '')
-            if start_date and txn_date < start_date:
-                continue
-            if end_date and txn_date > end_date:
-                continue
+            if txn_date:
+                try:
+                    txn_date_parsed = self._parse_date(txn_date)
+                    start_date_parsed = self._parse_date(start_date) if start_date else None
+                    end_date_parsed = self._parse_date(end_date) if end_date else None
+                    
+                    if start_date_parsed and txn_date_parsed and txn_date_parsed < start_date_parsed:
+                        continue
+                    if end_date_parsed and txn_date_parsed and txn_date_parsed > end_date_parsed:
+                        continue
+                except ValueError as e:
+                    logger.warning(f"Invalid date format in transaction: {txn_date}, error: {e}")
             
-            # Extract transaction details
-            acct_num = txn.get('accountNumber') or txn.get('AccountNumber') or ''
-            acct_name = txn.get('accountName') or txn.get('AccountName') or ''
+            # Extract transaction details with CSV injection protection
+            acct_num = self._sanitize_csv_value(txn.get('accountNumber') or txn.get('AccountNumber') or '')
+            acct_name = self._sanitize_csv_value(txn.get('accountName') or txn.get('AccountName') or '')
             txn_type = txn.get('txnType') or txn.get('TxnType') or txn.get('type', '')
-            ref_number = txn.get('refNumber') or txn.get('RefNumber') or txn.get('DocNumber', '')
-            memo = txn.get('memo') or txn.get('Memo') or txn.get('description', '')
+            ref_number = self._sanitize_csv_value(txn.get('refNumber') or txn.get('RefNumber') or txn.get('DocNumber', ''))
+            memo = self._sanitize_csv_value(txn.get('memo') or txn.get('Memo') or txn.get('description', ''))
             amount = self._to_decimal(txn.get('amount') or txn.get('Amount') or txn.get('TotalAmount', 0))
+            acct_type = txn.get('accountType') or txn.get('AccountType', '')
             
-            # Determine debit/credit based on amount sign and type
-            debit = amount if amount >= 0 else Decimal('0')
-            credit = abs(amount) if amount < 0 else Decimal('0')
+            # FIX #8: Transaction-type aware debit/credit determination
+            debit, credit = self._determine_debit_credit(amount, txn_type, acct_type)
             
             # Compute integrity hash for this transaction
             integrity_hash = self.compute_sha256_hash(txn)
@@ -435,33 +501,41 @@ class CasewareExporter:
         )
         global_file_hash = hashlib.sha256(global_hash_input.encode('utf-8')).hexdigest()
         
-        # Write CSV
-        with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            
-            # Header comment with GLOBAL FILE HASH (Integrity Summary)
-            f.write(f"# Caseware Audit General Ledger\n")
-            f.write(f"# Company: {self.company_name}\n")
-            if start_date:
-                f.write(f"# Period: {start_date} to {end_date or 'present'}\n")
-            f.write(f"# Generated: {datetime.now().isoformat()}\n")
-            f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-            f.write(f"#\n")
-            f.write(f"# ============ INTEGRITY SUMMARY ============\n")
-            f.write(f"# GLOBAL_FILE_HASH (SHA-256): {global_file_hash}\n")
-            f.write(f"# Total Transactions: {len(rows)}\n")
-            f.write(f"# Verify: This hash covers ALL transaction rows below.\n")
-            f.write(f"# If this hash matches, the entire file is untampered.\n")
-            f.write(f"# ============================================\n")
-            f.write(f"#\n")
-            f.write(f"# Row-level: Each row has its own Forensic_Integrity_Hash for per-transaction verification.\n")
-            f.write(f"#\n")
-            
-            writer.writerow(headers)
-            writer.writerows(rows)
+        # FIX #4: Write CSV with proper error handling
+        try:
+            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                
+                # Header comment with GLOBAL FILE HASH (Integrity Summary)
+                f.write(f"# Caseware Audit General Ledger\n")
+                f.write(f"# Company: {self.company_name}\n")
+                if start_date:
+                    f.write(f"# Period: {start_date} to {end_date or 'present'}\n")
+                f.write(f"# Generated: {datetime.now().isoformat()}\n")
+                f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
+                f.write(f"#\n")
+                f.write(f"# ============ INTEGRITY SUMMARY ============\n")
+                f.write(f"# GLOBAL_FILE_HASH (SHA-256): {global_file_hash}\n")
+                f.write(f"# Total Transactions: {len(rows)}\n")
+                f.write(f"# Verify: This hash covers ALL transaction rows below.\n")
+                f.write(f"# If this hash matches, the entire file is untampered.\n")
+                f.write(f"# ============================================\n")
+                f.write(f"#\n")
+                f.write(f"# Row-level: Each row has its own Forensic_Integrity_Hash for per-transaction verification.\n")
+                f.write(f"#\n")
+                
+                writer.writerow(headers)
+                writer.writerows(rows)
+        except IOError as e:
+            logger.error(f"Failed to write General Ledger file: {e}")
+            raise IOError(f"Cannot write to {output_file}: {e}") from e
+        except PermissionError as e:
+            logger.error(f"Permission denied writing General Ledger: {e}")
+            raise
         
-        # Store global hash in stats
-        self.stats['global_file_hash'] = global_file_hash
+        # Store global hash in stats (thread-safe)
+        with self._stats_lock:
+            self.stats['global_file_hash'] = global_file_hash
         
         logger.info(f"General Ledger exported: {output_file} ({len(rows)} transactions)")
         logger.info(f"Global File Hash: {global_file_hash}")
@@ -536,8 +610,12 @@ class CasewareExporter:
             "LeadSheetCodes": self.LEAD_SHEET_CODES
         }
         
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(mapping_config, f, indent=2)
+        try:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(mapping_config, f, indent=2)
+        except IOError as e:
+            logger.error(f"Failed to write mapping file: {e}")
+            raise IOError(f"Cannot write to {output_file}: {e}") from e
         
         logger.info(f"Mapping file exported: {output_file}")
         return str(output_file)
@@ -645,22 +723,90 @@ class CasewareExporter:
             return Decimal('0')
         try:
             return Decimal(str(value)).quantize(Decimal('0.01'), ROUND_HALF_UP)
-        except:
+        except (ValueError, InvalidOperation, TypeError) as e:
+            # FIX #1: Specific exceptions instead of bare except
+            logger.warning(f"Could not convert value to Decimal: {value}, error: {e}")
             return Decimal('0')
+    
+    def _parse_date(self, date_str: str) -> Optional[datetime]:
+        """FIX #5: Parse date string to datetime object with multiple format support."""
+        if not date_str:
+            return None
+        
+        formats = ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d']
+        for fmt in formats:
+            try:
+                return datetime.strptime(str(date_str).split('T')[0].split(' ')[0], fmt)
+            except ValueError:
+                continue
+        
+        raise ValueError(f"Unrecognized date format: {date_str}")
+    
+    def _sanitize_csv_value(self, value: Any) -> str:
+        """
+        FIX #10: Protect against CSV injection attacks.
+        
+        Prefixes cell values starting with =, +, -, @ with a single quote
+        to prevent formula interpretation in Excel/Google Sheets.
+        """
+        if value is None:
+            return ''
+        
+        value_str = str(value)
+        
+        # CSV injection protection
+        if value_str and value_str[0] in ('=', '+', '-', '@', '\t', '\r', '\n'):
+            return "'" + value_str
+        
+        return value_str
+    
+    def _determine_debit_credit(self, amount: Decimal, txn_type: str, acct_type: str) -> Tuple[Decimal, Decimal]:
+        """
+        FIX #8: Transaction-type aware debit/credit determination.
+        
+        Accounting rules:
+        - Payments received credit A/R
+        - Bills increase A/P (credit)
+        - Bill payments reduce A/P (debit)
+        - Invoices increase A/R (debit)
+        """
+        txn_type_lower = txn_type.lower() if txn_type else ''
+        
+        # Credit transactions (reduce asset or increase liability)
+        credit_types = {'payment', 'receivepayment', 'deposit', 'creditmemo', 'refund'}
+        
+        # Debit transactions (increase asset or reduce liability)
+        debit_types = {'invoice', 'bill', 'salesreceipt', 'check', 'expense'}
+        
+        if txn_type_lower in credit_types:
+            return (Decimal('0'), abs(amount))
+        elif txn_type_lower in debit_types:
+            return (abs(amount), Decimal('0'))
+        else:
+            # Fallback to sign-based logic
+            if amount >= 0:
+                return (amount, Decimal('0'))
+            else:
+                return (Decimal('0'), abs(amount))
     
     def _get_type_code(self, account_type: str) -> str:
         """Get single-letter type code for Caseware."""
         type_map = {
             'Bank': 'A', 'Accounts Receivable': 'A', 'Other Current Assets': 'A',
             'Fixed Assets': 'A', 'Other Assets': 'A', 'Inventory': 'A',
+            'Undeposited Funds': 'A',  # FIX #7: Added missing type
             'Accounts Payable': 'L', 'Credit Card': 'L', 'Other Current Liabilities': 'L',
             'Long Term Liabilities': 'L',
-            'Equity': 'E', 'Retained Earnings': 'E',
+            'Equity': 'E', 'Retained Earnings': 'E', 'Opening Balance Equity': 'E',
             'Income': 'R', 'Other Income': 'R',
             'Cost of Goods Sold': 'C',
             'Expense': 'X', 'Other Expense': 'X'
         }
-        return type_map.get(account_type, 'X')
+        code = type_map.get(account_type, None)
+        if code is None:
+            logger.warning(f"Unmapped account type: {account_type}, defaulting to X")
+            return 'X'
+        return code
     
     def _create_verification_manifest(self, result: Dict):
         """Create a verification manifest with bundle metadata."""
@@ -753,9 +899,25 @@ if __name__ == "__main__":
     input_file = sys.argv[1]
     output_dir = sys.argv[2]
     
-    # Load QB data
-    with open(input_file, 'r', encoding='utf-8') as f:
-        qb_data = json.load(f)
+    # FIX #9: Load QB data with encoding detection
+    try:
+        # Try to detect encoding first
+        with open(input_file, 'rb') as f_raw:
+            raw_data = f_raw.read(10000)  # Read first 10KB for detection
+            detected = chardet.detect(raw_data)
+            encoding = detected.get('encoding', 'utf-8') or 'utf-8'
+        
+        with open(input_file, 'r', encoding=encoding) as f:
+            qb_data = json.load(f)
+    except UnicodeDecodeError as e:
+        print(f"❌ Encoding error: {e}. Try specifying encoding explicitly.")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"❌ Invalid JSON: {e}")
+        sys.exit(1)
+    except IOError as e:
+        print(f"❌ Cannot read file: {e}")
+        sys.exit(1)
     
     # Generate bundle
     exporter = CasewareExporter(output_dir)
