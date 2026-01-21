@@ -699,7 +699,8 @@ def export_caseware_bundle(migration_id):
                     stored_data = json.loads(migration.trial_balance_data)
                     if 'accounts' in stored_data:
                         qb_data['accounts'] = stored_data['accounts']
-                except:
+                except (json.JSONDecodeError, TypeError, KeyError) as e:
+                    logger.warning(f"Failed to parse trial_balance_data: {e}")
                     pass
             
             # If no stored data, generate sample structure for demo
@@ -707,9 +708,9 @@ def export_caseware_bundle(migration_id):
                 qb_data = {
                     'accounts': [
                         {'Name': 'Cash', 'AccountType': 'Bank', 'Balance': 125000.00, 'AccountNumber': '1000'},
-                        {'Name': 'Accounts Receivable', 'AccountType': 'AccountsReceivable', 'Balance': 45000.00, 'AccountNumber': '1100'},
-                        {'Name': 'Inventory', 'AccountType': 'OtherCurrentAsset', 'Balance': 35000.00, 'AccountNumber': '1200'},
-                        {'Name': 'Accounts Payable', 'AccountType': 'AccountsPayable', 'Balance': 28000.00, 'AccountNumber': '2000'},
+                        {'Name': 'Accounts Receivable', 'AccountType': 'Accounts Receivable', 'Balance': 45000.00, 'AccountNumber': '1100'},
+                        {'Name': 'Inventory', 'AccountType': 'Inventory', 'Balance': 35000.00, 'AccountNumber': '1200'},
+                        {'Name': 'Accounts Payable', 'AccountType': 'Accounts Payable', 'Balance': 28000.00, 'AccountNumber': '2000'},
                         {'Name': 'Revenue', 'AccountType': 'Income', 'Balance': 250000.00, 'AccountNumber': '4000'},
                     ],
                     'transactions': []

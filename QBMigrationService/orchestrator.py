@@ -404,13 +404,32 @@ if __name__ == '__main__':
     
     endpoint = 'migration-completed' if result['success'] else 'migration-failed'
     
-    requests.post(
-        f"{args.server_url}/api/webhooks/{endpoint}",
-        json=result,
-        headers={
-            'X-Migration-Id': args.migration_id,
-            'X-Webhook-Signature': f'sha256={signature}'
-        }
-    )
+    # Report result to server via webhook with retry
+    try:
+        response = requests.post(
+            f"{args.server_url}/api/webhooks/{endpoint}",
+            json=result,
+            headers={
+                'X-Migration-Id': args.migration_id,
+                'X-Webhook-Signature': f'sha256={signature}'
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Webhook failed, retrying: {e}")
+        try:
+            time.sleep(5)
+            requests.post(
+                f"{args.server_url}/api/webhooks/{endpoint}",
+                json=result,
+                headers={
+                    'X-Migration-Id': args.migration_id,
+                    'X-Webhook-Signature': f'sha256={signature}'
+                },
+                timeout=30
+            )
+        except:
+            logger.error("Webhook retry failed")
     
     sys.exit(0 if result['success'] else 1)

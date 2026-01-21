@@ -583,7 +583,7 @@ class PremiumQBOClient:
                             logger.warning(f"[{correlation_id}] QuickBooks is busy, waiting 30s...")
                             time.sleep(30)
                             return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
-                except:
+                except (json.JSONDecodeError, ValueError):
                     pass
                 
                 # FIX #8: Don't log full response (may contain sensitive data)
