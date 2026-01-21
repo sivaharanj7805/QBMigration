@@ -29,10 +29,16 @@ import logging
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Generator
+from typing import Dict, List, Optional, Any, Tuple, Generator, Callable
 import os
-import chardet  # For encoding detection
 import threading
+
+# FIX #1: chardet with fallback if not installed
+try:
+    import chardet
+except ImportError:
+    chardet = None
+    logging.getLogger(__name__).warning("chardet not installed - using utf-8 fallback for encoding detection")
 
 logger = logging.getLogger(__name__)
 
@@ -398,9 +404,12 @@ class CasewareExporter:
     # GENERAL LEDGER EXPORT (Audit_GL.csv)
     # ========================================================================
     
-    def export_general_ledger(self, transactions: List[Dict],
+    def export_general_ledger(self, transactions,
                                start_date: str = None,
-                               end_date: str = None) -> str:
+                               end_date: str = None,
+                               total_count: int = None,
+                               progress_callback: Callable[[int, int, str], None] = None,
+                               expand_line_items: bool = False) -> str:
         """
         Generate Audit_GL.csv - General Ledger with SHA-256 integrity hashes.
         
@@ -417,9 +426,12 @@ class CasewareExporter:
         - Forensic_Integrity_Hash
         
         Args:
-            transactions: List of transaction dictionaries
+            transactions: List or Generator of transaction dictionaries
             start_date: Filter start date (optional)
             end_date: Filter end date (optional)
+            total_count: Total number of transactions (for progress reporting)
+            progress_callback: Optional callback(current, total, phase) for progress updates
+            expand_line_items: If True, export each line item as a separate row (FIX #3)
             
         Returns:
             Path to generated CSV file
@@ -440,6 +452,7 @@ class CasewareExporter:
         ]
         
         rows = []
+        processed_count = 0
         
         for txn in transactions:
             # FIX #2: Validate transaction is a dict
@@ -462,44 +475,34 @@ class CasewareExporter:
                 except ValueError as e:
                     logger.warning(f"Invalid date format in transaction: {txn_date}, error: {e}")
             
-            # Extract transaction details with CSV injection protection
-            acct_num = self._sanitize_csv_value(txn.get('accountNumber') or txn.get('AccountNumber') or '')
-            acct_name = self._sanitize_csv_value(txn.get('accountName') or txn.get('AccountName') or '')
-            txn_type = txn.get('txnType') or txn.get('TxnType') or txn.get('type', '')
-            ref_number = self._sanitize_csv_value(txn.get('refNumber') or txn.get('RefNumber') or txn.get('DocNumber', ''))
-            memo = self._sanitize_csv_value(txn.get('memo') or txn.get('Memo') or txn.get('description', ''))
-            amount = self._to_decimal(txn.get('amount') or txn.get('Amount') or txn.get('TotalAmount', 0))
-            acct_type = txn.get('accountType') or txn.get('AccountType', '')
+            # FIX #3: Option to expand line items for detailed auditing
+            if expand_line_items and 'lines' in txn:
+                for line in txn.get('lines', []):
+                    row = self._create_gl_row(txn, line, txn_date)
+                    if row:
+                        rows.append(row)
+            else:
+                row = self._create_gl_row(txn, None, txn_date)
+                if row:
+                    rows.append(row)
             
-            # FIX #8: Transaction-type aware debit/credit determination
-            debit, credit = self._determine_debit_credit(amount, txn_type, acct_type)
+            processed_count += 1
             
-            # Compute integrity hash for this transaction
-            integrity_hash = self.compute_sha256_hash(txn)
-            self.stats['hashes_generated'] += 1
-            
-            rows.append([
-                acct_num,
-                acct_name,
-                txn_type,
-                txn_date,
-                ref_number,
-                memo[:100] if memo else '',
-                f"{amount:.2f}",
-                f"{debit:.2f}",
-                f"{credit:.2f}",
-                integrity_hash
-            ])
-            
-            self.stats['transactions_exported'] += 1
+            # FIX #4: Progress callback every 1000 transactions
+            if progress_callback and total_count and processed_count % 1000 == 0:
+                progress_callback(processed_count, total_count, "Processing transactions...")
         
-        # Compute Global File Hash for entire dataset integrity
-        global_hash_input = json.dumps(
-            [row for row in rows],
-            sort_keys=True,
-            default=str
-        )
+        # FIX #9: Compute Global File Hash INCLUDING metadata for tamper detection
+        hash_content = {
+            'company': self.company_name,
+            'period': {'start': start_date, 'end': end_date},
+            'generated_at': datetime.now().isoformat(),
+            'row_count': len(rows),
+            'rows': rows
+        }
+        global_hash_input = json.dumps(hash_content, sort_keys=True, default=str)
         global_file_hash = hashlib.sha256(global_hash_input.encode('utf-8')).hexdigest()
+
         
         # FIX #4: Write CSV with proper error handling
         try:
@@ -582,7 +585,7 @@ class CasewareExporter:
             
             "GeneralLedger": {
                 "File": "Audit_GL.csv",
-                "SkipRows": 7,  # Skip header comments
+                "SkipRows": 11,  # FIX #6: Correct count - 10 comment lines + 1 blank + header
                 "Delimiter": ",",
                 "TextQualifier": "\"",
                 "ColumnMapping": {
@@ -627,7 +630,8 @@ class CasewareExporter:
     def generate_audit_bundle(self, qb_data: Dict,
                                as_of_date: str = None,
                                start_date: str = None,
-                               end_date: str = None) -> Dict:
+                               end_date: str = None,
+                               progress_callback: Callable[[int, int, str], None] = None) -> Dict:
         """
         Generate complete Caseware Audit Bundle.
         
@@ -638,10 +642,21 @@ class CasewareExporter:
             as_of_date: Trial balance date
             start_date: GL start date
             end_date: GL end date
+            progress_callback: Optional callback(current, total, message) for progress updates
             
         Returns:
             Dict with file paths and statistics
+            
+        Raises:
+            TypeError: If qb_data is not a dictionary
+            ValueError: If required keys are missing
         """
+        # FIX #7: Validate qb_data structure
+        validation_errors = self._validate_qb_data(qb_data)
+        if validation_errors:
+            logger.error(f"Invalid qb_data: {validation_errors}")
+            raise ValueError(f"Invalid qb_data structure: {'; '.join(validation_errors)}")
+        
         logger.info("="*60)
         logger.info("GENERATING CASEWARE AUDIT BUNDLE")
         logger.info("="*60)
@@ -656,6 +671,10 @@ class CasewareExporter:
             'statistics': {}
         }
         
+        # FIX #4: Progress callback
+        if progress_callback:
+            progress_callback(0, 3, "Starting export...")
+        
         # 1. Export Trial Balance
         accounts = qb_data.get('accounts', [])
         if accounts:
@@ -663,31 +682,31 @@ class CasewareExporter:
             result['files']['trial_balance'] = tb_file
             logger.info(f"✅ Trial Balance: {self.stats['accounts_exported']} accounts")
         
-        # 2. Export General Ledger (all transaction types)
-        all_transactions = []
+        if progress_callback:
+            progress_callback(1, 3, "Trial balance exported")
         
-        # Collect all transaction types
-        txn_types = [
-            'invoices', 'bills', 'receivePayments', 'billPayments',
-            'creditMemos', 'salesReceipts', 'estimates',
-            'journalEntries', 'checks', 'deposits', 'transfers',
-            'vendorCredits', 'purchaseOrders', 'salesOrders'
-        ]
-        
-        for txn_type in txn_types:
-            txns = qb_data.get(txn_type, [])
-            for txn in txns:
-                txn['txnType'] = txn_type
-                all_transactions.append(txn)
-        
-        if all_transactions:
-            gl_file = self.export_general_ledger(all_transactions, start_date, end_date)
+        # 2. Export General Ledger using generator (FIX #2: Memory efficient)
+        txn_count = sum(len(qb_data.get(t, [])) for t in self.TXN_TYPES)
+        if txn_count > 0:
+            gl_file = self.export_general_ledger(
+                self._iterate_transactions(qb_data),
+                start_date, 
+                end_date,
+                total_count=txn_count,
+                progress_callback=progress_callback
+            )
             result['files']['general_ledger'] = gl_file
             logger.info(f"✅ General Ledger: {self.stats['transactions_exported']} transactions")
+        
+        if progress_callback:
+            progress_callback(2, 3, "General ledger exported")
         
         # 3. Export Mapping File
         mapping_file = self.export_mapping_file()
         result['files']['mapping'] = mapping_file
+        
+        if progress_callback:
+            progress_callback(3, 3, "Mapping file exported")
         
         # 4. Generate summary
         result['statistics'] = {
@@ -712,6 +731,54 @@ class CasewareExporter:
         logger.info("="*60)
         
         return result
+    
+    # All transaction types to collect
+    TXN_TYPES = [
+        'invoices', 'bills', 'receivePayments', 'billPayments',
+        'creditMemos', 'salesReceipts', 'estimates',
+        'journalEntries', 'checks', 'deposits', 'transfers',
+        'vendorCredits', 'purchaseOrders', 'salesOrders',
+        'refundReceipts', 'inventoryAdjustments', 'taxPayments'
+    ]
+    
+    def _iterate_transactions(self, qb_data: Dict) -> Generator[Dict, None, None]:
+        """
+        FIX #2: Generator pattern for memory-efficient transaction iteration.
+        
+        Yields transactions one at a time instead of loading all into memory.
+        """
+        for txn_type in self.TXN_TYPES:
+            for txn in qb_data.get(txn_type, []):
+                # FIX #8: Don't mutate original - create a copy
+                txn_copy = {**txn, 'txnType': txn_type}
+                yield txn_copy
+    
+    def _validate_qb_data(self, qb_data: Any) -> List[str]:
+        """
+        FIX #7: Validate QB data structure before processing.
+        
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        if not isinstance(qb_data, dict):
+            errors.append(f"qb_data must be a dictionary, got {type(qb_data).__name__}")
+            return errors  # Can't check further if not a dict
+        
+        # Check for at least one data source
+        has_accounts = bool(qb_data.get('accounts'))
+        has_transactions = any(qb_data.get(t) for t in self.TXN_TYPES)
+        
+        if not has_accounts and not has_transactions:
+            errors.append("qb_data must contain 'accounts' or at least one transaction type")
+        
+        # Validate accounts structure if present
+        accounts = qb_data.get('accounts', [])
+        if accounts and not isinstance(accounts, list):
+            errors.append(f"'accounts' must be a list, got {type(accounts).__name__}")
+        
+        return errors
     
     # ========================================================================
     # HELPER METHODS
@@ -760,30 +827,122 @@ class CasewareExporter:
         
         return value_str
     
+    def _create_gl_row(self, txn: Dict, line_item: Optional[Dict], txn_date: str) -> Optional[List]:
+        """
+        Create a General Ledger row from a transaction (or line item).
+        
+        FIX #3: Supports both header-only export and line item expansion.
+        
+        Args:
+            txn: The parent transaction dictionary
+            line_item: Optional line item dict (if expanding line items)
+            txn_date: Pre-extracted transaction date
+            
+        Returns:
+            List of row values or None if invalid
+        """
+        # Use line item values if provided, fall back to transaction header
+        source = line_item if line_item else txn
+        
+        acct_num = self._sanitize_csv_value(
+            source.get('accountNumber') or source.get('AccountNumber') or 
+            source.get('AccountRef', {}).get('value') or 
+            txn.get('accountNumber') or txn.get('AccountNumber') or ''
+        )
+        acct_name = self._sanitize_csv_value(
+            source.get('accountName') or source.get('AccountName') or 
+            source.get('AccountRef', {}).get('name') or 
+            txn.get('accountName') or txn.get('AccountName') or ''
+        )
+        txn_type = txn.get('txnType') or txn.get('TxnType') or txn.get('type', '')
+        ref_number = self._sanitize_csv_value(
+            txn.get('refNumber') or txn.get('RefNumber') or txn.get('DocNumber', '')
+        )
+        
+        # Memo: use line description if available
+        if line_item:
+            memo = self._sanitize_csv_value(
+                line_item.get('description') or line_item.get('Description') or 
+                line_item.get('memo') or txn.get('memo') or ''
+            )
+        else:
+            memo = self._sanitize_csv_value(
+                txn.get('memo') or txn.get('Memo') or txn.get('description', '')
+            )
+        
+        # Amount: use line amount if available
+        if line_item:
+            amount = self._to_decimal(
+                line_item.get('amount') or line_item.get('Amount') or 0
+            )
+        else:
+            amount = self._to_decimal(
+                txn.get('amount') or txn.get('Amount') or txn.get('TotalAmount', 0)
+            )
+        
+        acct_type = source.get('accountType') or source.get('AccountType') or ''
+        
+        # Determine debit/credit
+        debit, credit = self._determine_debit_credit(amount, txn_type, acct_type)
+        
+        # Compute integrity hash for this row
+        hash_data = line_item if line_item else txn
+        integrity_hash = self.compute_sha256_hash(hash_data)
+        
+        with self._stats_lock:
+            self.stats['hashes_generated'] += 1
+            self.stats['transactions_exported'] += 1
+        
+        return [
+            acct_num,
+            acct_name,
+            txn_type,
+            txn_date,
+            ref_number,
+            memo[:100] if memo else '',
+            f"{amount:.2f}",
+            f"{debit:.2f}",
+            f"{credit:.2f}",
+            integrity_hash
+        ]
+    
     def _determine_debit_credit(self, amount: Decimal, txn_type: str, acct_type: str) -> Tuple[Decimal, Decimal]:
         """
-        FIX #8: Transaction-type aware debit/credit determination.
+        FIX #5: Transaction-type aware debit/credit determination.
         
         Accounting rules:
         - Payments received credit A/R
         - Bills increase A/P (credit)
         - Bill payments reduce A/P (debit)
         - Invoices increase A/R (debit)
+        - Journal entries need special handling (have explicit debit/credit)
         """
         txn_type_lower = txn_type.lower() if txn_type else ''
         
         # Credit transactions (reduce asset or increase liability)
-        credit_types = {'payment', 'receivepayment', 'deposit', 'creditmemo', 'refund'}
+        credit_types = {
+            'payment', 'receivepayment', 'deposit', 'creditmemo', 'refund',
+            'vendorcredit', 'refundreceipt', 'creditcardcredit'
+        }
         
         # Debit transactions (increase asset or reduce liability)
-        debit_types = {'invoice', 'bill', 'salesreceipt', 'check', 'expense'}
+        debit_types = {
+            'invoice', 'bill', 'salesreceipt', 'check', 'expense',
+            'billpayment', 'creditcardcharge', 'purchaseorder'
+        }
+        
+        # Neutral transactions (use amount sign)
+        neutral_types = {
+            'journalentry', 'transfer', 'inventoryadjustment', 'taxPayment',
+            'estimate', 'salesorder'
+        }
         
         if txn_type_lower in credit_types:
             return (Decimal('0'), abs(amount))
         elif txn_type_lower in debit_types:
             return (abs(amount), Decimal('0'))
         else:
-            # Fallback to sign-based logic
+            # Fallback to sign-based logic for neutral/unknown types
             if amount >= 0:
                 return (amount, Decimal('0'))
             else:
