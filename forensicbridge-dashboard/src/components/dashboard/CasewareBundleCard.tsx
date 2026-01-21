@@ -1,7 +1,8 @@
 "use client";
 
-import { Download, FileSpreadsheet, Package, CheckCircle2, Loader2 } from "lucide-react";
+import { Download, FileSpreadsheet, Package, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
 import { useState } from "react";
+import { api } from "@/lib/api";
 
 interface CasewareBundleCardProps {
     migrationId: string;
@@ -17,19 +18,51 @@ export function CasewareBundleCard({
     recordCount = 0
 }: CasewareBundleCardProps) {
     const [isDownloading, setIsDownloading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [status, setStatus] = useState<string>("");
 
     const handleDownload = async () => {
         setIsDownloading(true);
-        // Simulate download
-        await new Promise(r => setTimeout(r, 1500));
-        setIsDownloading(false);
+        setError(null);
+        setStatus("Generating Caseware bundle...");
 
-        // Create mock download
-        const a = document.createElement("a");
-        a.href = "#";
-        a.download = `${companyName}_CasewareBundle.zip`;
-        // In production, would fetch actual bundle
-        alert(`Downloading Caseware Bundle for ${companyName}`);
+        try {
+            // Step 1: Generate the Caseware bundle on the server
+            const exportResult = await api.exportCasewareBundle(migrationId);
+
+            if (!exportResult.success || exportResult.error) {
+                throw new Error(exportResult.error || "Failed to generate Caseware bundle");
+            }
+
+            setStatus("Downloading bundle...");
+
+            // Step 2: Download the generated bundle
+            const blob = await api.downloadCasewareBundle(migrationId);
+
+            if (!blob) {
+                throw new Error("Failed to download Caseware bundle");
+            }
+
+            // Step 3: Trigger browser download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${companyName}_CasewareBundle.zip`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            setStatus("Download complete!");
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Unknown error occurred";
+            setError(message);
+            console.error("Caseware download error:", err);
+        } finally {
+            setIsDownloading(false);
+            // Clear status after 3 seconds
+            setTimeout(() => setStatus(""), 3000);
+        }
     };
 
     return (
@@ -90,6 +123,23 @@ export function CasewareBundleCard({
                     </div>
                 </div>
             </div>
+
+            {/* Error Display */}
+            {error && (
+                <div className="px-6 py-3 bg-red-50 border-t border-red-200">
+                    <div className="flex items-center gap-2 text-red-700">
+                        <AlertCircle className="w-4 h-4" />
+                        <span className="text-sm">{error}</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Status Display */}
+            {status && !error && (
+                <div className="px-6 py-2 bg-blue-100 border-t border-blue-200">
+                    <p className="text-sm text-blue-700 text-center">{status}</p>
+                </div>
+            )}
 
             {/* BIG DOWNLOAD BUTTON */}
             <div className="p-6 bg-white border-t">

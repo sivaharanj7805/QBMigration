@@ -218,6 +218,16 @@ def start_migration(migration_id):
                 'error': 'QuickBooks Online credentials required (client_id, client_secret, refresh_token)'
             }), 400
         
+        # CRITICAL FIX: Ensure realm_id is present - use from user if not provided
+        if 'realm_id' not in qbo_credentials or not qbo_credentials['realm_id']:
+            if hasattr(current_user, 'qbo_realm_id') and current_user.qbo_realm_id:
+                qbo_credentials['realm_id'] = current_user.qbo_realm_id
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'realm_id required. Please connect to QuickBooks Online first.'
+                }), 400
+        
         # Mark as provisioning
         if hasattr(migration, 'mark_as_provisioning') and callable(migration.mark_as_provisioning):
             migration.mark_as_provisioning()

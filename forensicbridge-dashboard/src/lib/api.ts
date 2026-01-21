@@ -297,7 +297,7 @@ class ApiClient {
         });
     }
 
-    async downloadCasewareBundle(migrationId: string): Promise<Blob | null> {
+    async downloadCasewareBundle(migrationId: string): Promise<Blob> {
         const url = `${this.baseUrl}/api/migrations/${migrationId}/caseware-bundle`;
 
         try {
@@ -307,14 +307,21 @@ class ApiClient {
             });
 
             if (!response.ok) {
-                console.error("Failed to download Caseware bundle");
-                return null;
+                // Try to extract error from response
+                let errorMsg = `HTTP ${response.status}: Download failed`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.error || errorMsg;
+                } catch {
+                    // Not JSON, use default
+                }
+                throw new Error(errorMsg);
             }
 
             return await response.blob();
         } catch (error) {
             console.error("Download error:", error);
-            return null;
+            throw error;
         }
     }
 
