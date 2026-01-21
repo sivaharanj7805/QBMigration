@@ -417,7 +417,9 @@ class User(UserMixin, db.Model):
     
     def get_migrations_remaining(self):
         """Get number of migrations remaining for this user"""
-        return max(0, (self.migrations_purchased or 0) - (self.migrations_used or 0))
+        purchased = getattr(self, 'migrations_purchased', None) or 0
+        used = getattr(self, 'migrations_used', None) or 0
+        return max(0, purchased - used)
     
     def has_migrations_remaining(self):
         """Check if user has migrations remaining"""
@@ -451,22 +453,27 @@ class User(UserMixin, db.Model):
     def get_tier_info(self):
         """
         Get current tier information for the user.
+        Uses getattr with defaults to handle missing database columns gracefully.
         
         Returns:
             dict with tier details and migrations info
         """
-        tier = self.subscription_tier or 'none'
+        tier = getattr(self, 'subscription_tier', None) or 'none'
         config = self.TIER_CONFIG.get(tier, {})
+        
+        # Use getattr for all new columns to prevent errors if DB is not migrated
+        migrations_purchased = getattr(self, 'migrations_purchased', None) or 0
+        migrations_used = getattr(self, 'migrations_used', None) or 0
         
         return {
             'tier': tier,
             'tier_name': config.get('name', 'Free Trial'),
             'price': config.get('price', 0),
             'max_transactions': config.get('max_transactions', 0),
-            'migrations_purchased': self.migrations_purchased or 0,
-            'migrations_used': self.migrations_used or 0,
-            'migrations_remaining': self.get_migrations_remaining(),
-            'has_tier': self.subscription_tier is not None
+            'migrations_purchased': migrations_purchased,
+            'migrations_used': migrations_used,
+            'migrations_remaining': max(0, migrations_purchased - migrations_used),
+            'has_tier': tier != 'none' and tier is not None
         }
     
     # ========================================================================

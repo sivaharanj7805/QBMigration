@@ -283,8 +283,21 @@ def get_current_user():
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
-    # Get tier info
-    tier_info = user.get_tier_info()
+    # Get tier info - use try/except in case DB columns don't exist yet
+    try:
+        tier_info = user.get_tier_info()
+    except Exception as e:
+        # Fallback if tier columns don't exist in database
+        import logging
+        logging.getLogger(__name__).warning(f"Could not get tier info: {e}")
+        tier_info = {
+            'tier': 'none',
+            'tier_name': 'Free Trial',
+            'migrations_remaining': 0,
+            'migrations_purchased': 0,
+            'migrations_used': 0,
+            'has_tier': False
+        }
     
     return jsonify({
         'success': True,
