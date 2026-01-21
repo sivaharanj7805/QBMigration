@@ -101,75 +101,101 @@ def validate_password(password: str) -> Tuple[bool, str]:
 @auth_bp.route('/register', methods=['POST'])
 @limiter.limit("5 per minute")
 def register():
-    """Register a new user"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
-    email = data.get('email', '').strip().lower()
-    password = data.get('password', '')
-    first_name = data.get('first_name', data.get('name', '')).strip()
-    last_name = data.get('last_name', '').strip()
-    company = data.get('company_name', data.get('company', '')).strip()
-    
-    # Validation
-    if not email:
-        return jsonify({'success': False, 'error': 'Email is required'}), 400
-    
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    
-    if not validate_email(email):
-        return jsonify({'success': False, 'error': 'Invalid email format'}), 400
-    
-    valid, msg = validate_password(password)
-    if not valid:
-        return jsonify({'success': False, 'error': msg}), 400
-    
-    # Check if user exists
-    existing = User.query.filter_by(email=email).first()
-    if existing:
-        return jsonify({'success': False, 'error': 'Email already exists'}), 409
-    
-    # Create user using User model's set_password method (Argon2)
-    user = User(
-        email=email,
-        first_name=first_name,
-        last_name=last_name,
-        company_name=company
-    )
+    """Register a new user with comprehensive error handling"""
+    import logging
+    logger = logging.getLogger(__name__)
     
     try:
-        user.set_password(password)
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+        
+        # Extract and sanitize inputs
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        # Support both 'first_name' and 'name' from frontend
+        first_name = data.get('first_name', data.get('name', '')).strip()
+        last_name = data.get('last_name', '').strip()
+        # Support both 'company_name' and 'company' from frontend
+        company = data.get('company_name', data.get('company', '')).strip()
+        
+        # Sanitize inputs - remove potentially dangerous characters
+        import re
+        def sanitize(value, max_length=255):
+            if not value:
+                return value
+            value = re.sub(r'[<>"\'/\\;]', '', str(value).strip())
+            return value[:max_length]
+        
+        first_name = sanitize(first_name, 100)
+        last_name = sanitize(last_name, 100)
+        company = sanitize(company, 255)
+        
+        # Validation
+        if not email:
+            return jsonify({'success': False, 'error': 'Email is required'}), 400
+        
+        if not password:
+            return jsonify({'success': False, 'error': 'Password is required'}), 400
+        
+        if not validate_email(email):
+            return jsonify({'success': False, 'error': 'Invalid email format'}), 400
+        
+        # Validate password strength BEFORE creating user
+        valid, msg = validate_password(password)
+        if not valid:
+            return jsonify({'success': False, 'error': msg}), 400
+        
+        # Check if user exists
+        existing = User.query.filter_by(email=email).first()
+        if existing:
+            return jsonify({'success': False, 'error': 'Email already registered'}), 409
+        
+        # Create user
+        user = User(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            company_name=company
+        )
+        
+        # Set password - this may raise ValueError for strength/reuse issues
+        try:
+            user.set_password(password)
+        except ValueError as e:
+            logger.warning(f"Password validation failed for {email}: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 400
+        
+        # Save to database
         db.session.add(user)
         db.session.commit()
-    except ValueError as e:
-        # Password validation error
-        db.session.rollback()
-        return jsonify({'success': False, 'error': str(e)}), 400
+        
+        # Create session
+        session['user_id'] = user.id
+        session['email'] = user.email
+        
+        # Generate token
+        token = create_token(user.id, user.email)
+        
+        logger.info(f"New user registered: {email}")
+        
+        return jsonify({
+            'success': True,
+            'token': token,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'company_name': user.company_name
+            }
+        }), 201
+        
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'error': 'Failed to create user'}), 500
-    
-    # Create session
-    session['user_id'] = user.id
-    session['email'] = user.email
-    
-    # Generate token
-    token = create_token(user.id, user.email)
-    
-    return jsonify({
-        'success': True,
-        'token': token,
-        'user': {
-            'id': user.id,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'company_name': user.company_name
-        }
-    }), 201
+        logger.exception(f"Registration error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Registration failed. Please try again.'}), 500
 
 
 @auth_bp.route('/login', methods=['POST'])
