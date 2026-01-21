@@ -18,19 +18,59 @@ export default function DashboardLayout({
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(true);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [systemStatus, setSystemStatus] = useState<"operational" | "degraded" | "down">("operational");
+    const [userName, setUserName] = useState("");
 
     useEffect(() => {
         // Check authentication on mount
-        const authState = getAuthState();
+        const checkAuth = () => {
+            const authState = getAuthState();
 
-        if (!authState.isAuthenticated) {
-            // Not logged in - redirect to login
-            router.replace("/login");
-        } else {
+            if (!authState.isAuthenticated) {
+                // Not logged in - redirect to login immediately
+                router.replace("/login");
+                return; // Don't set loading to false, let redirect happen
+            }
+
+            // User is authenticated
             setIsAuthenticated(true);
             setIsLoading(false);
-        }
+
+            // Get user name for display
+            if (authState.user) {
+                const name = authState.user.name ||
+                    authState.user.first_name ||
+                    authState.user.email?.split('@')[0] ||
+                    "User";
+                setUserName(name);
+            }
+        };
+
+        checkAuth();
+        checkSystemHealth();
     }, [router]);
+
+    // Check system health status
+    const checkSystemHealth = async () => {
+        try {
+            const response = await fetch(`${API_URL}/health`, {
+                method: 'GET',
+                credentials: 'include'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 'healthy') {
+                    setSystemStatus("operational");
+                } else {
+                    setSystemStatus("degraded");
+                }
+            } else {
+                setSystemStatus("down");
+            }
+        } catch (error) {
+            setSystemStatus("down");
+        }
+    };
 
     // Logout handler - calls backend and clears local storage
     const handleLogout = async () => {
@@ -54,7 +94,7 @@ export default function DashboardLayout({
     };
 
     // Show loading while checking auth
-    if (isLoading && !isAuthenticated) {
+    if (isLoading) {
         return (
             <html lang="en">
                 <body className="flex h-screen items-center justify-center bg-gray-50">
@@ -72,6 +112,14 @@ export default function DashboardLayout({
         return null;
     }
 
+    // Get status display
+    const statusConfig = {
+        operational: { text: "All Systems Operational", color: "bg-green-100 text-green-700", icon: "✓" },
+        degraded: { text: "Degraded Performance", color: "bg-yellow-100 text-yellow-700", icon: "⚠" },
+        down: { text: "System Issues", color: "bg-red-100 text-red-700", icon: "✗" }
+    };
+    const status = statusConfig[systemStatus];
+
     return (
         <html lang="en">
             <body className="flex h-screen overflow-hidden">
@@ -84,14 +132,13 @@ export default function DashboardLayout({
                         {/* Header */}
                         <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
                             <div className="flex items-center gap-4">
-                                <h2 className="text-sm text-gray-500">Enterprise Migration Suite</h2>
+                                <h2 className="text-sm text-gray-500">
+                                    Welcome back, <span className="font-medium text-gray-900">{userName}</span>
+                                </h2>
                             </div>
                             <div className="flex items-center gap-4">
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                                    ✓ All Systems Operational
-                                </span>
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                                    🍁 ca-central-1
+                                <span className={`text-xs ${status.color} px-2 py-1 rounded-full`}>
+                                    {status.icon} {status.text}
                                 </span>
                                 <button
                                     onClick={handleLogout}
@@ -112,3 +159,4 @@ export default function DashboardLayout({
         </html>
     );
 }
+

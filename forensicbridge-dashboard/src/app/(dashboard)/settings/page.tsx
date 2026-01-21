@@ -1,8 +1,9 @@
 "use client";
 
 import { WhitelabelPreview } from "@/components/settings/WhitelabelPreview";
-import { useState } from "react";
-import { Palette, Bell, Shield, CreditCard, Users } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Palette, Bell, Shield, CreditCard, Users, Loader2 } from "lucide-react";
+import { getAuthState } from "@/lib/auth";
 
 type SettingsTab = "branding" | "notifications" | "security" | "billing" | "team";
 
@@ -18,9 +19,86 @@ interface WhitelabelConfig {
     website_url: string;
 }
 
+// API configuration
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+interface UserSubscription {
+    tier: string;
+    tierName: string;
+    features: string[];
+    migrationsRemaining?: number;
+}
+
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<SettingsTab>("branding");
     const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+    const [loading, setLoading] = useState(true);
+    const [userName, setUserName] = useState("");
+    const [userEmail, setUserEmail] = useState("");
+    const [subscription, setSubscription] = useState<UserSubscription>({
+        tier: "starter",
+        tierName: "Starter",
+        features: []
+    });
+    const [isEnterprise, setIsEnterprise] = useState(false);
+
+    useEffect(() => {
+        loadUserData();
+    }, []);
+
+    const loadUserData = async () => {
+        setLoading(true);
+        try {
+            // First, get data from localStorage
+            const authState = getAuthState();
+            if (authState.user) {
+                const name = authState.user.name ||
+                    authState.user.first_name ||
+                    authState.user.email?.split('@')[0] ||
+                    "User";
+                setUserName(name);
+                setUserEmail(authState.user.email || "");
+            }
+
+            // Try to fetch subscription from API
+            const response = await fetch(`${API_URL}/api/auth/me`, {
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.user) {
+                    setUserName(data.user.first_name || data.user.name || "User");
+                    setUserEmail(data.user.email || "");
+
+                    // Get subscription tier from user data or license
+                    const tier = data.user.subscription_tier || data.user.tier || "starter";
+                    const tierConfig: Record<string, { name: string, features: string[] }> = {
+                        'starter': { name: 'Starter', features: ['10 migrations/month', 'Email support'] },
+                        'professional': { name: 'Professional', features: ['50 migrations/month', 'Priority support', 'Reports'] },
+                        'enterprise': { name: 'Enterprise', features: ['Unlimited migrations', 'Whitelabel', 'Priority support'] },
+                        'reseller': { name: 'Reseller', features: ['Unlimited migrations', 'Full Whitelabel', 'API Access'] }
+                    };
+
+                    const config = tierConfig[tier] || tierConfig['starter'];
+                    setSubscription({
+                        tier: tier,
+                        tierName: config.name,
+                        features: config.features,
+                        migrationsRemaining: data.user.migrations_remaining
+                    });
+                    setIsEnterprise(tier === 'enterprise' || tier === 'reseller');
+                }
+            }
+        } catch (error) {
+            console.error("Failed to load user data:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSaveWhitelabel = (_config: WhitelabelConfig) => {
         setSaveStatus("saving");
@@ -38,6 +116,14 @@ export default function SettingsPage() {
         { id: "billing" as const, label: "Billing", icon: CreditCard },
         { id: "team" as const, label: "Team", icon: Users },
     ];
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">
@@ -80,7 +166,7 @@ export default function SettingsPage() {
                 {activeTab === "branding" && (
                     <WhitelabelPreview
                         onSave={handleSaveWhitelabel}
-                        isEnterprise={true}
+                        isEnterprise={isEnterprise}
                     />
                 )}
 
@@ -124,8 +210,23 @@ export default function SettingsPage() {
                     <div className="card-forensic p-6">
                         <h2 className="text-lg font-semibold mb-4">Billing & Subscription</h2>
                         <div className="p-4 bg-gradient-to-r from-[var(--forensic-gold)] to-yellow-500 text-white rounded-lg">
-                            <p className="font-bold text-lg">Enterprise Plan</p>
-                            <p className="text-sm opacity-90">Unlimited migrations • Whitelabel • Priority support</p>
+                            <p className="font-bold text-lg">{subscription.tierName} Plan</p>
+                            <p className="text-sm opacity-90">
+                                {subscription.features.join(' • ')}
+                            </p>
+                            {subscription.migrationsRemaining !== undefined && subscription.migrationsRemaining >= 0 && (
+                                <p className="text-sm mt-2 opacity-80">
+                                    Migrations remaining: {subscription.migrationsRemaining}
+                                </p>
+                            )}
+                        </div>
+                        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                            <p className="text-sm text-gray-600">
+                                <strong>Account:</strong> {userEmail}
+                            </p>
+                            <p className="text-sm text-gray-600 mt-1">
+                                <strong>Name:</strong> {userName}
+                            </p>
                         </div>
                     </div>
                 )}
@@ -142,3 +243,4 @@ export default function SettingsPage() {
         </div>
     );
 }
+
