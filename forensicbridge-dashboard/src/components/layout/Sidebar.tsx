@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
     LayoutDashboard,
     Upload,
@@ -14,7 +14,10 @@ import {
     ChevronLeft,
     ExternalLink
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { getAuthState, clearAuth } from "@/lib/auth";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -31,7 +34,58 @@ const bottomNav = [
 
 export function Sidebar() {
     const pathname = usePathname();
+    const router = useRouter();
     const [collapsed, setCollapsed] = useState(false);
+    const [userName, setUserName] = useState("");
+    const [userCompany, setUserCompany] = useState("");
+    const [userInitials, setUserInitials] = useState("");
+
+    // Load user data from localStorage
+    useEffect(() => {
+        const authState = getAuthState();
+        if (authState.user) {
+            // Handle both 'name' and 'first_name' formats from backend
+            const displayName = authState.user.name ||
+                (authState.user as any).first_name ||
+                authState.user.email?.split('@')[0] ||
+                "User";
+            const lastName = (authState.user as any).last_name || "";
+            const fullName = lastName ? `${displayName} ${lastName}` : displayName;
+
+            setUserName(fullName);
+            setUserCompany(
+                authState.user.company ||
+                (authState.user as any).company_name ||
+                "ForensicBridge User"
+            );
+
+            // Generate initials
+            const nameParts = fullName.trim().split(' ').filter(Boolean);
+            if (nameParts.length >= 2) {
+                setUserInitials(`${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`.toUpperCase());
+            } else if (nameParts.length === 1) {
+                setUserInitials(nameParts[0].substring(0, 2).toUpperCase());
+            } else {
+                setUserInitials("U");
+            }
+        }
+    }, []);
+
+    const handleLogout = async () => {
+        try {
+            await fetch(`${API_URL}/api/auth/logout`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                }
+            });
+        } catch (error) {
+            console.error("Backend logout failed:", error);
+        }
+        clearAuth();
+        router.push("/login");
+    };
 
     return (
         <aside className={`flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 ${collapsed ? "w-20" : "w-64"
@@ -113,7 +167,10 @@ export function Sidebar() {
                         </Link>
                     );
                 })}
-                <button className="sidebar-link w-full text-red-500 hover:bg-red-50">
+                <button
+                    onClick={handleLogout}
+                    className="sidebar-link w-full text-red-500 hover:bg-red-50"
+                >
                     <LogOut className="w-5 h-5 flex-shrink-0" />
                     {!collapsed && <span>Logout</span>}
                 </button>
@@ -123,12 +180,12 @@ export function Sidebar() {
             {!collapsed && (
                 <div className="px-4 py-3 border-t border-gray-100">
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
-                            <span className="text-sm font-medium text-gray-600">JS</span>
+                        <div className="w-8 h-8 bg-gradient-to-br from-amber-400 to-amber-600 rounded-full flex items-center justify-center">
+                            <span className="text-sm font-medium text-white">{userInitials || "U"}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 truncate">John Smith</p>
-                            <p className="text-xs text-gray-500 truncate">Enterprise Plan</p>
+                            <p className="text-sm font-medium text-gray-900 truncate">{userName || "User"}</p>
+                            <p className="text-xs text-gray-500 truncate">{userCompany || "ForensicBridge"}</p>
                         </div>
                     </div>
                 </div>
