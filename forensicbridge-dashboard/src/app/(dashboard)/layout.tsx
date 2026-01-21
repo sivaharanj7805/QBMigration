@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { MigrationBalanceBanner } from "@/components/MigrationBalanceBanner";
 import Providers from "../providers";
 import { getAuthState, clearAuth } from "@/lib/auth";
 import { Loader2 } from "lucide-react";
@@ -151,6 +152,7 @@ export default function DashboardLayout({
 
                         {/* Page Content */}
                         <main className="flex-1 overflow-auto bg-gray-50 p-6">
+                            <MigrationBalanceBanner />
                             {children}
                         </main>
                     </div>

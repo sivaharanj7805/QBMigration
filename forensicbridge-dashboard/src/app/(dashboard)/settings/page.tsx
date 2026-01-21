@@ -1,6 +1,7 @@
 "use client";
 
 import { WhitelabelPreview } from "@/components/settings/WhitelabelPreview";
+import { TeamManagement } from "@/components/settings/TeamManagement";
 import { useState, useEffect } from "react";
 import { Palette, Bell, Shield, CreditCard, Users, Loader2 } from "lucide-react";
 import { getAuthState } from "@/lib/auth";
@@ -232,12 +233,7 @@ export default function SettingsPage() {
                 )}
 
                 {activeTab === "team" && (
-                    <div className="card-forensic p-6">
-                        <h2 className="text-lg font-semibold mb-4">Team Members</h2>
-                        <button className="px-4 py-2 bg-[var(--bridge-blue)] text-white rounded-lg">
-                            + Invite Member
-                        </button>
-                    </div>
+                    <TeamManagement />
                 )}
             </div>
         </div>

@@ -54,8 +54,8 @@ export default function RegisterPage() {
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
 
-            // Redirect to dashboard
-            router.push('/');
+            // Redirect to tier selection (new users need to pick a tier)
+            router.push('/select-tier');
         } catch (err) {
             if (err instanceof TypeError && err.message === 'Failed to fetch') {
                 setError('Cannot connect to server. Please check if the API is running.');

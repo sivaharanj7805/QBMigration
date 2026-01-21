@@ -208,6 +208,28 @@ def start_migration(migration_id):
                 'error': 'Migration file not found in cloud storage'
             }), 400
         
+        # ===== MIGRATION BALANCE CHECK =====
+        # Check if user has migrations remaining in their tier
+        if not current_user.has_migrations_remaining():
+            tier_info = current_user.get_tier_info()
+            return jsonify({
+                'success': False,
+                'error': 'No migrations remaining. Please purchase additional migrations.',
+                'migrations_remaining': 0,
+                'migrations_used': tier_info['migrations_used'],
+                'migrations_purchased': tier_info['migrations_purchased'],
+                'tier': tier_info['tier'],
+                'upgrade_required': True
+            }), 403
+        
+        # Check if user has selected a tier at all
+        if not current_user.subscription_tier:
+            return jsonify({
+                'success': False,
+                'error': 'Please select a pricing tier before starting a migration.',
+                'tier_required': True
+            }), 403
+        
         # Get QBO credentials from request
         data = request.get_json() or {}
         qbo_credentials = data.get('qbo_credentials', {})
