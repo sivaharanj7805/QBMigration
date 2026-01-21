@@ -42,13 +42,18 @@ from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
+import threading
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# FIX #13: Don't override global logging configuration
+# Let the application configure logging instead
 logger = logging.getLogger(__name__)
+
+# Only configure if no handlers exist (for standalone usage)
+if not logger.handlers and not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 
 class QBDataTransformer:
@@ -654,10 +659,21 @@ class QBDataTransformer:
                 return date_value.split('T')[0]
             
             # Try auto-detection using config settings
+            # FIX #2: Proper config fallback with defaults
             try:
                 from . import config
             except ImportError:
-                import config
+                try:
+                    import config
+                except ImportError:
+                    # Create config stub with defaults
+                    class config:
+                        DATE_FORMAT_AUTO_DETECT = True
+                        DATE_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"]
+                        REGION = 'US'
+                        DATE_VALIDATION_STRICT = False
+                        DATE_FUTURE_MAX_YEARS = 5
+                        DATE_PAST_MAX_YEARS = 50
             
             # Check if auto-detection is enabled
             if getattr(config, 'DATE_FORMAT_AUTO_DETECT', True):
@@ -701,10 +717,13 @@ class QBDataTransformer:
                     
                     try:
                         return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-                    except:
+                    except (ValueError, TypeError):
+                        # FIX #1: Specific exception instead of bare except
                         pass
         
-        return None
+        # FIX #9: Return a default date or log warning instead of None
+        logger.warning(f"Could not parse date: {date_value}")
+        return None  # Caller should check for None and handle appropriately
     
     def to_decimal(self, value: Any) -> Decimal:
         """Convert to Decimal with 2 decimal places."""
@@ -712,14 +731,20 @@ class QBDataTransformer:
             return Decimal('0')
         try:
             return Decimal(str(value)).quantize(Decimal('0.01'), ROUND_HALF_UP)
-        except:
+        except (ValueError, InvalidOperation, TypeError, ArithmeticError) as e:
+            # FIX #1: Specific exceptions instead of bare except
+            logger.warning(f"Could not convert '{value}' to Decimal: {e}")
             return Decimal('0')
     
     def map_id(self, entity_type: str, qbd_id: Any) -> Optional[str]:
         """Map QB Desktop ID to QB Online ID."""
         if not qbd_id:
             return None
-        return self.id_mapping[entity_type].get(str(qbd_id))
+        qbo_id = self.id_mapping[entity_type].get(str(qbd_id))
+        # FIX #4: Log warning when mapping fails
+        if qbo_id is None:
+            logger.debug(f"No mapping found for {entity_type} ID: {qbd_id}")
+        return qbo_id
     
     def store_mapping(self, entity_type: str, qbd_id: Any, qbo_id: str):
         """Store ID mapping."""
@@ -768,13 +793,25 @@ class QBDataTransformer:
             qbo['SubAccount'] = True
         
         # Trial balance tracking
+        # FIX #5: Handle negative balances correctly
         balance = self.to_decimal(qbd.get('Balance', 0))
-        if qbo['AccountType'] in {'Bank', 'Accounts Receivable', 'Other Current Assets',
+        abs_balance = abs(balance)
+        is_debit_type = qbo['AccountType'] in {'Bank', 'Accounts Receivable', 'Other Current Assets',
                                    'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
-                                   'Expense', 'Other Expense'}:
-            self.trial_balance['debits'] += balance
+                                   'Expense', 'Other Expense'}
+        
+        if is_debit_type:
+            if balance >= 0:
+                self.trial_balance['debits'] += abs_balance
+            else:
+                # Negative balance in debit account goes to credits
+                self.trial_balance['credits'] += abs_balance
         else:
-            self.trial_balance['credits'] += balance
+            if balance >= 0:
+                self.trial_balance['credits'] += abs_balance
+            else:
+                # Negative balance in credit account goes to debits
+                self.trial_balance['debits'] += abs_balance
         
         return qbo
     
@@ -786,12 +823,25 @@ class QBDataTransformer:
         }
         
         if qbd.get('CompanyName'):
-            qbo['CompanyName'] = qbd['CompanyName'][:100]
+            original_name = qbd['CompanyName']
+            truncated_name = original_name[:100]
+            if len(original_name) > 100:
+                # FIX #7: Log warning when truncation occurs
+                logger.warning(f"Truncated CompanyName from {len(original_name)} to 100 chars: {truncated_name}...")
+            qbo['CompanyName'] = truncated_name
         
         if qbd.get('FirstName'):
-            qbo['GivenName'] = qbd['FirstName'][:25]
+            original = qbd['FirstName']
+            truncated = original[:25]
+            if len(original) > 25:
+                logger.warning(f"Truncated FirstName from {len(original)} to 25 chars")
+            qbo['GivenName'] = truncated
         if qbd.get('LastName'):
-            qbo['FamilyName'] = qbd['LastName'][:25]
+            original = qbd['LastName']
+            truncated = original[:25]
+            if len(original) > 25:
+                logger.warning(f"Truncated LastName from {len(original)} to 25 chars")
+            qbo['FamilyName'] = truncated
         
         if qbd.get('Email'):
             qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}

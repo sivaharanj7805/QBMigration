@@ -299,10 +299,20 @@ export function WhitelabelPreview({
                             )}
                             <span className="font-semibold">{config.company_name} Migration Suite</span>
                         </div>
+                        {/* Sample data indicator */}
+                        <span className="text-xs bg-white/20 px-2 py-0.5 rounded">
+                            PREVIEW
+                        </span>
                     </div>
 
                     <div className="p-6 space-y-4">
+                        {/* Sample Data Notice */}
+                        <div className="text-xs text-center text-gray-500 bg-gray-100 rounded py-1 mb-2">
+                            📋 Sample data shown for preview purposes only
+                        </div>
+
                         {/* Preview Stat Cards */}
+
                         <div className="grid grid-cols-2 gap-3">
                             <div
                                 className="p-4 rounded-lg text-white"
