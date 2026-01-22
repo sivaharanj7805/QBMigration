@@ -208,27 +208,44 @@ def start_migration(migration_id):
                 'error': 'Migration file not found in cloud storage'
             }), 400
         
-        # ===== MIGRATION BALANCE CHECK =====
-        # Check if user has migrations remaining in their tier
-        if not current_user.has_migrations_remaining():
-            tier_info = current_user.get_tier_info()
-            return jsonify({
-                'success': False,
-                'error': 'No migrations remaining. Please purchase additional migrations.',
-                'migrations_remaining': 0,
-                'migrations_used': tier_info['migrations_used'],
-                'migrations_purchased': tier_info['migrations_purchased'],
-                'tier': tier_info['tier'],
-                'upgrade_required': True
-            }), 403
+        # ===== MIGRATION CREDIT CHECK =====
+        # Use the new MigrationCredit system for proper type-based tracking
+        from models.migration_credit import MigrationCredit
         
-        # Check if user has selected a tier at all
-        if not current_user.subscription_tier:
-            return jsonify({
-                'success': False,
-                'error': 'Please select a pricing tier before starting a migration.',
-                'tier_required': True
-            }), 403
+        # Get transaction count from migration metadata (if available)
+        transaction_count = getattr(migration, 'total_transactions', 0) or 0
+        
+        # Find a suitable credit for this migration
+        credit = MigrationCredit.find_best_credit(current_user.id, transaction_count)
+        
+        if not credit:
+            # Check if user has any credits at all
+            available_credits = MigrationCredit.get_available_for_user(current_user.id)
+            
+            if not available_credits:
+                # No credits at all
+                return jsonify({
+                    'success': False,
+                    'error': 'No migration credits available. Please purchase a migration first.',
+                    'migrations_remaining': 0,
+                    'upgrade_required': True,
+                    'redirect_to': '/select-tier'
+                }), 403
+            else:
+                # Has credits but none suitable for this transaction count
+                highest_limit = max(c.transaction_limit for c in available_credits if c.transaction_limit != -1)
+                return jsonify({
+                    'success': False,
+                    'error': f'This file has {transaction_count:,} transactions but your highest available credit only covers {highest_limit:,} transactions. Please purchase a larger migration tier.',
+                    'transaction_count': transaction_count,
+                    'highest_available_limit': highest_limit,
+                    'upgrade_required': True,
+                    'redirect_to': '/select-tier'
+                }), 403
+        
+        # Store the credit ID to use after migration completes
+        # This will be used by the webhook to mark the credit as used
+        migration.migration_credit_id = credit.id
         
         # Get QBO credentials from request
         data = request.get_json() or {}

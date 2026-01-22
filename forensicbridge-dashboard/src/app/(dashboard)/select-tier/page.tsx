@@ -76,27 +76,31 @@ export default function TierSelectionPage() {
 
         try {
             const token = localStorage.getItem('token');
-            const endpoint = isUpgrade ? '/api/auth/upgrade-tier' : '/api/auth/select-tier';
 
-            const response = await fetch(`${API_URL}${endpoint}`, {
+            // Create Stripe checkout session
+            const response = await fetch(`${API_URL}/api/payments/create-checkout`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ tier_id: tierId })
+                body: JSON.stringify({ tier_type: tierId })
             });
 
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to select tier');
+                throw new Error(data.error || 'Failed to create checkout session');
             }
 
-            // Success - redirect to dashboard
-            router.push('/');
+            if (data.checkout_url) {
+                // Redirect to Stripe Checkout
+                window.location.href = data.checkout_url;
+            } else {
+                throw new Error('No checkout URL returned');
+            }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to select tier');
+            setError(err instanceof Error ? err.message : 'Failed to start checkout');
             setSelectedTier(null);
         } finally {
             setPurchasing(false);
