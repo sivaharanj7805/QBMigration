@@ -281,16 +281,32 @@ def migration_completed():
         # Mark as completed
         migration.mark_as_completed(results)
         
-        # ===== DEDUCT MIGRATION FROM USER BALANCE =====
-        # Find the user and deduct one migration from their balance
-        from models.user import User
-        user = User.query.get(migration.user_id)
-        if user:
-            if user.use_migration():
-                logger.info(f"Migration deducted for user {user.email}. Remaining: {user.get_migrations_remaining()}")
-                db.session.commit()
+        # ===== MARK MIGRATION CREDIT AS USED =====
+        # Use the new MigrationCredit system
+        from models.migration_credit import MigrationCredit
+        
+        # Get the credit ID that was assigned when migration started
+        credit_id = getattr(migration, 'migration_credit_id', None)
+        
+        if credit_id:
+            # Mark the specific credit as used
+            credit = MigrationCredit.query.get(credit_id)
+            if credit and credit.status == 'available':
+                transaction_count = results.get('total_transactions', 0)
+                credit.use_for_migration(migration.migration_id, transaction_count)
+                logger.info(f"MigrationCredit {credit_id} marked as used for migration {migration_id}")
             else:
-                logger.warning(f"Could not deduct migration for user {user.email} - balance already at 0")
+                logger.warning(f"Credit {credit_id} not available for migration {migration_id}")
+        else:
+            # Fallback: Use old system if credit_id not set
+            from models.user import User
+            user = User.query.get(migration.user_id)
+            if user:
+                if user.use_migration():
+                    logger.info(f"Migration deducted for user {user.email} (legacy). Remaining: {user.get_migrations_remaining()}")
+                    db.session.commit()
+                else:
+                    logger.warning(f"Could not deduct migration for user {user.email} - balance already at 0")
         
         logger.info(f"Migration {migration_id} completed successfully")
         

@@ -32,6 +32,7 @@ from api.webhook_delivery_log import webhook_logs_bp
 from api.license_api import license_bp
 from api.qbo import qbo_bp
 from api.legal import legal_bp
+from api.payments import payments_bp
 import sys
 
 
@@ -173,7 +174,7 @@ def auto_migrate_database(app):
     """
     try:
         with db.engine.connect() as conn:
-            # Add all potentially missing columns
+            # Add all potentially missing columns to users table
             conn.execute(text("""
                 ALTER TABLE users 
                 ADD COLUMN IF NOT EXISTS qbo_access_token TEXT,
@@ -188,6 +189,37 @@ def auto_migrate_database(app):
                 ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255),
                 ADD COLUMN IF NOT EXISTS stripe_payment_intent VARCHAR(255)
             """))
+            
+            # Create migration_credits table if it doesn't exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS migration_credits (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    tier_type VARCHAR(50) NOT NULL,
+                    transaction_limit INTEGER NOT NULL,
+                    price_cents INTEGER NOT NULL,
+                    stripe_checkout_session_id VARCHAR(255),
+                    stripe_payment_intent_id VARCHAR(255),
+                    payment_status VARCHAR(50) DEFAULT 'pending',
+                    status VARCHAR(50) DEFAULT 'pending',
+                    migration_id VARCHAR(36),
+                    transactions_used INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    paid_at TIMESTAMP,
+                    used_at TIMESTAMP
+                )
+            """))
+            
+            # Add migration_credit_id to migrations table for tracking which credit was used
+            try:
+                conn.execute(text("""
+                    ALTER TABLE migrations 
+                    ADD COLUMN IF NOT EXISTS migration_credit_id INTEGER REFERENCES migration_credits(id),
+                    ADD COLUMN IF NOT EXISTS total_transactions INTEGER DEFAULT 0
+                """))
+            except Exception:
+                pass  # Column may already exist
+            
             conn.commit()
             app.logger.info('Database schema verified/updated successfully')
     except Exception as e:
@@ -300,7 +332,8 @@ def create_app(config_name='development'):
     app.register_blueprint(license_bp)
     app.register_blueprint(qbo_bp)
     app.register_blueprint(legal_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal')
+    app.register_blueprint(payments_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, payments')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

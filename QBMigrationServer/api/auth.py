@@ -299,6 +299,23 @@ def get_current_user():
             'has_tier': False
         }
     
+    # Get migration credits breakdown by type
+    try:
+        from models.migration_credit import MigrationCredit
+        credits_summary = MigrationCredit.get_credits_summary(user.id)
+        
+        # Calculate totals from credits
+        total_available = sum(t.get('available', 0) for t in credits_summary.values())
+        total_used = sum(t.get('used', 0) for t in credits_summary.values())
+        has_credits = total_available > 0
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Could not get credits summary: {e}")
+        credits_summary = {}
+        total_available = tier_info['migrations_remaining']
+        total_used = tier_info['migrations_used']
+        has_credits = total_available > 0
+    
     return jsonify({
         'success': True,
         'user': {
@@ -309,13 +326,17 @@ def get_current_user():
             'name': user.first_name,  # Alias for frontend compatibility
             'company_name': user.company_name,
             'created_at': user.created_at.isoformat() if user.created_at else None,
-            # Tier info
+            # Legacy tier info (for backward compatibility)
             'subscription_tier': tier_info['tier'],
             'tier_name': tier_info['tier_name'],
-            'migrations_remaining': tier_info['migrations_remaining'],
-            'migrations_purchased': tier_info['migrations_purchased'],
-            'migrations_used': tier_info['migrations_used'],
-            'has_tier': tier_info['has_tier']
+            'migrations_remaining': total_available,
+            'migrations_purchased': total_available + total_used,
+            'migrations_used': total_used,
+            'has_tier': has_credits or tier_info['has_tier'],
+            # New: Credits breakdown by type
+            'migration_credits': credits_summary,
+            'total_credits_available': total_available,
+            'total_credits_used': total_used
         }
     })
 
