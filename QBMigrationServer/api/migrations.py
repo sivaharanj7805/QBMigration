@@ -13,14 +13,40 @@ logger = logging.getLogger(__name__)
 @migrations_bp.route('/api/migrations', methods=['GET'])
 @login_required
 def list_migrations():
-    """List all migrations for current user"""
+    """
+    List migrations for current user with pagination support.
+
+    Query Parameters:
+        page (int): Page number (default: 1)
+        per_page (int): Items per page (default: 50, max: 100)
+        status (str): Filter by status (optional)
+    """
     try:
-        migrations = Migration.query.filter_by(user_id=current_user.id)\
-            .order_by(Migration.created_at.desc()).all()
-        
+        # SECURITY FIX: Add pagination to prevent large result sets
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        status_filter = request.args.get('status', None, type=str)
+
+        # Validate pagination parameters
+        page = max(1, page)  # Minimum page is 1
+        per_page = min(100, max(1, per_page))  # Between 1 and 100
+
+        # Build query
+        query = Migration.query.filter_by(user_id=current_user.id)
+
+        # Apply status filter if provided
+        if status_filter:
+            query = query.filter_by(status=status_filter)
+
+        # Order by creation date (newest first)
+        query = query.order_by(Migration.created_at.desc())
+
+        # Paginate
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
         # Serialize migrations properly (handle missing fields)
         migrations_data = []
-        for migration in migrations:
+        for migration in pagination.items:
             migration_dict = {
                 'id': migration.id,
                 'migration_id': migration.migration_id,
@@ -32,18 +58,27 @@ def list_migrations():
                 'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
                 's3_uri': migration.s3_uri
             }
-            
+
             # Add optional fields only if they exist
             if hasattr(migration, 'error_message'):
                 migration_dict['error_message'] = migration.error_message
             if hasattr(migration, 'updated_at') and migration.updated_at:
                 migration_dict['updated_at'] = migration.updated_at.isoformat()
-            
+
             migrations_data.append(migration_dict)
-        
+
         return jsonify({
             'success': True,
             'migrations': migrations_data,
+            'pagination': {
+                'page': pagination.page,
+                'per_page': pagination.per_page,
+                'total_pages': pagination.pages,
+                'total_items': pagination.total,
+                'has_next': pagination.has_next,
+                'has_prev': pagination.has_prev
+            },
+            # Legacy compatibility
             'count': len(migrations_data)
         }), 200
         
