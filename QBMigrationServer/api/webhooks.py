@@ -6,6 +6,7 @@ import logging
 import hmac
 import hashlib
 import uuid
+from utils.pii_redaction import hash_email
 
 webhooks_bp = Blueprint('webhooks', __name__)
 logger = logging.getLogger(__name__)
@@ -299,28 +300,38 @@ def migration_completed():
         credit_id = getattr(migration, 'migration_credit_id', None)
 
         if credit_id:
-            # CRITICAL FIX: Use database-level locking to prevent double-usage
-            credit = MigrationCredit.query.filter_by(
-                id=credit_id,
-                status='available'
-            ).with_for_update().first()  # Database row lock
+            # CRITICAL FIX: Wrap entire credit deduction in nested transaction for atomicity
+            try:
+                with db.session.begin_nested():  # Creates SAVEPOINT
+                    # Database row lock (SELECT ... FOR UPDATE)
+                    credit = MigrationCredit.query.filter_by(
+                        id=credit_id,
+                        status='available'
+                    ).with_for_update().first()
 
-            if credit:
-                transaction_count = results.get('total_transactions', 0)
-                credit.use_for_migration(migration.migration_id, transaction_count)
-                logger.info(f"MigrationCredit {credit_id} marked as used for migration {migration_id}")
-            else:
-                logger.warning(f"Credit {credit_id} not available or already used for migration {migration_id}")
+                    if credit:
+                        transaction_count = results.get('total_transactions', 0)
+                        credit.use_for_migration(migration.migration_id, transaction_count)
+                        logger.info(f"MigrationCredit {credit_id} marked as used for migration {migration_id}")
+                    else:
+                        logger.warning(f"Credit {credit_id} not available or already used for migration {migration_id}")
+
+                # Commit outer transaction
+                db.session.commit()
+            except Exception as e:
+                logger.error(f"Failed to mark credit as used: {e}")
+                db.session.rollback()
+                # Don't fail entire webhook - migration completed successfully
         else:
             # Fallback: Use old system if credit_id not set
             from models.user import User
             user = User.query.get(migration.user_id)
             if user:
                 if user.use_migration():
-                    logger.info(f"Migration deducted for user {user.email} (legacy). Remaining: {user.get_migrations_remaining()}")
+                    logger.info(f"Migration deducted for user {hash_email(user.email)} (legacy). Remaining: {user.get_migrations_remaining()}")
                     db.session.commit()
                 else:
-                    logger.warning(f"Could not deduct migration for user {user.email} - balance already at 0")
+                    logger.warning(f"Could not deduct migration for user {hash_email(user.email)} - balance already at 0")
         
         logger.info(f"Migration {migration_id} completed successfully")
         

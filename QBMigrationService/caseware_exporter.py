@@ -40,117 +40,58 @@ except ImportError:
     chardet = None
     logging.getLogger(__name__).warning("chardet not installed - using utf-8 fallback for encoding detection")
 
+# FIX #33: Import locale-aware lead sheet mapper
+from leadsheet_mapper import LeadSheetMapper, AccountingStandard
+
 logger = logging.getLogger(__name__)
 
 
 class CasewareExporter:
     """
     Generates Caseware Audit Bundle from QB Desktop extracted data.
-    
+
     The "Caseware Mode" alternative to QBO migration.
+
+    FIX #33: Now supports locale-aware lead sheet code mapping for:
+    - US GAAP (United States)
+    - Canadian GAAP (Canada)
+    - IFRS (International)
     """
-    
+
     VERSION = "1.0.0"
-    
-    # Caseware Lead Sheet Code Mappings
-    # Expanded for Agricultural, Manufacturing, and high-value sectors
-    LEAD_SHEET_CODES = {
-        # Assets - General
-        'Bank': 'A1',
-        'Accounts Receivable': 'A2',
-        'Other Current Assets': 'A3',
-        'Fixed Assets': 'A4',
-        'Other Assets': 'A5',
-        'Inventory': 'A3.1',
-        'Prepaid Expenses': 'A3.2',
-        
-        # Assets - Agricultural (High-value sector)
-        'Livestock': 'A6.1',
-        'Crops': 'A6.2',
-        'Agricultural Inventory': 'A6.3',
-        'Farm Equipment': 'A6.4',
-        'Agricultural Land': 'A6.5',
-        'Breeding Stock': 'A6.6',
-        'Growing Crops': 'A6.7',
-        'Harvested Crops': 'A6.8',
-        
-        # Assets - Manufacturing (High-value sector)
-        'Raw Materials': 'A7.1',
-        'Work in Process': 'A7.2',
-        'Finished Goods': 'A7.3',
-        'Manufacturing Equipment': 'A7.4',
-        'Factory Buildings': 'A7.5',
-        'Tooling': 'A7.6',
-        'Packaging Materials': 'A7.7',
-        'Production Supplies': 'A7.8',
-        
-        # Assets - Other Industries
-        'Construction in Progress': 'A8.1',
-        'Software Development': 'A8.2',
-        'Oil & Gas Equipment': 'A8.3',
-        'Mining Assets': 'A8.4',
-        'Real Estate Held for Sale': 'A8.5',
-        
-        # Liabilities
-        'Accounts Payable': 'L1',
-        'Credit Card': 'L2',
-        'Other Current Liabilities': 'L3',
-        'Long Term Liabilities': 'L4',
-        'Sales Tax Payable': 'L3.1',
-        'Payroll Liabilities': 'L3.2',
-        'Accrued Liabilities': 'L3.3',
-        'Deferred Revenue': 'L3.4',
-        'Mortgage Payable': 'L4.1',
-        'Equipment Loans': 'L4.2',
-        
-        # Equity
-        'Equity': 'E1',
-        'Retained Earnings': 'E2',
-        'Opening Balance Equity': 'E3',
-        'Shareholder Equity': 'E4',
-        'Partner Capital': 'E5',
-        
-        # Income
-        'Income': 'R1',
-        'Other Income': 'R2',
-        'Sales': 'R1.1',
-        'Service Income': 'R1.2',
-        'Agricultural Sales': 'R1.3',
-        'Manufacturing Sales': 'R1.4',
-        'Contract Revenue': 'R1.5',
-        
-        # Cost of Goods Sold
-        'Cost of Goods Sold': 'C1',
-        'Direct Labor': 'C2',
-        'Manufacturing Overhead': 'C3',
-        'Agricultural COGS': 'C4',
-        
-        # Expenses
-        'Expense': 'X1',
-        'Other Expense': 'X2',
-        'Depreciation': 'X3',
-        'Amortization': 'X4',
-    }
-    
+
     # Account type classification for debit/credit determination
     DEBIT_TYPES = {
         'Bank', 'Accounts Receivable', 'Other Current Assets',
         'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
         'Expense', 'Other Expense', 'Inventory'
     }
-    
-    def __init__(self, output_dir: str, company_name: str = "Company"):
+
+    def __init__(self, output_dir: str, company_name: str = "Company",
+                 company_data: Optional[Dict] = None):
         """
         Initialize Caseware Exporter.
-        
+
         Args:
             output_dir: Directory to write audit bundle files
             company_name: Company name for report headers
+            company_data: QB company data for locale detection (optional)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.company_name = company_name
-        
+
+        # FIX #33: Initialize locale-aware lead sheet mapper
+        self.leadsheet_mapper = LeadSheetMapper()
+
+        # Detect accounting standard from company data if provided
+        if company_data:
+            standard = self.leadsheet_mapper.detect_accounting_standard(company_data)
+            logger.info(f"Detected accounting standard: {standard}")
+        else:
+            logger.warning("No company data provided - defaulting to US_GAAP")
+            self.leadsheet_mapper.detected_standard = 'US_GAAP'
+
         # Statistics (thread-safe)
         self._stats_lock = threading.Lock()
         self.stats = {
@@ -158,9 +99,10 @@ class CasewareExporter:
             'transactions_exported': 0,
             'total_debits': Decimal('0'),
             'total_credits': Decimal('0'),
-            'hashes_generated': 0
+            'hashes_generated': 0,
+            'accounting_standard': self.leadsheet_mapper.detected_standard
         }
-        
+
         logger.info(f"CasewareExporter v{self.VERSION} initialized. Output: {self.output_dir}")
     
     # ========================================================================
@@ -317,10 +259,10 @@ class CasewareExporter:
             balance = self._to_decimal(account.get('balance') or account.get('Balance') or account.get('CurrentBalance', 0))
             
             # Determine type code
-            type_code = self._get_type_code(acct_type)
-            
-            # Get Lead Sheet code
-            lead_sheet = self.LEAD_SHEET_CODES.get(acct_type, 'X9')
+            type_code = self.leadsheet_mapper.get_type_code(acct_type)
+
+            # FIX #33: Get Lead Sheet code from locale-aware mapper
+            lead_sheet = self.leadsheet_mapper.get_lead_sheet_code(acct_type)
             
             # Determine debit/credit
             if acct_type in self.DEBIT_TYPES:
@@ -609,8 +551,10 @@ class CasewareExporter:
                 "OutputFormat": "lowercase_hex",
                 "Description": "Each row contains a cryptographic hash that auditors can use to verify the digital fingerprint of individual transactions."
             },
-            
-            "LeadSheetCodes": self.LEAD_SHEET_CODES
+
+            # FIX #33: Use locale-aware lead sheet codes
+            "AccountingStandard": self.leadsheet_mapper.detected_standard,
+            "LeadSheetCodes": self.leadsheet_mapper.get_lead_sheet_codes()
         }
         
         try:
@@ -660,10 +604,16 @@ class CasewareExporter:
         logger.info("="*60)
         logger.info("GENERATING CASEWARE AUDIT BUNDLE")
         logger.info("="*60)
-        
-        # Extract company name from data
+
+        # FIX #33: Detect accounting standard from company data if not already detected
         if 'company' in qb_data:
             self.company_name = qb_data['company'].get('companyName', self.company_name)
+
+            # Detect locale if not already done
+            if not self.leadsheet_mapper.detected_standard:
+                standard = self.leadsheet_mapper.detect_accounting_standard(qb_data['company'])
+                logger.info(f"Detected accounting standard: {standard}")
+                self.stats['accounting_standard'] = standard
         
         result = {
             'success': True,
@@ -948,24 +898,6 @@ class CasewareExporter:
             else:
                 return (Decimal('0'), abs(amount))
     
-    def _get_type_code(self, account_type: str) -> str:
-        """Get single-letter type code for Caseware."""
-        type_map = {
-            'Bank': 'A', 'Accounts Receivable': 'A', 'Other Current Assets': 'A',
-            'Fixed Assets': 'A', 'Other Assets': 'A', 'Inventory': 'A',
-            'Undeposited Funds': 'A',  # FIX #7: Added missing type
-            'Accounts Payable': 'L', 'Credit Card': 'L', 'Other Current Liabilities': 'L',
-            'Long Term Liabilities': 'L',
-            'Equity': 'E', 'Retained Earnings': 'E', 'Opening Balance Equity': 'E',
-            'Income': 'R', 'Other Income': 'R',
-            'Cost of Goods Sold': 'C',
-            'Expense': 'X', 'Other Expense': 'X'
-        }
-        code = type_map.get(account_type, None)
-        if code is None:
-            logger.warning(f"Unmapped account type: {account_type}, defaulting to X")
-            return 'X'
-        return code
     
     def _create_verification_manifest(self, result: Dict):
         """Create a verification manifest with bundle metadata."""
@@ -1021,12 +953,13 @@ def add_caseware_mode_to_transformer():
             Dict with file paths and statistics
         """
         logger.info("🏛️ CASEWARE MODE ACTIVATED")
-        
-        # Get company name
-        company_name = qb_data.get('company', {}).get('companyName', 'Company')
-        
-        # Create exporter
-        exporter = CasewareExporter(output_dir, company_name)
+
+        # Get company data for locale detection
+        company_data = qb_data.get('company', {})
+        company_name = company_data.get('companyName', 'Company')
+
+        # FIX #33: Create exporter with company data for locale detection
+        exporter = CasewareExporter(output_dir, company_name, company_data)
         
         # Generate bundle
         result = exporter.generate_audit_bundle(
@@ -1078,8 +1011,10 @@ if __name__ == "__main__":
         print(f"❌ Cannot read file: {e}")
         sys.exit(1)
     
-    # Generate bundle
-    exporter = CasewareExporter(output_dir)
+    # FIX #33: Generate bundle with company data for locale detection
+    company_data = qb_data.get('company', {})
+    company_name = company_data.get('companyName', 'Company')
+    exporter = CasewareExporter(output_dir, company_name, company_data)
     result = exporter.generate_audit_bundle(qb_data)
     
     print(f"\n✅ Caseware Audit Bundle generated in: {output_dir}")

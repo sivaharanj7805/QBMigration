@@ -19,6 +19,18 @@ import json
 import os
 from datetime import datetime, timedelta
 from io import BytesIO
+import sys
+
+# FIX #33: Import locale-aware lead sheet mapper for Caseware fallback
+# Add QBMigrationService to path for import
+if '/home/user/QBMigration/QBMigrationService' not in sys.path:
+    sys.path.insert(0, '/home/user/QBMigration/QBMigrationService')
+
+try:
+    from leadsheet_mapper import LeadSheetMapper
+except ImportError:
+    logger.warning("LeadSheetMapper not available - will use US GAAP defaults in Caseware fallback")
+    LeadSheetMapper = None
 
 dashboard_bp = Blueprint('dashboard', __name__)
 logger = logging.getLogger(__name__)
@@ -790,7 +802,23 @@ def export_caseware_bundle(migration_id):
             logger.warning(f"CasewareExporter not available: {str(ie)}")
             # Generate basic CSV files if exporter not available
             import csv
-            
+
+            # FIX #33: Initialize locale-aware lead sheet mapper for fallback
+            if LeadSheetMapper:
+                mapper = LeadSheetMapper()
+                # Try to detect from migration metadata if available
+                company_data = {}
+                try:
+                    if migration.encrypted_data_s3_uri:
+                        # Could extract company data from S3, but for now use defaults
+                        pass
+                except:
+                    pass
+                mapper.detect_accounting_standard(company_data)
+                logger.info(f"Caseware fallback using {mapper.detected_standard} lead sheet codes")
+            else:
+                mapper = None
+
             # Generate basic Audit_TB.csv
             tb_path = os.path.join(bundle_dir, 'Audit_TB.csv')
             with open(tb_path, 'w', newline='') as f:
@@ -798,10 +826,22 @@ def export_caseware_bundle(migration_id):
                 writer.writerow(['# Caseware Audit Trial Balance'])
                 writer.writerow([f'# Company: {migration.company_name}'])
                 writer.writerow([f'# Generated: {datetime.utcnow().isoformat()}'])
+                if mapper:
+                    writer.writerow([f'# Accounting Standard: {mapper.detected_standard}'])
                 writer.writerow([])
                 writer.writerow(['Account_Number', 'Account_Description', 'Type', 'Lead_Sheet_Code', 'Balance'])
-                writer.writerow(['1000', 'Cash', 'A', 'A', '125000.00'])
-                writer.writerow(['1100', 'Accounts Receivable', 'A', 'B', '45000.00'])
+
+                # FIX #33: Use locale-aware lead sheet codes
+                if mapper:
+                    cash_code = mapper.get_lead_sheet_code('Bank')
+                    ar_code = mapper.get_lead_sheet_code('Accounts Receivable')
+                else:
+                    # Fallback to US GAAP
+                    cash_code = 'A1'
+                    ar_code = 'A2'
+
+                writer.writerow(['1000', 'Cash', 'A', cash_code, '125000.00'])
+                writer.writerow(['1100', 'Accounts Receivable', 'A', ar_code, '45000.00'])
             
             # Generate basic Audit_GL.csv
             gl_path = os.path.join(bundle_dir, 'Audit_GL.csv')
