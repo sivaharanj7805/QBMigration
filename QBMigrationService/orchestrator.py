@@ -22,6 +22,7 @@ import os
 import sys
 import json
 import logging
+import uuid
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime
 
@@ -394,42 +395,56 @@ if __name__ == '__main__':
     import requests
     import hmac
     import hashlib
-    
-    webhook_data = json.dumps(result)
+    from datetime import datetime
+
+    # SECURITY FIX: Align signature algorithm with server expectations
+    # Server expects: HMAC-SHA256(migration_id:timestamp)
+    webhook_timestamp = datetime.utcnow().isoformat() + 'Z'
+    message = f"{args.migration_id}:{webhook_timestamp}"
+
     signature = hmac.new(
-        args.webhook_secret.encode(),
-        webhook_data.encode(),
+        args.webhook_secret.encode('utf-8'),
+        message.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
-    
+
+    # Generate unique webhook ID for idempotency
+    webhook_id = str(uuid.uuid4())
+
     endpoint = 'migration-completed' if result['success'] else 'migration-failed'
-    
-    # Report result to server via webhook with retry
-    try:
-        response = requests.post(
-            f"{args.server_url}/api/webhooks/{endpoint}",
-            json=result,
-            headers={
-                'X-Migration-Id': args.migration_id,
-                'X-Webhook-Signature': f'sha256={signature}'
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Webhook failed, retrying: {e}")
+
+    # RELIABILITY FIX: Report result to server via webhook with exponential backoff
+    max_retries = 5
+    base_delay = 2  # seconds
+
+    webhook_url = f"{args.server_url}/api/webhooks/{endpoint}"
+    webhook_headers = {
+        'X-Migration-Id': args.migration_id,
+        'X-Webhook-Signature': signature,
+        'X-Webhook-Timestamp': webhook_timestamp,
+        'X-Webhook-Id': webhook_id
+    }
+
+    for attempt in range(max_retries):
         try:
-            time.sleep(5)
-            requests.post(
-                f"{args.server_url}/api/webhooks/{endpoint}",
+            response = requests.post(
+                webhook_url,
                 json=result,
-                headers={
-                    'X-Migration-Id': args.migration_id,
-                    'X-Webhook-Signature': f'sha256={signature}'
-                },
+                headers=webhook_headers,
                 timeout=30
             )
-        except:
-            logger.error("Webhook retry failed")
+            response.raise_for_status()
+            logger.info(f"Webhook delivered successfully on attempt {attempt + 1}")
+            break  # Success - exit retry loop
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                # Calculate exponential backoff: 2s, 4s, 8s, 16s
+                delay = base_delay * (2 ** attempt)
+                logger.warning(f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Webhook failed after {max_retries} attempts: {e}")
+                # Don't raise - allow migration to continue even if webhook fails
     
     sys.exit(0 if result['success'] else 1)

@@ -183,32 +183,53 @@ class AWSMigrationManager:
                 return False
             
             # List objects with migration_id prefix
+            # CRITICAL FIX: Paginate through S3 results (limit is 1000 per call)
             prefix = f"migrations/"
-            response = self.s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix
-            )
-            
-            if 'Contents' not in response:
-                logger.warning(f"No objects found for migration {migration_id}")
-                return True
-            
-            # Delete all objects for this migration
             deleted_count = 0
-            for obj in response['Contents']:
-                key = obj['Key']
-                
-                if migration_id in key:
-                    logger.info(f"Deleting S3 object: {key}")
-                    
-                    self.s3.delete_object(
-                        Bucket=bucket_name,
-                        Key=key
-                    )
-                    
-                    deleted_count += 1
-            
-            logger.info(f"Deleted {deleted_count} S3 objects for migration {migration_id}")
+            continuation_token = None
+            page_count = 0
+
+            while True:
+                page_count += 1
+
+                # Build list_objects_v2 params
+                list_params = {
+                    'Bucket': bucket_name,
+                    'Prefix': prefix,
+                    'MaxKeys': 1000
+                }
+
+                if continuation_token:
+                    list_params['ContinuationToken'] = continuation_token
+
+                response = self.s3.list_objects_v2(**list_params)
+
+                # Process objects in this page
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+
+                        if migration_id in key:
+                            logger.info(f"Deleting S3 object: {key}")
+
+                            self.s3.delete_object(
+                                Bucket=bucket_name,
+                                Key=key
+                            )
+
+                            deleted_count += 1
+
+                # Check if there are more pages
+                if response.get('IsTruncated'):
+                    continuation_token = response.get('NextContinuationToken')
+                    logger.info(f"S3 cleanup page {page_count} complete, continuing to next page...")
+                else:
+                    break  # No more pages
+
+            if deleted_count == 0:
+                logger.warning(f"No objects found for migration {migration_id} after {page_count} page(s)")
+            else:
+                logger.info(f"S3 cleanup complete: {deleted_count} object(s) deleted across {page_count} page(s)")
             
             # Publish metric
             self._publish_metric('S3FilesDeleted', deleted_count, 'Count')

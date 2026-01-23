@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -332,6 +333,146 @@ namespace QBDesktopExtractor
             return ComputeHash(hashInput.ToString());
         }
         
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Customer entity
+        /// </summary>
+        public static string ComputeCustomerHash(QBCustomer customer)
+        {
+            if (customer == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{customer.ListID ?? ""}|");
+            hashInput.Append($"Name:{customer.Name ?? ""}|");
+            hashInput.Append($"CompanyName:{customer.CompanyName ?? ""}|");
+            hashInput.Append($"Email:{customer.Email ?? ""}|");
+            hashInput.Append($"Phone:{customer.Phone ?? ""}|");
+            hashInput.Append($"Balance:{customer.Balance?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Vendor entity
+        /// </summary>
+        public static string ComputeVendorHash(QBVendor vendor)
+        {
+            if (vendor == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{vendor.ListID ?? ""}|");
+            hashInput.Append($"Name:{vendor.Name ?? ""}|");
+            hashInput.Append($"CompanyName:{vendor.CompanyName ?? ""}|");
+            hashInput.Append($"Email:{vendor.Email ?? ""}|");
+            hashInput.Append($"Phone:{vendor.Phone ?? ""}|");
+            hashInput.Append($"Balance:{vendor.Balance?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Employee entity
+        /// </summary>
+        public static string ComputeEmployeeHash(QBEmployee employee)
+        {
+            if (employee == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{employee.ListID ?? ""}|");
+            hashInput.Append($"Name:{employee.Name ?? ""}|");
+            hashInput.Append($"FirstName:{employee.FirstName ?? ""}|");
+            hashInput.Append($"LastName:{employee.LastName ?? ""}|");
+            hashInput.Append($"SSN:{employee.SSN ?? ""}|");  // Hash includes SSN for integrity
+            hashInput.Append($"EmployeeType:{employee.EmployeeType ?? ""}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Item entity (Products/Services)
+        /// </summary>
+        public static string ComputeItemHash(QBItem item)
+        {
+            if (item == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{item.ListID ?? ""}|");
+            hashInput.Append($"Name:{item.Name ?? ""}|");
+            hashInput.Append($"FullName:{item.FullName ?? ""}|");
+            hashInput.Append($"Type:{item.Type ?? ""}|");
+            hashInput.Append($"SalesPrice:{item.SalesPrice?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"PurchaseCost:{item.PurchaseCost?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"IsActive:{item.IsActive}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Account entity
+        /// </summary>
+        public static string ComputeAccountHash(QBAccount account)
+        {
+            if (account == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{account.ListID ?? ""}|");
+            hashInput.Append($"Name:{account.Name ?? ""}|");
+            hashInput.Append($"FullName:{account.FullName ?? ""}|");
+            hashInput.Append($"AccountType:{account.AccountType ?? ""}|");
+            hashInput.Append($"AccountNumber:{account.AccountNumber ?? ""}|");
+            hashInput.Append($"Balance:{account.Balance?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for Class entity
+        /// </summary>
+        public static string ComputeClassHash(QBClass qbClass)
+        {
+            if (qbClass == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{qbClass.ListID ?? ""}|");
+            hashInput.Append($"Name:{qbClass.Name ?? ""}|");
+            hashInput.Append($"FullName:{qbClass.FullName ?? ""}|");
+            hashInput.Append($"IsActive:{qbClass.IsActive}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for PaymentMethod entity
+        /// </summary>
+        public static string ComputePaymentMethodHash(QBPaymentMethod paymentMethod)
+        {
+            if (paymentMethod == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{paymentMethod.ListID ?? ""}|");
+            hashInput.Append($"Name:{paymentMethod.Name ?? ""}|");
+            hashInput.Append($"Type:{paymentMethod.Type ?? ""}|");
+            hashInput.Append($"IsActive:{paymentMethod.IsActive}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
+        /// <summary>
+        /// FORENSIC REQUIREMENT: Compute forensic hash for TaxCode entity
+        /// </summary>
+        public static string ComputeTaxCodeHash(QBTaxCode taxCode)
+        {
+            if (taxCode == null) return null;
+
+            var hashInput = new StringBuilder();
+            hashInput.Append($"ListID:{taxCode.ListID ?? ""}|");
+            hashInput.Append($"Name:{taxCode.Name ?? ""}|");
+            hashInput.Append($"Desc:{taxCode.Desc ?? ""}|");
+            hashInput.Append($"TaxRate:{taxCode.TaxRate?.ToString("F4", CultureInfo.InvariantCulture) ?? "0.0000"}|");
+            hashInput.Append($"IsActive:{taxCode.IsActive}");
+
+            return ComputeHash(hashInput.ToString());
+        }
+
         /// <summary>
         /// Generic hash computation using SHA256
         /// Matches Python: hashlib.sha256(data.encode()).hexdigest()
