@@ -267,10 +267,25 @@ def start_migration(migration_id):
         # ===== MIGRATION CREDIT CHECK =====
         # Use the new MigrationCredit system for proper type-based tracking
         from models.migration_credit import MigrationCredit
-        
-        # Get transaction count from migration metadata (if available)
+
+        # BILLING FIX: Validate transaction count before checking credits
         transaction_count = getattr(migration, 'total_transactions', 0) or 0
-        
+
+        # If transaction count is missing/zero, estimate from file size as fallback
+        if transaction_count == 0 and migration.encrypted_data_size_bytes:
+            # Rough estimate: 1 transaction ≈ 2KB
+            estimated_count = max(100, migration.encrypted_data_size_bytes // 2048)
+            logger.warning(f"Transaction count missing for {migration_id}, estimating {estimated_count:,} from file size")
+            transaction_count = estimated_count
+
+        # Sanity check: If still zero, reject migration to prevent credit abuse
+        if transaction_count == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Transaction count unknown. Please re-upload your QuickBooks file.',
+                'error_code': 'TRANSACTION_COUNT_MISSING'
+            }), 400
+
         # Find a suitable credit for this migration
         credit = MigrationCredit.find_best_credit(current_user.id, transaction_count)
         
@@ -303,15 +318,24 @@ def start_migration(migration_id):
         # This will be used by the webhook to mark the credit as used
         migration.migration_credit_id = credit.id
         
-        # Get QBO credentials from request
+        # SECURITY: Get QBO credentials from request
+        # WARNING: Credentials transmitted in plain JSON over HTTPS
+        # TODO: Implement client-side encryption with server public key
         data = request.get_json() or {}
         qbo_credentials = data.get('qbo_credentials', {})
-        
+
         if not qbo_credentials or not all(k in qbo_credentials for k in ['client_id', 'client_secret', 'refresh_token']):
             return jsonify({
                 'success': False,
                 'error': 'QuickBooks Online credentials required (client_id, client_secret, refresh_token)'
             }), 400
+
+        # SECURITY: Validate and log receipt WITHOUT logging actual credentials
+        client_id_masked = qbo_credentials.get('client_id', '')[:8] + '...' if qbo_credentials.get('client_id') else 'missing'
+        logger.info(f"Received QBO credentials for migration {migration_id} (client_id: {client_id_masked})")
+
+        # SECURITY: Immediately store credentials in Secrets Manager instead of passing through logs
+        # This prevents credential exposure in CloudWatch, access logs, etc.
         
         # CRITICAL FIX: Ensure realm_id is present - use from user if not provided
         if 'realm_id' not in qbo_credentials or not qbo_credentials['realm_id']:

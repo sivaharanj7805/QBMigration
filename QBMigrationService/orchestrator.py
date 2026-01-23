@@ -211,15 +211,17 @@ class MigrationOrchestrator:
             for entity_name, start_pct, end_pct in entity_order:
                 if entity_name in data and data[entity_name]:
                     self._report_progress(start_pct, f"Migrating {entity_name}")
-                    
+
+                    # RELIABILITY FIX: Pass oauth_mgr for automatic token refresh on 401
                     count = self._migrate_entity(
                         qbo_client,
                         transformer,
                         entity_name,
                         data[entity_name],
-                        entities_migrated
+                        entities_migrated,
+                        oauth_mgr  # Auto-refresh tokens during long migrations
                     )
-                    
+
                     entities_migrated[entity_name] = count
                     logger.info(f"Migrated {count} {entity_name}")
             
@@ -266,23 +268,25 @@ class MigrationOrchestrator:
         transformer,
         entity_name: str,
         source_data: list,
-        existing_maps: Dict[str, Dict]
+        existing_maps: Dict[str, Dict],
+        oauth_manager=None
     ) -> int:
         """
         Migrate a single entity type.
-        
+
         Args:
             qbo_client: Initialized QBO client
             transformer: Data transformer
             entity_name: Name of entity type
             source_data: List of source records
             existing_maps: Maps of already-migrated entities (for references)
-            
+            oauth_manager: OAuth manager for automatic token refresh (RELIABILITY FIX)
+
         Returns:
             Number of entities migrated
         """
         count = 0
-        
+
         for record in source_data:
             try:
                 # Transform to QBO format
@@ -291,10 +295,10 @@ class MigrationOrchestrator:
                     record,
                     reference_maps=existing_maps
                 )
-                
+
                 if transformed:
-                    # Create in QBO
-                    result = qbo_client.create_entity(entity_name, transformed)
+                    # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
+                    result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
                     
                     if result and 'Id' in result:
                         # Track mapping for references

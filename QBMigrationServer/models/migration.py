@@ -73,9 +73,9 @@ class Migration(db.Model):
     ec2_terminated = db.Column(db.Boolean, default=False)
     ec2_terminated_at = db.Column(db.DateTime)
     
-    # Cost tracking
-    estimated_cost_usd = db.Column(db.Numeric(10, 4))
-    actual_cost_usd = db.Column(db.Numeric(10, 4))
+    # Cost tracking (PRECISION FIX: 12,6 allows up to $999,999.999999 with micro-dollar precision)
+    estimated_cost_usd = db.Column(db.Numeric(12, 6))  # Was (10, 4) - can overflow on enterprise migrations
+    actual_cost_usd = db.Column(db.Numeric(12, 6))     # Was (10, 4) - prevents accounting errors
     cost_breakdown = db.Column(db.Text)  # JSON: {ec2: X, s3: Y, data_transfer: Z}
     
     # Forensic Data (Stored as JSON Text)

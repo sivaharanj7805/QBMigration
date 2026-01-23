@@ -308,21 +308,30 @@ def get_current_user():
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
-    # Get tier info - use try/except in case DB columns don't exist yet
+    # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
+    # If tier info can't be retrieved, user should know something is wrong
     try:
         tier_info = user.get_tier_info()
-    except Exception as e:
-        # Fallback if tier columns don't exist in database
-        import logging
-        logging.getLogger(__name__).warning(f"Could not get tier info: {e}")
+    except AttributeError as e:
+        # Database schema issue - log but allow graceful degradation
+        logger.warning(f"Database schema issue retrieving tier info: {e}")
         tier_info = {
             'tier': 'none',
             'tier_name': 'Free Trial',
             'migrations_remaining': 0,
             'migrations_purchased': 0,
             'migrations_used': 0,
-            'has_tier': False
+            'has_tier': False,
+            'warning': 'Billing system temporarily unavailable'
         }
+    except Exception as e:
+        # Unexpected error - this could indicate billing data corruption
+        logger.error(f"CRITICAL: Failed to retrieve tier info for user {user_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unable to retrieve account information. Please contact support.',
+            'error_code': 'TIER_INFO_UNAVAILABLE'
+        }), 500
     
     # Get migration credits breakdown by type
     try:
