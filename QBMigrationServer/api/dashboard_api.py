@@ -873,10 +873,13 @@ def export_caseware_bundle(migration_id):
             }), 200
             
     except Exception as e:
-        logger.exception(f"Failed to export Caseware bundle for {migration_id}: {str(e)}")
+        logger.exception(f"Failed to export Caseware bundle for {migration_id}")
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='api')
         return jsonify({
             'success': False,
-            'error': f'Failed to generate Caseware bundle: {str(e)}'
+            'error': sanitized_error
         }), 500
 
 

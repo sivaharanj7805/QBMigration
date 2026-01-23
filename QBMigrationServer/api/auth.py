@@ -15,6 +15,7 @@ from models.database import db
 from models.user import User
 from extensions import limiter
 from utils.pii_redaction import hash_email, redact_all_pii
+from utils.error_sanitizer import sanitize_error_message, create_error_response
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -179,7 +180,9 @@ def register():
         except ValueError as e:
             # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
             logger.warning(f"Password validation failed for {hash_email(email)}: {str(e)}")
-            return jsonify({'success': False, 'error': str(e)}), 400
+            # FIX #34: Sanitize error message before returning to client
+            sanitized_error = sanitize_error_message(e, context='auth')
+            return jsonify({'success': False, 'error': sanitized_error}), 400
         
         # Save to database
         db.session.add(user)

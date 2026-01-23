@@ -19,6 +19,7 @@ from api.dashboard_api import dashboard_bp
 from config import config
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
+from utils.error_sanitizer import sanitize_error_message, create_error_response, is_production
 from sqlalchemy import text
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -637,15 +638,17 @@ def create_app(config_name='development'):
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
     
-    # Error handlers
+    # FIX #34: Sanitized error handlers for production security
     @app.errorhandler(400)
     def bad_request(error):
         """Handle 400 Bad Request errors"""
-        app.logger.warning(f"Bad request: {str(error)}")
+        # SECURITY: Never expose raw error in production
+        sanitized = sanitize_error_message(error, context='validation')
+        app.logger.warning(f"Bad request: {sanitized}")
         return jsonify({
             'success': False,
-            'error': 'Bad request',
-            'message': str(error) if app.config.get('DEBUG') else 'Invalid request'
+            'error': sanitized,
+            'error_code': 'BAD_REQUEST'
         }), 400
     
     @app.errorhandler(401)
@@ -699,30 +702,24 @@ def create_app(config_name='development'):
     @app.errorhandler(500)
     def internal_error(error):
         """Handle 500 Internal Server Error"""
-        app.logger.error(f"Internal server error: {str(error)}", exc_info=True)
+        # SECURITY: Log full error server-side, but sanitize for client
+        app.logger.error("Internal server error", exc_info=True)
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': 'Internal server error',
-            'message': 'An unexpected error occurred' if not app.config.get('DEBUG') else str(error)
-        }), 500
-    
+
+        # CRITICAL: Never expose raw error details in production
+        response = create_error_response(error, context='api', status_code=500)
+        return jsonify(response), 500
+
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         """Catch-all handler for unexpected exceptions"""
-        app.logger.exception(f"Unexpected error: {str(error)}")
+        # SECURITY: Log full error server-side with stack trace
+        app.logger.exception("Unexpected exception occurred")
         db.session.rollback()
-        
-        if app.config.get('DEBUG'):
-            error_msg = str(error)
-        else:
-            error_msg = 'An unexpected error occurred. Our team has been notified.'
-        
-        return jsonify({
-            'success': False,
-            'error': 'Unexpected error',
-            'message': error_msg
-        }), 500
+
+        # CRITICAL: Always sanitize error messages for client response
+        response = create_error_response(error, context='api', status_code=500)
+        return jsonify(response), 500
     
     app.logger.info('Flask app created successfully')
     return app
