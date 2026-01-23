@@ -71,6 +71,7 @@ class Config:
     
     # S3
     AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET', 'qb-migration-temp-files')
+    AWS_S3_CODE_BUCKET = os.getenv('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')  # Bucket for migration worker code
     AWS_S3_ENCRYPTION = 'AES256'
     AWS_S3_FILE_TTL_HOURS = int(os.getenv('S3_FILE_TTL_HOURS', '24'))
     

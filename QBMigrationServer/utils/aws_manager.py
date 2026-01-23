@@ -424,12 +424,17 @@ class AWSMigrationManager:
                     raise
             
             # Generate user data script (bootstrap script for instance)
+            # SECURITY: Get code bucket from config (no hardcoded values)
+            from flask import current_app
+            code_bucket = current_app.config.get('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')
+
             user_data = self._generate_user_data_script(
                 migration_id=migration_id,
                 s3_uri=s3_uri,
                 secret_name=secret_name,
                 server_url=server_url,
-                webhook_secret=webhook_secret
+                webhook_secret=webhook_secret,
+                code_bucket=code_bucket
             )
             
             # Launch configuration
@@ -492,7 +497,7 @@ class AWSMigrationManager:
             self._publish_metric('EC2InstanceCreationFailure', 1, 'Count')
             return None
     
-    def _generate_user_data_script(self, migration_id, s3_uri, secret_name, server_url, webhook_secret):
+    def _generate_user_data_script(self, migration_id, s3_uri, secret_name, server_url, webhook_secret, code_bucket=None):
         """
         Generate user data script for EC2 instance
         This script runs on instance launch and:
@@ -501,7 +506,15 @@ class AWSMigrationManager:
         3. Runs migration worker
         4. Reports status via webhook
         5. Self-terminates
+
+        Args:
+            code_bucket: S3 bucket containing migration worker code (from AWS_S3_CODE_BUCKET config)
         """
+        # SECURITY: Use config-provided code bucket, no hardcoded values
+        if not code_bucket:
+            from flask import current_app
+            code_bucket = current_app.config.get('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')
+
         script = f"""#!/bin/bash
 set -e
 
@@ -539,9 +552,9 @@ pip install boto3 cryptography requests quickbooks-online-sdk
 
 # Download migration worker code
 echo "Downloading migration worker..."
-aws s3 cp s3://YOUR-CODE-BUCKET/migration_worker.py worker.py
-aws s3 cp s3://YOUR-CODE-BUCKET/data_transformer.py transformer.py
-aws s3 cp s3://YOUR-CODE-BUCKET/qbo_client.py qbo_client.py
+aws s3 cp s3://{code_bucket}/migration_worker.py worker.py
+aws s3 cp s3://{code_bucket}/data_transformer.py transformer.py
+aws s3 cp s3://{code_bucket}/qbo_client.py qbo_client.py
 
 # Download encrypted data from S3
 echo "Downloading encrypted QB data from S3..."

@@ -361,11 +361,13 @@ def create_app(config_name='development'):
     if app.config['ENV'] == 'production' and 'localhost' in str(allowed_origins):
         app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
 
+    # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
     CORS(app,
          supports_credentials=True,
          origins=[origin.strip() for origin in allowed_origins],
          allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
-         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+         max_age=3600)  # Cache preflight for 1 hour (reduces OPTIONS requests)
     app.logger.info(f'CORS enabled for origins: {allowed_origins}')
     
     # Setup rate limiting
@@ -519,7 +521,37 @@ def create_app(config_name='development'):
             health_status['status'] = 'unhealthy'
             health_status['checks']['database'] = 'unhealthy'
             return jsonify(health_status), 503
-        
+
+        # RELIABILITY FIX: Check database connection pool health
+        try:
+            # Query pg_stat_activity to check active vs total connections
+            result = db.session.execute(text("""
+                SELECT
+                    (SELECT count(*) FROM pg_stat_activity) as active_connections,
+                    (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+            """))
+            row = result.fetchone()
+            active_connections = row[0]
+            max_connections = row[1]
+
+            # Calculate pool usage percentage
+            pool_usage_pct = (active_connections / max_connections) * 100 if max_connections > 0 else 0
+
+            if pool_usage_pct >= 90:
+                health_status['checks']['connection_pool'] = f'critical ({active_connections}/{max_connections})'
+                health_status['status'] = 'degraded'
+                app.logger.warning(f"Connection pool critical: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
+            elif pool_usage_pct >= 75:
+                health_status['checks']['connection_pool'] = f'warning ({active_connections}/{max_connections})'
+                app.logger.info(f"Connection pool high: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
+            else:
+                health_status['checks']['connection_pool'] = f'healthy ({active_connections}/{max_connections})'
+
+        except Exception as e:
+            # If pool check fails, log but don't fail health check (might not be PostgreSQL)
+            app.logger.warning(f"Connection pool check failed (not PostgreSQL?): {str(e)}")
+            health_status['checks']['connection_pool'] = 'unknown'
+
         # Check AWS S3 access
         try:
             import boto3
