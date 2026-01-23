@@ -246,6 +246,7 @@ def start_migration(migration_id):
         # Store the credit ID to use after migration completes
         # This will be used by the webhook to mark the credit as used
         migration.migration_credit_id = credit.id
+        db.session.commit()  # Ensure credit ID is saved before starting migration
         
         # Get QBO credentials from request
         data = request.get_json() or {}

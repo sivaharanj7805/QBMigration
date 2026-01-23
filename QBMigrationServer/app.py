@@ -220,6 +220,22 @@ def auto_migrate_database(app):
             except Exception:
                 pass  # Column may already exist
             
+            # Create team_invites table if it doesn't exist
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS team_invites (
+                    id SERIAL PRIMARY KEY,
+                    owner_user_id INTEGER NOT NULL REFERENCES users(id),
+                    email VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'member',
+                    invite_token VARCHAR(64) UNIQUE,
+                    status VARCHAR(50) DEFAULT 'pending',
+                    accepted_user_id INTEGER REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    accepted_at TIMESTAMP
+                )
+            """))
+            
             conn.commit()
             app.logger.info('Database schema verified/updated successfully')
     except Exception as e:
