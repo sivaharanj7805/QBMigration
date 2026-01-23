@@ -112,7 +112,10 @@ def get_presigned_url():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to generate upload URL: {str(e)}'}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/complete', methods=['POST'])
@@ -230,7 +233,10 @@ def init_multipart_upload():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/multipart/part-url', methods=['POST'])
@@ -268,7 +274,10 @@ def get_part_upload_url():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/multipart/complete', methods=['POST'])
@@ -313,4 +322,7 @@ def complete_multipart_upload():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
