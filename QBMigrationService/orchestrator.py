@@ -23,8 +23,16 @@ import sys
 import json
 import logging
 import uuid
-from typing import Dict, Any, Callable, Optional
+from typing import Dict, Any, Callable, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime
+
+# FIX #35: TYPE_CHECKING for forward references without circular imports
+if TYPE_CHECKING:
+    from encryption import EncryptionManager
+    from oauth_manager import OAuthManager
+    from qbo_client import PremiumQBOClient
+    from data_transformer import QBDataTransformer
+    from verifier import MigrationVerifier
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -80,19 +88,19 @@ class MigrationOrchestrator:
         self._transformer = None
         self._verifier = None
     
-    def _report_progress(self, percent: int, message: str):
+    def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback"""
         logger.info(f"[{percent}%] {message}")
         self.progress_callback(percent, message)
-    
-    def _init_encryption(self):
+
+    def _init_encryption(self) -> 'EncryptionManager':
         """Initialize encryption manager"""
         if self._encryption_manager is None:
             from encryption import EncryptionManager
             self._encryption_manager = EncryptionManager()
         return self._encryption_manager
-    
-    def _init_oauth(self):
+
+    def _init_oauth(self) -> 'OAuthManager':
         """Initialize OAuth manager"""
         if self._oauth_manager is None:
             from oauth_manager import OAuthManager
@@ -104,8 +112,8 @@ class MigrationOrchestrator:
                 environment=self.qbo_environment
             )
         return self._oauth_manager
-    
-    def _init_qbo_client(self, access_token: str):
+
+    def _init_qbo_client(self, access_token: str) -> 'PremiumQBOClient':
         """Initialize QBO client with token"""
         if self._qbo_client is None:
             from qbo_client import PremiumQBOClient
@@ -115,15 +123,15 @@ class MigrationOrchestrator:
                 environment=self.qbo_environment
             )
         return self._qbo_client
-    
-    def _init_transformer(self):
+
+    def _init_transformer(self) -> 'QBDataTransformer':
         """Initialize data transformer"""
         if self._transformer is None:
             from data_transformer import QBDataTransformer
             self._transformer = QBDataTransformer()
         return self._transformer
-    
-    def _init_verifier(self, qbo_client):
+
+    def _init_verifier(self, qbo_client: 'PremiumQBOClient') -> 'MigrationVerifier':
         """Initialize migration verifier"""
         if self._verifier is None:
             from verifier import MigrationVerifier
@@ -264,12 +272,12 @@ class MigrationOrchestrator:
     
     def _migrate_entity(
         self,
-        qbo_client,
-        transformer,
+        qbo_client: 'PremiumQBOClient',
+        transformer: 'QBDataTransformer',
         entity_name: str,
-        source_data: list,
-        existing_maps: Dict[str, Dict],
-        oauth_manager=None
+        source_data: List[Dict[str, Any]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional['OAuthManager'] = None
     ) -> int:
         """
         Migrate a single entity type.
