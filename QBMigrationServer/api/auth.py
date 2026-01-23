@@ -18,6 +18,9 @@ from models.user import User
 from extensions import limiter
 from utils.pii_redaction import hash_email, redact_all_pii
 from utils.error_sanitizer import sanitize_error_message, create_error_response
+from utils.captcha_verifier import (
+    verify_captcha_token, is_captcha_required, get_client_ip, get_captcha_config
+)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -286,13 +289,42 @@ def login():
     
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
-    
+    captcha_token = data.get('captcha_token')  # FIX #38: CAPTCHA token from client
+
     if not email or not password:
         return jsonify({'success': False, 'error': 'Email and password required'}), 400
-    
+
     # FIX #37: Constant-time user lookup and validation
     # Find user (timing of database query is unavoidable, but we mitigate enumeration below)
     user = User.query.filter_by(email=email).first()
+
+    # FIX #38: Progressive CAPTCHA enforcement after 3 failed attempts
+    failed_attempts = user.failed_login_attempts if user else 0
+    captcha_required = is_captcha_required(email, failed_attempts)
+
+    if captcha_required:
+        if not captcha_token:
+            return jsonify({
+                'success': False,
+                'error': 'CAPTCHA verification required',
+                'captcha_required': True
+            }), 400
+
+        # Verify CAPTCHA token
+        captcha_valid, captcha_error = verify_captcha_token(
+            captcha_token,
+            remote_ip=get_client_ip()
+        )
+
+        if not captcha_valid:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"CAPTCHA verification failed for {hash_email(email)}: {captcha_error}")
+            return jsonify({
+                'success': False,
+                'error': 'CAPTCHA verification failed. Please try again.',
+                'captcha_required': True
+            }), 400
 
     # SECURITY: Always perform password verification in constant time
     # Whether user exists or not, we perform the same operations
@@ -680,4 +712,78 @@ def invite_team_member():
             'status': 'pending',
             'invited_by': user.email
         }
+    })
+
+@auth_bp.route('/captcha-config', methods=['GET'])
+def get_captcha_configuration():
+    """
+    Get CAPTCHA configuration for frontend integration.
+    
+    FIX #38: Progressive CAPTCHA enforcement endpoint.
+    
+    Returns CAPTCHA provider configuration including:
+    - Whether CAPTCHA is enabled
+    - Which provider (reCAPTCHA, hCaptcha, Turnstile)
+    - Site key for frontend integration
+    - Threshold for when CAPTCHA is required
+    
+    Response:
+    {
+        "enabled": true,
+        "provider": "recaptcha_v3",
+        "site_key": "6Lc...",
+        "threshold": 3
+    }
+    """
+    config = get_captcha_config()
+    
+    return jsonify({
+        'success': True,
+        'captcha': config
+    })
+
+
+@auth_bp.route('/check-captcha-required', methods=['POST'])
+def check_captcha_requirement():
+    """
+    Check if CAPTCHA is required for a specific email.
+    
+    FIX #38: Allow frontend to check CAPTCHA requirement before submitting credentials.
+    
+    Request:
+    {
+        "email": "user@example.com"
+    }
+    
+    Response:
+    {
+        "captcha_required": false,
+        "failed_attempts": 0,
+        "threshold": 3
+    }
+    """
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    email = data.get('email', '').strip().lower()
+    
+    if not email:
+        return jsonify({'success': False, 'error': 'Email required'}), 400
+    
+    # Look up user
+    user = User.query.filter_by(email=email).first()
+    
+    # Get failed attempts (0 if user doesn't exist)
+    failed_attempts = user.failed_login_attempts if user else 0
+    
+    # Check if CAPTCHA is required
+    captcha_required = is_captcha_required(email, failed_attempts)
+    
+    return jsonify({
+        'success': True,
+        'captcha_required': captcha_required,
+        'failed_attempts': failed_attempts,
+        'threshold': 3  # CAPTCHA required after 3 failed attempts
     })
