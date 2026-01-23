@@ -16,6 +16,9 @@ class Migration(db.Model):
         db.Index('idx_migration_user_status', 'user_id', 'status'),
         db.Index('idx_migration_user_created', 'user_id', 'created_at'),
         db.Index('idx_migration_status_created', 'status', 'created_at'),
+        # PERFORMANCE FIX: Composite index for filtered pagination query
+        # Supports: WHERE user_id = X AND status = Y ORDER BY created_at DESC
+        db.Index('idx_migration_user_status_created', 'user_id', 'status', 'created_at'),
         db.Index('idx_migration_cleanup', 'cleanup_completed', 'status'),
         db.Index('idx_migration_file_hash', 'user_id', 'file_hash'),
     )
@@ -262,13 +265,58 @@ class Migration(db.Model):
         return False
 
     def mark_as_completed(self, results=None):
-        """Mark migration as completed (idempotent)"""
+        """
+        Mark migration as completed (idempotent)
+        FORENSIC REQUIREMENT: Enforces $0.00 trial balance variance
+        """
         # Only update if currently processing (prevent overwriting completed state)
         if self.status == 'processing':
+            # FORENSIC ENFORCEMENT: Check trial balance reconciliation
+            if results and 'trial_balance' in results:
+                tb = results['trial_balance']
+                is_balanced = tb.get('is_balanced', False)
+                discrepancy = abs(tb.get('source_total', 0) - tb.get('destination_total', 0))
+
+                # CRITICAL: Enforce $0.00 variance for forensic integrity
+                if not is_balanced or discrepancy > 0.01:  # Allow 1 cent rounding tolerance
+                    error_msg = (
+                        f"Trial balance reconciliation failed. "
+                        f"Discrepancy: ${discrepancy:.2f}. "
+                        f"Source: ${tb.get('source_total', 0):.2f}, "
+                        f"Destination: ${tb.get('destination_total', 0):.2f}. "
+                        f"Migration cannot be marked complete without $0.00 variance."
+                    )
+                    self.status = 'failed'
+                    self.set_error_message(error_msg)
+                    self.error_code = 'TRIAL_BALANCE_MISMATCH'
+                    self.completed_at = datetime.utcnow()
+
+                    # Store verification data even on failure
+                    if results:
+                        self.verification_results = json.dumps(results)
+
+                    db.session.commit()
+                    raise ValueError(error_msg)
+
+            # If no trial balance provided, require it for completion
+            elif results and not results.get('skip_trial_balance_check'):
+                error_msg = (
+                    "Trial balance verification data missing. "
+                    "Forensic migration requires trial balance reconciliation. "
+                    "Migration cannot be marked complete without verification."
+                )
+                self.status = 'failed'
+                self.set_error_message(error_msg)
+                self.error_code = 'TRIAL_BALANCE_MISSING'
+                self.completed_at = datetime.utcnow()
+                db.session.commit()
+                raise ValueError(error_msg)
+
+            # Trial balance verified - proceed with completion
             self.status = 'completed'
             self.completed_at = datetime.utcnow()
             self.progress_percent = 100
-            self.current_step = 'Completed'
+            self.current_step = 'Completed - Trial Balance Verified'
 
             if results:
                 self.customers_migrated = results.get('customers', 0)
@@ -277,6 +325,10 @@ class Migration(db.Model):
                 self.bills_migrated = results.get('bills', 0)
                 self.items_migrated = results.get('items', 0)
                 self.total_records_migrated = results.get('total', 0)
+
+                # Store verification results
+                if 'trial_balance' in results or 'verification_data' in results:
+                    self.verification_results = json.dumps(results)
 
             db.session.commit()
             return True

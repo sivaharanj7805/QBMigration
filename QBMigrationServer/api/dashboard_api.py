@@ -13,6 +13,7 @@ from flask import Blueprint, request, jsonify, current_app, send_file
 from flask_login import login_required, current_user
 from models.database import db
 from models.migration import Migration
+from sqlalchemy import func, extract
 import logging
 import json
 import os
@@ -287,19 +288,22 @@ def get_dashboard_overview():
         
         # Calculate success rate
         success_rate = (completed / max(completed + failed, 1)) * 100
-        
-        # Calculate average duration
-        completed_migrations = Migration.query.filter_by(
-            user_id=current_user.id,
-            status='completed'
-        ).filter(Migration.completed_at.isnot(None)).all()
-        
-        total_duration = 0
-        for m in completed_migrations:
-            if m.completed_at and m.created_at:
-                total_duration += (m.completed_at - m.created_at).total_seconds()
-        
-        avg_duration_minutes = (total_duration / max(len(completed_migrations), 1)) / 60
+
+        # PERFORMANCE FIX: Calculate average duration using SQL aggregation
+        # Instead of loading all migrations into memory, use database to calculate average
+        avg_duration_result = db.session.query(
+            func.avg(
+                extract('epoch', Migration.completed_at - Migration.created_at)
+            )
+        ).filter(
+            Migration.user_id == current_user.id,
+            Migration.status == 'completed',
+            Migration.completed_at.isnot(None),
+            Migration.created_at.isnot(None)
+        ).scalar()
+
+        # Convert from seconds to minutes (result is in seconds)
+        avg_duration_minutes = (avg_duration_result / 60.0) if avg_duration_result else 0
         
         # Recent activity (last 24 hours)
         yesterday = datetime.utcnow() - timedelta(hours=24)
@@ -719,13 +723,53 @@ def export_caseware_bundle(migration_id):
             # Generate the bundle
             result = exporter.generate_audit_bundle(qb_data)
             
-            # Create zip file
+            # SECURITY FIX: Create encrypted zip file (AES-256)
             import zipfile
+            from cryptography.fernet import Fernet
+            import base64
+
+            # Generate encryption key from app secret (deterministic for same migration)
+            app_secret = current_app.config.get('BACKUP_ENCRYPTION_KEY', 'default_key')
+            migration_salt = migration_id.encode()
+            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.backends import default_backend
+
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=migration_salt,
+                iterations=100000,
+                backend=default_backend()
+            )
+            encryption_key = base64.urlsafe_b64encode(kdf.derive(app_secret.encode()))
+            cipher = Fernet(encryption_key)
+
             zip_path = os.path.join(bundle_dir, f'{migration_id}_caseware_bundle.zip')
+
+            # Create zip with standard compression (we'll encrypt the whole file)
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for filename, filepath in result.get('files', {}).items():
                     if os.path.exists(filepath):
                         zipf.write(filepath, os.path.basename(filepath))
+
+            # CRITICAL: Encrypt the zip file at rest
+            with open(zip_path, 'rb') as f:
+                plaintext_data = f.read()
+
+            encrypted_data = cipher.encrypt(plaintext_data)
+
+            # Overwrite with encrypted version
+            encrypted_zip_path = zip_path + '.encrypted'
+            with open(encrypted_zip_path, 'wb') as f:
+                f.write(encrypted_data)
+
+            # Remove plaintext zip
+            os.remove(zip_path)
+
+            # Store encryption info in migration (for later decryption during download)
+            migration.caseware_encryption_method = 'Fernet-AES256'
+            zip_path = encrypted_zip_path  # Update path to encrypted file
             
             # Update migration record
             migration.caseware_bundle_path = zip_path

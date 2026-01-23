@@ -127,6 +127,11 @@ namespace QBDesktopExtractor
                     totalBytesWritten += 4 + encryptedChunk.Length;
                     totalChunks++;
 
+                    // SECURITY FIX: Clear buffer to prevent data leakage in memory
+                    // Critical for 2GB+ files where buffer reuse could expose sensitive data
+                    Array.Clear(buffer, 0, buffer.Length);
+                    Array.Clear(encryptedChunk, 0, encryptedChunk.Length);
+
                     // Progress callback
                     progressCallback?.Invoke(totalBytesRead, totalSize);
                 }
