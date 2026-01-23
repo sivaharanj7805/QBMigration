@@ -49,6 +49,9 @@ def list_migrations():
         
     except Exception as e:
         logger.exception(f"Failed to list migrations: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retrieve migrations'
@@ -103,6 +106,9 @@ def get_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to get migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retrieve migration'
@@ -153,6 +159,9 @@ def get_migration_status(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to get migration status {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to get status'
@@ -324,7 +333,9 @@ def start_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to start migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to start migration. Please try again.'
@@ -413,7 +424,9 @@ def cancel_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to cancel migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to cancel migration'
@@ -494,7 +507,9 @@ def retry_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to retry migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retry migration'
@@ -557,7 +572,9 @@ def delete_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to delete migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to delete migration'
@@ -653,6 +670,9 @@ def execute_migration_celery(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to queue migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to queue migration'
@@ -748,6 +768,9 @@ def get_migration_stats():
         
     except Exception as e:
         logger.exception(f"Failed to get migration stats: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': True,
             'stats': {

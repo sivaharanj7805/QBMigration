@@ -19,8 +19,33 @@ import hashlib
 import logging
 import uuid
 import base64
+import re
 from datetime import datetime
 from io import BytesIO
+
+
+def sanitize_input(value, max_length=255):
+    """
+    Sanitize user input to prevent XSS and injection attacks.
+    Removes HTML tags, script tags, and potentially dangerous characters.
+    """
+    if not value or not isinstance(value, str):
+        return value
+
+    # Remove HTML tags and script content
+    value = re.sub(r'<[^>]*>', '', value)
+
+    # Remove potentially dangerous characters
+    value = re.sub(r'[<>"\'/\\;`$]', '', value)
+
+    # Trim whitespace
+    value = value.strip()
+
+    # Limit length
+    if max_length and len(value) > max_length:
+        value = value[:max_length]
+
+    return value
 
 # Initialize blueprint
 upload_bp = Blueprint('upload', __name__, url_prefix='/api/upload')
@@ -148,8 +173,9 @@ def _handle_original_upload(data, user):
     Handle original format upload (UNCHANGED from your original code)
     """
     encrypted_data = data.get('encrypted_data', '')
-    company_name = data.get('company_name', '')
-    qb_file_name = data.get('qb_file_name', 'quickbooks.qbw')
+    # SECURITY FIX: Sanitize all user inputs
+    company_name = sanitize_input(data.get('company_name', ''), max_length=255)
+    qb_file_name = sanitize_input(data.get('qb_file_name', 'quickbooks.qbw'), max_length=255)
     
     # Validate encrypted data presence
     if not encrypted_data:
@@ -323,9 +349,9 @@ def _handle_v31_upload(data, user):
             'error': 'AES key (encrypted or plaintext) is required'
         }), 400
     
-    # Get company info
-    company_name = company_info.get('company_name', 'Unknown Company')
-    qb_file_name = company_info.get('qb_file_name', 'quickbooks.qbw')
+    # SECURITY FIX: Get and sanitize company info
+    company_name = sanitize_input(company_info.get('company_name', 'Unknown Company'), max_length=255)
+    qb_file_name = sanitize_input(company_info.get('qb_file_name', 'quickbooks.qbw'), max_length=255)
     
     # Decode to check size
     try:
@@ -548,8 +574,8 @@ def upload_ndjson_bundle():
         logger.info(f"NDJSON bundle upload: {len(files)} files, {total_records} records, "
                    f"{total_size:,} bytes, session: {session_id}")
         
-        # Get company name
-        company_name = company_info.get('company_name', 'Unknown Company')
+        # SECURITY FIX: Get and sanitize company name
+        company_name = sanitize_input(company_info.get('company_name', 'Unknown Company'), max_length=255)
         
         # Create migration record
         migration = Migration(
