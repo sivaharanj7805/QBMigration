@@ -275,7 +275,7 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Protect key using DPAPI (Windows) or fallback
+        /// Protect key using DPAPI (Windows) - FAILS if DPAPI unavailable
         /// </summary>
         private static byte[] ProtectKey(byte[] key)
         {
@@ -283,16 +283,19 @@ namespace QBDesktopExtractor
             {
                 return ProtectedData.Protect(key, null, DataProtectionScope.CurrentUser);
             }
-            catch
+            catch (Exception ex)
             {
-                // Fallback: return key as-is (not recommended for production)
-                // In production, use proper KMS integration
-                return key;
+                // SECURITY: Never fallback to plaintext - fail fast
+                // For non-Windows systems, configure AWS KMS or Azure Key Vault
+                throw new CryptographicException(
+                    "DPAPI encryption failed. Ensure running on Windows or configure KMS_ENCRYPTION_ENDPOINT environment variable.",
+                    ex
+                );
             }
         }
 
         /// <summary>
-        /// Unprotect key using DPAPI
+        /// Unprotect key using DPAPI - FAILS if DPAPI unavailable
         /// </summary>
         private static byte[] UnprotectKey(byte[] protectedKey)
         {
@@ -300,10 +303,13 @@ namespace QBDesktopExtractor
             {
                 return ProtectedData.Unprotect(protectedKey, null, DataProtectionScope.CurrentUser);
             }
-            catch
+            catch (Exception ex)
             {
-                // Fallback
-                return protectedKey;
+                // SECURITY: Never fallback to plaintext - fail fast
+                throw new CryptographicException(
+                    "DPAPI decryption failed. Encryption keys may be corrupted or created on different machine.",
+                    ex
+                );
             }
         }
 

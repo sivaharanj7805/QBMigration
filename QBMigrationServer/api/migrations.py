@@ -27,9 +27,21 @@ def list_migrations():
         per_page = request.args.get('per_page', 50, type=int)
         status_filter = request.args.get('status', None, type=str)
 
-        # Validate pagination parameters
-        page = max(1, page)  # Minimum page is 1
+        # Validate pagination parameters (SQL injection prevention)
+        if not isinstance(page, int) or page < 1:
+            page = 1
+        if not isinstance(per_page, int) or per_page < 1:
+            per_page = 50
+        page = max(1, min(10000, page))  # Max page 10000
         per_page = min(100, max(1, per_page))  # Between 1 and 100
+
+        # SECURITY: Whitelist allowed status values (prevent SQL injection)
+        ALLOWED_STATUSES = ['pending', 'uploading', 'processing', 'completed', 'failed', 'cancelled']
+        if status_filter and status_filter not in ALLOWED_STATUSES:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid status filter. Allowed values: {", ".join(ALLOWED_STATUSES)}'
+            }), 400
 
         # Build query
         query = Migration.query.filter_by(user_id=current_user.id)

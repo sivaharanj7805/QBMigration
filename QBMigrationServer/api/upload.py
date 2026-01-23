@@ -27,16 +27,21 @@ from io import BytesIO
 def sanitize_input(value, max_length=255):
     """
     Sanitize user input to prevent XSS and injection attacks.
-    Removes HTML tags, script tags, and potentially dangerous characters.
+    SECURITY FIX: Uses whitelist approach - only allows safe characters.
+    Allowed: alphanumeric, spaces, hyphens, underscores, periods.
     """
     if not value or not isinstance(value, str):
         return value
 
-    # Remove HTML tags and script content
-    value = re.sub(r'<[^>]*>', '', value)
+    # SECURITY: Whitelist only safe characters (prevent command injection, S3 key poisoning)
+    # Allow: letters, numbers, spaces, hyphens, underscores, periods
+    value = re.sub(r'[^a-zA-Z0-9\s\-_.]', '', value)
 
-    # Remove potentially dangerous characters
-    value = re.sub(r'[<>"\'/\\;`$]', '', value)
+    # Collapse multiple spaces into one
+    value = re.sub(r'\s+', ' ', value)
+
+    # Remove leading/trailing dots and hyphens (prevent directory traversal)
+    value = value.strip('. -')
 
     # Trim whitespace
     value = value.strip()
@@ -44,6 +49,10 @@ def sanitize_input(value, max_length=255):
     # Limit length
     if max_length and len(value) > max_length:
         value = value[:max_length]
+
+    # Ensure result is not empty after sanitization
+    if not value:
+        return "sanitized_input"
 
     return value
 
@@ -363,19 +372,34 @@ def _handle_v31_upload(data, user):
             'success': False,
             'error': 'Invalid base64 encoding in encrypted data'
         }), 400
-    
+
+    # SECURITY: Calculate SHA-256 hash for data integrity verification
+    file_hash = hashlib.sha256(encrypted_data_bytes).hexdigest()
+
+    # FORENSIC REQUIREMENT: Verify client-supplied hash matches server calculation
+    client_hash = encryption.get('data_hash', '').lower()
+    if client_hash:
+        if client_hash != file_hash:
+            logger.error(f"Hash mismatch! Client: {client_hash[:16]}... Server: {file_hash[:16]}...")
+            return jsonify({
+                'success': False,
+                'error': 'Data integrity verification failed. Upload may be corrupted or tampered.',
+                'error_code': 'HASH_MISMATCH'
+            }), 400
+        logger.info(f"Hash verification passed: {file_hash[:16]}...")
+    else:
+        # For backward compatibility, warn but don't fail
+        logger.warning(f"Client did not provide data_hash for verification (session_id: {session_id})")
+
     # Check file size
     max_size_mb = current_app.config.get('MAX_UPLOAD_SIZE_MB', 100)
     max_size_bytes = max_size_mb * 1024 * 1024
-    
+
     if data_size_bytes > max_size_bytes:
         return jsonify({
             'success': False,
             'error': f'File too large. Maximum size is {max_size_mb}MB.'
         }), 413
-    
-    # Calculate hash for duplicate detection
-    file_hash = hashlib.sha256(encrypted_data_bytes).hexdigest()
     
     # Check for duplicate
     duplicate = Migration.query.filter_by(
