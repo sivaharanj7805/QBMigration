@@ -172,11 +172,13 @@ def stripe_webhook():
             payload, sig_header, webhook_secret
         )
     except ValueError as e:
+        # CRITICAL FIX: Return 200 to prevent Stripe retries
         logger.error(f"Invalid payload: {str(e)}")
-        return jsonify({'error': 'Invalid payload'}), 400
+        return jsonify({'received': True, 'error': 'Invalid payload'}), 200
     except stripe.error.SignatureVerificationError as e:
+        # CRITICAL FIX: Return 200 to prevent Stripe retries
         logger.error(f"Invalid signature: {str(e)}")
-        return jsonify({'error': 'Invalid signature'}), 400
+        return jsonify({'received': True, 'error': 'Invalid signature'}), 200
     
     # Handle the event
     if event['type'] == 'checkout.session.completed':
@@ -214,15 +216,25 @@ def handle_successful_payment(session):
             logger.info(f"Credit {credit.id} already marked as paid")
             return
         
-        # Mark as paid and available
-        credit.mark_paid(payment_intent_id)
-        
-        # Update user's subscription tier if they don't have one
-        user = User.query.get(credit.user_id)
-        if user and not user.subscription_tier:
-            user.subscription_tier = credit.tier_type
-            user.tier_purchased_at = datetime.utcnow()
-            db.session.commit()
+        # CRITICAL FIX: Wrap in transaction to prevent partial updates
+        try:
+            db.session.begin_nested()  # Start savepoint
+
+            # Mark as paid and available
+            credit.mark_paid(payment_intent_id)
+
+            # Update user's subscription tier if they don't have one
+            user = User.query.get(credit.user_id)
+            if user and not user.subscription_tier:
+                user.subscription_tier = credit.tier_type
+                user.tier_purchased_at = datetime.utcnow()
+
+            db.session.commit()  # Commit both changes atomically
+
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Transaction failed for credit {credit.id}: {str(e)}")
+            raise
         
         logger.info(f"Payment successful: Credit {credit.id} activated for user {credit.user_id}")
         
