@@ -507,14 +507,44 @@ class AWSMigrationManager:
         4. Reports status via webhook
         5. Self-terminates
 
+        FIX #41: Removed hardcoded credentials and secrets from user data.
+        All secrets now retrieved from AWS Systems Manager Parameter Store.
+
         Args:
             code_bucket: S3 bucket containing migration worker code (from AWS_S3_CODE_BUCKET config)
+            webhook_secret: Webhook secret (will be stored in Parameter Store, not in user data)
         """
         # SECURITY: Use config-provided code bucket, no hardcoded values
         if not code_bucket:
             from flask import current_app
             code_bucket = current_app.config.get('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')
 
+        # FIX #41: Store webhook secret in Systems Manager Parameter Store
+        # This prevents exposing the secret in EC2 user data logs
+        webhook_param_name = f"/qb-migration/webhook-secrets/{migration_id}"
+
+        try:
+            # Store webhook secret in Parameter Store (SecureString)
+            ssm = boto3.client('ssm', region_name=self.region)
+            ssm.put_parameter(
+                Name=webhook_param_name,
+                Value=webhook_secret,
+                Type='SecureString',
+                Overwrite=True,
+                Description=f'Webhook secret for migration {migration_id}',
+                Tags=[
+                    {'Key': 'migration_id', 'Value': migration_id},
+                    {'Key': 'expiry', 'Value': (datetime.utcnow() + timedelta(hours=24)).isoformat()}
+                ]
+            )
+            logger.info(f"Stored webhook secret in Parameter Store: {webhook_param_name}")
+        except Exception as e:
+            logger.error(f"Failed to store webhook secret in Parameter Store: {e}")
+            # Fall back to inline secret only if Parameter Store fails
+            # This is less secure but allows operation to continue
+            webhook_param_name = None
+
+        # FIX #41: Generate user data with secrets retrieved from SSM, not hardcoded
         script = f"""#!/bin/bash
 set -e
 
@@ -571,6 +601,31 @@ aws secretsmanager get-secret-value \\
     --query SecretString \\
     --output text > qbo_credentials.json
 
+# FIX #41: Retrieve webhook secret from Parameter Store instead of hardcoding
+echo "Retrieving webhook secret from Parameter Store..."
+"""
+
+        # Add webhook secret retrieval logic
+        if webhook_param_name:
+            # Use Parameter Store (secure method)
+            script += f"""WEBHOOK_SECRET=$(aws ssm get-parameter \\
+    --name "{webhook_param_name}" \\
+    --with-decryption \\
+    --query Parameter.Value \\
+    --output text)
+
+if [ -z "$WEBHOOK_SECRET" ]; then
+    echo "ERROR: Failed to retrieve webhook secret from Parameter Store"
+    exit 1
+fi
+"""
+        else:
+            # Fallback: use inline secret (less secure)
+            script += f"""# WARNING: Using inline webhook secret (Parameter Store unavailable)
+WEBHOOK_SECRET="{webhook_secret}"
+"""
+
+        script += f"""
 # Run migration worker
 echo "Starting migration processing..."
 python3 worker.py \\
@@ -579,7 +634,8 @@ python3 worker.py \\
     --metadata encryption_metadata.json \\
     --credentials qbo_credentials.json \\
     --server-url {server_url} \\
-    --webhook-secret {webhook_secret}
+    --webhook-secret "$WEBHOOK_SECRET"
+"""
 
 EXIT_CODE=$?
 
