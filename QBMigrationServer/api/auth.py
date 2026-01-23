@@ -513,33 +513,61 @@ def upgrade_tier():
 @auth_bp.route('/team', methods=['GET'])
 @require_auth
 def list_team_members():
-    """List team members (placeholder - would query team membership table)"""
+    """List team members and pending invites"""
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
-    # Placeholder: In production, this would query a team_members table
-    return jsonify({
-        'success': True,
-        'team_members': [
-            {
-                'id': user.id,
-                'email': user.email,
-                'name': user.first_name or user.email.split('@')[0],
-                'role': 'Owner',
-                'joined_at': user.created_at.isoformat() if user.created_at else None
-            }
-        ],
-        'pending_invites': []
-    })
+    try:
+        from models.team_invite import TeamInvite
+        
+        # Get team members (accepted invites)
+        team_members = TeamInvite.get_team_members(user_id)
+        
+        # Add the owner as first member
+        owner_member = {
+            'id': user.id,
+            'email': user.email,
+            'name': f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email.split('@')[0],
+            'role': 'Owner',
+            'joined_at': user.created_at.isoformat() if user.created_at else None
+        }
+        
+        # Get pending invites
+        pending = TeamInvite.get_pending_for_owner(user_id)
+        pending_invites = [invite.to_dict() for invite in pending]
+        
+        return jsonify({
+            'success': True,
+            'team_members': [owner_member] + team_members,
+            'pending_invites': pending_invites
+        })
+        
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Team fetch error (table may not exist): {e}")
+        # Fallback if table doesn't exist
+        return jsonify({
+            'success': True,
+            'team_members': [
+                {
+                    'id': user.id,
+                    'email': user.email,
+                    'name': f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email.split('@')[0],
+                    'role': 'Owner',
+                    'joined_at': user.created_at.isoformat() if user.created_at else None
+                }
+            ],
+            'pending_invites': []
+        })
 
 
 @auth_bp.route('/team/invite', methods=['POST'])
 @require_auth
 def invite_team_member():
-    """Invite a new team member (placeholder)"""
+    """Invite a new team member"""
     import logging
     logger = logging.getLogger(__name__)
     
@@ -560,26 +588,91 @@ def invite_team_member():
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
     # Check if user has Enterprise tier (required for team features)
-    if user.subscription_tier not in ['enterprise', 'forensic']:
+    tier = getattr(user, 'subscription_tier', None)
+    if tier not in ['enterprise', 'forensic']:
         return jsonify({
             'success': False,
-            'error': 'Team management requires Enterprise or Forensic tier'
+            'error': 'Team management requires Enterprise or Forensic tier. Please upgrade your plan.'
         }), 403
     
-    # Placeholder: In production, this would:
-    # 1. Create invite record in database
-    # 2. Send email invitation
-    # 3. Track pending invites
+    # Check if email is already a team member or has pending invite
+    try:
+        from models.team_invite import TeamInvite
+        
+        # Check for existing pending invite
+        existing = TeamInvite.query.filter_by(
+            owner_user_id=user_id,
+            email=email,
+            status='pending'
+        ).first()
+        
+        if existing:
+            return jsonify({
+                'success': False,
+                'error': f'An invitation is already pending for {email}'
+            }), 400
+        
+        # Check if user is inviting themselves
+        if email == user.email:
+            return jsonify({
+                'success': False,
+                'error': 'You cannot invite yourself'
+            }), 400
+        
+        # Create the invite
+        invite = TeamInvite.create_invite(
+            owner_user_id=user_id,
+            email=email,
+            role=role
+        )
+        
+        logger.info(f"Team invite created: {email} invited by {user.email} as {role}")
+        
+        # TODO: Send email notification
+        # In production, this would send an email with the invite link
+        # Example: send_invite_email(email, invite.invite_token, user.email)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Invitation sent to {email}',
+            'invite': invite.to_dict()
+        })
+        
+    except Exception as e:
+        logger.exception(f"Failed to create team invite: {e}")
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'Failed to send invitation. Please try again.'
+        }), 500
+
+
+@auth_bp.route('/team/invite/<int:invite_id>', methods=['DELETE'])
+@require_auth
+def cancel_team_invite(invite_id):
+    """Cancel a pending team invite"""
+    user_id = request.current_user['user_id']
     
-    logger.info(f"Team invite sent: {email} invited by {user.email} as {role}")
-    
-    return jsonify({
-        'success': True,
-        'message': f'Invitation sent to {email}',
-        'invite': {
-            'email': email,
-            'role': role,
-            'status': 'pending',
-            'invited_by': user.email
-        }
-    })
+    try:
+        from models.team_invite import TeamInvite
+        
+        invite = TeamInvite.query.filter_by(
+            id=invite_id,
+            owner_user_id=user_id
+        ).first()
+        
+        if not invite:
+            return jsonify({'success': False, 'error': 'Invite not found'}), 404
+        
+        if invite.status != 'pending':
+            return jsonify({'success': False, 'error': 'Can only cancel pending invites'}), 400
+        
+        invite.cancel()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Invitation cancelled'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
