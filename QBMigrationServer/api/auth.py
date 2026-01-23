@@ -21,6 +21,7 @@ from utils.error_sanitizer import sanitize_error_message, create_error_response
 from utils.captcha_verifier import (
     verify_captcha_token, is_captcha_required, get_client_ip, get_captcha_config
 )
+from utils.anomaly_detector import check_login_anomalies, log_anomaly
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -369,16 +370,35 @@ def login():
     user.record_successful_login()
     db.session.commit()
 
+    # FIX #39: Anomaly detection for suspicious login patterns
+    client_ip = get_client_ip()
+    anomalies = check_login_anomalies(user.id, client_ip)
+
+    if anomalies:
+        # Log all detected anomalies
+        for anomaly in anomalies:
+            log_anomaly(user.id, anomaly)
+
+        # For critical anomalies, add warning to response
+        critical_anomalies = [a for a in anomalies if a['severity'] == 'critical']
+        if critical_anomalies:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"CRITICAL anomaly detected for user {user.id}: "
+                f"{', '.join(a['reason'] for a in critical_anomalies)}"
+            )
+
     # SECURITY FIX: Regenerate session ID on successful login to prevent session fixation
     session.clear()
     session.modified = True  # Force Flask to regenerate session cookie
     session['user_id'] = user.id
     session['email'] = user.email
     session['_fresh'] = True  # Mark session as freshly authenticated
-    
+
     # Generate token
     token = create_token(user.id, user.email)
-    
+
     return jsonify({
         'success': True,
         'token': token,
