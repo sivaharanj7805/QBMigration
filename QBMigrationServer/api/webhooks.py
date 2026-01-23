@@ -188,18 +188,20 @@ def migration_progress():
         signature = request.headers.get('X-Webhook-Signature')
         timestamp = request.headers.get('X-Webhook-Timestamp')
         webhook_id = request.headers.get('X-Webhook-Id', str(uuid.uuid4()))
-        
-        # Verify signature (allow missing timestamp for testing)
-        if timestamp and signature:
-            is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
-            if not is_valid:
-                return jsonify({'success': False, 'error': f'Verification failed: {error}'}), 401
-        elif not timestamp:
-            # Simple secret check for testing without timestamp
-            webhook_secret = request.headers.get('X-Webhook-Secret')
-            expected_secret = current_app.config.get('WEBHOOK_SECRET')
-            if webhook_secret != expected_secret:
-                return jsonify({'success': False, 'error': 'Invalid webhook secret'}), 401
+
+        # CRITICAL FIX: Always require proper signature verification (no fallback)
+        if not all([migration_id, signature, timestamp]):
+            logger.warning(f"Missing required webhook headers from {request.remote_addr}")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp'
+            }), 400
+
+        # Verify signature
+        is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
+        if not is_valid:
+            logger.warning(f"Invalid webhook signature for {migration_id}: {error}")
+            return jsonify({'success': False, 'error': f'Verification failed: {error}'}), 401
         
         # Get data
         data = request.get_json() or {}
@@ -282,21 +284,25 @@ def migration_completed():
         migration.mark_as_completed(results)
         
         # ===== MARK MIGRATION CREDIT AS USED =====
-        # Use the new MigrationCredit system
+        # Use the new MigrationCredit system with database-level locking to prevent race conditions
         from models.migration_credit import MigrationCredit
-        
+
         # Get the credit ID that was assigned when migration started
         credit_id = getattr(migration, 'migration_credit_id', None)
-        
+
         if credit_id:
-            # Mark the specific credit as used
-            credit = MigrationCredit.query.get(credit_id)
-            if credit and credit.status == 'available':
+            # CRITICAL FIX: Use database-level locking to prevent double-usage
+            credit = MigrationCredit.query.filter_by(
+                id=credit_id,
+                status='available'
+            ).with_for_update().first()  # Database row lock
+
+            if credit:
                 transaction_count = results.get('total_transactions', 0)
                 credit.use_for_migration(migration.migration_id, transaction_count)
                 logger.info(f"MigrationCredit {credit_id} marked as used for migration {migration_id}")
             else:
-                logger.warning(f"Credit {credit_id} not available for migration {migration_id}")
+                logger.warning(f"Credit {credit_id} not available or already used for migration {migration_id}")
         else:
             # Fallback: Use old system if credit_id not set
             from models.user import User

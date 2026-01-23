@@ -53,6 +53,20 @@ class Config:
     # ============================================================================
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+
+    # SECURITY WARNING: Check if using access keys in production
+    @staticmethod
+    def warn_aws_credentials():
+        """Warn if using AWS access keys instead of IAM roles in production"""
+        if os.getenv('FLASK_ENV') == 'production':
+            if os.getenv('AWS_ACCESS_KEY_ID') or os.getenv('AWS_SECRET_ACCESS_KEY'):
+                import warnings
+                warnings.warn(
+                    "⚠️  SECURITY WARNING: Using AWS access keys in production. "
+                    "Consider using IAM roles instead for better security.",
+                    UserWarning
+                )
+
     AWS_REGION = os.getenv('AWS_REGION', 'ca-central-1')  # Canadian data residency per legal docs
     
     # S3
@@ -337,7 +351,10 @@ class ProductionConfig(Config):
     def init_app(cls, app):
         """Initialize production app"""
         Config.init_app(app)
-        
+
+        # SECURITY WARNING: Warn about AWS credentials
+        Config.warn_aws_credentials()
+
         # Validate critical production settings
         required_vars = [
             'SECRET_KEY',
@@ -348,11 +365,11 @@ class ProductionConfig(Config):
             'WEBHOOK_SECRET',
             'BACKUP_ENCRYPTION_KEY'
         ]
-        
+
         missing = [var for var in required_vars if not os.getenv(var)]
         if missing:
             raise ValueError(f"Missing required production environment variables: {', '.join(missing)}")
-        
+
         # Validate SECRET_KEY strength
         if len(os.getenv('SECRET_KEY', '')) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production!")

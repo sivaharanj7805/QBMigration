@@ -15,7 +15,8 @@ class MigrationCredit(db.Model):
     __tablename__ = 'migration_credits'
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # SECURITY FIX: Add CASCADE delete to clean up credits when user is deleted
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     
     # Migration type and limits
     tier_type = db.Column(db.String(50), nullable=False)  # starter, business, professional, enterprise, forensic
