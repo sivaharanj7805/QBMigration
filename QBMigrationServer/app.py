@@ -3,7 +3,7 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
 from flask_login import LoginManager
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -273,13 +273,19 @@ def create_app(config_name='development'):
     with app.app_context():
         auto_migrate_database(app)
     
-    # Enable CORS
-    CORS(app, 
+    # SECURITY FIX: Enable CORS with origins from environment variable
+    allowed_origins = os.getenv('ALLOWED_ORIGINS',
+                                'http://localhost:3000,http://localhost:5000').split(',')
+    # Warn if using default development origins in production
+    if app.config['ENV'] == 'production' and 'localhost' in str(allowed_origins):
+        app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
+
+    CORS(app,
          supports_credentials=True,
-         origins=['http://localhost:3000', 'http://localhost:5000', 'https://app.forensicbridge.ca', 'https://forensicbridge.ca', 'https://api.forensicbridge.ca'],
+         origins=[origin.strip() for origin in allowed_origins],
          allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
-    app.logger.info('CORS enabled')
+    app.logger.info(f'CORS enabled for origins: {allowed_origins}')
     
     # Setup rate limiting
     if app.config.get('RATELIMIT_ENABLED', True):
@@ -477,11 +483,21 @@ def create_app(config_name='development'):
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
         
         if not app.config.get('DEBUG'):
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+            # SECURITY FIX: Add preload directive for HSTS preload list submission
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
             response.headers['Content-Security-Policy'] = "default-src 'self'"
         
         return response
     
+    # SECURITY FIX: HTTPS redirect for production
+    @app.before_request
+    def redirect_to_https():
+        """Force HTTPS in production"""
+        if app.config['ENV'] == 'production':
+            if not request.is_secure and not request.headers.get('X-Forwarded-Proto', '') == 'https':
+                url = request.url.replace('http://', 'https://', 1)
+                return redirect(url, code=301)
+
     # Request logging middleware
     @app.before_request
     def log_request_info():

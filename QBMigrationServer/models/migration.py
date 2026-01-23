@@ -10,7 +10,16 @@ import hashlib
 class Migration(db.Model):
     """Migration model - tracks AWS-based ephemeral migrations with full audit trail"""
     __tablename__ = 'migrations'
-    
+
+    # Indexes for query performance
+    __table_args__ = (
+        db.Index('idx_migration_user_status', 'user_id', 'status'),
+        db.Index('idx_migration_user_created', 'user_id', 'created_at'),
+        db.Index('idx_migration_status_created', 'status', 'created_at'),
+        db.Index('idx_migration_cleanup', 'cleanup_completed', 'status'),
+        db.Index('idx_migration_file_hash', 'user_id', 'file_hash'),
+    )
+
     # Primary identifiers
     id = db.Column(db.Integer, primary_key=True)
     migration_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
@@ -210,56 +219,80 @@ class Migration(db.Model):
     # ============================================================================
     
     def mark_as_uploading(self):
-        """Mark migration as uploading to S3"""
-        self.status = 'uploading'
-        db.session.commit()
-    
+        """Mark migration as uploading to S3 (idempotent)"""
+        # Only update if current status is pending
+        if self.status == 'pending':
+            self.status = 'uploading'
+            db.session.commit()
+            return True
+        return False
+
     def mark_as_uploaded(self, s3_uri, s3_bucket, s3_key):
-        """Mark migration as uploaded to S3"""
-        self.status = 'uploaded'
-        self.s3_uri = s3_uri
-        self.s3_bucket = s3_bucket
-        self.s3_key = s3_key
-        db.session.commit()
-    
+        """Mark migration as uploaded to S3 (idempotent)"""
+        # Only update if current status is uploading or pending
+        if self.status in ['pending', 'uploading']:
+            self.status = 'uploaded'
+            self.s3_uri = s3_uri
+            self.s3_bucket = s3_bucket
+            self.s3_key = s3_key
+            db.session.commit()
+            return True
+        return False
+
     def mark_as_provisioning(self):
-        """Mark as provisioning EC2 instance"""
-        self.status = 'provisioning'
-        self.current_step = 'Creating AWS instance'
-        db.session.commit()
-    
+        """Mark as provisioning EC2 instance (idempotent)"""
+        # Only update if currently uploaded
+        if self.status == 'uploaded':
+            self.status = 'provisioning'
+            self.current_step = 'Creating AWS instance'
+            db.session.commit()
+            return True
+        return False
+
     def mark_as_processing(self, instance_id):
-        """Mark as processing on EC2 instance"""
-        self.status = 'processing'
-        self.aws_instance_id = instance_id
-        self.started_at = datetime.utcnow()
-        self.current_step = 'Running migration on AWS'
-        db.session.commit()
-    
+        """Mark as processing on EC2 instance (idempotent)"""
+        # Only update if currently provisioning or uploaded
+        if self.status in ['provisioning', 'uploaded']:
+            self.status = 'processing'
+            self.aws_instance_id = instance_id
+            self.started_at = datetime.utcnow()
+            self.current_step = 'Running migration on AWS'
+            db.session.commit()
+            return True
+        return False
+
     def mark_as_completed(self, results=None):
-        """Mark migration as completed"""
-        self.status = 'completed'
-        self.completed_at = datetime.utcnow()
-        self.progress_percent = 100
-        self.current_step = 'Completed'
-        
-        if results:
-            self.customers_migrated = results.get('customers', 0)
-            self.vendors_migrated = results.get('vendors', 0)
-            self.invoices_migrated = results.get('invoices', 0)
-            self.bills_migrated = results.get('bills', 0)
-            self.items_migrated = results.get('items', 0)
-            self.total_records_migrated = results.get('total', 0)
-        
-        db.session.commit()
-    
+        """Mark migration as completed (idempotent)"""
+        # Only update if currently processing (prevent overwriting completed state)
+        if self.status == 'processing':
+            self.status = 'completed'
+            self.completed_at = datetime.utcnow()
+            self.progress_percent = 100
+            self.current_step = 'Completed'
+
+            if results:
+                self.customers_migrated = results.get('customers', 0)
+                self.vendors_migrated = results.get('vendors', 0)
+                self.invoices_migrated = results.get('invoices', 0)
+                self.bills_migrated = results.get('bills', 0)
+                self.items_migrated = results.get('items', 0)
+                self.total_records_migrated = results.get('total', 0)
+
+            db.session.commit()
+            return True
+        return False
+
     def mark_as_failed(self, error_message, error_code=None):
-        """Mark migration as failed"""
-        self.status = 'failed'
-        self.set_error_message(error_message)
-        self.error_code = error_code
-        self.completed_at = datetime.utcnow()
-        db.session.commit()
+        """Mark migration as failed (idempotent)"""
+        # Allow marking as failed from any non-terminal state
+        if self.status not in ['completed', 'cleaned']:
+            self.status = 'failed'
+            self.set_error_message(error_message)
+            self.error_code = error_code
+            self.completed_at = datetime.utcnow()
+            db.session.commit()
+            return True
+        return False
     
     # ============================================================================
     # RETRY LOGIC

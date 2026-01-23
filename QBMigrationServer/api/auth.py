@@ -80,9 +80,21 @@ def require_auth(f):
 
 
 def validate_email(email: str) -> bool:
-    """Validate email format"""
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
+    """
+    Validate email format using comprehensive email-validator library.
+    Falls back to regex if library not available.
+    """
+    try:
+        from email_validator import validate_email as ev_validate, EmailNotValidError
+        try:
+            valid = ev_validate(email)
+            return True
+        except EmailNotValidError:
+            return False
+    except ImportError:
+        # Fallback to regex if email-validator not installed
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return bool(re.match(pattern, email))
 
 
 def validate_password(password: str) -> Tuple[bool, str]:
@@ -99,7 +111,7 @@ def validate_password(password: str) -> Tuple[bool, str]:
 
 
 @auth_bp.route('/register', methods=['POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("3 per hour")  # SECURITY FIX: Reduced from 5/min to prevent abuse
 def register():
     """Register a new user with comprehensive error handling"""
     import logging
@@ -170,8 +182,10 @@ def register():
         # Save to database
         db.session.add(user)
         db.session.commit()
-        
-        # Create session
+
+        # SECURITY FIX: Regenerate session ID to prevent session fixation
+        session.clear()
+        session.regenerate = True  # Mark for regeneration
         session['user_id'] = user.id
         session['email'] = user.email
         
@@ -218,11 +232,15 @@ def login():
     
     # Check if user exists (constant-time comparison to prevent enumeration)
     if not user:
-        # Still check a fake password to prevent timing attacks
+        # SECURITY FIX: Generate realistic hash to prevent timing attacks
         from argon2 import PasswordHasher
+        import os
         ph = PasswordHasher()
+        # Generate a realistic fake hash with random salt
+        fake_password = os.urandom(16).hex()
+        fake_hash = ph.hash(fake_password)
         try:
-            ph.verify("$argon2id$v=19$m=65536,t=3,p=4$dummy$dummyhash", password)
+            ph.verify(fake_hash, password)
         except:
             pass
         return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
@@ -252,8 +270,10 @@ def login():
     # Successful login
     user.record_successful_login()
     db.session.commit()
-    
-    # Create session
+
+    # SECURITY FIX: Regenerate session ID on successful login to prevent session fixation
+    session.clear()
+    session.regenerate = True  # Mark for regeneration
     session['user_id'] = user.id
     session['email'] = user.email
     
