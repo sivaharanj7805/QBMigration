@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 from models.database import db
 from models.user import User
 from extensions import limiter
+from utils.pii_redaction import hash_email, redact_all_pii
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -176,7 +177,8 @@ def register():
         try:
             user.set_password(password)
         except ValueError as e:
-            logger.warning(f"Password validation failed for {email}: {str(e)}")
+            # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+            logger.warning(f"Password validation failed for {hash_email(email)}: {str(e)}")
             return jsonify({'success': False, 'error': str(e)}), 400
         
         # Save to database
@@ -185,15 +187,17 @@ def register():
 
         # SECURITY FIX: Regenerate session ID to prevent session fixation
         session.clear()
-        session.regenerate = True  # Mark for regeneration
+        session.modified = True  # Force Flask to regenerate session cookie
         session['user_id'] = user.id
         session['email'] = user.email
+        session['_fresh'] = True  # Mark session as freshly authenticated
         
         # Generate token
         token = create_token(user.id, user.email)
-        
-        logger.info(f"New user registered: {email}")
-        
+
+        # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+        logger.info(f"New user registered: {hash_email(email)}")
+
         return jsonify({
             'success': True,
             'token': token,
@@ -213,7 +217,7 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("5 per 15 minutes")  # SECURITY: Reduce brute force risk
 def login():
     """Login and get JWT token"""
     data = request.get_json()
@@ -273,9 +277,10 @@ def login():
 
     # SECURITY FIX: Regenerate session ID on successful login to prevent session fixation
     session.clear()
-    session.regenerate = True  # Mark for regeneration
+    session.modified = True  # Force Flask to regenerate session cookie
     session['user_id'] = user.id
     session['email'] = user.email
+    session['_fresh'] = True  # Mark session as freshly authenticated
     
     # Generate token
     token = create_token(user.id, user.email)
@@ -477,9 +482,10 @@ def select_tier():
     # Add migrations and set tier
     user.add_migrations(migrations_to_add, tier=tier_id)
     db.session.commit()
-    
-    logger.info(f"User {user.email} selected tier {tier_id} with {migrations_to_add} migration(s)")
-    
+
+    # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+    logger.info(f"User {hash_email(user.email)} selected tier {tier_id} with {migrations_to_add} migration(s)")
+
     return jsonify({
         'success': True,
         'message': f'Successfully selected {tier_config.get("name", tier_id)} tier',
@@ -590,9 +596,10 @@ def invite_team_member():
     # 1. Create invite record in database
     # 2. Send email invitation
     # 3. Track pending invites
-    
-    logger.info(f"Team invite sent: {email} invited by {user.email} as {role}")
-    
+
+    # SECURITY: Redact emails from logs (GDPR/PIPEDA compliance)
+    logger.info(f"Team invite sent: {hash_email(email)} invited by {hash_email(user.email)} as {role}")
+
     return jsonify({
         'success': True,
         'message': f'Invitation sent to {email}',

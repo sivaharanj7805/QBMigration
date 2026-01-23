@@ -191,10 +191,11 @@ def auto_migrate_database(app):
             """))
             
             # Create migration_credits table if it doesn't exist
+            # SECURITY FIX: Add CASCADE delete for GDPR "right to be forgotten" compliance
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS migration_credits (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     tier_type VARCHAR(50) NOT NULL,
                     transaction_limit INTEGER NOT NULL,
                     price_cents INTEGER NOT NULL,
@@ -209,16 +210,79 @@ def auto_migrate_database(app):
                     used_at TIMESTAMP
                 )
             """))
+
+            # Fix existing foreign key constraints to add CASCADE (for existing installations)
+            try:
+                # Drop old constraint if exists
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migration_credits_user_id_fkey'
+                        ) THEN
+                            ALTER TABLE migration_credits
+                            DROP CONSTRAINT migration_credits_user_id_fkey;
+                        END IF;
+                    END $$;
+                """))
+
+                # Add new constraint with CASCADE
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migration_credits_user_id_cascade_fkey'
+                        ) THEN
+                            ALTER TABLE migration_credits
+                            ADD CONSTRAINT migration_credits_user_id_cascade_fkey
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                        END IF;
+                    END $$;
+                """))
+            except Exception as e:
+                app.logger.warning(f'Could not update CASCADE constraint on migration_credits: {str(e)}')
             
             # Add migration_credit_id to migrations table for tracking which credit was used
+            # SECURITY FIX: Add CASCADE constraints for GDPR compliance
             try:
+                # Add columns if not exist
                 conn.execute(text("""
-                    ALTER TABLE migrations 
-                    ADD COLUMN IF NOT EXISTS migration_credit_id INTEGER REFERENCES migration_credits(id),
-                    ADD COLUMN IF NOT EXISTS total_transactions INTEGER DEFAULT 0
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'migrations' AND column_name = 'migration_credit_id'
+                        ) THEN
+                            ALTER TABLE migrations ADD COLUMN migration_credit_id INTEGER;
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'migrations' AND column_name = 'total_transactions'
+                        ) THEN
+                            ALTER TABLE migrations ADD COLUMN total_transactions INTEGER DEFAULT 0;
+                        END IF;
+                    END $$;
                 """))
-            except Exception:
-                pass  # Column may already exist
+
+                # Add CASCADE foreign key constraint
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migrations_credit_cascade_fkey'
+                        ) THEN
+                            ALTER TABLE migrations
+                            ADD CONSTRAINT migrations_credit_cascade_fkey
+                            FOREIGN KEY (migration_credit_id) REFERENCES migration_credits(id) ON DELETE SET NULL;
+                        END IF;
+                    END $$;
+                """))
+            except Exception as e:
+                app.logger.warning(f'Could not add CASCADE to migrations.migration_credit_id: {str(e)}')
             
             conn.commit()
             app.logger.info('Database schema verified/updated successfully')
@@ -241,6 +305,23 @@ def create_app(config_name='development'):
     # Initialize config-specific setup
     if hasattr(config_class, 'init_app'):
         config_class.init_app(app)
+
+    # SECURITY: Validate critical encryption keys at startup
+    backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
+    if not backup_key or len(backup_key) < 32:
+        raise ValueError(
+            "CRITICAL: BACKUP_ENCRYPTION_KEY must be set and at least 32 characters. "
+            "This key is required for encrypting QBO OAuth tokens. "
+            "Set it in your .env file or environment variables."
+        )
+
+    # Validate JWT secret
+    jwt_secret = app.config.get('SECRET_KEY')
+    if not jwt_secret or len(jwt_secret) < 32:
+        raise ValueError(
+            "CRITICAL: SECRET_KEY must be set and at least 32 characters. "
+            "This is required for session security and JWT tokens."
+        )
 
     @app.before_request
     def check_content_length():

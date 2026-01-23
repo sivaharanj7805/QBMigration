@@ -187,14 +187,14 @@ def migration_progress():
         migration_id = request.headers.get('X-Migration-Id')
         signature = request.headers.get('X-Webhook-Signature')
         timestamp = request.headers.get('X-Webhook-Timestamp')
-        webhook_id = request.headers.get('X-Webhook-Id', str(uuid.uuid4()))
+        webhook_id = request.headers.get('X-Webhook-Id')
 
-        # CRITICAL FIX: Always require proper signature verification (no fallback)
-        if not all([migration_id, signature, timestamp]):
+        # CRITICAL FIX: Always require ALL headers (no fallback UUID generation)
+        if not all([migration_id, signature, timestamp, webhook_id]):
             logger.warning(f"Missing required webhook headers from {request.remote_addr}")
             return jsonify({
                 'success': False,
-                'error': 'Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp'
+                'error': 'Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id'
             }), 400
 
         # Verify signature
@@ -238,12 +238,12 @@ def migration_progress():
 def migration_completed():
     """
     Webhook called when migration completes successfully
-    
+
     Request Body:
         migration_id (str): Migration ID
         status (str): Final status
         results (dict): Migration results
-    
+
     Returns:
         200: Acknowledged
         401: Invalid signature
@@ -256,8 +256,16 @@ def migration_completed():
         migration_id = request.headers.get('X-Migration-Id')
         signature = request.headers.get('X-Webhook-Signature')
         timestamp = request.headers.get('X-Webhook-Timestamp')
-        webhook_id = request.headers.get('X-Webhook-Id', str(uuid.uuid4()))
-        
+        webhook_id = request.headers.get('X-Webhook-Id')
+
+        # SECURITY: Require all headers (no UUID fallback)
+        if not all([migration_id, signature, timestamp, webhook_id]):
+            logger.warning(f"Missing required webhook headers from {request.remote_addr}")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id'
+            }), 400
+
         # Verify signature
         is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
         if not is_valid:
@@ -336,12 +344,12 @@ def migration_completed():
 def migration_failed():
     """
     Webhook called when migration fails
-    
+
     Request Body:
         migration_id (str): Migration ID
         error (str): Error message
         error_code (str): Error code
-    
+
     Returns:
         200: Acknowledged
         401: Invalid signature
@@ -354,8 +362,16 @@ def migration_failed():
         migration_id = request.headers.get('X-Migration-Id')
         signature = request.headers.get('X-Webhook-Signature')
         timestamp = request.headers.get('X-Webhook-Timestamp')
-        webhook_id = request.headers.get('X-Webhook-Id', str(uuid.uuid4()))
-        
+        webhook_id = request.headers.get('X-Webhook-Id')
+
+        # SECURITY: Require all headers (no UUID fallback)
+        if not all([migration_id, signature, timestamp, webhook_id]):
+            logger.warning(f"Missing required webhook headers from {request.remote_addr}")
+            return jsonify({
+                'success': False,
+                'error': 'Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id'
+            }), 400
+
         # Verify signature
         is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
         if not is_valid:
