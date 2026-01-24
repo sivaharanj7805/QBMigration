@@ -336,7 +336,8 @@ def start_migration(migration_id):
         # Use the new MigrationCredit system for proper type-based tracking
         from models.migration_credit import MigrationCredit
 
-        # BILLING FIX: Validate transaction count before checking credits
+        # FIX #50: Validate transaction count before checking credits (prevents credit waste)
+        # BILLING FIX: Validate transaction count against tier limits before starting EC2
         transaction_count = getattr(migration, 'total_transactions', 0) or 0
 
         # If transaction count is missing/zero, estimate from file size as fallback

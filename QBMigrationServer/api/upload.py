@@ -26,9 +26,17 @@ from io import BytesIO
 
 def sanitize_input(value, max_length=255):
     """
-    Sanitize user input to prevent XSS and injection attacks.
-    SECURITY FIX: Uses whitelist approach - only allows safe characters.
-    Allowed: alphanumeric, spaces, hyphens, underscores, periods.
+    FIX #47: Comprehensive input validation for file uploads.
+    Sanitize user input to prevent XSS, command injection, and S3 key poisoning.
+
+    Uses whitelist approach - only allows safe characters:
+    - Alphanumeric (a-z, A-Z, 0-9)
+    - Spaces
+    - Hyphens (-)
+    - Underscores (_)
+    - Periods (.)
+
+    Blocks dangerous characters: {}[]()&|*$<>"'/\;`~!@#%^+=
     """
     if not value or not isinstance(value, str):
         return value
@@ -376,20 +384,37 @@ def _handle_v31_upload(data, user):
     # SECURITY: Calculate SHA-256 hash for data integrity verification
     file_hash = hashlib.sha256(encrypted_data_bytes).hexdigest()
 
-    # FORENSIC REQUIREMENT: Verify client-supplied hash matches server calculation
-    client_hash = encryption.get('data_hash', '').lower()
-    if client_hash:
-        if client_hash != file_hash:
-            logger.error(f"Hash mismatch! Client: {client_hash[:16]}... Server: {file_hash[:16]}...")
-            return jsonify({
-                'success': False,
-                'error': 'Data integrity verification failed. Upload may be corrupted or tampered.',
-                'error_code': 'HASH_MISMATCH'
-            }), 400
-        logger.info(f"Hash verification passed: {file_hash[:16]}...")
-    else:
-        # For backward compatibility, warn but don't fail
-        logger.warning(f"Client did not provide data_hash for verification (session_id: {session_id})")
+    # FIX #44: FORENSIC REQUIREMENT - MANDATORY hash verification (no backward compatibility)
+    # Client must provide data_hash for integrity verification
+    client_hash = encryption.get('data_hash', '').lower().strip()
+
+    if not client_hash:
+        logger.error(f"Client did not provide mandatory data_hash for verification (session_id: {session_id})")
+        return jsonify({
+            'success': False,
+            'error': 'Data integrity hash (data_hash) is required for forensic-grade verification.',
+            'error_code': 'HASH_REQUIRED'
+        }), 400
+
+    # Validate hash format (64 hex characters for SHA-256)
+    if not re.match(r'^[a-f0-9]{64}$', client_hash):
+        logger.error(f"Invalid hash format provided: {client_hash[:16]}...")
+        return jsonify({
+            'success': False,
+            'error': 'Invalid SHA-256 hash format. Expected 64 hexadecimal characters.',
+            'error_code': 'INVALID_HASH_FORMAT'
+        }), 400
+
+    # Verify client hash matches server calculation
+    if client_hash != file_hash:
+        logger.error(f"Hash mismatch! Client: {client_hash[:16]}... Server: {file_hash[:16]}...")
+        return jsonify({
+            'success': False,
+            'error': 'Data integrity verification failed. Upload may be corrupted or tampered.',
+            'error_code': 'HASH_MISMATCH'
+        }), 400
+
+    logger.info(f"Hash verification passed: {file_hash[:16]}...")
 
     # Check file size
     max_size_mb = current_app.config.get('MAX_UPLOAD_SIZE_MB', 100)

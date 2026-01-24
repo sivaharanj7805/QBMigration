@@ -43,7 +43,8 @@ class License(db.Model):
     license_key_hash = db.Column(db.String(64), nullable=False, index=True)  # SHA-256 for lookup
     
     # User Association (optional - can be activated later)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # FIX #48: SET NULL on user delete (licenses can be transferred)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     user_email = db.Column(db.String(255))  # Associated email at time of purchase
     
     # License Type
@@ -358,7 +359,8 @@ class LicenseActivation(db.Model):
     __tablename__ = 'license_activations'
     
     id = db.Column(db.Integer, primary_key=True)
-    license_id = db.Column(db.Integer, db.ForeignKey('licenses.id'), nullable=False)
+    # FIX #48: CASCADE delete activation records when license is deleted
+    license_id = db.Column(db.Integer, db.ForeignKey('licenses.id', ondelete='CASCADE'), nullable=False)
     
     # Action Details
     action = db.Column(db.String(20), nullable=False)  # activate, deactivate, validate, revoke
