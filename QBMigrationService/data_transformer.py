@@ -384,7 +384,7 @@ class QBDataTransformer:
         return transformed
 
     
-    def _init_account_mapping(self):
+    def _init_account_mapping(self) -> None:
         """Initialize comprehensive account type mappings."""
         # 250+ QB Desktop → QB Online account type mappings
         self.account_mapping = {
@@ -746,12 +746,12 @@ class QBDataTransformer:
             logger.debug(f"No mapping found for {entity_type} ID: {qbd_id}")
         return qbo_id
     
-    def store_mapping(self, entity_type: str, qbd_id: Any, qbo_id: str):
+    def store_mapping(self, entity_type: str, qbd_id: Any, qbo_id: str) -> None:
         """Store ID mapping."""
         if qbd_id and qbo_id:
             self.id_mapping[entity_type][str(qbd_id)] = str(qbo_id)
-    
-    def add_manual_review(self, entity_type: str, name: str, reason: str):
+
+    def add_manual_review(self, entity_type: str, name: str, reason: str) -> None:
         """Add item to manual review list."""
         self.manual_review.append({
             'type': entity_type,

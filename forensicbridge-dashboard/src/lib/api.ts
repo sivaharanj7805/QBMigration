@@ -1,8 +1,21 @@
 /**
  * ForensicBridge API Client
- * 
+ *
  * Handles all communication with the QBMigrationServer backend.
+ * Uses Zod for runtime schema validation to prevent XSS and type errors.
  */
+
+import { z } from 'zod';
+import {
+    DashboardOverviewSchema,
+    MigrationListSchema,
+    MigrationStatusSchema,
+    TrialBalanceSchema,
+    LoginResponseSchema,
+    UserInfoSchema,
+    UploadSessionSchema,
+    UploadCompleteSchema,
+} from './schemas';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -26,7 +39,8 @@ class ApiClient {
 
     private async request<T>(
         endpoint: string,
-        options: RequestInit = {}
+        options: RequestInit = {},
+        schema?: z.ZodSchema<T>
     ): Promise<ApiResponse<T>> {
         const url = `${this.baseUrl}${endpoint}`;
 
@@ -43,18 +57,37 @@ class ApiClient {
                 credentials: "include",
             });
 
-            const data = await response.json();
+            // SECURITY FIX: Parse and validate JSON with schema
+            const rawData = await response.json();
 
             if (!response.ok) {
                 return {
                     success: false,
-                    error: data.error || `HTTP ${response.status}`,
+                    error: rawData.error || `HTTP ${response.status}`,
                 };
             }
 
+            // SECURITY: Validate response data with Zod schema if provided
+            if (schema) {
+                try {
+                    const validatedData = schema.parse(rawData);
+                    return {
+                        success: true,
+                        data: validatedData,
+                    };
+                } catch (validationError) {
+                    console.error('Schema validation failed:', validationError);
+                    return {
+                        success: false,
+                        error: 'Invalid API response format. This may indicate a security issue.',
+                    };
+                }
+            }
+
+            // Fallback: return unvalidated data (backwards compatibility)
             return {
                 success: true,
-                data,
+                data: rawData as T,
             };
         } catch (error) {
             return {
@@ -69,17 +102,11 @@ class ApiClient {
     // ==========================================
 
     async getDashboardOverview() {
-        return this.request<{
-            overview: {
-                total_migrations: number;
-                completed_migrations: number;
-                failed_migrations: number;
-                in_progress: number;
-                success_rate: number;
-                avg_duration_minutes: number;
-                recent_completed_24h: number;
-            };
-        }>("/api/dashboard/overview");
+        return this.request(
+            "/api/dashboard/overview",
+            {},
+            DashboardOverviewSchema
+        );
     }
 
     async getRecentActivity() {

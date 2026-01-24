@@ -19,6 +19,7 @@ from api.dashboard_api import dashboard_bp
 from config import config
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
+from utils.error_sanitizer import sanitize_error_message, create_error_response, is_production
 from sqlalchemy import text
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
@@ -191,10 +192,11 @@ def auto_migrate_database(app):
             """))
             
             # Create migration_credits table if it doesn't exist
+            # SECURITY FIX: Add CASCADE delete for GDPR "right to be forgotten" compliance
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS migration_credits (
                     id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     tier_type VARCHAR(50) NOT NULL,
                     transaction_limit INTEGER NOT NULL,
                     price_cents INTEGER NOT NULL,
@@ -209,16 +211,79 @@ def auto_migrate_database(app):
                     used_at TIMESTAMP
                 )
             """))
+
+            # Fix existing foreign key constraints to add CASCADE (for existing installations)
+            try:
+                # Drop old constraint if exists
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migration_credits_user_id_fkey'
+                        ) THEN
+                            ALTER TABLE migration_credits
+                            DROP CONSTRAINT migration_credits_user_id_fkey;
+                        END IF;
+                    END $$;
+                """))
+
+                # Add new constraint with CASCADE
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migration_credits_user_id_cascade_fkey'
+                        ) THEN
+                            ALTER TABLE migration_credits
+                            ADD CONSTRAINT migration_credits_user_id_cascade_fkey
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+                        END IF;
+                    END $$;
+                """))
+            except Exception as e:
+                app.logger.warning(f'Could not update CASCADE constraint on migration_credits: {str(e)}')
             
             # Add migration_credit_id to migrations table for tracking which credit was used
+            # SECURITY FIX: Add CASCADE constraints for GDPR compliance
             try:
+                # Add columns if not exist
                 conn.execute(text("""
-                    ALTER TABLE migrations 
-                    ADD COLUMN IF NOT EXISTS migration_credit_id INTEGER REFERENCES migration_credits(id),
-                    ADD COLUMN IF NOT EXISTS total_transactions INTEGER DEFAULT 0
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'migrations' AND column_name = 'migration_credit_id'
+                        ) THEN
+                            ALTER TABLE migrations ADD COLUMN migration_credit_id INTEGER;
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'migrations' AND column_name = 'total_transactions'
+                        ) THEN
+                            ALTER TABLE migrations ADD COLUMN total_transactions INTEGER DEFAULT 0;
+                        END IF;
+                    END $$;
                 """))
-            except Exception:
-                pass  # Column may already exist
+
+                # Add CASCADE foreign key constraint
+                conn.execute(text("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE constraint_name = 'migrations_credit_cascade_fkey'
+                        ) THEN
+                            ALTER TABLE migrations
+                            ADD CONSTRAINT migrations_credit_cascade_fkey
+                            FOREIGN KEY (migration_credit_id) REFERENCES migration_credits(id) ON DELETE SET NULL;
+                        END IF;
+                    END $$;
+                """))
+            except Exception as e:
+                app.logger.warning(f'Could not add CASCADE to migrations.migration_credit_id: {str(e)}')
             
             conn.commit()
             app.logger.info('Database schema verified/updated successfully')
@@ -241,6 +306,94 @@ def create_app(config_name='development'):
     # Initialize config-specific setup
     if hasattr(config_class, 'init_app'):
         config_class.init_app(app)
+
+    # SECURITY: Validate critical encryption keys at startup
+    # FIX #43: Validate BACKUP_ENCRYPTION_KEY is a valid Fernet key
+    from cryptography.fernet import Fernet, InvalidToken
+    import base64
+
+    backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
+    if not backup_key:
+        raise ValueError(
+            "CRITICAL: BACKUP_ENCRYPTION_KEY must be set. "
+            "This key is required for encrypting QBO OAuth tokens. "
+            "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+
+    # Validate it's a valid Fernet key by attempting to create a Fernet instance
+    try:
+        key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+        test_fernet = Fernet(key_bytes)
+        # Test encryption/decryption works
+        test_data = b"validation_test"
+        encrypted = test_fernet.encrypt(test_data)
+        decrypted = test_fernet.decrypt(encrypted)
+        if decrypted != test_data:
+            raise ValueError("Encryption/decryption test failed")
+        logger.info("BACKUP_ENCRYPTION_KEY validated successfully")
+    except Exception as e:
+        raise ValueError(
+            f"CRITICAL: BACKUP_ENCRYPTION_KEY is invalid: {str(e)}. "
+            "The key must be a valid Fernet key (32 bytes, base64-encoded, 44 characters). "
+            "Generate a new key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+
+    # Validate JWT secret
+    jwt_secret = app.config.get('SECRET_KEY')
+    if not jwt_secret or len(jwt_secret) < 32:
+        raise ValueError(
+            "CRITICAL: SECRET_KEY must be set and at least 32 characters. "
+            "This is required for session security and JWT tokens."
+        )
+
+    # FIX #49: Validate AWS region and AMI consistency
+    aws_region = app.config.get('AWS_REGION', 'ca-central-1')
+    ami_id = app.config.get('AWS_EC2_AMI_ID', '')
+
+    # Mapping of regions to known AMI prefixes for validation
+    REGION_AMI_PREFIXES = {
+        'us-east-1': 'ami-',
+        'us-west-2': 'ami-',
+        'ca-central-1': 'ami-',
+        'eu-west-1': 'ami-',
+        'eu-central-1': 'ami-',
+        'ap-southeast-1': 'ami-',
+        'ap-northeast-1': 'ami-'
+    }
+
+    # Validate region is supported
+    if aws_region not in REGION_AMI_PREFIXES:
+        logger.warning(
+            f"AWS region '{aws_region}' is not in the pre-validated list. "
+            f"Ensure your AMI ID is valid for this region."
+        )
+
+    # CRITICAL: Hardcoded AMI from config.py default is for US region
+    HARDCODED_US_AMI = 'ami-0c55b159cbfafe1f0'
+    if ami_id == HARDCODED_US_AMI and aws_region != 'us-east-1':
+        raise ValueError(
+            f"CRITICAL: AMI ID '{ami_id}' is a US-East-1 AMI, but AWS_REGION is '{aws_region}'. "
+            f"This creates a data sovereignty violation risk. "
+            f"You must set AWS_EC2_AMI_ID environment variable to an AMI valid for region '{aws_region}'. "
+            f"Find region-specific AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+        )
+
+    # Require explicit AMI configuration in production
+    if not ami_id:
+        raise ValueError(
+            "CRITICAL: AWS_EC2_AMI_ID must be explicitly configured. "
+            f"Set an AMI ID valid for region '{aws_region}'. "
+            f"Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+        )
+
+    # Validate AMI format
+    if not ami_id.startswith('ami-') or len(ami_id) < 12:
+        raise ValueError(
+            f"CRITICAL: Invalid AMI ID format: '{ami_id}'. "
+            f"AMI IDs must start with 'ami-' and be at least 12 characters."
+        )
+
+    logger.info(f"AWS configuration validated: Region={aws_region}, AMI={ami_id[:12]}...")
 
     @app.before_request
     def check_content_length():
@@ -280,11 +433,13 @@ def create_app(config_name='development'):
     if app.config['ENV'] == 'production' and 'localhost' in str(allowed_origins):
         app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
 
+    # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
     CORS(app,
          supports_credentials=True,
          origins=[origin.strip() for origin in allowed_origins],
          allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
-         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+         max_age=3600)  # Cache preflight for 1 hour (reduces OPTIONS requests)
     app.logger.info(f'CORS enabled for origins: {allowed_origins}')
     
     # Setup rate limiting
@@ -438,7 +593,37 @@ def create_app(config_name='development'):
             health_status['status'] = 'unhealthy'
             health_status['checks']['database'] = 'unhealthy'
             return jsonify(health_status), 503
-        
+
+        # RELIABILITY FIX: Check database connection pool health
+        try:
+            # Query pg_stat_activity to check active vs total connections
+            result = db.session.execute(text("""
+                SELECT
+                    (SELECT count(*) FROM pg_stat_activity) as active_connections,
+                    (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+            """))
+            row = result.fetchone()
+            active_connections = row[0]
+            max_connections = row[1]
+
+            # Calculate pool usage percentage
+            pool_usage_pct = (active_connections / max_connections) * 100 if max_connections > 0 else 0
+
+            if pool_usage_pct >= 90:
+                health_status['checks']['connection_pool'] = f'critical ({active_connections}/{max_connections})'
+                health_status['status'] = 'degraded'
+                app.logger.warning(f"Connection pool critical: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
+            elif pool_usage_pct >= 75:
+                health_status['checks']['connection_pool'] = f'warning ({active_connections}/{max_connections})'
+                app.logger.info(f"Connection pool high: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
+            else:
+                health_status['checks']['connection_pool'] = f'healthy ({active_connections}/{max_connections})'
+
+        except Exception as e:
+            # If pool check fails, log but don't fail health check (might not be PostgreSQL)
+            app.logger.warning(f"Connection pool check failed (not PostgreSQL?): {str(e)}")
+            health_status['checks']['connection_pool'] = 'unknown'
+
         # Check AWS S3 access
         try:
             import boto3
@@ -524,15 +709,17 @@ def create_app(config_name='development'):
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
     
-    # Error handlers
+    # FIX #34: Sanitized error handlers for production security
     @app.errorhandler(400)
     def bad_request(error):
         """Handle 400 Bad Request errors"""
-        app.logger.warning(f"Bad request: {str(error)}")
+        # SECURITY: Never expose raw error in production
+        sanitized = sanitize_error_message(error, context='validation')
+        app.logger.warning(f"Bad request: {sanitized}")
         return jsonify({
             'success': False,
-            'error': 'Bad request',
-            'message': str(error) if app.config.get('DEBUG') else 'Invalid request'
+            'error': sanitized,
+            'error_code': 'BAD_REQUEST'
         }), 400
     
     @app.errorhandler(401)
@@ -586,30 +773,24 @@ def create_app(config_name='development'):
     @app.errorhandler(500)
     def internal_error(error):
         """Handle 500 Internal Server Error"""
-        app.logger.error(f"Internal server error: {str(error)}", exc_info=True)
+        # SECURITY: Log full error server-side, but sanitize for client
+        app.logger.error("Internal server error", exc_info=True)
         db.session.rollback()
-        return jsonify({
-            'success': False,
-            'error': 'Internal server error',
-            'message': 'An unexpected error occurred' if not app.config.get('DEBUG') else str(error)
-        }), 500
-    
+
+        # CRITICAL: Never expose raw error details in production
+        response = create_error_response(error, context='api', status_code=500)
+        return jsonify(response), 500
+
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
         """Catch-all handler for unexpected exceptions"""
-        app.logger.exception(f"Unexpected error: {str(error)}")
+        # SECURITY: Log full error server-side with stack trace
+        app.logger.exception("Unexpected exception occurred")
         db.session.rollback()
-        
-        if app.config.get('DEBUG'):
-            error_msg = str(error)
-        else:
-            error_msg = 'An unexpected error occurred. Our team has been notified.'
-        
-        return jsonify({
-            'success': False,
-            'error': 'Unexpected error',
-            'message': error_msg
-        }), 500
+
+        # CRITICAL: Always sanitize error messages for client response
+        response = create_error_response(error, context='api', status_code=500)
+        return jsonify(response), 500
     
     app.logger.info('Flask app created successfully')
     return app
