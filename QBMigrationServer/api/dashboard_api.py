@@ -760,10 +760,22 @@ def export_caseware_bundle(migration_id):
             zip_path = os.path.join(bundle_dir, f'{migration_id}_caseware_bundle.zip')
 
             # Create zip with standard compression (we'll encrypt the whole file)
+            temp_files = []
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for filename, filepath in result.get('files', {}).items():
                     if os.path.exists(filepath):
                         zipf.write(filepath, os.path.basename(filepath))
+                        temp_files.append(filepath)  # Track for cleanup
+
+            # FIX #65: Delete unencrypted CSV files immediately after zipping
+            # Prevents plaintext financial data from persisting on disk
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        logger.info(f"Deleted temporary file: {os.path.basename(temp_file)}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to delete temporary file {temp_file}: {cleanup_error}")
 
             # CRITICAL: Encrypt the zip file at rest
             with open(zip_path, 'rb') as f:
@@ -858,7 +870,18 @@ def export_caseware_bundle(migration_id):
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(tb_path, 'Audit_TB.csv')
                 zipf.write(gl_path, 'Audit_GL.csv')
-            
+
+            # FIX #65: Delete unencrypted CSV files immediately after zipping
+            # Prevents plaintext financial data from persisting on disk
+            try:
+                if os.path.exists(tb_path):
+                    os.remove(tb_path)
+                if os.path.exists(gl_path):
+                    os.remove(gl_path)
+                logger.info(f"Deleted temporary CSV files for migration {migration_id}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to delete temporary CSV files: {cleanup_error}")
+
             migration.caseware_bundle_path = zip_path
             migration.caseware_bundle_ready = True
             migration.destination = 'caseware'
