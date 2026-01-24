@@ -29,26 +29,27 @@ namespace QBDesktopExtractor
         {
             if (invoice == null) return null;
             
-            // Canonical field ordering for deterministic hashing
+            // FIX #59: Canonical field ordering with InvariantCulture for deterministic hashing
             var hashInput = new StringBuilder();
             hashInput.Append($"TxnID:{invoice.TxnID ?? ""}|");
             hashInput.Append($"RefNumber:{invoice.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{invoice.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{invoice.CustomerRefListID ?? ""}|");
-            hashInput.Append($"Subtotal:{invoice.Subtotal?.ToString("F2") ?? "0.00"}|");
-            hashInput.Append($"SalesTaxTotal:{invoice.SalesTaxTotal?.ToString("F2") ?? "0.00"}|");
-            hashInput.Append($"AppliedAmount:{invoice.AppliedAmount?.ToString("F2") ?? "0.00"}|");
-            hashInput.Append($"BalanceRemaining:{invoice.BalanceRemaining?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"Subtotal:{invoice.Subtotal?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"SalesTaxTotal:{invoice.SalesTaxTotal?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"AppliedAmount:{invoice.AppliedAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"BalanceRemaining:{invoice.BalanceRemaining?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"IsPaid:{invoice.IsPaid ?? false}|");
             hashInput.Append($"EditSequence:{invoice.EditSequence ?? ""}");
             
-            // Include line items in hash
+            // FIX #59: Include line items in hash with canonicalized decimal formatting
             if (invoice.Lines != null && invoice.Lines.Count > 0)
             {
                 hashInput.Append("|Lines:");
                 foreach (var line in invoice.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    // Use InvariantCulture to prevent regional formatting differences (1.00 vs 1,00)
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -67,7 +68,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{bill.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{bill.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"VendorRefListID:{bill.VendorRefListID ?? ""}|");
-            hashInput.Append($"AmountDue:{bill.AmountDue?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"AmountDue:{bill.AmountDue?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"IsPaid:{bill.IsPaid ?? false}|");
             hashInput.Append($"EditSequence:{bill.EditSequence ?? ""}");
             
@@ -77,7 +78,7 @@ namespace QBDesktopExtractor
                 hashInput.Append("|Lines:");
                 foreach (var line in bill.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -96,7 +97,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{payment.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{payment.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{payment.CustomerRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{payment.TotalAmount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"TotalAmount:{payment.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"PaymentMethodRefListID:{payment.PaymentMethodRefListID ?? ""}|");
             hashInput.Append($"DepositToAccountRefListID:{payment.DepositToAccountRefListID ?? ""}|");
             hashInput.Append($"EditSequence:{payment.EditSequence ?? ""}");
@@ -116,7 +117,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{payment.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{payment.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"PayeeEntityRefListID:{payment.PayeeEntityRefListID ?? ""}|");
-            hashInput.Append($"Amount:{payment.Amount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"Amount:{payment.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"BankAccountRefListID:{payment.BankAccountRefListID ?? ""}");
             
             return ComputeHash(hashInput.ToString());
@@ -134,15 +135,15 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{creditMemo.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{creditMemo.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{creditMemo.CustomerRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{creditMemo.TotalAmount?.ToString("F2") ?? "0.00"}|");
-            hashInput.Append($"CreditRemaining:{creditMemo.CreditRemaining?.ToString("F2") ?? "0.00"}");
+            hashInput.Append($"TotalAmount:{creditMemo.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
+            hashInput.Append($"CreditRemaining:{creditMemo.CreditRemaining?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
             
             if (creditMemo.Lines != null && creditMemo.Lines.Count > 0)
             {
                 hashInput.Append("|Lines:");
                 foreach (var line in creditMemo.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -167,7 +168,7 @@ namespace QBDesktopExtractor
                 hashInput.Append("|Lines:");
                 foreach (var line in journalEntry.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.JournalLineType ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.JournalLineType ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -187,7 +188,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"TxnDate:{check.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"PayeeEntityRefListID:{check.PayeeEntityRefListID ?? ""}|");
             hashInput.Append($"AccountRefListID:{check.AccountRefListID ?? ""}|");
-            hashInput.Append($"Amount:{check.Amount?.ToString("F2") ?? "0.00"}");
+            hashInput.Append($"Amount:{check.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
             
             return ComputeHash(hashInput.ToString());
         }
@@ -203,7 +204,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"TxnID:{deposit.TxnID ?? ""}|");
             hashInput.Append($"TxnDate:{deposit.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"DepositToAccountRefListID:{deposit.DepositToAccountRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{deposit.TotalAmount?.ToString("F2") ?? "0.00"}");
+            hashInput.Append($"TotalAmount:{deposit.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
             
             return ComputeHash(hashInput.ToString());
         }
@@ -220,7 +221,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{salesReceipt.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{salesReceipt.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{salesReceipt.CustomerRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{salesReceipt.TotalAmount?.ToString("F2") ?? "0.00"}");
+            hashInput.Append($"TotalAmount:{salesReceipt.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
             
             return ComputeHash(hashInput.ToString());
         }
@@ -237,7 +238,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{po.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{po.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"VendorRefListID:{po.VendorRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{po.TotalAmount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"TotalAmount:{po.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"IsManuallyClosed:{po.IsManuallyClosed ?? false}|");
             hashInput.Append($"IsFullyReceived:{po.IsFullyReceived ?? false}");
             
@@ -246,7 +247,7 @@ namespace QBDesktopExtractor
                 hashInput.Append("|Lines:");
                 foreach (var line in po.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -265,7 +266,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{so.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{so.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{so.CustomerRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{so.TotalAmount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"TotalAmount:{so.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"IsManuallyClosed:{so.IsManuallyClosed ?? false}|");
             hashInput.Append($"IsFullyInvoiced:{so.IsFullyInvoiced ?? false}");
             
@@ -274,7 +275,7 @@ namespace QBDesktopExtractor
                 hashInput.Append("|Lines:");
                 foreach (var line in so.Lines.OrderBy(l => l.TxnLineID))
                 {
-                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2") ?? "0.00"}]");
+                    hashInput.Append($"[{line.TxnLineID ?? ""}:{line.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}]");
                 }
             }
             
@@ -293,7 +294,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"RefNumber:{estimate.RefNumber ?? ""}|");
             hashInput.Append($"TxnDate:{estimate.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"CustomerRefListID:{estimate.CustomerRefListID ?? ""}|");
-            hashInput.Append($"TotalAmount:{estimate.TotalAmount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"TotalAmount:{estimate.TotalAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"IsActive:{estimate.IsActive ?? false}");
             
             return ComputeHash(hashInput.ToString());
@@ -310,7 +311,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"TxnID:{vendorCredit.TxnID ?? ""}|");
             hashInput.Append($"TxnDate:{vendorCredit.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"VendorRefListID:{vendorCredit.VendorRefListID ?? ""}|");
-            hashInput.Append($"CreditAmount:{vendorCredit.CreditAmount?.ToString("F2") ?? "0.00"}|");
+            hashInput.Append($"CreditAmount:{vendorCredit.CreditAmount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}|");
             hashInput.Append($"APAccountRefListID:{vendorCredit.APAccountRefListID ?? ""}");
             
             return ComputeHash(hashInput.ToString());
@@ -328,7 +329,7 @@ namespace QBDesktopExtractor
             hashInput.Append($"TxnDate:{transfer.TxnDate?.ToString("yyyy-MM-dd") ?? ""}|");
             hashInput.Append($"TransferFromAccountRefListID:{transfer.TransferFromAccountRefListID ?? ""}|");
             hashInput.Append($"TransferToAccountRefListID:{transfer.TransferToAccountRefListID ?? ""}|");
-            hashInput.Append($"Amount:{transfer.Amount?.ToString("F2") ?? "0.00"}");
+            hashInput.Append($"Amount:{transfer.Amount?.ToString("F2", CultureInfo.InvariantCulture) ?? "0.00"}");
             
             return ComputeHash(hashInput.ToString());
         }

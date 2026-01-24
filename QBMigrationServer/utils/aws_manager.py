@@ -336,27 +336,42 @@ class AWSMigrationManager:
             return None
     
     def _find_migration_metadata_key(self, migration_id, bucket_name):
-        """Find S3 key for migration's metadata file"""
+        """
+        FIX #60: Find S3 key for migration's metadata file with pagination support.
+        S3 list_objects_v2 returns max 1000 objects per call.
+        """
         try:
             prefix = "migrations/"
-            
-            response = self.s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix
-            )
-            
-            if 'Contents' not in response:
-                return None
-            
-            for obj in response['Contents']:
-                key = obj['Key']
-                
-                # Check if this is the metadata file
-                if migration_id in key and key.endswith('encryption_metadata.json'):
-                    return key
-            
-            return None
-            
+            continuation_token = None
+
+            # FIX #60: Paginate through all S3 objects
+            while True:
+                list_params = {
+                    'Bucket': bucket_name,
+                    'Prefix': prefix,
+                    'MaxKeys': 1000
+                }
+
+                if continuation_token:
+                    list_params['ContinuationToken'] = continuation_token
+
+                response = self.s3.list_objects_v2(**list_params)
+
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+
+                        # Check if this is the metadata file
+                        if migration_id in key and key.endswith('encryption_metadata.json'):
+                            return key
+
+                # Check if more pages exist
+                if response.get('IsTruncated', False):
+                    continuation_token = response.get('NextContinuationToken')
+                else:
+                    # No more pages, file not found
+                    return None
+
         except Exception as e:
             logger.error(f"Error finding metadata key: {str(e)}")
             return None
