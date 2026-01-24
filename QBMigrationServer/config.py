@@ -76,7 +76,9 @@ class Config:
     AWS_S3_FILE_TTL_HOURS = int(os.getenv('S3_FILE_TTL_HOURS', '24'))
     
     # EC2
-    AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', 'ami-0c55b159cbfafe1f0')
+    # FIX #49: Remove hardcoded US AMI - require explicit configuration per region
+    # Default ami-0c55b159cbfafe1f0 was for us-east-1, causing data sovereignty violations
+    AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', '')  # MUST be set explicitly for your region
     AWS_EC2_INSTANCE_TYPE = os.getenv('AWS_EC2_INSTANCE_TYPE', 't3.micro')
     AWS_EC2_KEY_NAME = os.getenv('AWS_EC2_KEY_NAME', 'qb-migration-key')
     AWS_EC2_SECURITY_GROUP = os.getenv('AWS_EC2_SECURITY_GROUP')

@@ -308,12 +308,34 @@ def create_app(config_name='development'):
         config_class.init_app(app)
 
     # SECURITY: Validate critical encryption keys at startup
+    # FIX #43: Validate BACKUP_ENCRYPTION_KEY is a valid Fernet key
+    from cryptography.fernet import Fernet, InvalidToken
+    import base64
+
     backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
-    if not backup_key or len(backup_key) < 32:
+    if not backup_key:
         raise ValueError(
-            "CRITICAL: BACKUP_ENCRYPTION_KEY must be set and at least 32 characters. "
+            "CRITICAL: BACKUP_ENCRYPTION_KEY must be set. "
             "This key is required for encrypting QBO OAuth tokens. "
-            "Set it in your .env file or environment variables."
+            "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+
+    # Validate it's a valid Fernet key by attempting to create a Fernet instance
+    try:
+        key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+        test_fernet = Fernet(key_bytes)
+        # Test encryption/decryption works
+        test_data = b"validation_test"
+        encrypted = test_fernet.encrypt(test_data)
+        decrypted = test_fernet.decrypt(encrypted)
+        if decrypted != test_data:
+            raise ValueError("Encryption/decryption test failed")
+        logger.info("BACKUP_ENCRYPTION_KEY validated successfully")
+    except Exception as e:
+        raise ValueError(
+            f"CRITICAL: BACKUP_ENCRYPTION_KEY is invalid: {str(e)}. "
+            "The key must be a valid Fernet key (32 bytes, base64-encoded, 44 characters). "
+            "Generate a new key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
         )
 
     # Validate JWT secret
@@ -323,6 +345,55 @@ def create_app(config_name='development'):
             "CRITICAL: SECRET_KEY must be set and at least 32 characters. "
             "This is required for session security and JWT tokens."
         )
+
+    # FIX #49: Validate AWS region and AMI consistency
+    aws_region = app.config.get('AWS_REGION', 'ca-central-1')
+    ami_id = app.config.get('AWS_EC2_AMI_ID', '')
+
+    # Mapping of regions to known AMI prefixes for validation
+    REGION_AMI_PREFIXES = {
+        'us-east-1': 'ami-',
+        'us-west-2': 'ami-',
+        'ca-central-1': 'ami-',
+        'eu-west-1': 'ami-',
+        'eu-central-1': 'ami-',
+        'ap-southeast-1': 'ami-',
+        'ap-northeast-1': 'ami-'
+    }
+
+    # Validate region is supported
+    if aws_region not in REGION_AMI_PREFIXES:
+        logger.warning(
+            f"AWS region '{aws_region}' is not in the pre-validated list. "
+            f"Ensure your AMI ID is valid for this region."
+        )
+
+    # CRITICAL: Hardcoded AMI from config.py default is for US region
+    HARDCODED_US_AMI = 'ami-0c55b159cbfafe1f0'
+    if ami_id == HARDCODED_US_AMI and aws_region != 'us-east-1':
+        raise ValueError(
+            f"CRITICAL: AMI ID '{ami_id}' is a US-East-1 AMI, but AWS_REGION is '{aws_region}'. "
+            f"This creates a data sovereignty violation risk. "
+            f"You must set AWS_EC2_AMI_ID environment variable to an AMI valid for region '{aws_region}'. "
+            f"Find region-specific AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+        )
+
+    # Require explicit AMI configuration in production
+    if not ami_id:
+        raise ValueError(
+            "CRITICAL: AWS_EC2_AMI_ID must be explicitly configured. "
+            f"Set an AMI ID valid for region '{aws_region}'. "
+            f"Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+        )
+
+    # Validate AMI format
+    if not ami_id.startswith('ami-') or len(ami_id) < 12:
+        raise ValueError(
+            f"CRITICAL: Invalid AMI ID format: '{ami_id}'. "
+            f"AMI IDs must start with 'ami-' and be at least 12 characters."
+        )
+
+    logger.info(f"AWS configuration validated: Region={aws_region}, AMI={ami_id[:12]}...")
 
     @app.before_request
     def check_content_length():

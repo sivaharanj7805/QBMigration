@@ -26,7 +26,8 @@ class Migration(db.Model):
     # Primary identifiers
     id = db.Column(db.Integer, primary_key=True)
     migration_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    # FIX #48: CASCADE delete migrations when user is deleted (GDPR compliance)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     
     # Company info (metadata only)
     company_name = db.Column(db.String(255))
@@ -531,6 +532,57 @@ class Migration(db.Model):
                     pass
         
         return data
-    
+
+    def strip_sensitive_data(self):
+        """
+        FIX #45: Strip sensitive PII/financial data for zero-persistence compliance.
+        Keeps only metadata (hashes, counts, status) - removes raw balances, logs, transactions.
+        Should be called 24 hours after migration completion.
+        """
+        import json
+        from datetime import datetime
+
+        # Strip trial_balance_data - keep only summary metadata
+        if self.trial_balance_data:
+            try:
+                data = json.loads(self.trial_balance_data)
+                # Keep only non-sensitive metadata
+                metadata = {
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'original_account_count': len(data.get('accounts', [])) if 'accounts' in data else None,
+                    'original_transaction_count': len(data.get('transactions', [])) if 'transactions' in data else None,
+                    'data_hash': data.get('hash') if 'hash' in data else None,
+                    'variance_percent': data.get('variance_percent') if 'variance_percent' in data else None,
+                    'reconciliation_status': data.get('status') if 'status' in data else None
+                }
+                self.trial_balance_data = json.dumps(metadata)
+            except (json.JSONDecodeError, TypeError) as e:
+                # If parsing fails, just clear the data
+                self.trial_balance_data = json.dumps({
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'error': 'Failed to parse original data'
+                })
+
+        # Strip live_status_data - keep only summary metadata
+        if self.live_status_data:
+            try:
+                data = json.loads(self.live_status_data)
+                # Keep only non-sensitive metadata
+                metadata = {
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'final_phase': data.get('current_phase') if 'current_phase' in data else None,
+                    'phase_count': len(data.get('phases', [])) if 'phases' in data else None,
+                    'completion_status': data.get('status') if 'status' in data else None
+                }
+                self.live_status_data = json.dumps(metadata)
+            except (json.JSONDecodeError, TypeError) as e:
+                # If parsing fails, just clear the data
+                self.live_status_data = json.dumps({
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'error': 'Failed to parse original data'
+                })
+
+        return True
+
     def __repr__(self):
         return f'<Migration {self.migration_id} - {self.status}>'
