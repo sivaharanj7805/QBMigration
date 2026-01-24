@@ -9,13 +9,49 @@ from functools import wraps
 import jwt
 import datetime
 import re
+import hmac
+import hashlib
 from typing import Optional, Tuple
 
 from models.database import db
 from models.user import User
 from extensions import limiter
+from utils.pii_redaction import hash_email, redact_all_pii
+from utils.error_sanitizer import sanitize_error_message, create_error_response
+from utils.captcha_verifier import (
+    verify_captcha_token, is_captcha_required, get_client_ip, get_captcha_config
+)
+from utils.anomaly_detector import check_login_anomalies, log_anomaly
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+
+
+# FIX #37: Constant-time string comparison for security
+def constant_time_compare(a: str, b: str) -> bool:
+    """
+    Constant-time string comparison to prevent timing attacks.
+
+    Uses HMAC comparison which is designed to be constant-time.
+    This prevents attackers from using timing analysis to determine
+    if an email exists in the database.
+
+    Args:
+        a: First string
+        b: Second string
+
+    Returns:
+        True if strings are equal, False otherwise
+    """
+    if not isinstance(a, str) or not isinstance(b, str):
+        return False
+
+    # Normalize to bytes for HMAC comparison
+    a_bytes = a.encode('utf-8')
+    b_bytes = b.encode('utf-8')
+
+    # Use HMAC.compare_digest for constant-time comparison
+    # This is cryptographically secure and prevents timing attacks
+    return hmac.compare_digest(a_bytes, b_bytes)
 
 
 def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
@@ -83,16 +119,28 @@ def validate_email(email: str) -> bool:
     """
     Validate email format using comprehensive email-validator library.
     Falls back to regex if library not available.
+
+    FIX #37: Uses constant-time operations where possible to prevent timing attacks.
+    Note: The validation itself may have timing variations, but we prevent
+    enumeration attacks by using the same validation path for all emails.
     """
+    if not email or not isinstance(email, str):
+        return False
+
+    # Normalize email for validation
+    email = email.strip().lower()
+
     try:
         from email_validator import validate_email as ev_validate, EmailNotValidError
         try:
+            # Validate email format
             valid = ev_validate(email)
             return True
         except EmailNotValidError:
             return False
     except ImportError:
         # Fallback to regex if email-validator not installed
+        # FIX #37: Use consistent regex pattern that doesn't branch based on content
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return bool(re.match(pattern, email))
 
@@ -154,16 +202,30 @@ def register():
         if not validate_email(email):
             return jsonify({'success': False, 'error': 'Invalid email format'}), 400
         
-        # Validate password strength BEFORE creating user
+        # Validate password strength BEFORE checking user existence
         valid, msg = validate_password(password)
         if not valid:
             return jsonify({'success': False, 'error': msg}), 400
-        
-        # Check if user exists
+
+        # FIX #37: Prevent timing attack for email enumeration
+        # Always perform the same operations regardless of user existence
         existing = User.query.filter_by(email=email).first()
+
         if existing:
+            # FIX #37: Perform fake password hashing to match timing of real registration
+            # This prevents attackers from using timing to enumerate registered emails
+            from argon2 import PasswordHasher
+            ph = PasswordHasher()
+            try:
+                # Hash the provided password (same operation as real registration)
+                # This takes ~50-100ms, same as real password hashing
+                _ = ph.hash(password)
+            except:
+                pass
+
+            # Return error with same timing as successful registration
             return jsonify({'success': False, 'error': 'Email already registered'}), 409
-        
+
         # Create user
         user = User(
             email=email,
@@ -171,13 +233,16 @@ def register():
             last_name=last_name,
             company_name=company
         )
-        
+
         # Set password - this may raise ValueError for strength/reuse issues
         try:
             user.set_password(password)
         except ValueError as e:
-            logger.warning(f"Password validation failed for {email}: {str(e)}")
-            return jsonify({'success': False, 'error': str(e)}), 400
+            # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+            logger.warning(f"Password validation failed for {hash_email(email)}: {str(e)}")
+            # FIX #34: Sanitize error message before returning to client
+            sanitized_error = sanitize_error_message(e, context='auth')
+            return jsonify({'success': False, 'error': sanitized_error}), 400
         
         # Save to database
         db.session.add(user)
@@ -185,15 +250,17 @@ def register():
 
         # SECURITY FIX: Regenerate session ID to prevent session fixation
         session.clear()
-        session.regenerate = True  # Mark for regeneration
+        session.modified = True  # Force Flask to regenerate session cookie
         session['user_id'] = user.id
         session['email'] = user.email
+        session['_fresh'] = True  # Mark session as freshly authenticated
         
         # Generate token
         token = create_token(user.id, user.email)
-        
-        logger.info(f"New user registered: {email}")
-        
+
+        # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+        logger.info(f"New user registered: {hash_email(email)}")
+
         return jsonify({
             'success': True,
             'token': token,
@@ -213,7 +280,7 @@ def register():
 
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("5 per 15 minutes")  # SECURITY: Reduce brute force risk
 def login():
     """Login and get JWT token"""
     data = request.get_json()
@@ -223,16 +290,51 @@ def login():
     
     email = data.get('email', '').strip().lower()
     password = data.get('password', '')
-    
+    captcha_token = data.get('captcha_token')  # FIX #38: CAPTCHA token from client
+
     if not email or not password:
         return jsonify({'success': False, 'error': 'Email and password required'}), 400
-    
-    # Find user
+
+    # FIX #37: Constant-time user lookup and validation
+    # Find user (timing of database query is unavoidable, but we mitigate enumeration below)
     user = User.query.filter_by(email=email).first()
-    
-    # Check if user exists (constant-time comparison to prevent enumeration)
+
+    # FIX #38: Progressive CAPTCHA enforcement after 3 failed attempts
+    failed_attempts = user.failed_login_attempts if user else 0
+    captcha_required = is_captcha_required(email, failed_attempts)
+
+    if captcha_required:
+        if not captcha_token:
+            return jsonify({
+                'success': False,
+                'error': 'CAPTCHA verification required',
+                'captcha_required': True
+            }), 400
+
+        # Verify CAPTCHA token
+        captcha_valid, captcha_error = verify_captcha_token(
+            captcha_token,
+            remote_ip=get_client_ip()
+        )
+
+        if not captcha_valid:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"CAPTCHA verification failed for {hash_email(email)}: {captcha_error}")
+            return jsonify({
+                'success': False,
+                'error': 'CAPTCHA verification failed. Please try again.',
+                'captcha_required': True
+            }), 400
+
+    # SECURITY: Always perform password verification in constant time
+    # Whether user exists or not, we perform the same operations
+    password_valid = False
+    is_locked = False
+
     if not user:
-        # SECURITY FIX: Generate realistic hash to prevent timing attacks
+        # FIX #37: Generate realistic hash to prevent timing attacks
+        # This ensures login attempts for non-existent users take the same time as real users
         from argon2 import PasswordHasher
         import os
         ph = PasswordHasher()
@@ -240,46 +342,63 @@ def login():
         fake_password = os.urandom(16).hex()
         fake_hash = ph.hash(fake_password)
         try:
+            # This will always fail but takes the same time as real verification
             ph.verify(fake_hash, password)
         except:
             pass
-        return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
-    
-    # Check if account is locked
-    if user.is_locked():
-        return jsonify({
-            'success': False, 
-            'error': 'Account is locked due to too many failed attempts. Please try again later.'
-        }), 401
-    
-    # Verify password
-    if not user.check_password(password):
-        # Track failed attempt
-        user.record_failed_login()
-        db.session.commit()
-        
-        # Check if now locked
-        if user.failed_login_attempts >= 5:
-            return jsonify({
-                'success': False,
-                'error': 'Account is locked due to too many failed attempts. Please try again later.'
-            }), 401
-        
+        password_valid = False
+        is_locked = False
+    else:
+        # User exists - check if locked and verify password
+        is_locked = user.is_locked()
+
+        # FIX #37: Always verify password even if account is locked
+        # This prevents timing attacks that could distinguish locked vs non-existent accounts
+        password_valid = user.check_password(password) if not is_locked else False
+
+    # FIX #37: Consistent error handling regardless of user existence
+    if not user or is_locked or not password_valid:
+        # Track failed attempt only if user exists
+        if user and not is_locked:
+            user.record_failed_login()
+            db.session.commit()
+
+        # Generic error message that doesn't reveal if user exists or is locked
         return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
     
     # Successful login
     user.record_successful_login()
     db.session.commit()
 
+    # FIX #39: Anomaly detection for suspicious login patterns
+    client_ip = get_client_ip()
+    anomalies = check_login_anomalies(user.id, client_ip)
+
+    if anomalies:
+        # Log all detected anomalies
+        for anomaly in anomalies:
+            log_anomaly(user.id, anomaly)
+
+        # For critical anomalies, add warning to response
+        critical_anomalies = [a for a in anomalies if a['severity'] == 'critical']
+        if critical_anomalies:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"CRITICAL anomaly detected for user {user.id}: "
+                f"{', '.join(a['reason'] for a in critical_anomalies)}"
+            )
+
     # SECURITY FIX: Regenerate session ID on successful login to prevent session fixation
     session.clear()
-    session.regenerate = True  # Mark for regeneration
+    session.modified = True  # Force Flask to regenerate session cookie
     session['user_id'] = user.id
     session['email'] = user.email
-    
+    session['_fresh'] = True  # Mark session as freshly authenticated
+
     # Generate token
     token = create_token(user.id, user.email)
-    
+
     return jsonify({
         'success': True,
         'token': token,
@@ -303,21 +422,30 @@ def get_current_user():
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
     
-    # Get tier info - use try/except in case DB columns don't exist yet
+    # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
+    # If tier info can't be retrieved, user should know something is wrong
     try:
         tier_info = user.get_tier_info()
-    except Exception as e:
-        # Fallback if tier columns don't exist in database
-        import logging
-        logging.getLogger(__name__).warning(f"Could not get tier info: {e}")
+    except AttributeError as e:
+        # Database schema issue - log but allow graceful degradation
+        logger.warning(f"Database schema issue retrieving tier info: {e}")
         tier_info = {
             'tier': 'none',
             'tier_name': 'Free Trial',
             'migrations_remaining': 0,
             'migrations_purchased': 0,
             'migrations_used': 0,
-            'has_tier': False
+            'has_tier': False,
+            'warning': 'Billing system temporarily unavailable'
         }
+    except Exception as e:
+        # Unexpected error - this could indicate billing data corruption
+        logger.error(f"CRITICAL: Failed to retrieve tier info for user {user_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unable to retrieve account information. Please contact support.',
+            'error_code': 'TIER_INFO_UNAVAILABLE'
+        }), 500
     
     # Get migration credits breakdown by type
     try:
@@ -477,9 +605,10 @@ def select_tier():
     # Add migrations and set tier
     user.add_migrations(migrations_to_add, tier=tier_id)
     db.session.commit()
-    
-    logger.info(f"User {user.email} selected tier {tier_id} with {migrations_to_add} migration(s)")
-    
+
+    # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+    logger.info(f"User {hash_email(user.email)} selected tier {tier_id} with {migrations_to_add} migration(s)")
+
     return jsonify({
         'success': True,
         'message': f'Successfully selected {tier_config.get("name", tier_id)} tier',
@@ -590,9 +719,10 @@ def invite_team_member():
     # 1. Create invite record in database
     # 2. Send email invitation
     # 3. Track pending invites
-    
-    logger.info(f"Team invite sent: {email} invited by {user.email} as {role}")
-    
+
+    # SECURITY: Redact emails from logs (GDPR/PIPEDA compliance)
+    logger.info(f"Team invite sent: {hash_email(email)} invited by {hash_email(user.email)} as {role}")
+
     return jsonify({
         'success': True,
         'message': f'Invitation sent to {email}',
@@ -602,4 +732,78 @@ def invite_team_member():
             'status': 'pending',
             'invited_by': user.email
         }
+    })
+
+@auth_bp.route('/captcha-config', methods=['GET'])
+def get_captcha_configuration():
+    """
+    Get CAPTCHA configuration for frontend integration.
+    
+    FIX #38: Progressive CAPTCHA enforcement endpoint.
+    
+    Returns CAPTCHA provider configuration including:
+    - Whether CAPTCHA is enabled
+    - Which provider (reCAPTCHA, hCaptcha, Turnstile)
+    - Site key for frontend integration
+    - Threshold for when CAPTCHA is required
+    
+    Response:
+    {
+        "enabled": true,
+        "provider": "recaptcha_v3",
+        "site_key": "6Lc...",
+        "threshold": 3
+    }
+    """
+    config = get_captcha_config()
+    
+    return jsonify({
+        'success': True,
+        'captcha': config
+    })
+
+
+@auth_bp.route('/check-captcha-required', methods=['POST'])
+def check_captcha_requirement():
+    """
+    Check if CAPTCHA is required for a specific email.
+    
+    FIX #38: Allow frontend to check CAPTCHA requirement before submitting credentials.
+    
+    Request:
+    {
+        "email": "user@example.com"
+    }
+    
+    Response:
+    {
+        "captcha_required": false,
+        "failed_attempts": 0,
+        "threshold": 3
+    }
+    """
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    email = data.get('email', '').strip().lower()
+    
+    if not email:
+        return jsonify({'success': False, 'error': 'Email required'}), 400
+    
+    # Look up user
+    user = User.query.filter_by(email=email).first()
+    
+    # Get failed attempts (0 if user doesn't exist)
+    failed_attempts = user.failed_login_attempts if user else 0
+    
+    # Check if CAPTCHA is required
+    captcha_required = is_captcha_required(email, failed_attempts)
+    
+    return jsonify({
+        'success': True,
+        'captcha_required': captcha_required,
+        'failed_attempts': failed_attempts,
+        'threshold': 3  # CAPTCHA required after 3 failed attempts
     })

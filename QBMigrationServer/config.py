@@ -71,11 +71,14 @@ class Config:
     
     # S3
     AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET', 'qb-migration-temp-files')
+    AWS_S3_CODE_BUCKET = os.getenv('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')  # Bucket for migration worker code
     AWS_S3_ENCRYPTION = 'AES256'
     AWS_S3_FILE_TTL_HOURS = int(os.getenv('S3_FILE_TTL_HOURS', '24'))
     
     # EC2
-    AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', 'ami-0c55b159cbfafe1f0')
+    # FIX #49: Remove hardcoded US AMI - require explicit configuration per region
+    # Default ami-0c55b159cbfafe1f0 was for us-east-1, causing data sovereignty violations
+    AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', '')  # MUST be set explicitly for your region
     AWS_EC2_INSTANCE_TYPE = os.getenv('AWS_EC2_INSTANCE_TYPE', 't3.micro')
     AWS_EC2_KEY_NAME = os.getenv('AWS_EC2_KEY_NAME', 'qb-migration-key')
     AWS_EC2_SECURITY_GROUP = os.getenv('AWS_EC2_SECURITY_GROUP')
@@ -89,7 +92,41 @@ class Config:
     
     # Lambda
     AWS_LAMBDA_CLEANUP_FUNCTION = os.getenv('AWS_LAMBDA_CLEANUP_FUNCTION', 'qb-migration-cleanup')
-    
+
+    # ============================================================================
+    # AWS VALIDATION
+    # ============================================================================
+    @classmethod
+    def validate_aws_region(cls):
+        """
+        SECURITY: Validate AWS_REGION matches AWS_EC2_AMI_ID region
+        Prevents data sovereignty violations (Canadian data in US region)
+        """
+        import warnings
+
+        region = cls.AWS_REGION
+        ami_id = cls.AWS_EC2_AMI_ID
+
+        # AMI IDs are region-specific - we can't validate without AWS API call
+        # But we can warn about known mismatches
+        known_us_east_amis = ['ami-0c55b159cbfafe1f0', 'ami-0d5eff06f840b0e53']
+
+        if region == 'ca-central-1' and ami_id in known_us_east_amis:
+            warnings.warn(
+                f"⚠️  DATA SOVEREIGNTY WARNING: AWS_REGION is set to '{region}' "
+                f"but AWS_EC2_AMI_ID '{ami_id}' appears to be a US region AMI. "
+                f"This violates PIPEDA Canadian data residency requirements. "
+                f"Update AWS_EC2_AMI_ID to a ca-central-1 AMI.",
+                UserWarning
+            )
+
+        # Additional validation: Region format
+        if not region.startswith(('us-', 'ca-', 'eu-', 'ap-', 'sa-', 'af-', 'me-')):
+            raise ValueError(
+                f"Invalid AWS_REGION format: '{region}'. "
+                f"Must be a valid AWS region (e.g., 'ca-central-1')"
+            )
+
     # ============================================================================
     # SECURITY
     # ============================================================================
@@ -354,6 +391,9 @@ class ProductionConfig(Config):
 
         # SECURITY WARNING: Warn about AWS credentials
         Config.warn_aws_credentials()
+
+        # SECURITY: Validate AWS region matches AMI region (data sovereignty)
+        Config.validate_aws_region()
 
         # Validate critical production settings
         required_vars = [

@@ -16,6 +16,9 @@ class Migration(db.Model):
         db.Index('idx_migration_user_status', 'user_id', 'status'),
         db.Index('idx_migration_user_created', 'user_id', 'created_at'),
         db.Index('idx_migration_status_created', 'status', 'created_at'),
+        # PERFORMANCE FIX: Composite index for filtered pagination query
+        # Supports: WHERE user_id = X AND status = Y ORDER BY created_at DESC
+        db.Index('idx_migration_user_status_created', 'user_id', 'status', 'created_at'),
         db.Index('idx_migration_cleanup', 'cleanup_completed', 'status'),
         db.Index('idx_migration_file_hash', 'user_id', 'file_hash'),
     )
@@ -23,7 +26,8 @@ class Migration(db.Model):
     # Primary identifiers
     id = db.Column(db.Integer, primary_key=True)
     migration_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    # FIX #48: CASCADE delete migrations when user is deleted (GDPR compliance)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     
     # Company info (metadata only)
     company_name = db.Column(db.String(255))
@@ -70,9 +74,9 @@ class Migration(db.Model):
     ec2_terminated = db.Column(db.Boolean, default=False)
     ec2_terminated_at = db.Column(db.DateTime)
     
-    # Cost tracking
-    estimated_cost_usd = db.Column(db.Numeric(10, 4))
-    actual_cost_usd = db.Column(db.Numeric(10, 4))
+    # Cost tracking (PRECISION FIX: 12,6 allows up to $999,999.999999 with micro-dollar precision)
+    estimated_cost_usd = db.Column(db.Numeric(12, 6))  # Was (10, 4) - can overflow on enterprise migrations
+    actual_cost_usd = db.Column(db.Numeric(12, 6))     # Was (10, 4) - prevents accounting errors
     cost_breakdown = db.Column(db.Text)  # JSON: {ec2: X, s3: Y, data_transfer: Z}
     
     # Forensic Data (Stored as JSON Text)
@@ -262,13 +266,58 @@ class Migration(db.Model):
         return False
 
     def mark_as_completed(self, results=None):
-        """Mark migration as completed (idempotent)"""
+        """
+        Mark migration as completed (idempotent)
+        FORENSIC REQUIREMENT: Enforces $0.00 trial balance variance
+        """
         # Only update if currently processing (prevent overwriting completed state)
         if self.status == 'processing':
+            # FORENSIC ENFORCEMENT: Check trial balance reconciliation
+            if results and 'trial_balance' in results:
+                tb = results['trial_balance']
+                is_balanced = tb.get('is_balanced', False)
+                discrepancy = abs(tb.get('source_total', 0) - tb.get('destination_total', 0))
+
+                # CRITICAL: Enforce $0.00 variance for forensic integrity
+                if not is_balanced or discrepancy > 0.01:  # Allow 1 cent rounding tolerance
+                    error_msg = (
+                        f"Trial balance reconciliation failed. "
+                        f"Discrepancy: ${discrepancy:.2f}. "
+                        f"Source: ${tb.get('source_total', 0):.2f}, "
+                        f"Destination: ${tb.get('destination_total', 0):.2f}. "
+                        f"Migration cannot be marked complete without $0.00 variance."
+                    )
+                    self.status = 'failed'
+                    self.set_error_message(error_msg)
+                    self.error_code = 'TRIAL_BALANCE_MISMATCH'
+                    self.completed_at = datetime.utcnow()
+
+                    # Store verification data even on failure
+                    if results:
+                        self.verification_results = json.dumps(results)
+
+                    db.session.commit()
+                    raise ValueError(error_msg)
+
+            # If no trial balance provided, require it for completion
+            elif results and not results.get('skip_trial_balance_check'):
+                error_msg = (
+                    "Trial balance verification data missing. "
+                    "Forensic migration requires trial balance reconciliation. "
+                    "Migration cannot be marked complete without verification."
+                )
+                self.status = 'failed'
+                self.set_error_message(error_msg)
+                self.error_code = 'TRIAL_BALANCE_MISSING'
+                self.completed_at = datetime.utcnow()
+                db.session.commit()
+                raise ValueError(error_msg)
+
+            # Trial balance verified - proceed with completion
             self.status = 'completed'
             self.completed_at = datetime.utcnow()
             self.progress_percent = 100
-            self.current_step = 'Completed'
+            self.current_step = 'Completed - Trial Balance Verified'
 
             if results:
                 self.customers_migrated = results.get('customers', 0)
@@ -277,6 +326,10 @@ class Migration(db.Model):
                 self.bills_migrated = results.get('bills', 0)
                 self.items_migrated = results.get('items', 0)
                 self.total_records_migrated = results.get('total', 0)
+
+                # Store verification results
+                if 'trial_balance' in results or 'verification_data' in results:
+                    self.verification_results = json.dumps(results)
 
             db.session.commit()
             return True
@@ -479,6 +532,57 @@ class Migration(db.Model):
                     pass
         
         return data
-    
+
+    def strip_sensitive_data(self):
+        """
+        FIX #45: Strip sensitive PII/financial data for zero-persistence compliance.
+        Keeps only metadata (hashes, counts, status) - removes raw balances, logs, transactions.
+        Should be called 24 hours after migration completion.
+        """
+        import json
+        from datetime import datetime
+
+        # Strip trial_balance_data - keep only summary metadata
+        if self.trial_balance_data:
+            try:
+                data = json.loads(self.trial_balance_data)
+                # Keep only non-sensitive metadata
+                metadata = {
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'original_account_count': len(data.get('accounts', [])) if 'accounts' in data else None,
+                    'original_transaction_count': len(data.get('transactions', [])) if 'transactions' in data else None,
+                    'data_hash': data.get('hash') if 'hash' in data else None,
+                    'variance_percent': data.get('variance_percent') if 'variance_percent' in data else None,
+                    'reconciliation_status': data.get('status') if 'status' in data else None
+                }
+                self.trial_balance_data = json.dumps(metadata)
+            except (json.JSONDecodeError, TypeError) as e:
+                # If parsing fails, just clear the data
+                self.trial_balance_data = json.dumps({
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'error': 'Failed to parse original data'
+                })
+
+        # Strip live_status_data - keep only summary metadata
+        if self.live_status_data:
+            try:
+                data = json.loads(self.live_status_data)
+                # Keep only non-sensitive metadata
+                metadata = {
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'final_phase': data.get('current_phase') if 'current_phase' in data else None,
+                    'phase_count': len(data.get('phases', [])) if 'phases' in data else None,
+                    'completion_status': data.get('status') if 'status' in data else None
+                }
+                self.live_status_data = json.dumps(metadata)
+            except (json.JSONDecodeError, TypeError) as e:
+                # If parsing fails, just clear the data
+                self.live_status_data = json.dumps({
+                    'stripped_at': datetime.utcnow().isoformat(),
+                    'error': 'Failed to parse original data'
+                })
+
+        return True
+
     def __repr__(self):
         return f'<Migration {self.migration_id} - {self.status}>'

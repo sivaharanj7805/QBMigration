@@ -20,6 +20,8 @@ from models.database import db
 from models.license import License, LicenseActivation, LICENSE_TIERS
 from extensions import limiter
 from config import Config
+# FIX #53: Import PII redaction for secure logging
+from utils.pii_redaction import hash_email
 
 license_bp = Blueprint('license', __name__, url_prefix='/api/license')
 logger = logging.getLogger(__name__)
@@ -404,7 +406,8 @@ def create_license():
         db.session.add(license_obj)
         db.session.commit()
         
-        logger.info(f"License created: {license_obj.license_key} ({tier}) by {current_user.email}")
+        # FIX #53: Redact PII from logs
+        logger.info(f"License created: {license_obj.license_key} ({tier}) by {hash_email(current_user.email)}")
         
         return jsonify({
             'success': True,
@@ -449,7 +452,8 @@ def deactivate_license():
         license_obj.deactivate(reason=reason, admin_email=current_user.email)
         db.session.commit()
         
-        logger.info(f"License deactivated: {license_key[:15]}... by {current_user.email}")
+        # FIX #53: Redact PII from logs
+        logger.info(f"License deactivated: {license_key[:15]}... by {hash_email(current_user.email)}")
         
         return jsonify({
             'success': True,
@@ -492,7 +496,8 @@ def revoke_license():
         license_obj.revoke(reason=reason, revoked_by=current_user.email)
         db.session.commit()
         
-        logger.warning(f"License revoked: {license_key[:15]}... by {current_user.email}: {reason}")
+        # FIX #53: Redact PII from logs
+        logger.warning(f"License revoked: {license_key[:15]}... by {hash_email(current_user.email)}: {reason}")
         
         return jsonify({
             'success': True,
