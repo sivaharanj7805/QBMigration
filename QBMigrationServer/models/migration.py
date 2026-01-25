@@ -3,8 +3,17 @@ from datetime import datetime, timedelta
 from flask import current_app
 import uuid
 import json
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 import hashlib
+import logging
+
+# Configuration constants (CQ-05: Extracted from magic numbers)
+MIGRATION_EXPIRY_HOURS = 48
+WEBHOOK_ID_LIMIT = 50
+STUCK_TIMEOUT_HOURS = 6
+BALANCE_TOLERANCE = 0.01
+
+logger = logging.getLogger(__name__)
 
 
 class Migration(db.Model):
@@ -114,7 +123,7 @@ class Migration(db.Model):
         if not self.migration_id:
             self.migration_id = str(uuid.uuid4())
         if not self.expires_at:
-            self.expires_at = datetime.utcnow() + timedelta(hours=48)
+            self.expires_at = datetime.utcnow() + timedelta(hours=MIGRATION_EXPIRY_HOURS)
     
     # ============================================================================
     # ERROR MESSAGE ENCRYPTION (prevent leaking QB data in errors)
@@ -152,7 +161,8 @@ class Migration(db.Model):
             
             f = Fernet(key.encode() if isinstance(key, str) else key)
             return f.decrypt(self.error_message_encrypted.encode()).decode()
-        except:
+        except (InvalidToken, ValueError, TypeError) as e:
+            logger.warning(f"Error message decryption failed: {e}")
             return "Error message decryption failed"
     
     # ============================================================================
@@ -279,7 +289,7 @@ class Migration(db.Model):
                 discrepancy = abs(tb.get('source_total', 0) - tb.get('destination_total', 0))
 
                 # CRITICAL: Enforce $0.00 variance for forensic integrity
-                if not is_balanced or discrepancy > 0.01:  # Allow 1 cent rounding tolerance
+                if not is_balanced or discrepancy > BALANCE_TOLERANCE:  # Allow 1 cent rounding tolerance
                     error_msg = (
                         f"Trial balance reconciliation failed. "
                         f"Discrepancy: ${discrepancy:.2f}. "
@@ -402,20 +412,22 @@ class Migration(db.Model):
         try:
             processed = json.loads(self.webhook_processed_ids)
             return webhook_id in processed
-        except:
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse webhook_processed_ids: {e}")
             return False
     
     def mark_webhook_processed(self, webhook_id):
         """Mark webhook as processed"""
         try:
             processed = json.loads(self.webhook_processed_ids) if self.webhook_processed_ids else []
-        except:
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse webhook_processed_ids, resetting: {e}")
             processed = []
         
         if webhook_id not in processed:
             processed.append(webhook_id)
-            # Keep only last 50 webhook IDs
-            processed = processed[-50:]
+            # Keep only last N webhook IDs to prevent unbounded growth
+            processed = processed[-WEBHOOK_ID_LIMIT:]
             self.webhook_processed_ids = json.dumps(processed)
         
         self.last_webhook_at = datetime.utcnow()
@@ -429,7 +441,7 @@ class Migration(db.Model):
         """Check if migration has expired"""
         return datetime.utcnow() > self.expires_at
     
-    def is_stuck(self, timeout_hours=6):
+    def is_stuck(self, timeout_hours=STUCK_TIMEOUT_HOURS):
         """Check if migration is stuck (processing too long)"""
         if self.status != 'processing':
             return False
@@ -515,21 +527,21 @@ class Migration(db.Model):
             if self.cost_breakdown:
                 try:
                     data['cost_breakdown'] = json.loads(self.cost_breakdown)
-                except:
-                    pass
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse cost_breakdown: {e}")
             
             # Parse forensic data
             if hasattr(self, 'trial_balance_data') and self.trial_balance_data:
                 try:
                     data['trial_balance_data'] = json.loads(self.trial_balance_data)
-                except:
-                    pass
-            
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse trial_balance_data: {e}")
+
             if hasattr(self, 'live_status_data') and self.live_status_data:
                 try:
                     data['live_status_data'] = json.loads(self.live_status_data)
-                except:
-                    pass
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse live_status_data: {e}")
         
         return data
 

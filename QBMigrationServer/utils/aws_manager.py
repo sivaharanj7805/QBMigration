@@ -635,10 +635,13 @@ if [ -z "$WEBHOOK_SECRET" ]; then
 fi
 """
         else:
-            # Fallback: use inline secret (less secure)
-            script += f"""# WARNING: Using inline webhook secret (Parameter Store unavailable)
-WEBHOOK_SECRET="{webhook_secret}"
-"""
+            # SEC-03: Fail fast instead of using insecure inline secret
+            # Inline secrets in EC2 user data can be exposed in logs
+            logger.error("WEBHOOK_SECRET parameter name not configured - cannot securely provision instance")
+            raise ValueError(
+                "Webhook secret Parameter Store name is required for secure migration. "
+                "Configure WEBHOOK_PARAM_NAME in environment or use put_webhook_secret() first."
+            )
 
         script += f"""
 # Run migration worker
@@ -878,4 +881,5 @@ exit $EXIT_CODE
                 ]
             )
         except Exception as e:
-            logger.debug(f"Failed to publish metric: {str(e)}")
+            # MON-01: Log at WARNING level so monitoring gaps are visible
+            logger.warning(f"Failed to publish CloudWatch metric '{metric_name}': {str(e)}")

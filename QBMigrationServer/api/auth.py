@@ -220,7 +220,8 @@ def register():
                 # Hash the provided password (same operation as real registration)
                 # This takes ~50-100ms, same as real password hashing
                 _ = ph.hash(password)
-            except:
+            except Exception:
+                # Ignore hash failures - this is just for timing equalization
                 pass
 
             # Return error with same timing as successful registration
@@ -344,7 +345,8 @@ def login():
         try:
             # This will always fail but takes the same time as real verification
             ph.verify(fake_hash, password)
-        except:
+        except Exception:
+            # Expected failure - this is just for timing equalization
             pass
         password_valid = False
         is_locked = False
