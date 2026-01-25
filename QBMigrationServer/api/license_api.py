@@ -32,8 +32,27 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def get_license_secret():
-    """Get license signing secret"""
-    return os.getenv('LICENSE_SECRET_KEY', current_app.config.get('SECRET_KEY', 'dev-secret'))
+    """
+    Get license signing secret.
+
+    FIX BE-02: Require dedicated LICENSE_SECRET_KEY in production.
+    Falls back to SECRET_KEY only in development mode.
+    """
+    license_secret = os.getenv('LICENSE_SECRET_KEY')
+
+    if license_secret:
+        return license_secret
+
+    # Only allow fallback in development
+    if current_app.config.get('ENV') == 'development' or current_app.debug:
+        logger.warning("LICENSE_SECRET_KEY not set - using SECRET_KEY fallback (development mode only)")
+        return current_app.config.get('SECRET_KEY', 'dev-secret')
+
+    # In production, require dedicated secret
+    raise RuntimeError(
+        "LICENSE_SECRET_KEY environment variable is required in production. "
+        "Set a unique secret key for license signing."
+    )
 
 
 def generate_license_token(license_obj, hardware_fingerprint):

@@ -97,11 +97,15 @@ namespace QBDesktopExtractor
                     }
                 }
             }
-            catch { }
-            
+            catch (Exception ex)
+            {
+                // FIX CS-02: Log checkpoint loading errors instead of silent suppression
+                _logger?.Log(LogLevel.Debug, "Could not load checkpoint: {0}", ex.Message);
+            }
+
             return null;
         }
-        
+
         /// <summary>
         /// Clear checkpoint after successful completion
         /// </summary>
@@ -112,7 +116,11 @@ namespace QBDesktopExtractor
                 if (File.Exists(_checkpointPath))
                     File.Delete(_checkpointPath);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // FIX CS-03: Log checkpoint clearing errors instead of silent suppression
+                _logger?.Log(LogLevel.Debug, "Could not clear checkpoint: {0}", ex.Message);
+            }
         }
 
         /// <summary>

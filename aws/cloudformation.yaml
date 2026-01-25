@@ -257,6 +257,74 @@ Resources:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: RateLimitMetric
+        # FIX AWS-01: Stricter rate limit for authentication endpoints
+        - Name: AuthRateLimitRule
+          Priority: 5
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                OrStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          UriPath: {}
+                        PositionalConstraint: STARTS_WITH
+                        SearchString: /api/auth
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          UriPath: {}
+                        PositionalConstraint: STARTS_WITH
+                        SearchString: /api/login
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AuthRateLimitMetric
+
+  # ============================================================================
+  # KMS KEY FOR ENCRYPTION (FIX AWS-03)
+  # ============================================================================
+  MigrationEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: CMK for ForensicBridge migration data encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow S3 Service
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-key
+
+  MigrationEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/forensicbridge-${Environment}'
+      TargetKeyId: !Ref MigrationEncryptionKey
 
   # ============================================================================
   # S3 BUCKET (Encrypted Migration Data - Hardened)
@@ -267,8 +335,11 @@ Resources:
       BucketName: !Sub forensicbridge-migrations-${AWS::AccountId}
       BucketEncryption:
         ServerSideEncryptionConfiguration:
+          # FIX AWS-03: Use Customer Managed Key instead of default AES256
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt MigrationEncryptionKey.Arn
+            BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -380,16 +451,24 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
 
-  RedisCluster:
-    Type: AWS::ElastiCache::CacheCluster
+  # FIX AWS-04: Use Replication Group for encryption in transit support
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
     Properties:
-      ClusterName: !Sub fb-${Environment}-redis
+      ReplicationGroupId: !Sub fb-${Environment}-redis
+      ReplicationGroupDescription: ForensicBridge Redis with encryption
       CacheNodeType: cache.t3.micro
       Engine: redis
-      NumCacheNodes: 1
+      NumCacheClusters: 1
       CacheSubnetGroupName: !Ref RedisSubnetGroup
-      VpcSecurityGroupIds:
+      SecurityGroupIds:
         - !Ref RedisSecurityGroup
+      # FIX AWS-04: Enable encryption in transit and at rest
+      TransitEncryptionEnabled: true
+      AtRestEncryptionEnabled: true
+      AutomaticFailoverEnabled: false
+      SnapshotRetentionLimit: 7
+      SnapshotWindow: '03:00-05:00'
 
   # ============================================================================
   # EC2 INSTANCE (API Server + Worker)
@@ -605,6 +684,95 @@ Resources:
         - Name: LoadBalancer
           Value: !GetAtt ALB.LoadBalancerFullName
 
+  # FIX AWS-02: Additional critical CloudWatch alarms
+  DatabaseFreeStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-db-storage
+      AlarmDescription: RDS free storage space below 5GB
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: 1
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 5368709120  # 5GB in bytes
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  DatabaseCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-db-cpu
+      AlarmDescription: RDS CPU utilization above 80%
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 80
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  WAFBlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-waf-blocked
+      AlarmDescription: High number of WAF blocked requests (potential attack)
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: BlockedRequests
+      Namespace: AWS/WAFV2
+      Period: 300
+      Statistic: Sum
+      Threshold: 1000
+      Dimensions:
+        - Name: WebACL
+          Value: !Sub forensicbridge-${Environment}-waf
+        - Name: Region
+          Value: !Ref AWS::Region
+        - Name: Rule
+          Value: ALL
+
+  TargetResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-response-time
+      AlarmDescription: Target response time above 2 seconds
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 3
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Period: 60
+      Statistic: Average
+      Threshold: 2
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ALB.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt ALBTargetGroup.TargetGroupFullName
+
+  UnhealthyHostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub forensicbridge-${Environment}-unhealthy-hosts
+      AlarmDescription: Unhealthy hosts in target group
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ALB.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt ALBTargetGroup.TargetGroupFullName
+
 # ============================================================================
 # OUTPUTS
 # ============================================================================
@@ -629,7 +797,7 @@ Outputs:
 
   RedisEndpoint:
     Description: ElastiCache Redis endpoint
-    Value: !GetAtt RedisCluster.RedisEndpoint.Address
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
     Export:
       Name: !Sub ${AWS::StackName}-Redis-Endpoint
 

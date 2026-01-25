@@ -380,10 +380,20 @@ namespace QBDesktopExtractor
 
                 File.Delete(filePath);
             }
-            catch
+            catch (Exception ex)
             {
+                // FIX CS-05: Log secure delete failures instead of silent suppression
+                System.Diagnostics.Debug.WriteLine($"[EncryptionManager] Secure delete failed for {filePath}: {ex.Message}");
+
                 // Best effort - try simple delete
-                try { File.Delete(filePath); } catch { }
+                try
+                {
+                    File.Delete(filePath);
+                }
+                catch (Exception innerEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[EncryptionManager] Simple delete also failed: {innerEx.Message}");
+                }
             }
         }
 
