@@ -43,10 +43,17 @@ class User(UserMixin, db.Model):
     
     # Primary Key
     id = db.Column(db.Integer, primary_key=True)
-    
+
     # Authentication
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+
+    # Indexes for performance
+    __table_args__ = (
+        db.Index('idx_user_email_active', 'email', 'is_active'),
+        db.Index('idx_user_stripe_customer', 'stripe_customer_id'),
+        db.Index('idx_user_subscription_tier', 'subscription_tier'),
+    )
     
     # Profile
     first_name = db.Column(db.String(100))
@@ -82,12 +89,66 @@ class User(UserMixin, db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = db.Column(db.DateTime)
     
-    # QuickBooks Online OAuth
+    # QuickBooks Online OAuth (tokens stored encrypted)
     qbo_access_token = db.Column(db.Text, nullable=True)  # Encrypted access token
     qbo_refresh_token = db.Column(db.Text, nullable=True)  # Encrypted refresh token
     qbo_realm_id = db.Column(db.String(50), nullable=True)  # Company ID in QBO
     qbo_token_expires_at = db.Column(db.DateTime, nullable=True)
     qbo_connected_at = db.Column(db.DateTime, nullable=True)
+
+    def _get_encryption_key(self):
+        """Get encryption key for QBO tokens"""
+        from flask import current_app
+        key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+        if not key:
+            raise ValueError("BACKUP_ENCRYPTION_KEY not configured - cannot encrypt QBO tokens")
+        return key.encode() if isinstance(key, str) else key
+
+    def set_qbo_tokens(self, access_token, refresh_token, realm_id, expires_at):
+        """Set encrypted QBO tokens"""
+        from cryptography.fernet import Fernet
+        try:
+            f = Fernet(self._get_encryption_key())
+
+            # Encrypt tokens
+            self.qbo_access_token = f.encrypt(access_token.encode()).decode() if access_token else None
+            self.qbo_refresh_token = f.encrypt(refresh_token.encode()).decode() if refresh_token else None
+            self.qbo_realm_id = realm_id
+            self.qbo_token_expires_at = expires_at
+            self.qbo_connected_at = datetime.utcnow()
+        except Exception as e:
+            from flask import current_app
+            current_app.logger.error(f"Failed to encrypt QBO tokens: {str(e)}")
+            raise
+
+    def get_qbo_access_token(self):
+        """Get decrypted QBO access token"""
+        if not self.qbo_access_token:
+            return None
+        from cryptography.fernet import Fernet
+        try:
+            f = Fernet(self._get_encryption_key())
+            return f.decrypt(self.qbo_access_token.encode()).decode()
+        except Exception:
+            return None
+
+    def get_qbo_refresh_token(self):
+        """Get decrypted QBO refresh token"""
+        if not self.qbo_refresh_token:
+            return None
+        from cryptography.fernet import Fernet
+        try:
+            f = Fernet(self._get_encryption_key())
+            return f.decrypt(self.qbo_refresh_token.encode()).decode()
+        except Exception:
+            return None
+
+    def clear_qbo_tokens(self):
+        """Clear QBO tokens (logout)"""
+        self.qbo_access_token = None
+        self.qbo_refresh_token = None
+        self.qbo_realm_id = None
+        self.qbo_token_expires_at = None
     
     # Subscription Tier & Migration Tracking
     # Tiers: starter ($497), business ($997), professional ($1997), enterprise ($3997), forensic ($7997+)

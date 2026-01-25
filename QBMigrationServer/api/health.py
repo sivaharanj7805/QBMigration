@@ -167,8 +167,124 @@ def detailed_health_check():
         'enabled': multi_az,
         'availability_zones': ['ca-central-1a', 'ca-central-1b', 'ca-central-1d'] if multi_az else []
     }
-    
-    status_code = 200 if health_status['status'] == 'healthy' else 503
+
+    # FIX #40: Database Connection Pool Health Check
+    try:
+        result = db.session.execute(text("""
+            SELECT
+                (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_connections,
+                (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+        """))
+        row = result.fetchone()
+        if row:
+            active_connections, max_connections = row
+            pool_usage_pct = (active_connections / max_connections) * 100 if max_connections > 0 else 0
+
+            status = 'pass'
+            if pool_usage_pct >= 90:
+                status = 'warn'
+            if pool_usage_pct >= 95:
+                status = 'critical'
+
+            health_status['checks']['connection_pool'] = {
+                'status': status,
+                'active_connections': active_connections,
+                'max_connections': max_connections,
+                'usage_percent': round(pool_usage_pct, 2)
+            }
+
+            if status in ('warn', 'critical'):
+                health_status['status'] = 'degraded'
+    except Exception as e:
+        health_status['checks']['connection_pool'] = {
+            'status': 'unknown',
+            'message': f'Could not check: {str(e)}'
+        }
+
+    # FIX #40: AWS S3 Service Connectivity Check
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+        s3 = boto3.client('s3', region_name=aws_region)
+
+        # Simple connectivity test - list buckets
+        s3.list_buckets()
+
+        health_status['checks']['aws_s3_service'] = {
+            'status': 'pass',
+            'message': 'S3 service reachable'
+        }
+    except ClientError as e:
+        health_status['checks']['aws_s3_service'] = {
+            'status': 'fail',
+            'message': f'S3 service error: {e.response["Error"]["Code"]}'
+        }
+        health_status['status'] = 'unhealthy'
+    except Exception as e:
+        health_status['checks']['aws_s3_service'] = {
+            'status': 'fail',
+            'message': f'Cannot reach S3: {str(e)}'
+        }
+        health_status['status'] = 'unhealthy'
+
+    # FIX #40: QuickBooks Online API Connectivity Check (optional)
+    try:
+        import requests
+        # Check QBO API status page or a lightweight endpoint
+        # Using a simple HTTP check to verify network connectivity
+        qbo_status_response = requests.get(
+            'https://status.quickbooks.com/api/v2/status.json',
+            timeout=5
+        )
+
+        if qbo_status_response.status_code == 200:
+            health_status['checks']['qbo_api'] = {
+                'status': 'pass',
+                'message': 'QuickBooks Online API reachable'
+            }
+        else:
+            health_status['checks']['qbo_api'] = {
+                'status': 'warn',
+                'message': f'QBO API returned {qbo_status_response.status_code}'
+            }
+    except requests.exceptions.Timeout:
+        health_status['checks']['qbo_api'] = {
+            'status': 'fail',
+            'message': 'QBO API timeout'
+        }
+        health_status['status'] = 'degraded'
+    except requests.exceptions.RequestException as e:
+        health_status['checks']['qbo_api'] = {
+            'status': 'fail',
+            'message': f'Cannot reach QBO API: {str(e)}'
+        }
+        health_status['status'] = 'degraded'
+    except Exception:
+        # Requests library not available - skip this check
+        health_status['checks']['qbo_api'] = {
+            'status': 'skipped',
+            'message': 'Requests library not available'
+        }
+
+    # FIX #40: Encryption Service Check
+    encryption_key = os.getenv('ENCRYPTION_KEY')
+    encryption_key_b64 = os.getenv('ENCRYPTION_KEY_B64')
+
+    if encryption_key or encryption_key_b64:
+        health_status['checks']['encryption'] = {
+            'status': 'pass',
+            'configured': True,
+            'key_source': 'ENCRYPTION_KEY_B64' if encryption_key_b64 else 'ENCRYPTION_KEY'
+        }
+    else:
+        health_status['checks']['encryption'] = {
+            'status': 'fail',
+            'configured': False,
+            'message': 'No encryption key configured'
+        }
+        health_status['status'] = 'unhealthy'
+
+    status_code = 200 if health_status['status'] in ('healthy', 'degraded') else 503
     return jsonify(health_status), status_code
 
 

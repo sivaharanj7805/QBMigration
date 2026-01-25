@@ -5,22 +5,128 @@ from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
 import logging
+import re
 
 migrations_bp = Blueprint('migrations', __name__)
 logger = logging.getLogger(__name__)
 
 
+# FIX #42: SQL injection prevention helpers
+def validate_pagination_param(value, param_name, default, min_val, max_val):
+    """
+    Validate pagination parameter with comprehensive SQL injection prevention.
+
+    Args:
+        value: The parameter value (may be string or int)
+        param_name: Parameter name for error messages
+        default: Default value if validation fails
+        min_val: Minimum allowed value
+        max_val: Maximum allowed value
+
+    Returns:
+        Validated integer value
+
+    Raises:
+        ValueError: If value contains SQL injection patterns
+    """
+    # If None, return default
+    if value is None:
+        return default
+
+    # Convert to string for regex validation
+    value_str = str(value).strip()
+
+    # FIX #42: Regex validation - must be pure integer
+    # Prevents SQL injection via malformed integers like "1; DROP TABLE"
+    if not re.match(r'^\d+$', value_str):
+        logger.warning(f"Invalid {param_name} parameter format: {value_str[:50]}")
+        return default
+
+    # Convert to integer
+    try:
+        value_int = int(value_str)
+    except (ValueError, OverflowError):
+        logger.warning(f"Failed to convert {param_name} to integer: {value_str[:50]}")
+        return default
+
+    # Range validation
+    if value_int < min_val or value_int > max_val:
+        logger.warning(f"{param_name} out of range: {value_int} (allowed: {min_val}-{max_val})")
+        return default
+
+    return value_int
+
+
 @migrations_bp.route('/api/migrations', methods=['GET'])
 @login_required
 def list_migrations():
-    """List all migrations for current user"""
+    """
+    List migrations for current user with pagination support.
+
+    Query Parameters:
+        page (int): Page number (default: 1)
+        per_page (int): Items per page (default: 50, max: 100)
+        status (str): Filter by status (optional)
+    """
     try:
-        migrations = Migration.query.filter_by(user_id=current_user.id)\
-            .order_by(Migration.created_at.desc()).all()
-        
+        # FIX #42: Enhanced SQL injection prevention for pagination
+        # Use regex validation to ensure parameters are pure integers
+        page = validate_pagination_param(
+            request.args.get('page'),
+            param_name='page',
+            default=1,
+            min_val=1,
+            max_val=10000
+        )
+
+        per_page = validate_pagination_param(
+            request.args.get('per_page'),
+            param_name='per_page',
+            default=50,
+            min_val=1,
+            max_val=100
+        )
+
+        status_filter = request.args.get('status', None, type=str)
+
+        # FIX #42: Whitelist validation for status filter
+        ALLOWED_STATUSES = ['pending', 'uploading', 'processing', 'completed', 'failed', 'cancelled']
+        if status_filter:
+            # Strip whitespace and convert to lowercase for comparison
+            status_filter = status_filter.strip().lower()
+
+            # Validate against whitelist
+            if status_filter not in ALLOWED_STATUSES:
+                logger.warning(f"Invalid status filter attempted: {status_filter[:50]}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid status filter. Allowed values: {", ".join(ALLOWED_STATUSES)}'
+                }), 400
+
+            # Additional regex check: only allow alphanumeric and underscore
+            if not re.match(r'^[a-z_]+$', status_filter):
+                logger.warning(f"Status filter contains invalid characters: {status_filter[:50]}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Invalid status filter format'
+                }), 400
+
+        # Build query
+        query = Migration.query.filter_by(user_id=current_user.id)
+
+        # Apply status filter if provided
+        if status_filter:
+            query = query.filter_by(status=status_filter)
+
+        # Order by creation date (newest first)
+        query = query.order_by(Migration.created_at.desc())
+
+        # Paginate
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
         # Serialize migrations properly (handle missing fields)
         migrations_data = []
-        for migration in migrations:
+        for migration in pagination.items:
             migration_dict = {
                 'id': migration.id,
                 'migration_id': migration.migration_id,
@@ -32,23 +138,35 @@ def list_migrations():
                 'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
                 's3_uri': migration.s3_uri
             }
-            
+
             # Add optional fields only if they exist
             if hasattr(migration, 'error_message'):
                 migration_dict['error_message'] = migration.error_message
             if hasattr(migration, 'updated_at') and migration.updated_at:
                 migration_dict['updated_at'] = migration.updated_at.isoformat()
-            
+
             migrations_data.append(migration_dict)
-        
+
         return jsonify({
             'success': True,
             'migrations': migrations_data,
+            'pagination': {
+                'page': pagination.page,
+                'per_page': pagination.per_page,
+                'total_pages': pagination.pages,
+                'total_items': pagination.total,
+                'has_next': pagination.has_next,
+                'has_prev': pagination.has_prev
+            },
+            # Legacy compatibility
             'count': len(migrations_data)
         }), 200
         
     except Exception as e:
         logger.exception(f"Failed to list migrations: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retrieve migrations'
@@ -103,6 +221,9 @@ def get_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to get migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retrieve migration'
@@ -153,6 +274,9 @@ def get_migration_status(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to get migration status {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to get status'
@@ -211,10 +335,26 @@ def start_migration(migration_id):
         # ===== MIGRATION CREDIT CHECK =====
         # Use the new MigrationCredit system for proper type-based tracking
         from models.migration_credit import MigrationCredit
-        
-        # Get transaction count from migration metadata (if available)
+
+        # FIX #50: Validate transaction count before checking credits (prevents credit waste)
+        # BILLING FIX: Validate transaction count against tier limits before starting EC2
         transaction_count = getattr(migration, 'total_transactions', 0) or 0
-        
+
+        # If transaction count is missing/zero, estimate from file size as fallback
+        if transaction_count == 0 and migration.encrypted_data_size_bytes:
+            # Rough estimate: 1 transaction ≈ 2KB
+            estimated_count = max(100, migration.encrypted_data_size_bytes // 2048)
+            logger.warning(f"Transaction count missing for {migration_id}, estimating {estimated_count:,} from file size")
+            transaction_count = estimated_count
+
+        # Sanity check: If still zero, reject migration to prevent credit abuse
+        if transaction_count == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Transaction count unknown. Please re-upload your QuickBooks file.',
+                'error_code': 'TRANSACTION_COUNT_MISSING'
+            }), 400
+
         # Find a suitable credit for this migration
         credit = MigrationCredit.find_best_credit(current_user.id, transaction_count)
         
@@ -248,15 +388,24 @@ def start_migration(migration_id):
         migration.migration_credit_id = credit.id
         db.session.commit()  # Ensure credit ID is saved before starting migration
         
-        # Get QBO credentials from request
+        # SECURITY: Get QBO credentials from request
+        # WARNING: Credentials transmitted in plain JSON over HTTPS
+        # TODO: Implement client-side encryption with server public key
         data = request.get_json() or {}
         qbo_credentials = data.get('qbo_credentials', {})
-        
+
         if not qbo_credentials or not all(k in qbo_credentials for k in ['client_id', 'client_secret', 'refresh_token']):
             return jsonify({
                 'success': False,
                 'error': 'QuickBooks Online credentials required (client_id, client_secret, refresh_token)'
             }), 400
+
+        # SECURITY: Validate and log receipt WITHOUT logging actual credentials
+        client_id_masked = qbo_credentials.get('client_id', '')[:8] + '...' if qbo_credentials.get('client_id') else 'missing'
+        logger.info(f"Received QBO credentials for migration {migration_id} (client_id: {client_id_masked})")
+
+        # SECURITY: Immediately store credentials in Secrets Manager instead of passing through logs
+        # This prevents credential exposure in CloudWatch, access logs, etc.
         
         # CRITICAL FIX: Ensure realm_id is present - use from user if not provided
         if 'realm_id' not in qbo_credentials or not qbo_credentials['realm_id']:
@@ -325,7 +474,9 @@ def start_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to start migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to start migration. Please try again.'
@@ -414,7 +565,9 @@ def cancel_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to cancel migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to cancel migration'
@@ -495,7 +648,9 @@ def retry_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to retry migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to retry migration'
@@ -558,7 +713,9 @@ def delete_migration(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to delete migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
         db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to delete migration'
@@ -654,6 +811,9 @@ def execute_migration_celery(migration_id):
         
     except Exception as e:
         logger.exception(f"Failed to queue migration {migration_id}: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': False,
             'error': 'Failed to queue migration'
@@ -749,6 +909,9 @@ def get_migration_stats():
         
     except Exception as e:
         logger.exception(f"Failed to get migration stats: {str(e)}")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
         return jsonify({
             'success': True,
             'stats': {

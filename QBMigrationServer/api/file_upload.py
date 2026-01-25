@@ -104,8 +104,11 @@ def upload_qb_export():
             os.remove(file_path)
         if os.path.exists(temp_dir):
             os.rmdir(temp_dir)
-        
-        return jsonify({'error': f'Failed to parse file: {str(e)}'}), 500
+
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @file_upload_bp.route('/supported-exports', methods=['GET'])

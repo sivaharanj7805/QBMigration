@@ -15,7 +15,8 @@ class MigrationCredit(db.Model):
     __tablename__ = 'migration_credits'
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    # SECURITY FIX: Add CASCADE delete to clean up credits when user is deleted
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     
     # Migration type and limits
     tier_type = db.Column(db.String(50), nullable=False)  # starter, business, professional, enterprise, forensic
@@ -80,15 +81,23 @@ class MigrationCredit(db.Model):
         return cls.TIER_CONFIG.get(tier_type)
     
     @classmethod
-    def create_pending(cls, user_id, tier_type, stripe_checkout_session_id):
+    def create_pending(cls, user_id, tier_type, stripe_checkout_session_id, auto_commit=True):
         """
         Create a pending credit when checkout session is created.
         Credit becomes 'available' only after Stripe confirms payment.
+
+        Args:
+            user_id: User ID
+            tier_type: Credit tier type
+            stripe_checkout_session_id: Stripe checkout session ID
+            auto_commit: If True, commits immediately. If False, caller manages transaction.
+
+        FIX BE-03: Allow caller to manage transaction context.
         """
         config = cls.TIER_CONFIG.get(tier_type)
         if not config:
             raise ValueError(f"Invalid tier type: {tier_type}")
-        
+
         credit = cls(
             user_id=user_id,
             tier_type=tier_type,
@@ -99,7 +108,10 @@ class MigrationCredit(db.Model):
             status='pending'
         )
         db.session.add(credit)
-        db.session.commit()
+
+        if auto_commit:
+            db.session.commit()
+
         return credit
     
     def mark_paid(self, payment_intent_id):
