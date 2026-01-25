@@ -37,6 +37,8 @@ from api.payments import payments_bp
 import sys
 
 
+logger = logging.getLogger(__name__)
+
 
 def setup_logging(app):
     """Configure application logging with rotating file handler"""
