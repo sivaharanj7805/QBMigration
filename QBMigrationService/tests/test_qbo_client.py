@@ -409,7 +409,7 @@ class TestOAuthManagement:
             # This should trigger a refresh
             try:
                 client.create_entity("Customer", {"Name": "Test"}, oauth_manager=mock_oauth)
-            except:
+            except Exception:
                 pass  # May fail but we're testing the refresh call
 
 

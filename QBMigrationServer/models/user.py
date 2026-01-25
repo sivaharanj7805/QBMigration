@@ -267,7 +267,7 @@ class User(UserMixin, db.Model):
         # Parse password history
         try:
             history = json.loads(self.password_history)
-        except:
+        except (json.JSONDecodeError, TypeError):
             return False
         
         # Check against each previous password
@@ -275,7 +275,7 @@ class User(UserMixin, db.Model):
             try:
                 if ph.verify(old_hash, password):
                     return True
-            except:
+            except (VerifyMismatchError, VerificationError, InvalidHash):
                 continue
         
         return False
@@ -292,7 +292,7 @@ class User(UserMixin, db.Model):
         # Parse existing history
         try:
             history = json.loads(self.password_history) if self.password_history else []
-        except:
+        except (json.JSONDecodeError, TypeError):
             history = []
         
         # Add new hash
@@ -415,7 +415,7 @@ class User(UserMixin, db.Model):
                     codes.remove(token.upper())
                     self.backup_codes = json.dumps(codes)
                     return True
-            except:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
         
         return False
@@ -440,7 +440,7 @@ class User(UserMixin, db.Model):
         try:
             devices = json.loads(self.trusted_devices)
             return fingerprint in devices
-        except:
+        except (json.JSONDecodeError, TypeError):
             return False
     
     def add_trusted_device(self, fingerprint):
@@ -452,7 +452,7 @@ class User(UserMixin, db.Model):
         """
         try:
             devices = json.loads(self.trusted_devices) if self.trusted_devices else []
-        except:
+        except (json.JSONDecodeError, TypeError):
             devices = []
         
         if fingerprint not in devices:

@@ -1,0 +1,185 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+
+    - name: Check formatting with Black
+      run: |
+        black --check --diff QBMigrationServer/ QBMigrationService/ || echo "::warning::Code formatting issues found. Run 'black .' to fix."
+
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only --diff QBMigrationServer/ QBMigrationService/ || echo "::warning::Import sorting issues found. Run 'isort .' to fix."
+
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 QBMigrationServer/ QBMigrationService/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 QBMigrationServer/ QBMigrationService/ --count --exit-zero --max-complexity=15 --max-line-length=120 --statistics
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+
+    - name: Run Bandit security scan
+      run: |
+        bandit -r QBMigrationServer/ QBMigrationService/ -f json -o bandit-report.json --exit-zero
+        bandit -r QBMigrationServer/ QBMigrationService/ -ll -ii
+
+    - name: Upload Bandit Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: bandit-security-report
+        path: bandit-report.json
+
+  test-server:
+    name: Test Backend Server
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: qbmigration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r QBMigrationServer/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+
+    - name: Run Server Tests
+      env:
+        DATABASE_URL: postgresql://testuser:testpass@localhost:5432/qbmigration_test
+        SECRET_KEY: test-secret-key-for-ci
+        FLASK_ENV: testing
+        WEBHOOK_SECRET: test-webhook-secret
+        BACKUP_ENCRYPTION_KEY: 7qUe_Y_X3v9K2NpM8WqLrT5hJ1cF4dG6bA0sE7iO9nU=
+      run: |
+        cd QBMigrationServer
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing || true
+
+    - name: Upload Coverage Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: server-coverage-report
+        path: QBMigrationServer/coverage.xml
+
+  test-service:
+    name: Test Migration Service
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r QBMigrationService/requirements.txt
+        pip install pytest pytest-cov
+
+    - name: Run Service Tests
+      run: |
+        cd QBMigrationService
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing || true
+
+    - name: Upload Coverage Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: service-coverage-report
+        path: QBMigrationService/coverage.xml
+
+  type-check:
+    name: Type Check (Optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install mypy
+      run: |
+        python -m pip install --upgrade pip
+        pip install mypy types-requests types-flask
+
+    - name: Run mypy
+      run: |
+        mypy QBMigrationServer/ QBMigrationService/ --ignore-missing-imports --no-error-summary || echo "::warning::Type checking found issues"

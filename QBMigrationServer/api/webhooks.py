@@ -416,8 +416,8 @@ def migration_failed():
             try:
                 from utils.notifications import send_migration_failure_alert
                 send_migration_failure_alert(migration)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to send failure alert for {migration_id}: {e}")
         
         # Trigger cleanup
         try:
