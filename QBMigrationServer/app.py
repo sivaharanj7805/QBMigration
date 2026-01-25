@@ -448,7 +448,7 @@ def create_app(config_name='development'):
     allowed_origins = os.getenv('ALLOWED_ORIGINS',
                                 'http://localhost:3000,http://localhost:5000').split(',')
     # Warn if using default development origins in production
-    if app.config['ENV'] == 'production' and 'localhost' in str(allowed_origins):
+    if os.getenv('FLASK_ENV', 'development') == 'production' and 'localhost' in str(allowed_origins):
         app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
 
     # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
@@ -705,7 +705,7 @@ def create_app(config_name='development'):
     @app.before_request
     def redirect_to_https():
         """Force HTTPS in production"""
-        if app.config['ENV'] == 'production':
+        if os.getenv('FLASK_ENV', 'development') == 'production':
             if not request.is_secure and not request.headers.get('X-Forwarded-Proto', '') == 'https':
                 url = request.url.replace('http://', 'https://', 1)
                 return redirect(url, code=301)
