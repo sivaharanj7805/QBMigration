@@ -58,6 +58,27 @@ def redact_email(text: str) -> str:
     return re.sub(email_pattern, redact_match, text)
 
 
+def hash_ip(ip_address: str) -> str:
+    """
+    Hash an IP address for GDPR-compliant storage.
+
+    Args:
+        ip_address: IP address to hash
+
+    Returns:
+        SHA-256 hash of the IP (first 16 characters)
+
+    Example:
+        >>> hash_ip("192.168.1.1")
+        "ip_a1b2c3d4e5f6g7h8"
+    """
+    if not ip_address:
+        return "unknown"
+
+    ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
+    return f"ip_{ip_hash}"
+
+
 def redact_phone(text: str) -> str:
     """
     Redact phone numbers from text.
@@ -72,11 +93,12 @@ def redact_phone(text: str) -> str:
         >>> redact_phone("Call 555-123-4567")
         "Call XXX-XXX-4567"
     """
-    # Match common phone formats
+    # Match common phone formats including international
     phone_patterns = [
         r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',  # 555-123-4567
         r'\(\d{3}\)\s*\d{3}[-.]?\d{4}',     # (555) 123-4567
-        r'\+\d{1,3}\s*\d{3}[-.]?\d{3}[-.]?\d{4}'  # +1 555-123-4567
+        r'\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # +1 555-123-4567, +44 20 7946 0958
+        r'\+\d{7,15}\b',  # +12125551234 (compact international)
     ]
 
     result = text
