@@ -3,6 +3,17 @@
 import { Shield, CheckCircle2, AlertCircle, Clock, ChevronDown, Copy, Check } from "lucide-react";
 import { useState } from "react";
 
+// Lead Sheet breakdown for 58 standard codes
+interface LeadSheetEntry {
+    code: string;
+    name: string;
+    category: "Assets" | "Liabilities" | "Equity" | "Income" | "COGS" | "Expenses";
+    sourceBalance: number;
+    destBalance: number;
+    variance: number;
+    isMatched: boolean;
+}
+
 interface ReconciliationShieldProps {
     // Migration page props
     sourceBalance?: number;
@@ -15,6 +26,10 @@ interface ReconciliationShieldProps {
     destinationHash?: string;
     hashMatch?: boolean;
     migrationId?: string;
+
+    // Lead Sheet breakdown (58 codes) - Addresses audit gap
+    leadSheetBreakdown?: LeadSheetEntry[];
+    showLeadSheetDetails?: boolean;
 
     // Alternate props (original)
     bankAccounts?: Array<{
@@ -37,6 +52,8 @@ export function ReconciliationShield({
     sourceHash,
     destinationHash,
     hashMatch,
+    leadSheetBreakdown = [],
+    showLeadSheetDetails = false,
     bankAccounts = [],
     overallStatus,
     lastChecked,
@@ -44,6 +61,8 @@ export function ReconciliationShield({
 }: ReconciliationShieldProps) {
     const [expanded, setExpanded] = useState(false);
     const [copiedHash, setCopiedHash] = useState<"source" | "dest" | null>(null);
+    const [showLeadSheet, setShowLeadSheet] = useState(showLeadSheetDetails);
+    const [leadSheetFilter, setLeadSheetFilter] = useState<string>("all");
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat("en-US", {
@@ -231,6 +250,147 @@ export function ReconciliationShield({
                             ))}
                         </tbody>
                     </table>
+                </div>
+            )}
+
+            {/* Lead Sheet Breakdown - 58 Standard Codes */}
+            {expanded && leadSheetBreakdown.length > 0 && (
+                <div className="border-t border-gray-100 bg-white p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold text-gray-900 flex items-center gap-2">
+                            <Shield className="w-4 h-4 text-blue-600" />
+                            Lead Sheet Reconciliation (58 Codes)
+                        </h4>
+                        <div className="flex items-center gap-2">
+                            <select
+                                value={leadSheetFilter}
+                                onChange={(e) => setLeadSheetFilter(e.target.value)}
+                                className="text-xs border rounded px-2 py-1"
+                            >
+                                <option value="all">All Categories</option>
+                                <option value="Assets">Assets</option>
+                                <option value="Liabilities">Liabilities</option>
+                                <option value="Equity">Equity</option>
+                                <option value="Income">Income</option>
+                                <option value="COGS">COGS</option>
+                                <option value="Expenses">Expenses</option>
+                                <option value="variances">Show Variances Only</option>
+                            </select>
+                            <button
+                                onClick={() => setShowLeadSheet(!showLeadSheet)}
+                                className="text-xs text-blue-600 hover:text-blue-800"
+                            >
+                                {showLeadSheet ? "Hide Details" : "Show Details"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Summary by Category */}
+                    <div className="grid grid-cols-6 gap-2 mb-3">
+                        {["Assets", "Liabilities", "Equity", "Income", "COGS", "Expenses"].map((category) => {
+                            const categoryItems = leadSheetBreakdown.filter(
+                                (item) => item.category === category
+                            );
+                            const matched = categoryItems.filter((item) => item.isMatched).length;
+                            const total = categoryItems.length;
+                            const allMatched = matched === total;
+
+                            return (
+                                <div
+                                    key={category}
+                                    className={`p-2 rounded text-center text-xs ${
+                                        allMatched ? "bg-green-50 border border-green-200" : "bg-yellow-50 border border-yellow-200"
+                                    }`}
+                                >
+                                    <div className="font-medium text-gray-700">{category}</div>
+                                    <div className={allMatched ? "text-green-600" : "text-yellow-600"}>
+                                        {matched}/{total}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Total Variance Summary */}
+                    <div className={`p-3 rounded-lg mb-3 ${
+                        leadSheetBreakdown.every(item => item.isMatched)
+                            ? "bg-green-50 border border-green-200"
+                            : "bg-yellow-50 border border-yellow-200"
+                    }`}>
+                        <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">Total Variance Across All 58 Lead Sheets:</span>
+                            <span className={`text-lg font-bold ${
+                                leadSheetBreakdown.every(item => item.isMatched)
+                                    ? "text-green-600"
+                                    : "text-yellow-600"
+                            }`}>
+                                {formatCurrency(leadSheetBreakdown.reduce((sum, item) => sum + Math.abs(item.variance), 0))}
+                            </span>
+                        </div>
+                        {leadSheetBreakdown.every(item => item.isMatched) && (
+                            <div className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                All 58 Lead Sheet codes balanced to $0.00
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Detailed Table */}
+                    {showLeadSheet && (
+                        <div className="max-h-64 overflow-y-auto border rounded">
+                            <table className="w-full text-xs">
+                                <thead className="bg-gray-50 sticky top-0">
+                                    <tr className="text-left text-gray-500">
+                                        <th className="p-2 font-medium">Code</th>
+                                        <th className="p-2 font-medium">Name</th>
+                                        <th className="p-2 font-medium">Category</th>
+                                        <th className="p-2 font-medium text-right">Source</th>
+                                        <th className="p-2 font-medium text-right">Dest</th>
+                                        <th className="p-2 font-medium text-right">Variance</th>
+                                        <th className="p-2 font-medium text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {leadSheetBreakdown
+                                        .filter((item) => {
+                                            if (leadSheetFilter === "all") return true;
+                                            if (leadSheetFilter === "variances") return !item.isMatched;
+                                            return item.category === leadSheetFilter;
+                                        })
+                                        .map((item) => (
+                                            <tr
+                                                key={item.code}
+                                                className={`border-t ${
+                                                    item.isMatched ? "" : "bg-yellow-50"
+                                                }`}
+                                            >
+                                                <td className="p-2 font-mono font-medium">{item.code}</td>
+                                                <td className="p-2 text-gray-700">{item.name}</td>
+                                                <td className="p-2 text-gray-500">{item.category}</td>
+                                                <td className="p-2 text-right tabular-nums">
+                                                    {formatCurrency(item.sourceBalance)}
+                                                </td>
+                                                <td className="p-2 text-right tabular-nums">
+                                                    {formatCurrency(item.destBalance)}
+                                                </td>
+                                                <td className={`p-2 text-right tabular-nums ${
+                                                    item.variance !== 0 ? "text-red-600 font-medium" : "text-green-600"
+                                                }`}>
+                                                    {formatCurrency(item.variance)}
+                                                </td>
+                                                <td className="p-2 text-center">
+                                                    {item.isMatched ? (
+                                                        <CheckCircle2 className="w-4 h-4 text-green-500 mx-auto" />
+                                                    ) : (
+                                                        <AlertCircle className="w-4 h-4 text-yellow-500 mx-auto" />
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             )}
 

@@ -904,6 +904,10 @@ namespace QBDesktopExtractor
     /// <summary>
     /// Invoice line item with qty, rate, amount, and item reference
     /// </summary>
+    /// <summary>
+    /// Invoice line item with full job costing support for construction industry
+    /// JOB COSTING FORENSICS: Maintains the link between expenses and specific jobs
+    /// </summary>
     public class QBInvoiceLine
     {
         [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
@@ -921,6 +925,46 @@ namespace QBDesktopExtractor
         [JsonProperty("serviceDate")] public DateTime? ServiceDate { get; set; }
         [JsonProperty("other1")] public string Other1 { get; set; }
         [JsonProperty("other2")] public string Other2 { get; set; }
+
+        // ==================================================================
+        // JOB COSTING FIELDS - Critical for construction industry forensics
+        // ==================================================================
+
+        /// <summary>Job/Project reference for construction job costing</summary>
+        [JsonProperty("jobRefListId")] public string JobRefListID { get; set; }
+
+        /// <summary>Job/Project full name for hierarchical job tracking</summary>
+        [JsonProperty("jobRefFullName")] public string JobRefFullName { get; set; }
+
+        /// <summary>Cost type: Labor, Materials, Subcontractor, Equipment, Other</summary>
+        [JsonProperty("costType")] public string CostType { get; set; }
+
+        /// <summary>Cost code for detailed job cost tracking (e.g., "01-100" for Site Work)</summary>
+        [JsonProperty("costCode")] public string CostCode { get; set; }
+
+        /// <summary>Phase/Stage of job (e.g., "Foundation", "Framing", "Electrical")</summary>
+        [JsonProperty("jobPhase")] public string JobPhase { get; set; }
+
+        /// <summary>Original estimated amount for this line item</summary>
+        [JsonProperty("estimatedAmount")] public decimal? EstimatedAmount { get; set; }
+
+        /// <summary>Percentage of completion for progress billing</summary>
+        [JsonProperty("percentComplete")] public decimal? PercentComplete { get; set; }
+
+        /// <summary>Retainage amount held back (common in construction)</summary>
+        [JsonProperty("retainageAmount")] public decimal? RetainageAmount { get; set; }
+
+        /// <summary>Retainage percentage (typically 5-10% in construction)</summary>
+        [JsonProperty("retainagePercent")] public decimal? RetainagePercent { get; set; }
+
+        /// <summary>Change order reference if this line is from a change order</summary>
+        [JsonProperty("changeOrderRef")] public string ChangeOrderRef { get; set; }
+
+        /// <summary>Whether this is billable to the customer/job</summary>
+        [JsonProperty("isBillable")] public bool? IsBillable { get; set; }
+
+        /// <summary>Billing status: NotBilled, Billed, NotBillable</summary>
+        [JsonProperty("billingStatus")] public string BillingStatus { get; set; }
     }
 
     public class QBPurchaseOrder
