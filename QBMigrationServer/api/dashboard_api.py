@@ -460,7 +460,7 @@ def get_trial_balance(migration_id):
         if hasattr(migration, 'verification_results') and migration.verification_results:
             try:
                 verification_data = json.loads(migration.verification_results)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
         
         # Build trial balance response
@@ -556,7 +556,7 @@ def download_audit_certificate(migration_id):
                 if hasattr(migration, 'verification_results') and migration.verification_results:
                     try:
                         verification_data = json.loads(migration.verification_results)
-                    except:
+                    except (json.JSONDecodeError, TypeError):
                         pass
                 
                 # Generate PDF
@@ -824,7 +824,7 @@ def export_caseware_bundle(migration_id):
                     if migration.encrypted_data_s3_uri:
                         # Could extract company data from S3, but for now use defaults
                         pass
-                except:
+                except AttributeError:
                     pass
                 mapper.detect_accounting_standard(company_data)
                 logger.info(f"Caseware fallback using {mapper.detected_standard} lead sheet codes")
