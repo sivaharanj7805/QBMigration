@@ -110,6 +110,7 @@ htmlcov/
 # Secrets
 secrets/
 .keys/
+.master_key
 
 # FIX #46: Prevent credential files from being committed
 cookies.txt
