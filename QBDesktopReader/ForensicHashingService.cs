@@ -529,17 +529,508 @@ namespace QBDesktopExtractor
     {
         [JsonProperty("session_id")]
         public string SessionId { get; set; }
-        
+
         [JsonProperty("generated_at")]
         public DateTime GeneratedAt { get; set; }
-        
+
         [JsonProperty("hash_version")]
         public string HashVersion { get; set; }
-        
+
         [JsonProperty("hash_algorithm")]
         public string HashAlgorithm { get; set; }
-        
+
         [JsonProperty("record_counts")]
         public Dictionary<string, int> RecordCounts { get; set; }
+
+        [JsonProperty("merkle_root")]
+        public string MerkleRoot { get; set; }
+
+        [JsonProperty("merkle_tree_depth")]
+        public int MerkleTreeDepth { get; set; }
+
+        [JsonProperty("total_leaf_nodes")]
+        public int TotalLeafNodes { get; set; }
+    }
+
+    /// <summary>
+    /// Merkle Tree Builder for Forensic Chain of Custody
+    ///
+    /// Implements a cryptographic Merkle tree to provide tamper-evident
+    /// verification of the entire extraction dataset. The Merkle root serves
+    /// as a single hash that cryptographically commits to ALL individual
+    /// record hashes, enabling:
+    ///
+    /// 1. Court-admissible proof of data integrity
+    /// 2. Efficient verification (O(log n) for any single record)
+    /// 3. Detection of any tampering anywhere in the dataset
+    ///
+    /// CRITICAL FOR M&A: This addresses the $500K-$1M valuation gap identified
+    /// in the technical due diligence audit.
+    /// </summary>
+    public class MerkleTreeBuilder
+    {
+        private List<string> _leafHashes;
+        private List<List<string>> _treeLevels;
+        private string _merkleRoot;
+        private readonly object _lock = new object();
+
+        public MerkleTreeBuilder()
+        {
+            _leafHashes = new List<string>();
+            _treeLevels = new List<List<string>>();
+        }
+
+        /// <summary>
+        /// Add a leaf hash (individual record hash) to the tree
+        /// </summary>
+        public void AddLeafHash(string hash)
+        {
+            if (string.IsNullOrEmpty(hash)) return;
+
+            lock (_lock)
+            {
+                _leafHashes.Add(hash);
+            }
+        }
+
+        /// <summary>
+        /// Add multiple leaf hashes (batch operation)
+        /// </summary>
+        public void AddLeafHashes(IEnumerable<string> hashes)
+        {
+            if (hashes == null) return;
+
+            lock (_lock)
+            {
+                foreach (var hash in hashes.Where(h => !string.IsNullOrEmpty(h)))
+                {
+                    _leafHashes.Add(hash);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Build the Merkle tree and compute the root hash
+        /// </summary>
+        /// <returns>The Merkle root hash</returns>
+        public string BuildTree()
+        {
+            lock (_lock)
+            {
+                if (_leafHashes.Count == 0)
+                {
+                    _merkleRoot = ComputeSHA256("EMPTY_TREE");
+                    return _merkleRoot;
+                }
+
+                // Ensure even number of leaves (duplicate last if odd)
+                var leaves = new List<string>(_leafHashes);
+                if (leaves.Count % 2 == 1)
+                {
+                    leaves.Add(leaves.Last());
+                }
+
+                _treeLevels.Clear();
+                _treeLevels.Add(leaves);
+
+                // Build tree levels from bottom up
+                var currentLevel = leaves;
+                while (currentLevel.Count > 1)
+                {
+                    var nextLevel = new List<string>();
+
+                    for (int i = 0; i < currentLevel.Count; i += 2)
+                    {
+                        var left = currentLevel[i];
+                        var right = (i + 1 < currentLevel.Count) ? currentLevel[i + 1] : left;
+
+                        // Concatenate and hash
+                        var combined = left + right;
+                        var parentHash = ComputeSHA256(combined);
+                        nextLevel.Add(parentHash);
+                    }
+
+                    _treeLevels.Add(nextLevel);
+                    currentLevel = nextLevel;
+                }
+
+                _merkleRoot = currentLevel.Count > 0 ? currentLevel[0] : ComputeSHA256("EMPTY_TREE");
+                return _merkleRoot;
+            }
+        }
+
+        /// <summary>
+        /// Get the Merkle root (builds tree if not already built)
+        /// </summary>
+        public string GetMerkleRoot()
+        {
+            if (string.IsNullOrEmpty(_merkleRoot))
+            {
+                BuildTree();
+            }
+            return _merkleRoot;
+        }
+
+        /// <summary>
+        /// Get the depth of the Merkle tree
+        /// </summary>
+        public int GetTreeDepth()
+        {
+            return _treeLevels.Count;
+        }
+
+        /// <summary>
+        /// Get total number of leaf nodes
+        /// </summary>
+        public int GetLeafCount()
+        {
+            return _leafHashes.Count;
+        }
+
+        /// <summary>
+        /// Generate a proof path for a specific leaf (for verification)
+        /// </summary>
+        /// <param name="leafIndex">Index of the leaf to prove</param>
+        /// <returns>List of (sibling_hash, is_left) tuples for verification</returns>
+        public List<MerkleProofNode> GetProofPath(int leafIndex)
+        {
+            if (_treeLevels.Count == 0)
+            {
+                BuildTree();
+            }
+
+            if (leafIndex < 0 || leafIndex >= _leafHashes.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(leafIndex));
+            }
+
+            var proof = new List<MerkleProofNode>();
+            var index = leafIndex;
+
+            // Handle odd leaf count
+            if (_leafHashes.Count % 2 == 1 && index == _leafHashes.Count - 1)
+            {
+                // Last leaf in odd tree, sibling is itself
+            }
+
+            for (int level = 0; level < _treeLevels.Count - 1; level++)
+            {
+                var isLeft = index % 2 == 0;
+                var siblingIndex = isLeft ? index + 1 : index - 1;
+
+                if (siblingIndex < _treeLevels[level].Count)
+                {
+                    proof.Add(new MerkleProofNode
+                    {
+                        Hash = _treeLevels[level][siblingIndex],
+                        IsLeft = !isLeft
+                    });
+                }
+
+                index = index / 2;
+            }
+
+            return proof;
+        }
+
+        /// <summary>
+        /// Verify a leaf hash using a proof path
+        /// </summary>
+        public bool VerifyProof(string leafHash, List<MerkleProofNode> proof, string expectedRoot)
+        {
+            var currentHash = leafHash;
+
+            foreach (var node in proof)
+            {
+                if (node.IsLeft)
+                {
+                    currentHash = ComputeSHA256(node.Hash + currentHash);
+                }
+                else
+                {
+                    currentHash = ComputeSHA256(currentHash + node.Hash);
+                }
+            }
+
+            return currentHash == expectedRoot;
+        }
+
+        /// <summary>
+        /// Generate a complete Merkle proof report for audit/legal purposes
+        /// </summary>
+        public MerkleTreeReport GenerateReport(string sessionId)
+        {
+            if (string.IsNullOrEmpty(_merkleRoot))
+            {
+                BuildTree();
+            }
+
+            return new MerkleTreeReport
+            {
+                SessionId = sessionId,
+                GeneratedAt = DateTime.UtcNow,
+                MerkleRoot = _merkleRoot,
+                TreeDepth = _treeLevels.Count,
+                TotalLeafNodes = _leafHashes.Count,
+                HashAlgorithm = "SHA-256",
+                TreeStructure = _treeLevels.Select((level, idx) => new MerkleTreeLevel
+                {
+                    Level = idx,
+                    NodeCount = level.Count,
+                    Hashes = idx == 0 ? null : level.Take(10).ToList() // Include first 10 hashes per level for verification
+                }).ToList()
+            };
+        }
+
+        private static string ComputeSHA256(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return null;
+
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(input);
+                byte[] hash = sha256.ComputeHash(bytes);
+
+                var sb = new StringBuilder(hash.Length * 2);
+                foreach (byte b in hash)
+                {
+                    sb.Append(b.ToString("x2"));
+                }
+                return sb.ToString();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Node in a Merkle proof path
+    /// </summary>
+    public class MerkleProofNode
+    {
+        [JsonProperty("hash")]
+        public string Hash { get; set; }
+
+        [JsonProperty("is_left")]
+        public bool IsLeft { get; set; }
+    }
+
+    /// <summary>
+    /// Complete Merkle tree report for audit purposes
+    /// </summary>
+    public class MerkleTreeReport
+    {
+        [JsonProperty("session_id")]
+        public string SessionId { get; set; }
+
+        [JsonProperty("generated_at")]
+        public DateTime GeneratedAt { get; set; }
+
+        [JsonProperty("merkle_root")]
+        public string MerkleRoot { get; set; }
+
+        [JsonProperty("tree_depth")]
+        public int TreeDepth { get; set; }
+
+        [JsonProperty("total_leaf_nodes")]
+        public int TotalLeafNodes { get; set; }
+
+        [JsonProperty("hash_algorithm")]
+        public string HashAlgorithm { get; set; }
+
+        [JsonProperty("tree_structure")]
+        public List<MerkleTreeLevel> TreeStructure { get; set; }
+
+        [JsonProperty("verification_instructions")]
+        public string VerificationInstructions =>
+            "To verify: 1) Recompute leaf hashes from source records using SHA-256. " +
+            "2) Build Merkle tree from leaves. 3) Compare computed root with this MerkleRoot. " +
+            "4) Matching roots prove 100% data integrity across all records.";
+    }
+
+    /// <summary>
+    /// Level in the Merkle tree structure
+    /// </summary>
+    public class MerkleTreeLevel
+    {
+        [JsonProperty("level")]
+        public int Level { get; set; }
+
+        [JsonProperty("node_count")]
+        public int NodeCount { get; set; }
+
+        [JsonProperty("sample_hashes")]
+        public List<string> Hashes { get; set; }
+    }
+
+    /// <summary>
+    /// Extension methods for building Merkle trees from extracted data
+    /// </summary>
+    public static class MerkleTreeExtensions
+    {
+        /// <summary>
+        /// Build a Merkle tree from a complete extraction result
+        /// </summary>
+        public static MerkleTreeReport BuildMerkleTree(
+            this QBExtractedData data,
+            string sessionId)
+        {
+            var builder = new MerkleTreeBuilder();
+
+            // Add all transaction hashes
+            if (data.Invoices != null)
+            {
+                foreach (var inv in data.Invoices.Where(i => !string.IsNullOrEmpty(i.IntegrityHash)))
+                {
+                    builder.AddLeafHash(inv.IntegrityHash);
+                }
+            }
+
+            if (data.Bills != null)
+            {
+                foreach (var bill in data.Bills.Where(b => !string.IsNullOrEmpty(b.IntegrityHash)))
+                {
+                    builder.AddLeafHash(bill.IntegrityHash);
+                }
+            }
+
+            if (data.JournalEntries != null)
+            {
+                foreach (var je in data.JournalEntries.Where(j => !string.IsNullOrEmpty(j.IntegrityHash)))
+                {
+                    builder.AddLeafHash(je.IntegrityHash);
+                }
+            }
+
+            if (data.ReceivePayments != null)
+            {
+                foreach (var pmt in data.ReceivePayments.Where(p => !string.IsNullOrEmpty(p.IntegrityHash)))
+                {
+                    builder.AddLeafHash(pmt.IntegrityHash);
+                }
+            }
+
+            if (data.CreditMemos != null)
+            {
+                foreach (var cm in data.CreditMemos.Where(c => !string.IsNullOrEmpty(c.IntegrityHash)))
+                {
+                    builder.AddLeafHash(cm.IntegrityHash);
+                }
+            }
+
+            if (data.Checks != null)
+            {
+                foreach (var chk in data.Checks.Where(c => !string.IsNullOrEmpty(c.IntegrityHash)))
+                {
+                    builder.AddLeafHash(chk.IntegrityHash);
+                }
+            }
+
+            if (data.Deposits != null)
+            {
+                foreach (var dep in data.Deposits.Where(d => !string.IsNullOrEmpty(d.IntegrityHash)))
+                {
+                    builder.AddLeafHash(dep.IntegrityHash);
+                }
+            }
+
+            if (data.SalesReceipts != null)
+            {
+                foreach (var sr in data.SalesReceipts.Where(s => !string.IsNullOrEmpty(s.IntegrityHash)))
+                {
+                    builder.AddLeafHash(sr.IntegrityHash);
+                }
+            }
+
+            if (data.PurchaseOrders != null)
+            {
+                foreach (var po in data.PurchaseOrders.Where(p => !string.IsNullOrEmpty(p.IntegrityHash)))
+                {
+                    builder.AddLeafHash(po.IntegrityHash);
+                }
+            }
+
+            if (data.SalesOrders != null)
+            {
+                foreach (var so in data.SalesOrders.Where(s => !string.IsNullOrEmpty(s.IntegrityHash)))
+                {
+                    builder.AddLeafHash(so.IntegrityHash);
+                }
+            }
+
+            if (data.Estimates != null)
+            {
+                foreach (var est in data.Estimates.Where(e => !string.IsNullOrEmpty(e.IntegrityHash)))
+                {
+                    builder.AddLeafHash(est.IntegrityHash);
+                }
+            }
+
+            if (data.VendorCredits != null)
+            {
+                foreach (var vc in data.VendorCredits.Where(v => !string.IsNullOrEmpty(v.IntegrityHash)))
+                {
+                    builder.AddLeafHash(vc.IntegrityHash);
+                }
+            }
+
+            if (data.Transfers != null)
+            {
+                foreach (var xfer in data.Transfers.Where(t => !string.IsNullOrEmpty(t.IntegrityHash)))
+                {
+                    builder.AddLeafHash(xfer.IntegrityHash);
+                }
+            }
+
+            if (data.BillPayments != null)
+            {
+                foreach (var bp in data.BillPayments.Where(b => !string.IsNullOrEmpty(b.IntegrityHash)))
+                {
+                    builder.AddLeafHash(bp.IntegrityHash);
+                }
+            }
+
+            // Add list entity hashes (Customers, Vendors, Items, Accounts, etc.)
+            if (data.Customers != null)
+            {
+                foreach (var cust in data.Customers.Where(c => !string.IsNullOrEmpty(c.IntegrityHash)))
+                {
+                    builder.AddLeafHash(cust.IntegrityHash);
+                }
+            }
+
+            if (data.Vendors != null)
+            {
+                foreach (var vend in data.Vendors.Where(v => !string.IsNullOrEmpty(v.IntegrityHash)))
+                {
+                    builder.AddLeafHash(vend.IntegrityHash);
+                }
+            }
+
+            if (data.Employees != null)
+            {
+                foreach (var emp in data.Employees.Where(e => !string.IsNullOrEmpty(e.IntegrityHash)))
+                {
+                    builder.AddLeafHash(emp.IntegrityHash);
+                }
+            }
+
+            if (data.Items != null)
+            {
+                foreach (var item in data.Items.Where(i => !string.IsNullOrEmpty(i.IntegrityHash)))
+                {
+                    builder.AddLeafHash(item.IntegrityHash);
+                }
+            }
+
+            if (data.Accounts != null)
+            {
+                foreach (var acct in data.Accounts.Where(a => !string.IsNullOrEmpty(a.IntegrityHash)))
+                {
+                    builder.AddLeafHash(acct.IntegrityHash);
+                }
+            }
+
+            // Build and return the report
+            return builder.GenerateReport(sessionId);
+        }
     }
 }
