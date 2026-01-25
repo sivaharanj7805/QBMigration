@@ -26,6 +26,8 @@ import sys
 if '/home/user/QBMigration/QBMigrationService' not in sys.path:
     sys.path.insert(0, '/home/user/QBMigration/QBMigrationService')
 
+logger = logging.getLogger(__name__)
+
 try:
     from leadsheet_mapper import LeadSheetMapper
 except ImportError:
@@ -33,7 +35,6 @@ except ImportError:
     LeadSheetMapper = None
 
 dashboard_bp = Blueprint('dashboard', __name__)
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
