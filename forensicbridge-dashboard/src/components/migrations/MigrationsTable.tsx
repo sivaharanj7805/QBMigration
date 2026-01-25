@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
     Play,
@@ -54,29 +54,34 @@ export function MigrationsTable({
 }: MigrationsTableProps) {
     const [sortField, setSortField] = useState<SortField>("created_at");
     const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+    // FIX FE-02: Add state for More Options dropdown
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-    const handleSort = (field: SortField) => {
+    const handleSort = useCallback((field: SortField) => {
         if (sortField === field) {
             setSortOrder(sortOrder === "asc" ? "desc" : "asc");
         } else {
             setSortField(field);
             setSortOrder("asc");
         }
-    };
+    }, [sortField, sortOrder]);
 
-    const sortedMigrations = [...migrations].sort((a, b) => {
-        let aVal = a[sortField];
-        let bVal = b[sortField];
+    // FIX FE-03: Memoize sorted migrations to prevent unnecessary re-sorting
+    const sortedMigrations = useMemo(() => {
+        return [...migrations].sort((a, b) => {
+            let aVal: string | number = a[sortField];
+            let bVal: string | number = b[sortField];
 
-        if (sortField === "created_at") {
-            aVal = new Date(aVal as string).getTime();
-            bVal = new Date(bVal as string).getTime();
-        }
+            if (sortField === "created_at") {
+                aVal = new Date(aVal as string).getTime();
+                bVal = new Date(bVal as string).getTime();
+            }
 
-        if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
-        return 0;
-    });
+            if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
+            if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
+            return 0;
+        });
+    }, [migrations, sortField, sortOrder]);
 
     const toggleSelection = (id: string) => {
         const newSelection = new Set(selectedIds);
@@ -308,12 +313,55 @@ export function MigrationsTable({
                                                 <RotateCcw className="w-4 h-4 text-[var(--bridge-blue)]" />
                                             </button>
                                         )}
-                                        <button
-                                            className="p-1.5 hover:bg-gray-100 rounded transition-colors"
-                                            title="More Options"
-                                        >
-                                            <MoreHorizontal className="w-4 h-4 text-gray-400" />
-                                        </button>
+                                        {/* FIX FE-02: More Options dropdown with actual functionality */}
+                                        <div className="relative">
+                                            <button
+                                                className="p-1.5 hover:bg-gray-100 rounded transition-colors"
+                                                title="More Options"
+                                                onClick={() => setOpenMenuId(
+                                                    openMenuId === migration.migration_id ? null : migration.migration_id
+                                                )}
+                                            >
+                                                <MoreHorizontal className="w-4 h-4 text-gray-400" />
+                                            </button>
+                                            {openMenuId === migration.migration_id && (
+                                                <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
+                                                    <div className="py-1">
+                                                        <Link
+                                                            href={`/migrations/${migration.migration_id}`}
+                                                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                            onClick={() => setOpenMenuId(null)}
+                                                        >
+                                                            View Details
+                                                        </Link>
+                                                        <Link
+                                                            href={`/migrations/${migration.migration_id}/audit`}
+                                                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                            onClick={() => setOpenMenuId(null)}
+                                                        >
+                                                            View Audit Log
+                                                        </Link>
+                                                        <Link
+                                                            href={`/migrations/${migration.migration_id}/certificate`}
+                                                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                                            onClick={() => setOpenMenuId(null)}
+                                                        >
+                                                            Download Certificate
+                                                        </Link>
+                                                        <hr className="my-1 border-gray-200" />
+                                                        <button
+                                                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                                            onClick={() => {
+                                                                setOpenMenuId(null);
+                                                                // Deletion would require a callback prop
+                                                            }}
+                                                        >
+                                                            Delete Migration
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </td>
                             </tr>

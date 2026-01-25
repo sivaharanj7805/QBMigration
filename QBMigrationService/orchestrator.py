@@ -22,8 +22,17 @@ import os
 import sys
 import json
 import logging
-from typing import Dict, Any, Callable, Optional
+import uuid
+from typing import Dict, Any, Callable, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime
+
+# FIX #35: TYPE_CHECKING for forward references without circular imports
+if TYPE_CHECKING:
+    from encryption import EncryptionManager
+    from oauth_manager import OAuthManager
+    from qbo_client import PremiumQBOClient
+    from data_transformer import QBDataTransformer
+    from verifier import MigrationVerifier
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -79,19 +88,19 @@ class MigrationOrchestrator:
         self._transformer = None
         self._verifier = None
     
-    def _report_progress(self, percent: int, message: str):
+    def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback"""
         logger.info(f"[{percent}%] {message}")
         self.progress_callback(percent, message)
-    
-    def _init_encryption(self):
+
+    def _init_encryption(self) -> 'EncryptionManager':
         """Initialize encryption manager"""
         if self._encryption_manager is None:
             from encryption import EncryptionManager
             self._encryption_manager = EncryptionManager()
         return self._encryption_manager
-    
-    def _init_oauth(self):
+
+    def _init_oauth(self) -> 'OAuthManager':
         """Initialize OAuth manager"""
         if self._oauth_manager is None:
             from oauth_manager import OAuthManager
@@ -103,8 +112,8 @@ class MigrationOrchestrator:
                 environment=self.qbo_environment
             )
         return self._oauth_manager
-    
-    def _init_qbo_client(self, access_token: str):
+
+    def _init_qbo_client(self, access_token: str) -> 'PremiumQBOClient':
         """Initialize QBO client with token"""
         if self._qbo_client is None:
             from qbo_client import PremiumQBOClient
@@ -114,15 +123,15 @@ class MigrationOrchestrator:
                 environment=self.qbo_environment
             )
         return self._qbo_client
-    
-    def _init_transformer(self):
+
+    def _init_transformer(self) -> 'QBDataTransformer':
         """Initialize data transformer"""
         if self._transformer is None:
             from data_transformer import QBDataTransformer
             self._transformer = QBDataTransformer()
         return self._transformer
-    
-    def _init_verifier(self, qbo_client):
+
+    def _init_verifier(self, qbo_client: 'PremiumQBOClient') -> 'MigrationVerifier':
         """Initialize migration verifier"""
         if self._verifier is None:
             from verifier import MigrationVerifier
@@ -210,15 +219,17 @@ class MigrationOrchestrator:
             for entity_name, start_pct, end_pct in entity_order:
                 if entity_name in data and data[entity_name]:
                     self._report_progress(start_pct, f"Migrating {entity_name}")
-                    
+
+                    # RELIABILITY FIX: Pass oauth_mgr for automatic token refresh on 401
                     count = self._migrate_entity(
                         qbo_client,
                         transformer,
                         entity_name,
                         data[entity_name],
-                        entities_migrated
+                        entities_migrated,
+                        oauth_mgr  # Auto-refresh tokens during long migrations
                     )
-                    
+
                     entities_migrated[entity_name] = count
                     logger.info(f"Migrated {count} {entity_name}")
             
@@ -261,27 +272,29 @@ class MigrationOrchestrator:
     
     def _migrate_entity(
         self,
-        qbo_client,
-        transformer,
+        qbo_client: 'PremiumQBOClient',
+        transformer: 'QBDataTransformer',
         entity_name: str,
-        source_data: list,
-        existing_maps: Dict[str, Dict]
+        source_data: List[Dict[str, Any]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional['OAuthManager'] = None
     ) -> int:
         """
         Migrate a single entity type.
-        
+
         Args:
             qbo_client: Initialized QBO client
             transformer: Data transformer
             entity_name: Name of entity type
             source_data: List of source records
             existing_maps: Maps of already-migrated entities (for references)
-            
+            oauth_manager: OAuth manager for automatic token refresh (RELIABILITY FIX)
+
         Returns:
             Number of entities migrated
         """
         count = 0
-        
+
         for record in source_data:
             try:
                 # Transform to QBO format
@@ -290,10 +303,10 @@ class MigrationOrchestrator:
                     record,
                     reference_maps=existing_maps
                 )
-                
+
                 if transformed:
-                    # Create in QBO
-                    result = qbo_client.create_entity(entity_name, transformed)
+                    # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
+                    result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
                     
                     if result and 'Id' in result:
                         # Track mapping for references
@@ -394,42 +407,56 @@ if __name__ == '__main__':
     import requests
     import hmac
     import hashlib
-    
-    webhook_data = json.dumps(result)
+    from datetime import datetime
+
+    # SECURITY FIX: Align signature algorithm with server expectations
+    # Server expects: HMAC-SHA256(migration_id:timestamp)
+    webhook_timestamp = datetime.utcnow().isoformat() + 'Z'
+    message = f"{args.migration_id}:{webhook_timestamp}"
+
     signature = hmac.new(
-        args.webhook_secret.encode(),
-        webhook_data.encode(),
+        args.webhook_secret.encode('utf-8'),
+        message.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
-    
+
+    # Generate unique webhook ID for idempotency
+    webhook_id = str(uuid.uuid4())
+
     endpoint = 'migration-completed' if result['success'] else 'migration-failed'
-    
-    # Report result to server via webhook with retry
-    try:
-        response = requests.post(
-            f"{args.server_url}/api/webhooks/{endpoint}",
-            json=result,
-            headers={
-                'X-Migration-Id': args.migration_id,
-                'X-Webhook-Signature': f'sha256={signature}'
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Webhook failed, retrying: {e}")
+
+    # RELIABILITY FIX: Report result to server via webhook with exponential backoff
+    max_retries = 5
+    base_delay = 2  # seconds
+
+    webhook_url = f"{args.server_url}/api/webhooks/{endpoint}"
+    webhook_headers = {
+        'X-Migration-Id': args.migration_id,
+        'X-Webhook-Signature': signature,
+        'X-Webhook-Timestamp': webhook_timestamp,
+        'X-Webhook-Id': webhook_id
+    }
+
+    for attempt in range(max_retries):
         try:
-            time.sleep(5)
-            requests.post(
-                f"{args.server_url}/api/webhooks/{endpoint}",
+            response = requests.post(
+                webhook_url,
                 json=result,
-                headers={
-                    'X-Migration-Id': args.migration_id,
-                    'X-Webhook-Signature': f'sha256={signature}'
-                },
+                headers=webhook_headers,
                 timeout=30
             )
-        except:
-            logger.error("Webhook retry failed")
+            response.raise_for_status()
+            logger.info(f"Webhook delivered successfully on attempt {attempt + 1}")
+            break  # Success - exit retry loop
+
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                # Calculate exponential backoff: 2s, 4s, 8s, 16s
+                delay = base_delay * (2 ** attempt)
+                logger.warning(f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Webhook failed after {max_retries} attempts: {e}")
+                # Don't raise - allow migration to continue even if webhook fails
     
     sys.exit(0 if result['success'] else 1)

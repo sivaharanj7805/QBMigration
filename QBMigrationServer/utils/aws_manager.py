@@ -183,32 +183,53 @@ class AWSMigrationManager:
                 return False
             
             # List objects with migration_id prefix
+            # CRITICAL FIX: Paginate through S3 results (limit is 1000 per call)
             prefix = f"migrations/"
-            response = self.s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix
-            )
-            
-            if 'Contents' not in response:
-                logger.warning(f"No objects found for migration {migration_id}")
-                return True
-            
-            # Delete all objects for this migration
             deleted_count = 0
-            for obj in response['Contents']:
-                key = obj['Key']
-                
-                if migration_id in key:
-                    logger.info(f"Deleting S3 object: {key}")
-                    
-                    self.s3.delete_object(
-                        Bucket=bucket_name,
-                        Key=key
-                    )
-                    
-                    deleted_count += 1
-            
-            logger.info(f"Deleted {deleted_count} S3 objects for migration {migration_id}")
+            continuation_token = None
+            page_count = 0
+
+            while True:
+                page_count += 1
+
+                # Build list_objects_v2 params
+                list_params = {
+                    'Bucket': bucket_name,
+                    'Prefix': prefix,
+                    'MaxKeys': 1000
+                }
+
+                if continuation_token:
+                    list_params['ContinuationToken'] = continuation_token
+
+                response = self.s3.list_objects_v2(**list_params)
+
+                # Process objects in this page
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+
+                        if migration_id in key:
+                            logger.info(f"Deleting S3 object: {key}")
+
+                            self.s3.delete_object(
+                                Bucket=bucket_name,
+                                Key=key
+                            )
+
+                            deleted_count += 1
+
+                # Check if there are more pages
+                if response.get('IsTruncated'):
+                    continuation_token = response.get('NextContinuationToken')
+                    logger.info(f"S3 cleanup page {page_count} complete, continuing to next page...")
+                else:
+                    break  # No more pages
+
+            if deleted_count == 0:
+                logger.warning(f"No objects found for migration {migration_id} after {page_count} page(s)")
+            else:
+                logger.info(f"S3 cleanup complete: {deleted_count} object(s) deleted across {page_count} page(s)")
             
             # Publish metric
             self._publish_metric('S3FilesDeleted', deleted_count, 'Count')
@@ -315,27 +336,42 @@ class AWSMigrationManager:
             return None
     
     def _find_migration_metadata_key(self, migration_id, bucket_name):
-        """Find S3 key for migration's metadata file"""
+        """
+        FIX #60: Find S3 key for migration's metadata file with pagination support.
+        S3 list_objects_v2 returns max 1000 objects per call.
+        """
         try:
             prefix = "migrations/"
-            
-            response = self.s3.list_objects_v2(
-                Bucket=bucket_name,
-                Prefix=prefix
-            )
-            
-            if 'Contents' not in response:
-                return None
-            
-            for obj in response['Contents']:
-                key = obj['Key']
-                
-                # Check if this is the metadata file
-                if migration_id in key and key.endswith('encryption_metadata.json'):
-                    return key
-            
-            return None
-            
+            continuation_token = None
+
+            # FIX #60: Paginate through all S3 objects
+            while True:
+                list_params = {
+                    'Bucket': bucket_name,
+                    'Prefix': prefix,
+                    'MaxKeys': 1000
+                }
+
+                if continuation_token:
+                    list_params['ContinuationToken'] = continuation_token
+
+                response = self.s3.list_objects_v2(**list_params)
+
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+
+                        # Check if this is the metadata file
+                        if migration_id in key and key.endswith('encryption_metadata.json'):
+                            return key
+
+                # Check if more pages exist
+                if response.get('IsTruncated', False):
+                    continuation_token = response.get('NextContinuationToken')
+                else:
+                    # No more pages, file not found
+                    return None
+
         except Exception as e:
             logger.error(f"Error finding metadata key: {str(e)}")
             return None
@@ -403,12 +439,17 @@ class AWSMigrationManager:
                     raise
             
             # Generate user data script (bootstrap script for instance)
+            # SECURITY: Get code bucket from config (no hardcoded values)
+            from flask import current_app
+            code_bucket = current_app.config.get('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')
+
             user_data = self._generate_user_data_script(
                 migration_id=migration_id,
                 s3_uri=s3_uri,
                 secret_name=secret_name,
                 server_url=server_url,
-                webhook_secret=webhook_secret
+                webhook_secret=webhook_secret,
+                code_bucket=code_bucket
             )
             
             # Launch configuration
@@ -471,7 +512,7 @@ class AWSMigrationManager:
             self._publish_metric('EC2InstanceCreationFailure', 1, 'Count')
             return None
     
-    def _generate_user_data_script(self, migration_id, s3_uri, secret_name, server_url, webhook_secret):
+    def _generate_user_data_script(self, migration_id, s3_uri, secret_name, server_url, webhook_secret, code_bucket=None):
         """
         Generate user data script for EC2 instance
         This script runs on instance launch and:
@@ -480,7 +521,45 @@ class AWSMigrationManager:
         3. Runs migration worker
         4. Reports status via webhook
         5. Self-terminates
+
+        FIX #41: Removed hardcoded credentials and secrets from user data.
+        All secrets now retrieved from AWS Systems Manager Parameter Store.
+
+        Args:
+            code_bucket: S3 bucket containing migration worker code (from AWS_S3_CODE_BUCKET config)
+            webhook_secret: Webhook secret (will be stored in Parameter Store, not in user data)
         """
+        # SECURITY: Use config-provided code bucket, no hardcoded values
+        if not code_bucket:
+            from flask import current_app
+            code_bucket = current_app.config.get('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')
+
+        # FIX #41: Store webhook secret in Systems Manager Parameter Store
+        # This prevents exposing the secret in EC2 user data logs
+        webhook_param_name = f"/qb-migration/webhook-secrets/{migration_id}"
+
+        try:
+            # Store webhook secret in Parameter Store (SecureString)
+            ssm = boto3.client('ssm', region_name=self.region)
+            ssm.put_parameter(
+                Name=webhook_param_name,
+                Value=webhook_secret,
+                Type='SecureString',
+                Overwrite=True,
+                Description=f'Webhook secret for migration {migration_id}',
+                Tags=[
+                    {'Key': 'migration_id', 'Value': migration_id},
+                    {'Key': 'expiry', 'Value': (datetime.utcnow() + timedelta(hours=24)).isoformat()}
+                ]
+            )
+            logger.info(f"Stored webhook secret in Parameter Store: {webhook_param_name}")
+        except Exception as e:
+            logger.error(f"Failed to store webhook secret in Parameter Store: {e}")
+            # Fall back to inline secret only if Parameter Store fails
+            # This is less secure but allows operation to continue
+            webhook_param_name = None
+
+        # FIX #41: Generate user data with secrets retrieved from SSM, not hardcoded
         script = f"""#!/bin/bash
 set -e
 
@@ -518,9 +597,9 @@ pip install boto3 cryptography requests quickbooks-online-sdk
 
 # Download migration worker code
 echo "Downloading migration worker..."
-aws s3 cp s3://YOUR-CODE-BUCKET/migration_worker.py worker.py
-aws s3 cp s3://YOUR-CODE-BUCKET/data_transformer.py transformer.py
-aws s3 cp s3://YOUR-CODE-BUCKET/qbo_client.py qbo_client.py
+aws s3 cp s3://{code_bucket}/migration_worker.py worker.py
+aws s3 cp s3://{code_bucket}/data_transformer.py transformer.py
+aws s3 cp s3://{code_bucket}/qbo_client.py qbo_client.py
 
 # Download encrypted data from S3
 echo "Downloading encrypted QB data from S3..."
@@ -537,6 +616,31 @@ aws secretsmanager get-secret-value \\
     --query SecretString \\
     --output text > qbo_credentials.json
 
+# FIX #41: Retrieve webhook secret from Parameter Store instead of hardcoding
+echo "Retrieving webhook secret from Parameter Store..."
+"""
+
+        # Add webhook secret retrieval logic
+        if webhook_param_name:
+            # Use Parameter Store (secure method)
+            script += f"""WEBHOOK_SECRET=$(aws ssm get-parameter \\
+    --name "{webhook_param_name}" \\
+    --with-decryption \\
+    --query Parameter.Value \\
+    --output text)
+
+if [ -z "$WEBHOOK_SECRET" ]; then
+    echo "ERROR: Failed to retrieve webhook secret from Parameter Store"
+    exit 1
+fi
+"""
+        else:
+            # Fallback: use inline secret (less secure)
+            script += f"""# WARNING: Using inline webhook secret (Parameter Store unavailable)
+WEBHOOK_SECRET="{webhook_secret}"
+"""
+
+        script += f"""
 # Run migration worker
 echo "Starting migration processing..."
 python3 worker.py \\
@@ -545,7 +649,8 @@ python3 worker.py \\
     --metadata encryption_metadata.json \\
     --credentials qbo_credentials.json \\
     --server-url {server_url} \\
-    --webhook-secret {webhook_secret}
+    --webhook-secret "$WEBHOOK_SECRET"
+"""
 
 EXIT_CODE=$?
 

@@ -12,6 +12,11 @@ import os
 
 from api.auth import require_auth
 from models import db, Migration
+from utils.anomaly_detector import check_upload_anomalies, log_anomaly
+from utils.pii_redaction import hash_ip
+import logging
+
+logger = logging.getLogger(__name__)
 
 s3_upload_bp = Blueprint('s3_upload', __name__, url_prefix='/api/upload')
 
@@ -88,6 +93,7 @@ def get_presigned_url():
         )
         
         # Create migration record
+        # FIX BE-01: Hash IP address for GDPR compliance
         migration = Migration(
             user_id=user_id,
             session_id=session_id,
@@ -96,7 +102,7 @@ def get_presigned_url():
             s3_key=s3_key,
             data_size_bytes=file_size,
             file_hash=sha256_hash,
-            ip_address=request.remote_addr
+            ip_address=hash_ip(request.remote_addr)
         )
         
         db.session.add(migration)
@@ -112,7 +118,10 @@ def get_presigned_url():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to generate upload URL: {str(e)}'}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/complete', methods=['POST'])
@@ -152,6 +161,26 @@ def complete_upload():
         migration.mark_as_failed('Hash mismatch - file may be corrupted', 'HASH_MISMATCH')
         return jsonify({'error': 'Hash mismatch'}), 400
     
+    # FIX #39: Anomaly detection for large file uploads
+    file_size = migration.encrypted_data_size_bytes or 0
+    if file_size > 0:
+        anomalies = check_upload_anomalies(user_id, file_size)
+
+        if anomalies:
+            # Log all detected anomalies
+            for anomaly in anomalies:
+                log_anomaly(user_id, anomaly)
+
+            # For critical anomalies (> 5GB single file), add warning
+            critical_anomalies = [a for a in anomalies if a['severity'] == 'critical']
+            if critical_anomalies:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"CRITICAL upload anomaly for user {user_id}: "
+                    f"{', '.join(a['reason'] for a in critical_anomalies)}"
+                )
+
     # Update migration
     migration.company_name = company_name
     migration.mark_as_uploaded(
@@ -159,14 +188,16 @@ def complete_upload():
         s3_bucket=migration.s3_bucket,
         s3_key=migration.s3_key
     )
-    
+
     # Trigger processing (via Celery)
     try:
         from workers.migration_worker import process_migration
         process_migration.delay(migration_id)
+        logger.info(f"Migration {migration_id} queued for processing via Celery")
     except ImportError:
-        pass  # Celery not configured
-    
+        # FIX BE-06: Log when Celery is not configured instead of silent pass
+        logger.warning(f"Celery not configured - migration {migration_id} will require manual processing")
+
     return jsonify({
         'success': True,
         'migration_id': migration_id,
@@ -208,6 +239,7 @@ def init_multipart_upload():
         upload_id = response['UploadId']
         
         # Create migration record
+        # FIX BE-01: Hash IP address for GDPR compliance
         migration = Migration(
             user_id=user_id,
             session_id=session_id,
@@ -215,7 +247,7 @@ def init_multipart_upload():
             s3_bucket=bucket,
             s3_key=s3_key,
             data_size_bytes=file_size,
-            ip_address=request.remote_addr
+            ip_address=hash_ip(request.remote_addr)
         )
         
         db.session.add(migration)
@@ -230,7 +262,10 @@ def init_multipart_upload():
         
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/multipart/part-url', methods=['POST'])
@@ -268,7 +303,10 @@ def get_part_upload_url():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
 
 
 @s3_upload_bp.route('/multipart/complete', methods=['POST'])
@@ -313,4 +351,7 @@ def complete_multipart_upload():
         })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500

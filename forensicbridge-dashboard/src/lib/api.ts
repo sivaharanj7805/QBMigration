@@ -1,10 +1,40 @@
 /**
  * ForensicBridge API Client
- * 
+ *
  * Handles all communication with the QBMigrationServer backend.
+ * Uses Zod for runtime schema validation to prevent XSS and type errors.
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+import { z } from 'zod';
+import {
+    DashboardOverviewSchema,
+    MigrationListSchema,
+    MigrationStatusSchema,
+    TrialBalanceSchema,
+    LoginResponseSchema,
+    UserInfoSchema,
+    UploadSessionSchema,
+    UploadCompleteSchema,
+} from './schemas';
+
+// FIX FE-01: Production-safe API URL configuration
+// In production, NEXT_PUBLIC_API_URL must be set - fallback only for development
+const API_BASE_URL = (() => {
+    const envUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (envUrl) return envUrl;
+
+    // Only allow localhost fallback in development
+    if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] NEXT_PUBLIC_API_URL not set - using localhost (development only)');
+        return "http://localhost:5000";
+    }
+
+    // In production without env var, throw clear error
+    throw new Error(
+        'NEXT_PUBLIC_API_URL environment variable is required in production. ' +
+        'Set it to your API server URL.'
+    );
+})();
 
 interface ApiResponse<T> {
     success: boolean;
@@ -12,12 +42,17 @@ interface ApiResponse<T> {
     error?: string;
 }
 
+// FIX FE-04: Default request timeout (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
 class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
+    private timeout: number;
 
-    constructor(baseUrl: string) {
+    constructor(baseUrl: string, timeout: number = DEFAULT_TIMEOUT_MS) {
         this.baseUrl = baseUrl;
+        this.timeout = timeout;
     }
 
     setToken(token: string) {
@@ -26,7 +61,8 @@ class ApiClient {
 
     private async request<T>(
         endpoint: string,
-        options: RequestInit = {}
+        options: RequestInit = {},
+        schema?: z.ZodSchema<T>
     ): Promise<ApiResponse<T>> {
         const url = `${this.baseUrl}${endpoint}`;
 
@@ -36,27 +72,62 @@ class ApiClient {
             ...options.headers,
         };
 
+        // FIX FE-04: Add request timeout using AbortController
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
         try {
             const response = await fetch(url, {
                 ...options,
                 headers,
                 credentials: "include",
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
 
-            const data = await response.json();
+            // SECURITY FIX: Parse and validate JSON with schema
+            const rawData = await response.json();
 
             if (!response.ok) {
                 return {
                     success: false,
-                    error: data.error || `HTTP ${response.status}`,
+                    error: rawData.error || `HTTP ${response.status}`,
                 };
             }
 
+            // SECURITY: Validate response data with Zod schema if provided
+            if (schema) {
+                try {
+                    const validatedData = schema.parse(rawData);
+                    return {
+                        success: true,
+                        data: validatedData,
+                    };
+                } catch (validationError) {
+                    console.error('Schema validation failed:', validationError);
+                    return {
+                        success: false,
+                        error: 'Invalid API response format. This may indicate a security issue.',
+                    };
+                }
+            }
+
+            // Fallback: return unvalidated data (backwards compatibility)
             return {
                 success: true,
-                data,
+                data: rawData as T,
             };
         } catch (error) {
+            clearTimeout(timeoutId);
+
+            // FIX FE-04: Specific error message for timeout
+            if (error instanceof Error && error.name === 'AbortError') {
+                return {
+                    success: false,
+                    error: `Request timed out after ${this.timeout / 1000} seconds`,
+                };
+            }
+
             return {
                 success: false,
                 error: error instanceof Error ? error.message : "Network error",
@@ -69,17 +140,11 @@ class ApiClient {
     // ==========================================
 
     async getDashboardOverview() {
-        return this.request<{
-            overview: {
-                total_migrations: number;
-                completed_migrations: number;
-                failed_migrations: number;
-                in_progress: number;
-                success_rate: number;
-                avg_duration_minutes: number;
-                recent_completed_24h: number;
-            };
-        }>("/api/dashboard/overview");
+        return this.request(
+            "/api/dashboard/overview",
+            {},
+            DashboardOverviewSchema
+        );
     }
 
     async getRecentActivity() {

@@ -20,6 +20,8 @@ from models.database import db
 from models.license import License, LicenseActivation, LICENSE_TIERS
 from extensions import limiter
 from config import Config
+# FIX #53: Import PII redaction for secure logging
+from utils.pii_redaction import hash_email
 
 license_bp = Blueprint('license', __name__, url_prefix='/api/license')
 logger = logging.getLogger(__name__)
@@ -30,8 +32,27 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 def get_license_secret():
-    """Get license signing secret"""
-    return os.getenv('LICENSE_SECRET_KEY', current_app.config.get('SECRET_KEY', 'dev-secret'))
+    """
+    Get license signing secret.
+
+    FIX BE-02: Require dedicated LICENSE_SECRET_KEY in production.
+    Falls back to SECRET_KEY only in development mode.
+    """
+    license_secret = os.getenv('LICENSE_SECRET_KEY')
+
+    if license_secret:
+        return license_secret
+
+    # Only allow fallback in development
+    if current_app.config.get('ENV') == 'development' or current_app.debug:
+        logger.warning("LICENSE_SECRET_KEY not set - using SECRET_KEY fallback (development mode only)")
+        return current_app.config.get('SECRET_KEY', 'dev-secret')
+
+    # In production, require dedicated secret
+    raise RuntimeError(
+        "LICENSE_SECRET_KEY environment variable is required in production. "
+        "Set a unique secret key for license signing."
+    )
 
 
 def generate_license_token(license_obj, hardware_fingerprint):
@@ -404,7 +425,8 @@ def create_license():
         db.session.add(license_obj)
         db.session.commit()
         
-        logger.info(f"License created: {license_obj.license_key} ({tier}) by {current_user.email}")
+        # FIX #53: Redact PII from logs
+        logger.info(f"License created: {license_obj.license_key} ({tier}) by {hash_email(current_user.email)}")
         
         return jsonify({
             'success': True,
@@ -449,7 +471,8 @@ def deactivate_license():
         license_obj.deactivate(reason=reason, admin_email=current_user.email)
         db.session.commit()
         
-        logger.info(f"License deactivated: {license_key[:15]}... by {current_user.email}")
+        # FIX #53: Redact PII from logs
+        logger.info(f"License deactivated: {license_key[:15]}... by {hash_email(current_user.email)}")
         
         return jsonify({
             'success': True,
@@ -492,7 +515,8 @@ def revoke_license():
         license_obj.revoke(reason=reason, revoked_by=current_user.email)
         db.session.commit()
         
-        logger.warning(f"License revoked: {license_key[:15]}... by {current_user.email}: {reason}")
+        # FIX #53: Redact PII from logs
+        logger.warning(f"License revoked: {license_key[:15]}... by {hash_email(current_user.email)}: {reason}")
         
         return jsonify({
             'success': True,
