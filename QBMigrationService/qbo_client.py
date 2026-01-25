@@ -97,7 +97,8 @@ class PremiumQBOClient:
         self.max_workers = self._get_plan_worker_limit(qbo_plan)
         self.enable_parallel = True
         
-        print(f"✓ QBO Plan: {qbo_plan} → {self.max_workers} upload workers")
+        # FIX SVC-06: Use logger instead of print
+        logger.info(f"QBO Plan: {qbo_plan} -> {self.max_workers} upload workers")
         
         # Failed items storage (FIX #243, #389)
         self.failed_items: List[Dict] = []
@@ -133,7 +134,8 @@ class PremiumQBOClient:
         if env_override:
             try:
                 limit = int(env_override)
-                print(f"   Using environment override: {limit} workers")
+                # FIX SVC-06: Use logger instead of print
+                logger.info(f"Using environment override: {limit} workers")
             except ValueError:
                 pass
         
@@ -1174,7 +1176,8 @@ class PremiumQBOClient:
         Returns:
             List of matching entities
         """
-        headers = self._get_headers(oauth_manager)
+        # FIX SVC-03: Use correct method name _get_request_headers
+        headers = self._get_request_headers(oauth_manager)
         
         # URL encode the query
         import urllib.parse
@@ -1209,8 +1212,9 @@ class PremiumQBOClient:
         """Cleanup: close session"""
         try:
             self.session.close()
-        except:
-            pass 
+        except Exception:
+            # FIX SVC-04: Catch specific Exception instead of bare except
+            pass
 
 # Alias for backward compatibility
 QBOClient = PremiumQBOClient

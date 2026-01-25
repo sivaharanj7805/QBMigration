@@ -133,7 +133,8 @@ class QBDataTransformer:
         if max_workers is None:
             max_workers = max(1, mp.cpu_count() - 1)
         
-        print(f"\n🚀 Smart parallel transformation ({max_workers} workers)")
+        # FIX SVC-02: Use logger instead of print
+        logger.info(f"Smart parallel transformation ({max_workers} workers)")
         
         from multiprocessing import Manager
         
@@ -152,7 +153,7 @@ class QBDataTransformer:
         }
         
         # Phase 1: Foundation (Sequential - too fast to parallelize)
-        print("  Phase 1: Foundation (sequential)...")
+        logger.info("Phase 1: Foundation (sequential)")
         foundation_types = ['CompanyCurrency', 'TaxAgency', 'TaxRate', 'TaxCode', 
                           'Term', 'PaymentMethod', 'CustomerType', 'JournalCode']
         
@@ -165,7 +166,7 @@ class QBDataTransformer:
             )
         
         # Phase 2: Accounts (Sequential - MUST accumulate trial_balance)
-        print("  Phase 2: Accounts (sequential for trial balance)...")
+        logger.info("Phase 2: Accounts (sequential for trial balance)")
         if 'Account' in qb_data:
             result['entities']['Account'] = self._transform_entity_batch(
                 qb_data['Account'],
@@ -173,7 +174,7 @@ class QBDataTransformer:
             )
         
         # Phase 3: Master Lists (PARALLEL with shared state)
-        print(f"  Phase 3: Master Lists (parallel with {max_workers} workers)...")
+        logger.info(f"Phase 3: Master Lists (parallel with {max_workers} workers)")
         
         # Create shared state using Manager
         manager = Manager()
@@ -229,9 +230,9 @@ class QBDataTransformer:
                         self.stats['by_entity_type'][entity_type] = type_stats['processed']
                         self.stats['errors'].extend(type_stats['errors'])
                         
-                        print(f"    ✓ {entity_type}: {len(transformed_entities)} entities")
+                        logger.info(f"{entity_type}: {len(transformed_entities)} entities transformed")
                     except Exception as e:
-                        print(f"    ✗ {entity_type}: {e}")
+                        logger.error(f"{entity_type}: {e}")
                         self.stats['errors'].append({
                             'entity': entity_type,
                             'error': str(e)
@@ -243,7 +244,7 @@ class QBDataTransformer:
             self.id_mapping[entity_type] = dict(mappings)
         
         # Phase 4: Transactions (Sequential - heavy id_mapping usage, safer sequential)
-        print("  Phase 4: Transactions (sequential)...")
+        logger.info("Phase 4: Transactions (sequential)")
         transaction_types = [
             'Estimate', 'Invoice', 'SalesReceipt',
             'PurchaseOrder', 'Purchase', 'Bill',

@@ -17,7 +17,24 @@ import {
     UploadCompleteSchema,
 } from './schemas';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+// FIX FE-01: Production-safe API URL configuration
+// In production, NEXT_PUBLIC_API_URL must be set - fallback only for development
+const API_BASE_URL = (() => {
+    const envUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (envUrl) return envUrl;
+
+    // Only allow localhost fallback in development
+    if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] NEXT_PUBLIC_API_URL not set - using localhost (development only)');
+        return "http://localhost:5000";
+    }
+
+    // In production without env var, throw clear error
+    throw new Error(
+        'NEXT_PUBLIC_API_URL environment variable is required in production. ' +
+        'Set it to your API server URL.'
+    );
+})();
 
 interface ApiResponse<T> {
     success: boolean;
@@ -25,12 +42,17 @@ interface ApiResponse<T> {
     error?: string;
 }
 
+// FIX FE-04: Default request timeout (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
 class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
+    private timeout: number;
 
-    constructor(baseUrl: string) {
+    constructor(baseUrl: string, timeout: number = DEFAULT_TIMEOUT_MS) {
         this.baseUrl = baseUrl;
+        this.timeout = timeout;
     }
 
     setToken(token: string) {
@@ -50,12 +72,18 @@ class ApiClient {
             ...options.headers,
         };
 
+        // FIX FE-04: Add request timeout using AbortController
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
         try {
             const response = await fetch(url, {
                 ...options,
                 headers,
                 credentials: "include",
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
 
             // SECURITY FIX: Parse and validate JSON with schema
             const rawData = await response.json();
@@ -90,6 +118,16 @@ class ApiClient {
                 data: rawData as T,
             };
         } catch (error) {
+            clearTimeout(timeoutId);
+
+            // FIX FE-04: Specific error message for timeout
+            if (error instanceof Error && error.name === 'AbortError') {
+                return {
+                    success: false,
+                    error: `Request timed out after ${this.timeout / 1000} seconds`,
+                };
+            }
+
             return {
                 success: false,
                 error: error instanceof Error ? error.message : "Network error",

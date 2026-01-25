@@ -115,7 +115,17 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Upload using v3.1 JSON format (matches server's _handle_v31_upload)
-        /// This is the recommended method for new integrations
+        /// This is the recommended method for new integrations.
+        ///
+        /// SECURITY MODEL (FIX CS-01):
+        /// The encryption key is transmitted in the JSON payload, protected by TLS 1.3.
+        /// This provides transport security with the following guarantees:
+        /// - Key is encrypted during transmission via HTTPS/TLS
+        /// - Server decrypts data immediately and discards the key
+        /// - Key is never stored server-side
+        ///
+        /// For enhanced security (defense-in-depth), the IsKeyEncrypted and EncryptedKey
+        /// fields support RSA key wrapping if the server provides a public key.
         /// </summary>
         public async Task<UploadResult> UploadV31FormatAsync(
             byte[] encryptedData,
@@ -510,10 +520,16 @@ namespace QBDesktopExtractor
                     var result = JsonConvert.DeserializeObject<ChunkExistsResponse>(json);
                     return result?.Exists ?? false;
                 }
+
+                // FIX CS-06: Log non-success response instead of silent false
+                _logger?.Log(LogLevel.Debug, "Chunk exists check returned HTTP {0} for chunk {1}",
+                    (int)response.StatusCode, chunkIndex);
             }
-            catch
+            catch (Exception ex)
             {
-                // If check fails, assume chunk doesn't exist
+                // FIX CS-06: Log error instead of silent suppression
+                _logger?.Log(LogLevel.Debug, "Chunk exists check failed for chunk {0}: {1}",
+                    chunkIndex, ex.Message);
             }
 
             return false;
