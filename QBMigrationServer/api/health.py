@@ -284,6 +284,55 @@ def detailed_health_check():
         }
         health_status['status'] = 'unhealthy'
 
+    # FIX #50: Redis Health Check - Critical for rate limiting
+    redis_url = current_app.config.get('REDIS_URL', os.getenv('REDIS_URL', 'memory://'))
+    if redis_url and not redis_url.startswith('memory://'):
+        try:
+            import redis
+            r = redis.from_url(redis_url, socket_connect_timeout=5)
+            r.ping()
+            health_status['checks']['redis'] = {
+                'status': 'pass',
+                'message': 'Redis connected',
+                'mode': 'distributed'
+            }
+        except ImportError:
+            health_status['checks']['redis'] = {
+                'status': 'warn',
+                'message': 'Redis library not installed',
+                'mode': 'unknown'
+            }
+        except redis.ConnectionError as e:
+            health_status['checks']['redis'] = {
+                'status': 'fail',
+                'message': f'Redis connection failed: {str(e)}',
+                'mode': 'disconnected'
+            }
+            health_status['status'] = 'degraded'
+            logger.warning(f"Redis health check failed: {e}")
+        except redis.TimeoutError:
+            health_status['checks']['redis'] = {
+                'status': 'fail',
+                'message': 'Redis connection timeout',
+                'mode': 'timeout'
+            }
+            health_status['status'] = 'degraded'
+        except Exception as e:
+            health_status['checks']['redis'] = {
+                'status': 'fail',
+                'message': f'Redis error: {str(e)}',
+                'mode': 'error'
+            }
+            health_status['status'] = 'degraded'
+    else:
+        # Using in-memory rate limiting - warn about this
+        health_status['checks']['redis'] = {
+            'status': 'warn',
+            'message': 'Using in-memory rate limiting (not distributed)',
+            'mode': 'memory',
+            'warning': 'Rate limiting will not persist across restarts or scale across instances'
+        }
+
     status_code = 200 if health_status['status'] in ('healthy', 'degraded') else 503
     return jsonify(health_status), status_code
 

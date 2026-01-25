@@ -206,12 +206,12 @@ SECRETS_TEMPLATE = """
 
 if __name__ == '__main__':
     # Test the secrets manager
-    print("Testing Secrets Manager...")
-    print(f"Flask ENV: {os.getenv('FLASK_ENV', 'development')}")
+    logger.info("Testing Secrets Manager...")
+    logger.info(f"Flask ENV: {os.getenv('FLASK_ENV', 'development')}")
     
     try:
         secrets = get_all_secrets()
-        print(f"Loaded {len(secrets)} secrets")
+        logger.info(f"Loaded {len(secrets)} secrets")
         
         # Validate required secrets for production
         required = ['flask_secret_key', 'database_url', 'aws_s3_bucket']
@@ -219,7 +219,7 @@ if __name__ == '__main__':
         
         for key, present in validation.items():
             status = "✅" if present else "❌"
-            print(f"  {status} {key}")
+            logger.info(f"  {status} {key}")
             
     except SecretsManagerError as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")

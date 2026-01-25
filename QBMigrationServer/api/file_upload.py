@@ -12,6 +12,10 @@ from datetime import datetime
 
 from api.auth import require_auth
 from models import db, Migration
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 file_upload_bp = Blueprint('file_upload', __name__, url_prefix='/api/files')
 

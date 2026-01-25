@@ -15,7 +15,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 import base64
+import logging
 
+
+
+logger = logging.getLogger(__name__)
 
 class WhitelabelConfig:
     """
@@ -237,13 +241,13 @@ if __name__ == "__main__":
     # Create a reseller license
     lm = LicenseManager()
     reseller = lm.generate_license_key("Big CPA Firm", "RESELLER", 365)
-    print("Reseller License:", reseller["license_key"][:50] + "...")
+    logger.info("Reseller License:", reseller["license_key"][:50] + "...")
     
     # Validate it
     validation = lm.validate_license(reseller["license_key"])
-    print("Valid:", validation["valid"])
-    print("Company:", validation["details"]["company"])
-    print("Tier:", validation["details"]["tier"])
+    logger.info("Valid:", validation["valid"])
+    logger.info("Company:", validation["details"]["company"])
+    logger.info("Tier:", validation["details"]["tier"])
     
     # Create whitelabel config
     config = WhitelabelConfig()
@@ -252,5 +256,5 @@ if __name__ == "__main__":
         "primary_color": "#86BC25",  # Deloitte green
         "product_name": "Deloitte Migration Accelerator"
     })
-    print("\nCSS Variables:")
-    print(config.to_css_variables())
+    logger.info("\nCSS Variables:")
+    logger.info(config.to_css_variables())

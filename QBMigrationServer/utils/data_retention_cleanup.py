@@ -280,7 +280,7 @@ if __name__ == '__main__':
         logger.info("=" * 80)
 
         # Print JSON result for programmatic consumption
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
 
         # Exit with appropriate code
         sys.exit(0 if result['success'] else 1)

@@ -29,8 +29,8 @@ USAGE:
     result = transformer.transform(qb_desktop_data)
     
     # Check results
-    print(result['summary'])
-    print(f"Trial Balance: {result['trial_balance']}")
+    logger.info(result['summary'])
+    logger.info(f"Trial Balance: {result['trial_balance']}")
 """
 
 import re
@@ -1138,7 +1138,8 @@ class QBDataTransformer:
     
         for component in bom_components:
             component_ref = component.get('ItemRef') or component.get('ItemName')
-            quantity = float(component.get('Quantity', 1.0))
+            # FIX #54: Use Decimal for quantity to maintain financial precision
+            quantity = self.to_decimal(component.get('Quantity', '1.0'))
         
             # Map to QBO item ID
             qbo_item_id = self.id_mapping['items'].get(component_ref)

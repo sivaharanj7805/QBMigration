@@ -1,42 +1,53 @@
-# Virtual environment
-venv/
-env/
+# ============================================================================
+# FORENSICBRIDGE .GITIGNORE - Production Security Hardened
+# FIX #48: Added encryption key exclusions
+# FIX #59: Removed duplicate entries
+# ============================================================================
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# ============================================================================
+# CRITICAL: ENCRYPTION KEYS & SECRETS (FIX #48)
+# ============================================================================
+# NEVER commit encryption keys to repository
+.master_key
+*.master_key
+master.key
+encryption.key
+*.encryption_key
 
-# Environment variables
+# Key files
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Secrets directories
+secrets/
+.keys/
+.secrets/
+
+# Credential files (FIX #46)
+cookies.txt
+*.cookies
+session.txt
+tokens.txt
+credentials.txt
+credentials.json
+auth.txt
+service-account*.json
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+.envrc
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-logs/
-*.log
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Uploads
-data/encrypted/
-data/uploads/
-
-# Python
+# ============================================================================
+# PYTHON
+# ============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -48,7 +59,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-/lib/
+lib/
 lib64/
 parts/
 sdist/
@@ -57,64 +68,131 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
 venv/
 env/
 ENV/
-.venv
+.venv/
+.virtualenv/
 
-# Sensitive data
-.env
-.env.local
-.env.*.local
-*.key
-*.pem
-*.p12
-*.pfx
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Data files
-data/
-# Specific data JSON files (not package.json, tsconfig.json, etc.)
-test_upload.json
-*.enc
-*.encrypted
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
 
-# Logs
+# ============================================================================
+# NODE.JS / FRONTEND
+# ============================================================================
+node_modules/
+.next/
+out/
+.nuxt/
+dist/
+.cache/
+*.tsbuildinfo
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+*.db
+*.sqlite
+*.sqlite3
+*.sql.backup
+
+# ============================================================================
+# LOGS
+# ============================================================================
 *.log
 logs/
-data/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# IDE
+# ============================================================================
+# IDE & EDITORS
+# ============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+*.sublime-workspace
+*.sublime-project
+.project
+.classpath
+.settings/
 
-# OS
+# ============================================================================
+# OPERATING SYSTEMS
+# ============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# Backups
+# ============================================================================
+# DATA & UPLOADS
+# ============================================================================
+data/
+uploads/
+test_upload.json
+*.enc
+*.encrypted
+
+# ============================================================================
+# BACKUPS
+# ============================================================================
 *.bak
 *.backup
 *.old
+*.orig
+*.tmp
+*.temp
 
-# Test coverage
-.coverage
-htmlcov/
-.pytest_cache/
+# ============================================================================
+# .NET / C# (QBDesktopReader)
+# ============================================================================
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+packages/
+*.nupkg
+project.lock.json
+.vs/
 
-# Secrets
-secrets/
-.keys/
+# ============================================================================
+# AWS
+# ============================================================================
+.aws/
+aws-credentials
+samconfig.toml
 
-# FIX #46: Prevent credential files from being committed
-cookies.txt
-*.cookies
-session.txt
-tokens.txt
-credentials.txt
-auth.txt
+# ============================================================================
+# MISC
+# ============================================================================
+*.pid
+*.seed
+*.pid.lock
+.cache

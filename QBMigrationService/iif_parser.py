@@ -12,7 +12,11 @@ import csv
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from io import StringIO
+import logging
 
+
+
+logger = logging.getLogger(__name__)
 
 class IIFParser:
     """Parser for QuickBooks Desktop IIF export files"""
@@ -355,10 +359,10 @@ if __name__ == '__main__':
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python iif_parser.py <file.iif>")
+        logger.info("Usage: python iif_parser.py <file.iif>")
         sys.exit(1)
     
     parser = QuickBooksExportParser()
     result = parser.parse(sys.argv[1])
     
-    print(json.dumps(result, indent=2, default=str))
+    logger.info(json.dumps(result, indent=2, default=str))

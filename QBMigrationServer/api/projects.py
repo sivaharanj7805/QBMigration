@@ -10,6 +10,10 @@ import string
 
 from models import db, Project, Migration
 from api.auth import require_auth
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
 

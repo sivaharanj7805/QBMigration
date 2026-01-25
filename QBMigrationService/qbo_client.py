@@ -860,7 +860,7 @@ class PremiumQBOClient:
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id))
         
-        print(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
+        logger.info(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
@@ -891,9 +891,9 @@ class PremiumQBOClient:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
         
-        print(f"✓ Batch processing complete:")
-        print(f"  Succeeded: {len(results['succeeded'])}")
-        print(f"  Failed: {len(results['failed'])}")
+        logger.info(f"✓ Batch processing complete:")
+        logger.info(f"  Succeeded: {len(results['succeeded'])}")
+        logger.error(f"  Failed: {len(results['failed'])}")
         
         return results
     
@@ -1060,7 +1060,7 @@ class PremiumQBOClient:
         """
         with self.failed_items_lock:
             if not self.failed_items:
-                print("No failed items to export")
+                logger.error("No failed items to export")
                 return
             
             with open(filepath, 'w') as f:
@@ -1070,7 +1070,7 @@ class PremiumQBOClient:
                     "items": self.failed_items
                 }, f, indent=2)
             
-            print(f"✓ Exported {len(self.failed_items)} failed items to {filepath}")
+            logger.error(f"✓ Exported {len(self.failed_items)} failed items to {filepath}")
     
     def query(
         self,
@@ -1142,8 +1142,8 @@ class PremiumQBOClient:
             entities = cursor.fetchall()
             conn.close()
         
-        print(f"\n🗑️  Rolling back migration {migration_id}...")
-        print(f"   Found {len(entities)} entities to delete")
+        logger.info(f"\n🗑️  Rolling back migration {migration_id}...")
+        logger.info(f"   Found {len(entities)} entities to delete")
         
         deleted = 0
         failed = 0
@@ -1154,9 +1154,9 @@ class PremiumQBOClient:
             else:
                 failed += 1
         
-        print(f"\n✅ Rollback complete:")
-        print(f"   Deleted: {deleted}")
-        print(f"   Failed: {failed}")
+        logger.info(f"\n✅ Rollback complete:")
+        logger.info(f"   Deleted: {deleted}")
+        logger.error(f"   Failed: {failed}")
         
         return {
             "deleted": deleted,

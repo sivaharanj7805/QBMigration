@@ -37,7 +37,11 @@ def token_required(f):
             return jsonify({'success': False, 'error': 'Token is missing'}), 401
         
         try:
-            secret_key = current_app.config.get('SECRET_KEY', 'dev-secret-key')
+            # FIX #58: Remove insecure JWT secret fallback - require proper configuration
+            secret_key = current_app.config.get('SECRET_KEY')
+            if not secret_key:
+                logger.error("SECRET_KEY not configured - JWT verification impossible")
+                return jsonify({'success': False, 'error': 'Server configuration error'}), 500
             data = jwt.decode(token, secret_key, algorithms=['HS256'])
             current_user = User.query.get(data['user_id'])
             
@@ -146,8 +150,20 @@ def create_checkout(current_user):
         })
         
     except stripe.error.StripeError as e:
+        # FIX #52: Sanitize Stripe errors - don't expose internal details to clients
         logger.error(f"Stripe error: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 400
+        # Map common Stripe errors to user-friendly messages
+        error_message = 'Payment processing failed. Please try again or contact support.'
+        if isinstance(e, stripe.error.CardError):
+            # Card errors are safe to show to users (declined, insufficient funds, etc.)
+            error_message = e.user_message or 'Your card was declined. Please try a different payment method.'
+        elif isinstance(e, stripe.error.InvalidRequestError):
+            error_message = 'Invalid payment request. Please try again.'
+        elif isinstance(e, stripe.error.AuthenticationError):
+            error_message = 'Payment system configuration error. Please contact support.'
+        elif isinstance(e, stripe.error.RateLimitError):
+            error_message = 'Too many payment requests. Please wait a moment and try again.'
+        return jsonify({'success': False, 'error': error_message}), 400
     except Exception as e:
         logger.exception(f"Payment error: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to create checkout session'}), 500
@@ -172,13 +188,15 @@ def stripe_webhook():
             payload, sig_header, webhook_secret
         )
     except ValueError as e:
-        # CRITICAL FIX: Return 200 to prevent Stripe retries
-        logger.error(f"Invalid payload: {str(e)}")
-        return jsonify({'received': True, 'error': 'Invalid payload'}), 200
+        # FIX #55: Return 400 for invalid payload - Stripe handles retries appropriately
+        # Returning 200 hides configuration issues and potential attacks
+        logger.error(f"Stripe webhook invalid payload: {str(e)}")
+        return jsonify({'error': 'Invalid payload'}), 400
     except stripe.error.SignatureVerificationError as e:
-        # CRITICAL FIX: Return 200 to prevent Stripe retries
-        logger.error(f"Invalid signature: {str(e)}")
-        return jsonify({'received': True, 'error': 'Invalid signature'}), 200
+        # FIX #55: Return 401 for signature failures - indicates possible attack or misconfiguration
+        # Stripe will NOT retry on 4xx errors, which is correct for signature failures
+        logger.warning(f"Stripe webhook signature verification failed: {str(e)}")
+        return jsonify({'error': 'Invalid signature'}), 401
     
     # Handle the event
     if event['type'] == 'checkout.session.completed':

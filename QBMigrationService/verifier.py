@@ -59,12 +59,12 @@ class PremiumMigrationVerifier:
         If this fails, the migration is fundamentally broken
         regardless of individual account counts
         """
-        print("\n" + "=" * 80)
-        print("  TRIAL BALANCE VERIFICATION")
-        print("=" * 80)
+        logger.info("\n" + "=" * 80)
+        logger.info("  TRIAL BALANCE VERIFICATION")
+        logger.info("=" * 80)
         
         # Calculate QBD trial balance
-        print("\n[1/2] Calculating QuickBooks Desktop trial balance...")
+        logger.info("\n[1/2] Calculating QuickBooks Desktop trial balance...")
         qbd_debits = Decimal('0')
         qbd_credits = Decimal('0')
         
@@ -86,12 +86,12 @@ class PremiumMigrationVerifier:
                 else:
                     qbd_debits += abs(balance)
         
-        print(f"  QBD Debits:  ${qbd_debits:,.2f}")
-        print(f"  QBD Credits: ${qbd_credits:,.2f}")
-        print(f"  QBD Balance: ${(qbd_debits - qbd_credits):,.2f}")
+        logger.info(f"  QBD Debits:  ${qbd_debits:,.2f}")
+        logger.info(f"  QBD Credits: ${qbd_credits:,.2f}")
+        logger.info(f"  QBD Balance: ${(qbd_debits - qbd_credits):,.2f}")
         
         # Calculate QBO trial balance
-        print("\n[2/2] Calculating QuickBooks Online trial balance...")
+        logger.info("\n[2/2] Calculating QuickBooks Online trial balance...")
         
         try:
             qbo_accounts = self.client.query("Account", oauth_manager=oauth_manager)
@@ -116,9 +116,9 @@ class PremiumMigrationVerifier:
                     else:
                         qbo_debits += abs(balance)
             
-            print(f"  QBO Debits:  ${qbo_debits:,.2f}")
-            print(f"  QBO Credits: ${qbo_credits:,.2f}")
-            print(f"  QBO Balance: ${(qbo_debits - qbo_credits):,.2f}")
+            logger.info(f"  QBO Debits:  ${qbo_debits:,.2f}")
+            logger.info(f"  QBO Credits: ${qbo_credits:,.2f}")
+            logger.info(f"  QBO Balance: ${(qbo_debits - qbo_credits):,.2f}")
             
             # Verify equation: Debits = Credits (within tolerance)
             qbd_balanced = abs(qbd_debits - qbd_credits) < Decimal('0.05')
@@ -144,15 +144,15 @@ class PremiumMigrationVerifier:
                 "credit_variance": float(qbd_credits - qbo_credits)
             }
             
-            print("\n" + "=" * 80)
+            logger.info("\n" + "=" * 80)
             
             if qbd_balanced and qbo_balanced and debit_match and credit_match:
-                print("  ✅ TRIAL BALANCE VERIFIED - BOOKS ARE BALANCED")
-                print("=" * 80)
+                logger.info("  ✅ TRIAL BALANCE VERIFIED - BOOKS ARE BALANCED")
+                logger.info("=" * 80)
                 return True
             else:
-                print("  ❌ TRIAL BALANCE FAILED - MIGRATION IS COMPROMISED")
-                print("=" * 80)
+                logger.error("  ❌ TRIAL BALANCE FAILED - MIGRATION IS COMPROMISED")
+                logger.info("=" * 80)
                 
                 if not qbd_balanced:
                     self.report["errors"].append("QBD trial balance is not balanced - source data issue")
@@ -187,9 +187,9 @@ class PremiumMigrationVerifier:
         Verifies bank transaction reconciliation states match between
         QuickBooks Desktop and QuickBooks Online.
         """
-        print("" + "=" * 80)
-        print("  BANK RECONCILIATION VERIFICATION")
-        print("=" * 80)
+        logger.info("" + "=" * 80)
+        logger.info("  BANK RECONCILIATION VERIFICATION")
+        logger.info("=" * 80)
         
         reconciliation_results = {
             "verified": True,
@@ -202,11 +202,11 @@ class PremiumMigrationVerifier:
         bank_accounts = [acc for acc in qbd_accounts if acc.get("AccountType") in ["Bank", "CreditCard"]]
         
         if not bank_accounts:
-            print("  ⚠️  No bank accounts found")
+            logger.info("  ⚠️  No bank accounts found")
             reconciliation_results["warnings"].append("No bank accounts in source data")
             return reconciliation_results
         
-        print(f"[1/3] Found {len(bank_accounts)} bank account(s)")
+        logger.info(f"[1/3] Found {len(bank_accounts)} bank account(s)")
         
         # Get QBO bank accounts
         try:
@@ -217,15 +217,15 @@ class PremiumMigrationVerifier:
                 if acc.get('AccountType') in ['Bank', 'Credit Card']
             }
             
-            print(f"[2/3] Retrieved {len(qbo_bank_accounts)} bank account(s) from QBO")
+            logger.info(f"[2/3] Retrieved {len(qbo_bank_accounts)} bank account(s) from QBO")
         except Exception as e:
-            print(f"  ❌ Failed to retrieve QBO accounts: {e}")
+            logger.error(f"  ❌ Failed to retrieve QBO accounts: {e}")
             reconciliation_results["verified"] = False
             reconciliation_results["discrepancies"].append(f"Cannot retrieve QBO accounts: {e}")
             return reconciliation_results
         
         # Verify each bank account
-        print(f"[3/3] Verifying reconciliation states...")
+        logger.info(f"[3/3] Verifying reconciliation states...")
         
         for qbd_account in bank_accounts:
             account_name = qbd_account.get("Name", "Unknown")
@@ -236,7 +236,7 @@ class PremiumMigrationVerifier:
             if not qbo_account:
                 warning = f"Bank account '{account_name}' not found in QBO"
                 reconciliation_results["warnings"].append(warning)
-                print(f"  ⚠️  {warning}")
+                logger.warning(f"  ⚠️  {warning}")
                 continue
             
             qbd_reconciled_balance = qbd_account.get("ReconciledBalance", 0)
@@ -262,21 +262,21 @@ class PremiumMigrationVerifier:
                     reconciliation_results["discrepancies"].append(discrepancy)
                     reconciliation_results["verified"] = False
                     
-                    print(f"  ❌ {account_name}: Difference ${balance_diff:,.2f}")
+                    logger.info(f"  ❌ {account_name}: Difference ${balance_diff:,.2f}")
                 else:
-                    print(f"  ✅ {account_name}: Balanced")
+                    logger.info(f"  ✅ {account_name}: Balanced")
             
             except Exception as e:
                 warning = f"Cannot verify {account_name}: {e}"
                 reconciliation_results["warnings"].append(warning)
-                print(f"  ⚠️  {warning}")
+                logger.warning(f"  ⚠️  {warning}")
         
-        print("" + "=" * 80)
+        logger.info("" + "=" * 80)
         if reconciliation_results["verified"]:
-            print("  ✅ BANK RECONCILIATION VERIFIED")
+            logger.info("  ✅ BANK RECONCILIATION VERIFIED")
         else:
-            print("  ❌ DISCREPANCIES FOUND")
-        print("=" * 80 + "")
+            logger.info("  ❌ DISCREPANCIES FOUND")
+        logger.info("=" * 80 + "")
         
         self.report["critical_metrics"]["reconciliation"] = reconciliation_results
         return reconciliation_results
@@ -416,7 +416,7 @@ class PremiumMigrationVerifier:
         
         except Exception as e:
             # Log error but don't fail reconciliation
-            print(f"⚠️  Item-based transaction lookup failed: {e}")
+            logger.error(f"⚠️  Item-based transaction lookup failed: {e}")
         
         return transactions
     
@@ -443,7 +443,7 @@ class PremiumMigrationVerifier:
         Cause: Payment migrated but LinkedTxn not created
         Impact: Customer balance is wrong
         """
-        print("\n[UNAPPLIED PAYMENTS] Scanning for unlinked payments...")
+        logger.info("\n[UNAPPLIED PAYMENTS] Scanning for unlinked payments...")
         
         try:
             # Get total A/R balance
@@ -467,7 +467,7 @@ class PremiumMigrationVerifier:
             variance = total_ar - total_open_invoices
             
             if abs(variance) > Decimal('1.00'):
-                print(f"  ⚠️  Unapplied payment variance: ${variance:,.2f}")
+                logger.info(f"  ⚠️  Unapplied payment variance: ${variance:,.2f}")
                 
                 self.report["warnings"].append(
                     f"Unapplied payment variance detected: ${variance:,.2f}. "
@@ -480,7 +480,7 @@ class PremiumMigrationVerifier:
                     "total_open_invoices": float(total_open_invoices)
                 }]
             else:
-                print(f"  ✓ All payments properly applied (variance: ${variance:.2f})")
+                logger.info(f"  ✓ All payments properly applied (variance: ${variance:.2f})")
                 return []
             
         except Exception as e:
@@ -502,7 +502,7 @@ class PremiumMigrationVerifier:
                 "success": actual_count >= expected_count
             }
             
-            print(f"  Customers: {actual_count}/{expected_count}")
+            logger.info(f"  Customers: {actual_count}/{expected_count}")
             return actual_count >= expected_count
         except Exception as e:
             logger.error(f"Customer verification failed: {e}")
@@ -519,7 +519,7 @@ class PremiumMigrationVerifier:
                 "success": actual_count >= expected_count
             }
             
-            print(f"  Vendors: {actual_count}/{expected_count}")
+            logger.info(f"  Vendors: {actual_count}/{expected_count}")
             return actual_count >= expected_count
         except Exception as e:
             logger.error(f"Vendor verification failed: {e}")
@@ -536,7 +536,7 @@ class PremiumMigrationVerifier:
                 "success": actual_count >= expected_count
             }
             
-            print(f"  Invoices: {actual_count}/{expected_count}")
+            logger.info(f"  Invoices: {actual_count}/{expected_count}")
             return actual_count >= expected_count
         except Exception as e:
             logger.error(f"Invoice verification failed: {e}")
@@ -570,7 +570,7 @@ class PremiumMigrationVerifier:
         - Data integrity scores
         - Signed by [Your Company Name]
         """
-        print("\n[PDF REPORT] Generating professional audit certificate...")
+        logger.info("\n[PDF REPORT] Generating professional audit certificate...")
         
         doc = SimpleDocTemplate(filepath, pagesize=letter)
         styles = getSampleStyleSheet()
@@ -810,18 +810,18 @@ class PremiumMigrationVerifier:
         # Build PDF
         doc.build(story)
         
-        print(f"  ✓ PDF certificate generated: {filepath}")
-        print(f"    This document can be provided to your CPA for tax audits")
+        logger.info(f"  ✓ PDF certificate generated: {filepath}")
+        logger.info(f"    This document can be provided to your CPA for tax audits")
     
     def save_report(self, filepath: str):
         """Save JSON verification report"""
         with open(filepath, 'w') as f:
             json.dump(self.report, f, indent=2)
         
-        print(f"\n✓ Verification report saved: {filepath}")
-        print(f"\n  Summary:")
-        print(f"    Errors: {len(self.report['errors'])}")
-        print(f"    Warnings: {len(self.report['warnings'])}")
+        logger.info(f"\n✓ Verification report saved: {filepath}")
+        logger.info(f"\n  Summary:")
+        logger.error(f"    Errors: {len(self.report['errors'])}")
+        logger.warning(f"    Warnings: {len(self.report['warnings'])}")
     
     # ========================================================================
     # PREMIUM FEATURE #5: DISCREPANCY DRILL-DOWN
@@ -843,9 +843,9 @@ class PremiumMigrationVerifier:
         
         This is what Big 4 auditors look for in technical due diligence.
         """
-        print("\n" + "=" * 80)
-        print("  DISCREPANCY DRILL-DOWN ANALYSIS")
-        print("=" * 80)
+        logger.info("\n" + "=" * 80)
+        logger.info("  DISCREPANCY DRILL-DOWN ANALYSIS")
+        logger.info("=" * 80)
         
         drilldown = {
             "total_variance": Decimal('0'),
@@ -890,13 +890,13 @@ class PremiumMigrationVerifier:
                     })
                     drilldown["total_variance"] += abs(variance)
                     
-                    print(f"  ❌ {name}: ${variance:+,.2f} variance")
+                    logger.info(f"  ❌ {name}: ${variance:+,.2f} variance")
                 else:
                     drilldown["accounts_matched"].append({
                         "account_name": name,
                         "balance": float(qbd_balance)
                     })
-                    print(f"  ✅ {name}: Matched (${qbd_balance:,.2f})")
+                    logger.info(f"  ✅ {name}: Matched (${qbd_balance:,.2f})")
             else:
                 # Account missing in QBO
                 drilldown["accounts_missing_in_qbo"].append({
@@ -905,7 +905,7 @@ class PremiumMigrationVerifier:
                     "balance": float(qbd_balance)
                 })
                 drilldown["total_variance"] += abs(qbd_balance)
-                print(f"  ⚠️  {name}: MISSING in QBO (${qbd_balance:,.2f})")
+                logger.info(f"  ⚠️  {name}: MISSING in QBO (${qbd_balance:,.2f})")
         
         # Find extra accounts in QBO (not in QBD)
         for qbo_acc in qbo_accounts:
@@ -917,7 +917,7 @@ class PremiumMigrationVerifier:
                         "account_name": name,
                         "balance": float(balance)
                     })
-                    print(f"  ⚠️  {name}: EXTRA in QBO (${balance:,.2f})")
+                    logger.info(f"  ⚠️  {name}: EXTRA in QBO (${balance:,.2f})")
         
         # Generate recommended actions
         if drilldown["accounts_with_variance"]:
@@ -938,12 +938,12 @@ class PremiumMigrationVerifier:
             )
         
         # Summary
-        print("\n" + "-" * 80)
-        print(f"  TOTAL VARIANCE: ${float(drilldown['total_variance']):,.2f}")
-        print(f"  Accounts Matched: {len(drilldown['accounts_matched'])}")
-        print(f"  Accounts with Variance: {len(drilldown['accounts_with_variance'])}")
-        print(f"  Missing in QBO: {len(drilldown['accounts_missing_in_qbo'])}")
-        print("=" * 80 + "\n")
+        logger.info("\n" + "-" * 80)
+        logger.info(f"  TOTAL VARIANCE: ${float(drilldown['total_variance']):,.2f}")
+        logger.info(f"  Accounts Matched: {len(drilldown['accounts_matched'])}")
+        logger.info(f"  Accounts with Variance: {len(drilldown['accounts_with_variance'])}")
+        logger.info(f"  Missing in QBO: {len(drilldown['accounts_missing_in_qbo'])}")
+        logger.info("=" * 80 + "\n")
         
         # Store in report
         self.report["discrepancy_drilldown"] = {

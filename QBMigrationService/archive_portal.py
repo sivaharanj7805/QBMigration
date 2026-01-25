@@ -9,6 +9,10 @@ import os
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
 from functools import wraps
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -364,6 +368,6 @@ def portal():
 
 
 if __name__ == '__main__':
-    print("Starting Active Archival Web Portal...")
-    print(f"Archive directory: {ARCHIVE_DIR}")
+    logger.info("Starting Active Archival Web Portal...")
+    logger.info(f"Archive directory: {ARCHIVE_DIR}")
     app.run(host='0.0.0.0', port=5001, debug=True)

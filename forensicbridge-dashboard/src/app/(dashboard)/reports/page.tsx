@@ -72,17 +72,39 @@ export default function ReportsPage() {
     const fetchReports = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/reports`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setReports(data.reports || []);
-            // }
+            // FIX #51: Implement real API call with proper error handling
+            const token = localStorage.getItem('token');
+            const headers: HeadersInit = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
 
-            // For now, start with empty data
-            setReports([]);
+            const response = await fetch(`${API_URL}/api/reports`, {
+                credentials: 'include',
+                headers
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    setReports(data.reports || data.data?.reports || []);
+                } else {
+                    // API returned success: false - use empty state
+                    setReports([]);
+                }
+            } else if (response.status === 404) {
+                // Endpoint not implemented yet - use empty state gracefully
+                console.info("Reports API endpoint not yet available");
+                setReports([]);
+            } else {
+                throw new Error(`API error: ${response.status}`);
+            }
         } catch (error) {
             console.error("Failed to fetch reports:", error);
+            // On error, show empty state rather than broken UI
+            setReports([]);
         } finally {
             setLoading(false);
         }

@@ -4,6 +4,10 @@ Required for Intuit App Registration
 """
 
 from flask import Blueprint, render_template, redirect, url_for
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 legal_bp = Blueprint('legal', __name__, url_prefix='/legal')
 

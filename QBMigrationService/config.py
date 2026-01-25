@@ -1,17 +1,21 @@
 import os
 from pathlib import Path
 from typing import Optional
+import logging
 
 # ============================================================================
 # CONFIGURATION VALIDATION & SANITIZATION
 # ============================================================================
+
+
+logger = logging.getLogger(__name__)
 
 def get_env_int(key: str, default: int) -> int:
     """Safely get integer from environment with validation"""
     try:
         return int(os.getenv(key, str(default)))
     except ValueError:
-        print(f"Warning: Invalid integer for {key}, using default: {default}")
+        logger.warning(f"Warning: Invalid integer for {key}, using default: {default}")
         return default
 
 def get_env_float(key: str, default: float) -> float:
@@ -19,7 +23,7 @@ def get_env_float(key: str, default: float) -> float:
     try:
         return float(os.getenv(key, str(default)))
     except ValueError:
-        print(f"Warning: Invalid float for {key}, using default: {default}")
+        logger.warning(f"Warning: Invalid float for {key}, using default: {default}")
         return default
 
 def get_env_bool(key: str, default: str = "true") -> bool:
@@ -55,7 +59,7 @@ ACCESS_TOKEN = os.getenv("QBO_ACCESS_TOKEN", "")  # Optional for initial setup
 
 # Validate critical credentials
 if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
-    print("WARNING: QBO credentials not configured. Set environment variables.")
+    logger.warning("WARNING: QBO credentials not configured. Set environment variables.")
 
 # ============================================================================
 # ENVIRONMENT & REGION CONFIGURATION
@@ -64,14 +68,14 @@ if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
 # Environment (sandbox or production)
 ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
 if ENVIRONMENT not in ("sandbox", "production"):
-    print(f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'")
+    logger.warning(f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'")
     ENVIRONMENT = "sandbox"
 
 # Region support (US, CA, UK, AU, IN)
 REGION = os.getenv("QBO_REGION", "US").upper()
 VALID_REGIONS = ("US", "CA", "UK", "AU", "IN")
 if REGION not in VALID_REGIONS:
-    print(f"Warning: Invalid region '{REGION}', defaulting to 'US'")
+    logger.warning(f"Warning: Invalid region '{REGION}', defaulting to 'US'")
     REGION = "US"
 
 # Production guard - requires explicit flag to run against production
@@ -141,7 +145,7 @@ ENCRYPT_LOGS = get_env_bool("ENCRYPT_LOGS", "true")
 # Minimum bcrypt rounds (should be configurable for future-proofing)
 BCRYPT_ROUNDS = get_env_int("BCRYPT_ROUNDS", 12)
 if BCRYPT_ROUNDS < 10:
-    print("Warning: BCRYPT_ROUNDS too low, using minimum of 10")
+    logger.warning("Warning: BCRYPT_ROUNDS too low, using minimum of 10")
     BCRYPT_ROUNDS = 10
 
 # Token refresh buffer (in seconds) - configurable for different batch sizes
@@ -229,7 +233,7 @@ DATE_PAST_MAX_YEARS = get_env_int("DATE_PAST_MAX_YEARS", 50)  # Max years in pas
 
 BATCH_SIZE = get_env_int("BATCH_SIZE", 30)  # QBO limit is 30
 if BATCH_SIZE > 30:
-    print(f"Warning: BATCH_SIZE {BATCH_SIZE} exceeds QBO limit of 30, using 30")
+    logger.warning(f"Warning: BATCH_SIZE {BATCH_SIZE} exceeds QBO limit of 30, using 30")
     BATCH_SIZE = 30
 
 RATE_LIMIT_DELAY = get_env_float("RATE_LIMIT_DELAY", 0.15)
@@ -238,7 +242,7 @@ MAX_RETRIES = get_env_int("MAX_RETRIES", 3)
 # Parallel processing settings
 MAX_PARALLEL_WORKERS = get_env_int("MAX_PARALLEL_WORKERS", 5)
 if MAX_PARALLEL_WORKERS > 10:
-    print(f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting")
+    logger.warning(f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting")
 
 # Redis configuration (for rate limiting and job queue)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -323,8 +327,8 @@ def initialize_directories():
         os.chmod(DATA_DIR, 0o700)  # Owner read/write/execute only
         
     except PermissionError as e:
-        print(f"Warning: Cannot create directories: {e}")
-        print(f"   Ensure write permissions for: {DATA_DIR}")
+        logger.warning(f"Warning: Cannot create directories: {e}")
+        logger.info(f"   Ensure write permissions for: {DATA_DIR}")
 
 # ============================================================================
 # PRODUCTION GUARD
@@ -344,12 +348,12 @@ def validate_production_access():
                 "Or disable guard with: QBO_PRODUCTION_GUARD=false"
             )
         
-        print("WARNING: Running against PRODUCTION environment")
-        print(f"   Region: {REGION}")
-        print(f"   Realm ID: {REALM_ID}")
-        print(f"   Confirm this is correct before proceeding.\n")
+        logger.warning("WARNING: Running against PRODUCTION environment")
+        logger.info(f"   Region: {REGION}")
+        logger.info(f"   Realm ID: {REALM_ID}")
+        logger.info(f"   Confirm this is correct before proceeding.\n")
     else:
-        print(f"✓ Running in {ENVIRONMENT.upper()} mode (Region: {REGION})")
+        logger.info(f"✓ Running in {ENVIRONMENT.upper()} mode (Region: {REGION})")
 
 # ============================================================================
 # QBO PLAN RECOMMENDATION

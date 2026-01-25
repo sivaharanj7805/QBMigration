@@ -430,10 +430,10 @@ if __name__ == "__main__":
     
     # Generate data key
     plaintext, encrypted = manager.generate_data_key({"test": "context"})
-    print(f"Generated key length: {len(plaintext)} bytes")
-    print(f"Encrypted key length: {len(encrypted)} bytes")
+    logger.info(f"Generated key length: {len(plaintext)} bytes")
+    logger.info(f"Encrypted key length: {len(encrypted)} bytes")
     
     # Decrypt and verify
     decrypted = manager.decrypt_data_key(encrypted, {"test": "context"})
     assert decrypted == plaintext
-    print("Key encryption/decryption successful!")
+    logger.info("Key encryption/decryption successful!")

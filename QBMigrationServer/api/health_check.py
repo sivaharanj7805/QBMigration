@@ -11,6 +11,10 @@ from io import BytesIO
 
 from api.auth import require_auth
 from models import db
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 health_check_bp = Blueprint('health_check', __name__, url_prefix='/api/health-check')
 

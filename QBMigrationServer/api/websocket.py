@@ -8,8 +8,12 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
 import jwt
 from datetime import datetime
+import logging
 
 # Blueprint for REST endpoints related to WebSocket
+
+logger = logging.getLogger(__name__)
+
 websocket_bp = Blueprint('websocket', __name__, url_prefix='/api/ws')
 
 # SocketIO instance - initialized in app.py
@@ -37,13 +41,13 @@ def register_handlers(sio, secret_key):
     @sio.on('connect')
     def handle_connect():
         """Handle client connection"""
-        print(f"[WebSocket] Client connected: {request.sid}")
+        logger.info(f"[WebSocket] Client connected: {request.sid}")
         emit('connected', {'status': 'connected', 'sid': request.sid})
     
     @sio.on('disconnect')
     def handle_disconnect():
         """Handle client disconnect"""
-        print(f"[WebSocket] Client disconnected: {request.sid}")
+        logger.info(f"[WebSocket] Client disconnected: {request.sid}")
     
     @sio.on('authenticate')
     def handle_authenticate(data):
@@ -60,7 +64,7 @@ def register_handlers(sio, secret_key):
             # Join user-specific room
             join_room(f'user_{user_id}')
             emit('authenticated', {'user_id': user_id})
-            print(f"[WebSocket] User {user_id} authenticated")
+            logger.info(f"[WebSocket] User {user_id} authenticated")
             
         except jwt.ExpiredSignatureError:
             emit('error', {'message': 'Token expired'})
@@ -77,7 +81,7 @@ def register_handlers(sio, secret_key):
         
         join_room(f'migration_{migration_id}')
         emit('subscribed', {'migration_id': migration_id})
-        print(f"[WebSocket] Client subscribed to migration: {migration_id}")
+        logger.info(f"[WebSocket] Client subscribed to migration: {migration_id}")
     
     @sio.on('unsubscribe_migration')
     def handle_unsubscribe_migration(data):

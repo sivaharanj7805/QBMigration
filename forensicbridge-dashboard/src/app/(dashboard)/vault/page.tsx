@@ -59,15 +59,56 @@ export default function VaultPage() {
     const fetchVaultData = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/vault`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setArchivedCompanies(data.companies || []);
-            //     setStats(data.stats || { archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
-            // }
+            // FIX #51: Implement real API call with proper error handling
+            const token = localStorage.getItem('token');
+            const headers: HeadersInit = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
 
-            // For now, start with empty data
+            const response = await fetch(`${API_URL}/api/vault`, {
+                credentials: 'include',
+                headers
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    setArchivedCompanies(data.companies || data.data?.companies || []);
+                    setStats(data.stats || data.data?.stats || {
+                        archivedCompanies: 0,
+                        totalRecords: 0,
+                        storageSize: "0 GB",
+                        monthlyCost: "$0.00"
+                    });
+                } else {
+                    // API returned success: false - use empty state
+                    setArchivedCompanies([]);
+                    setStats({
+                        archivedCompanies: 0,
+                        totalRecords: 0,
+                        storageSize: "0 GB",
+                        monthlyCost: "$0.00"
+                    });
+                }
+            } else if (response.status === 404) {
+                // Endpoint not implemented yet - use empty state gracefully
+                console.info("Vault API endpoint not yet available");
+                setArchivedCompanies([]);
+                setStats({
+                    archivedCompanies: 0,
+                    totalRecords: 0,
+                    storageSize: "0 GB",
+                    monthlyCost: "$0.00"
+                });
+            } else {
+                throw new Error(`API error: ${response.status}`);
+            }
+        } catch (error) {
+            console.error("Failed to fetch vault data:", error);
+            // On error, show empty state rather than broken UI
             setArchivedCompanies([]);
             setStats({
                 archivedCompanies: 0,
@@ -75,8 +116,6 @@ export default function VaultPage() {
                 storageSize: "0 GB",
                 monthlyCost: "$0.00"
             });
-        } catch (error) {
-            console.error("Failed to fetch vault data:", error);
         } finally {
             setLoading(false);
         }

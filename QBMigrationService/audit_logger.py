@@ -5,6 +5,10 @@ from datetime import datetime
 from pathlib import Path
 from cryptography.fernet import Fernet
 from typing import Dict, List, Optional, Any
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 class AuditLogger:
     """
@@ -248,7 +252,7 @@ class AuditLogger:
                     
         except Exception as e:
             # Don't let logging failures crash the application
-            print(f"⚠️  Log write failed: {e}")
+            logger.error(f"⚠️  Log write failed: {e}")
     
     def log_security_event(self, event_type: str, details: Dict[str, Any]):
         """Log security event"""
@@ -256,7 +260,7 @@ class AuditLogger:
         
         # Print to console (sanitized)
         message = details.get('message', '')
-        print(f"[SECURITY] {event_type}: {message}")
+        logger.info(f"[SECURITY] {event_type}: {message}")
     
     def log_access(
         self,
@@ -407,7 +411,7 @@ class AuditLogger:
                     else:
                         entries.append(json.loads(line))
                 except Exception as e:
-                    print(f"⚠️  Could not parse log entry: {e}")
+                    logger.info(f"⚠️  Could not parse log entry: {e}")
         
         return entries
     
@@ -435,4 +439,4 @@ class AuditLogger:
                 # Rename current to .old
                 log_file.rename(old_file)
                 
-                print(f"✓ Rotated log: {log_file.name}")
+                logger.info(f"✓ Rotated log: {log_file.name}")

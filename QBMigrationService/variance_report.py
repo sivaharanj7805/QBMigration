@@ -10,7 +10,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, List, Optional
 from pathlib import Path
+import logging
 
+
+
+logger = logging.getLogger(__name__)
 
 class VarianceReportGenerator:
     """
@@ -478,9 +482,9 @@ if __name__ == "__main__":
     generator = VarianceReportGenerator("Test Company Inc.")
     report = generator.generate_variance_report(source_data, dest_data)
     
-    print(f"Overall Status: {report['overall_status']}")
-    print(f"Total Variances: {report['summary']['total_variances']}")
+    logger.info(f"Overall Status: {report['overall_status']}")
+    logger.info(f"Total Variances: {report['summary']['total_variances']}")
     
     # Generate HTML
     generator.generate_html_report(report, "variance_report.html")
-    print("HTML report generated: variance_report.html")
+    logger.info("HTML report generated: variance_report.html")

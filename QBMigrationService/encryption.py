@@ -8,7 +8,11 @@ import json
 import ctypes
 import hashlib
 from typing import Dict, Optional, Union, Tuple
+import logging
 
+
+
+logger = logging.getLogger(__name__)
 
 class EncryptionManager:
     """
@@ -190,8 +194,8 @@ class EncryptionManager:
         """
         if expected_hash is None:
             # Legacy data without hash - log warning but allow
-            print("⚠️  WARNING: No hash provided - cannot verify data integrity")
-            print("   This may be legacy data. Consider re-extracting from QB Desktop.")
+            logger.warning("⚠️  WARNING: No hash provided - cannot verify data integrity")
+            logger.info("   This may be legacy data. Consider re-extracting from QB Desktop.")
             return True
         
         # Calculate actual hash
@@ -208,7 +212,7 @@ class EncryptionManager:
                 f"   Migration ABORTED for security."
             )
         
-        print("✅ Hash verification PASSED - Data integrity confirmed")
+        logger.info("✅ Hash verification PASSED - Data integrity confirmed")
         return True
     
     @staticmethod
@@ -222,8 +226,8 @@ class EncryptionManager:
         plaintext, expected_hash = EncryptionManager.decrypt_from_json_with_verification(encrypted_json)
         
         if expected_hash:
-            print("⚠️  WARNING: Hash present but not verified by caller")
-            print("   Use decrypt_from_json_with_verification() for security")
+            logger.warning("⚠️  WARNING: Hash present but not verified by caller")
+            logger.info("   Use decrypt_from_json_with_verification() for security")
         
         return plaintext
     
@@ -269,7 +273,7 @@ class EncryptionManager:
                 
             elif len(parts) == 3:
                 # CBC mode (from .NET Framework version) - LEGACY ONLY
-                print("⚠️  WARNING: Legacy CBC encryption detected. Upgrade to GCM.")
+                logger.warning("⚠️  WARNING: Legacy CBC encryption detected. Upgrade to GCM.")
                 
                 iv = base64.b64decode(parts[0])
                 ciphertext = base64.b64decode(parts[1])
@@ -383,11 +387,11 @@ class EncryptionManager:
             
             # Delete the file
             os.remove(filepath)
-            print(f"✅ Securely deleted: {os.path.basename(filepath)}")
+            logger.info(f"✅ Securely deleted: {os.path.basename(filepath)}")
             return True
             
         except Exception as e:
-            print(f"⚠️  Failed to securely delete {filepath}: {e}")
+            logger.error(f"⚠️  Failed to securely delete {filepath}: {e}")
             return False
     
     @staticmethod
@@ -472,7 +476,7 @@ class EncryptionManager:
                         f"   Expected: {expected_hash}\n"
                         f"   Actual:   {actual_hash}"
                     )
-                print("✅ Hash verification PASSED")
+                logger.info("✅ Hash verification PASSED")
             
             # Write to disk in chunks to avoid RAM bloat
             with open(output_path, 'wb') as f:
@@ -493,13 +497,13 @@ class EncryptionManager:
             except (OSError, AttributeError):
                 pass
             
-            print(f"✅ Streamed decryption complete: {os.path.basename(output_path)}")
-            print(f"   Size: {len(plaintext_bytes) / 1024 / 1024:.1f} MB")
+            logger.info(f"✅ Streamed decryption complete: {os.path.basename(output_path)}")
+            logger.info(f"   Size: {len(plaintext_bytes) / 1024 / 1024:.1f} MB")
             
             return True
             
         except Exception as e:
-            print(f"Streaming decryption failed: {e}")
+            logger.error(f"Streaming decryption failed: {e}")
             return False
     
     @staticmethod
@@ -563,7 +567,7 @@ class EncryptionManager:
             return True
             
         except Exception as e:
-            print(f"Decryption failed: {e}")
+            logger.error(f"Decryption failed: {e}")
             return False
     
     @staticmethod

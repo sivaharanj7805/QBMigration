@@ -58,15 +58,56 @@ export default function ProjectsPage() {
     const fetchProjectData = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/projects`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setCompanyFiles(data.files || []);
-            //     setStats(data.stats || { totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
-            // }
+            // FIX #51: Implement real API call with proper error handling
+            const token = localStorage.getItem('token');
+            const headers: HeadersInit = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
 
-            // For now, start with empty data
+            const response = await fetch(`${API_URL}/api/projects`, {
+                credentials: 'include',
+                headers
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    setCompanyFiles(data.files || data.data?.files || []);
+                    setStats(data.stats || data.data?.stats || {
+                        totalFiles: 0,
+                        migrated: 0,
+                        pending: 0,
+                        totalRecords: 0
+                    });
+                } else {
+                    // API returned success: false - use empty state
+                    setCompanyFiles([]);
+                    setStats({
+                        totalFiles: 0,
+                        migrated: 0,
+                        pending: 0,
+                        totalRecords: 0
+                    });
+                }
+            } else if (response.status === 404) {
+                // Endpoint not implemented yet - use empty state gracefully
+                console.info("Projects API endpoint not yet available");
+                setCompanyFiles([]);
+                setStats({
+                    totalFiles: 0,
+                    migrated: 0,
+                    pending: 0,
+                    totalRecords: 0
+                });
+            } else {
+                throw new Error(`API error: ${response.status}`);
+            }
+        } catch (error) {
+            console.error("Failed to fetch project data:", error);
+            // On error, show empty state rather than broken UI
             setCompanyFiles([]);
             setStats({
                 totalFiles: 0,
@@ -74,8 +115,6 @@ export default function ProjectsPage() {
                 pending: 0,
                 totalRecords: 0
             });
-        } catch (error) {
-            console.error("Failed to fetch project data:", error);
         } finally {
             setLoading(false);
         }

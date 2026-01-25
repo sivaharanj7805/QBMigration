@@ -29,6 +29,10 @@ from pathlib import Path
 
 # Import all modules
 from config import (
+import logging
+
+logger = logging.getLogger(__name__)
+
     initialize_directories, validate_production_access,
     INPUT_FILE, OUTPUT_DIR, DATA_RETENTION_HOURS,
     sanitize_migration_id
@@ -69,13 +73,13 @@ class MigrationOrchestrator:
         self.retention = DataRetentionManager(retention_hours=DATA_RETENTION_HOURS)
         self.migration_id = self._generate_migration_id()
         
-        print("\n" + "="*80)
-        print("  QUICKBOOKS DESKTOP → ONLINE MIGRATION")
-        print("  Enterprise Security Edition v3.2.0")
-        print("="*80)
-        print(f"  Migration ID: {self.migration_id}")
-        print(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("="*80 + "\n")
+        logger.info("\n" + "="*80)
+        logger.info("  QUICKBOOKS DESKTOP → ONLINE MIGRATION")
+        logger.info("  Enterprise Security Edition v3.2.0")
+        logger.info("="*80)
+        logger.info(f"  Migration ID: {self.migration_id}")
+        logger.info(f"  Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("="*80 + "\n")
     
     def _generate_migration_id(self) -> str:
         """Generate unique migration ID."""
@@ -99,7 +103,7 @@ class MigrationOrchestrator:
         
         try:
             # Step 1: Load encrypted data
-            print("\n📦 STEP 1: Loading encrypted data...")
+            logger.info("\n📦 STEP 1: Loading encrypted data...")
             if encrypted_file_path is None:
                 encrypted_file_path = str(INPUT_FILE)
             
@@ -112,7 +116,7 @@ class MigrationOrchestrator:
             with open(decrypted_file, 'r') as f:
                 qb_data = json.load(f)
             
-            print(f"✅ Loaded data from: {Path(encrypted_file_path).name}")
+            logger.info(f"✅ Loaded data from: {Path(encrypted_file_path).name}")
             
             # Log migration start
             data_counts = {
@@ -137,28 +141,28 @@ class MigrationOrchestrator:
                 })
             
             # Step 2: Security scan
-            print("\n🔒 STEP 2: Running pre-migration security scan...")
+            logger.info("\n🔒 STEP 2: Running pre-migration security scan...")
             
             try:
                 scan_result = SecurityManager.pre_migration_scan(qb_data)
             except SecurityError as e:
-                print(f"\n❌ Security check failed: {e}")
+                logger.error(f"\n❌ Security check failed: {e}")
                 return False
             
             if not scan_result['should_proceed']:
-                print("\n❌ Migration aborted due to security scan failures.")
-                print("\nPlease fix these issues in your QuickBooks Desktop file:")
+                logger.error("\n❌ Migration aborted due to security scan failures.")
+                logger.info("\nPlease fix these issues in your QuickBooks Desktop file:")
                 for error in scan_result['errors']:
-                    print(f"  • {error}")
+                    logger.error(f"  • {error}")
                 return False
             
             if scan_result['warnings']:
-                print(f"\n⚠️  Found {len(scan_result['warnings'])} warning(s):")
+                logger.warning(f"\n⚠️  Found {len(scan_result['warnings'])} warning(s):")
                 for warning in scan_result['warnings'][:3]:
-                    print(f"  • {warning}")
+                    logger.warning(f"  • {warning}")
             
             # Step 3: Transform data
-            print("\n🔄 STEP 3: Transforming data...")
+            logger.info("\n🔄 STEP 3: Transforming data...")
             transformer = QBDataTransformer(region=os.getenv('QBO_REGION', 'US'))
             
             # $25M FIX: Production-grade parallel transformation with shared state
@@ -167,23 +171,23 @@ class MigrationOrchestrator:
             use_parallel = os.getenv('ENABLE_PARALLEL_TRANSFORM', 'true').lower() == 'true'
             
             if use_parallel:
-                print("   Using parallel transformation (production-grade)")
+                logger.info("   Using parallel transformation (production-grade)")
                 from config import MAX_PARALLEL_WORKERS
                 transformed_data = transformer.transform_parallel(qb_data, max_workers=MAX_PARALLEL_WORKERS)
             else:
-                print("   Using sequential transformation")
+                logger.info("   Using sequential transformation")
                 transformed_data = transformer.transform(qb_data)
             
-            print(f"✅ Transformed {transformed_data['summary']['total_entities']} entities")
-            print(f"   Skipped: {transformed_data['summary']['skipped_entities']}")
-            print(f"   Trial Balance: {'✅ Balanced' if transformed_data['trial_balance']['balanced'] else '❌ NOT Balanced'}")
+            logger.info(f"✅ Transformed {transformed_data['summary']['total_entities']} entities")
+            logger.info(f"   Skipped: {transformed_data['summary']['skipped_entities']}")
+            logger.info(f"   Trial Balance: {'✅ Balanced' if transformed_data['trial_balance']['balanced'] else '❌ NOT Balanced'}")
             
             # $25M FIX: Automated trial balance handling (NO MANUAL OVERRIDE)
             if not transformed_data['trial_balance']['balanced']:
-                print("\n❌ TRIAL BALANCE NOT BALANCED - MIGRATION HALTED")
-                print(f"   Debits:  ${transformed_data['trial_balance']['debits']}")
-                print(f"   Credits: ${transformed_data['trial_balance']['credits']}")
-                print(f"   Difference: ${transformed_data['trial_balance']['difference']}")
+                logger.info("\n❌ TRIAL BALANCE NOT BALANCED - MIGRATION HALTED")
+                logger.info(f"   Debits:  ${transformed_data['trial_balance']['debits']}")
+                logger.info(f"   Credits: ${transformed_data['trial_balance']['credits']}")
+                logger.info(f"   Difference: ${transformed_data['trial_balance']['difference']}")
                 
                 # Generate discrepancy report
                 discrepancy_report = self._generate_discrepancy_report(
@@ -191,12 +195,12 @@ class MigrationOrchestrator:
                     qb_data
                 )
                 
-                print(f"\n📊 Generated discrepancy report: {discrepancy_report}")
-                print("\n⚠️  NEXT STEPS:")
-                print("   1. Review the discrepancy report")
-                print("   2. Fix the trial balance in QuickBooks Desktop")
-                print("   3. Re-export and try again")
-                print("\n❌ Cannot proceed with unbalanced books (professional liability)")
+                logger.info(f"\n📊 Generated discrepancy report: {discrepancy_report}")
+                logger.info("\n⚠️  NEXT STEPS:")
+                logger.info("   1. Review the discrepancy report")
+                logger.info("   2. Fix the trial balance in QuickBooks Desktop")
+                logger.info("   3. Re-export and try again")
+                logger.info("\n❌ Cannot proceed with unbalanced books (professional liability)")
                 
                 self.logger.log_security_event("TRIAL_BALANCE_FAILED", {
                     "migration_id": self.migration_id,
@@ -209,8 +213,8 @@ class MigrationOrchestrator:
                 return False
             
             # Step 4: Upload to QB Online
-            print("\n☁️  STEP 4: Uploading to QuickBooks Online...")
-            print("   This may take several minutes...")
+            logger.info("\n☁️  STEP 4: Uploading to QuickBooks Online...")
+            logger.info("   This may take several minutes...")
             
             # $25M FIX: Pass QBO plan for dynamic worker scaling
             qbo_plan = os.getenv('QBO_PLAN', 'Plus')
@@ -220,17 +224,17 @@ class MigrationOrchestrator:
                 self.migration_id
             )
             
-            print(f"\n✅ Upload complete!")
-            print(f"   Successful: {upload_result['successful']}")
-            print(f"   Failed: {upload_result['failed']}")
+            logger.info(f"\n✅ Upload complete!")
+            logger.info(f"   Successful: {upload_result['successful']}")
+            logger.error(f"   Failed: {upload_result['failed']}")
             
             if upload_result['failed'] > 0:
-                print(f"\n⚠️  Some entities failed to upload:")
+                logger.error(f"\n⚠️  Some entities failed to upload:")
                 for error in upload_result.get('errors', [])[:5]:
-                    print(f"   • {error}")
+                    logger.error(f"   • {error}")
             
             # Step 5: Verify migration
-            print("\n✔️ STEP 5: Verifying migration...")
+            logger.info("\n✔️ STEP 5: Verifying migration...")
             verifier = MigrationVerifier(qbo_client)
             verification = verifier.verify_migration(
                 transformed_data['entities'],
@@ -239,29 +243,29 @@ class MigrationOrchestrator:
             )
             
             if verification['passed']:
-                print("✅ Verification PASSED - All data migrated correctly!")
+                logger.info("✅ Verification PASSED - All data migrated correctly!")
                 success = True
             else:
-                print(f"⚠️  Verification found {len(verification['issues'])} issue(s):")
+                logger.info(f"⚠️  Verification found {len(verification['issues'])} issue(s):")
                 for issue in verification['issues'][:5]:
-                    print(f"   • {issue}")
+                    logger.info(f"   • {issue}")
                 
                 # Still consider it a success if most data migrated
                 if upload_result['successful'] > 0:
                     success = True
             
             # Step 6: Save results
-            print("\n💾 STEP 6: Saving migration results...")
+            logger.info("\n💾 STEP 6: Saving migration results...")
             results_file = self._save_results(
                 transformed_data, 
                 upload_result, 
                 verification,
                 source_hash
             )
-            print(f"✅ Results saved to: {results_file.name}")
+            logger.info(f"✅ Results saved to: {results_file.name}")
             
             # Step 7: Schedule deletion
-            print("\n🗑️  STEP 7: Scheduling secure deletion...")
+            logger.info("\n🗑️  STEP 7: Scheduling secure deletion...")
             files_to_delete = [
                 decrypted_file,
                 encrypted_file_path,
@@ -274,38 +278,38 @@ class MigrationOrchestrator:
                 delay_hours=DATA_RETENTION_HOURS
             )
             
-            print(f"✅ All files scheduled for secure deletion in {DATA_RETENTION_HOURS} hour(s)")
-            print(f"   • Encrypted QB data")
-            print(f"   • Decrypted temporary data")
-            print(f"   • Migration results")
+            logger.info(f"✅ All files scheduled for secure deletion in {DATA_RETENTION_HOURS} hour(s)")
+            logger.info(f"   • Encrypted QB data")
+            logger.info(f"   • Decrypted temporary data")
+            logger.info(f"   • Migration results")
             
         except FileNotFoundError as e:
-            print(f"\n❌ File error: {e}")
+            logger.error(f"\n❌ File error: {e}")
             success = False
             
         except json.JSONDecodeError as e:
-            print(f"\n❌ Invalid JSON data: {e}")
+            logger.info(f"\n❌ Invalid JSON data: {e}")
             success = False
         
         except SecurityError as e:
-            print(f"\n❌ Security error: {e}")
+            logger.error(f"\n❌ Security error: {e}")
             success = False
         
         except ValueError as e:
             # Catch hash verification failures
             if "HASH VERIFICATION FAILED" in str(e):
-                print(f"\n❌ {e}")
+                logger.info(f"\n❌ {e}")
                 self.logger.log_security_event("HASH_VERIFICATION_FAILED", {
                     "migration_id": self.migration_id,
                     "error": str(e),
                     "message": "Data integrity check failed"
                 })
             else:
-                print(f"\n❌ Data error: {e}")
+                logger.error(f"\n❌ Data error: {e}")
             success = False
             
         except Exception as e:
-            print(f"\n❌ Migration failed: {e}")
+            logger.error(f"\n❌ Migration failed: {e}")
             import traceback
             traceback.print_exc()
             
@@ -328,24 +332,24 @@ class MigrationOrchestrator:
             )
             
             # Print summary
-            print("\n" + "="*80)
+            logger.info("\n" + "="*80)
             if success:
-                print("  ✅ MIGRATION COMPLETED SUCCESSFULLY!")
-                print("\n  Your QuickBooks data is now in QuickBooks Online!")
-                print(f"  All source data will be securely deleted in {DATA_RETENTION_HOURS} hour(s).")
+                logger.info("  ✅ MIGRATION COMPLETED SUCCESSFULLY!")
+                logger.info("\n  Your QuickBooks data is now in QuickBooks Online!")
+                logger.info(f"  All source data will be securely deleted in {DATA_RETENTION_HOURS} hour(s).")
             else:
-                print("  ❌ MIGRATION FAILED")
-                print("\n  Please review the errors above and try again.")
-            print("="*80)
-            print(f"  Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
-            print(f"  Migration ID: {self.migration_id}")
-            print("="*80 + "\n")
+                logger.error("  ❌ MIGRATION FAILED")
+                logger.error("\n  Please review the errors above and try again.")
+            logger.info("="*80)
+            logger.info(f"  Duration: {duration:.1f} seconds ({duration/60:.1f} minutes)")
+            logger.info(f"  Migration ID: {self.migration_id}")
+            logger.info("="*80 + "\n")
             
             # Clean up decrypted file immediately if migration failed
             if not success and decrypted_file and os.path.exists(decrypted_file):
-                print("🗑️  Cleaning up temporary files...")
+                logger.info("🗑️  Cleaning up temporary files...")
                 EncryptionManager.secure_delete(decrypted_file)
-                print("✅ Temporary files deleted")
+                logger.info("✅ Temporary files deleted")
         
         return success
     
@@ -358,7 +362,7 @@ class MigrationOrchestrator:
         """
         decrypted_file = str(OUTPUT_DIR / f"{self.migration_id}_decrypted.json")
         
-        print(f"   Decrypting: {Path(encrypted_file).name}...")
+        logger.info(f"   Decrypting: {Path(encrypted_file).name}...")
         
         with open(encrypted_file, 'r') as f:
             encrypted_json = f.read()
@@ -368,10 +372,10 @@ class MigrationOrchestrator:
         
         # Verify hash BEFORE writing to disk
         if source_hash:
-            print(f"   Verifying data integrity (SHA-256)...")
+            logger.info(f"   Verifying data integrity (SHA-256)...")
             EncryptionManager.verify_data_integrity(plaintext, source_hash)
         else:
-            print("   ⚠️  No hash provided - cannot verify data integrity")
+            logger.info("   ⚠️  No hash provided - cannot verify data integrity")
         
         with open(decrypted_file, 'w') as f:
             f.write(plaintext)
@@ -384,7 +388,7 @@ class MigrationOrchestrator:
         
         self.logger.log_encryption(self.migration_id, "DECRYPT", len(plaintext))
         
-        print(f"   ✅ Decrypted to temporary file")
+        logger.info(f"   ✅ Decrypted to temporary file")
         
         return decrypted_file, source_hash
     
@@ -496,15 +500,15 @@ class MigrationOrchestrator:
                 "Set confirm_deletion=True to proceed with immediate cleanup."
             )
         
-        print("\n⚠️  IMMEDIATE CLEANUP REQUESTED")
-        print("   Deleting all migration data NOW...")
+        logger.info("\n⚠️  IMMEDIATE CLEANUP REQUESTED")
+        logger.info("   Deleting all migration data NOW...")
         
         deleted = self.retention.delete_immediately(
             self.migration_id,
             list(OUTPUT_DIR.glob(f"{self.migration_id}*"))
         )
         
-        print(f"✅ Deleted {deleted} file(s)")
+        logger.info(f"✅ Deleted {deleted} file(s)")
         
         self.logger.log_security_event("IMMEDIATE_CLEANUP", {
             "migration_id": self.migration_id,
@@ -517,18 +521,18 @@ class MigrationOrchestrator:
 
 def main():
     """Main entry point."""
-    print("\n" + "🚀 " * 20)
-    print("  QuickBooks Migration Service v3.2.0")
-    print("  Enterprise Security Edition")
-    print("🚀 " * 20 + "\n")
+    logger.info("\n" + "🚀 " * 20)
+    logger.info("  QuickBooks Migration Service v3.2.0")
+    logger.info("  Enterprise Security Edition")
+    logger.info("🚀 " * 20 + "\n")
     
     # Check for input file
     if len(sys.argv) > 1:
         encrypted_file = sys.argv[1]
     else:
-        print("Usage: python main.py <encrypted_qb_data.json>")
-        print("\nExample:")
-        print("  python main.py data/encrypted/company_data.json")
+        logger.info("Usage: python main.py <encrypted_qb_data.json>")
+        logger.info("\nExample:")
+        logger.info("  python main.py data/encrypted/company_data.json")
         sys.exit(1)
     
     # Run migration

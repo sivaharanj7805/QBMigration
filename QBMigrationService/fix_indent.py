@@ -1,6 +1,10 @@
 """Fix indentation in data_transformer.py"""
 
 import re
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 with open('data_transformer.py', 'r', encoding='utf-8') as f:
     lines = f.readlines()
@@ -34,5 +38,5 @@ for i, line in enumerate(lines):
 with open('data_transformer_fixed.py', 'w', encoding='utf-8') as f:
     f.writelines(output_lines)
 
-print(f'Fixed {len(lines) - fix_from_line} lines')
-print('Output written to data_transformer_fixed.py')
+logger.info(f'Fixed {len(lines) - fix_from_line} lines')
+logger.info('Output written to data_transformer_fixed.py')

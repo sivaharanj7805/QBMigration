@@ -12,8 +12,12 @@ Usage:
 
 import os
 import sys
+import logging
 
 # Add parent directory to path for imports
+
+logger = logging.getLogger(__name__)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
@@ -26,7 +30,7 @@ def get_database_url():
     """Get database URL from environment"""
     url = os.getenv('DATABASE_URL')
     if not url:
-        print("ERROR: DATABASE_URL environment variable not set")
+        logger.error("ERROR: DATABASE_URL environment variable not set")
         sys.exit(1)
     return url
 
@@ -36,48 +40,48 @@ def run_migration(engine, sql, description):
         with engine.connect() as conn:
             conn.execute(text(sql))
             conn.commit()
-        print(f"  ✓ {description}")
+        logger.info(f"  ✓ {description}")
         return True
     except ProgrammingError as e:
         if "already exists" in str(e) or "duplicate column" in str(e).lower():
-            print(f"  → {description} (already exists, skipping)")
+            logger.info(f"  → {description} (already exists, skipping)")
             return True
         else:
-            print(f"  ✗ {description}: {str(e)}")
+            logger.info(f"  ✗ {description}: {str(e)}")
             return False
     except Exception as e:
-        print(f"  ✗ {description}: {str(e)}")
+        logger.info(f"  ✗ {description}: {str(e)}")
         return False
 
 def main():
-    print("=" * 60)
-    print("ForensicBridge Database Migration")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("ForensicBridge Database Migration")
+    logger.info("=" * 60)
     print()
     
     # Connect to database
     database_url = get_database_url()
-    print(f"Connecting to database...")
+    logger.info(f"Connecting to database...")
     
     try:
         engine = create_engine(database_url)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        print("  ✓ Database connection successful")
+        logger.info("  ✓ Database connection successful")
     except OperationalError as e:
-        print(f"  ✗ Failed to connect to database: {str(e)}")
+        logger.error(f"  ✗ Failed to connect to database: {str(e)}")
         sys.exit(1)
     
     print()
-    print("Running migrations...")
+    logger.info("Running migrations...")
     print()
     
     # =========================================================================
     # USERS TABLE MIGRATIONS
     # =========================================================================
-    print("─" * 40)
-    print("Users Table Migrations")
-    print("─" * 40)
+    logger.info("─" * 40)
+    logger.info("Users Table Migrations")
+    logger.info("─" * 40)
     
     users_migrations = [
         (
@@ -107,15 +111,15 @@ def main():
         if run_migration(engine, sql, desc):
             users_success += 1
     
-    print(f"\nUsers table: {users_success}/{len(users_migrations)} migrations successful")
+    logger.info(f"\nUsers table: {users_success}/{len(users_migrations)} migrations successful")
     
     # =========================================================================
     # MIGRATIONS TABLE MIGRATIONS
     # =========================================================================
     print()
-    print("─" * 40)
-    print("Migrations Table Migrations")
-    print("─" * 40)
+    logger.info("─" * 40)
+    logger.info("Migrations Table Migrations")
+    logger.info("─" * 40)
     
     migrations_migrations = [
         (
@@ -137,33 +141,33 @@ def main():
         if run_migration(engine, sql, desc):
             migrations_success += 1
     
-    print(f"\nMigrations table: {migrations_success}/{len(migrations_migrations)} migrations successful")
+    logger.info(f"\nMigrations table: {migrations_success}/{len(migrations_migrations)} migrations successful")
     
     # =========================================================================
     # SUMMARY
     # =========================================================================
     print()
-    print("=" * 60)
+    logger.info("=" * 60)
     total = len(users_migrations) + len(migrations_migrations)
     success = users_success + migrations_success
     
     if success == total:
-        print("✓ ALL MIGRATIONS COMPLETED SUCCESSFULLY")
+        logger.info("✓ ALL MIGRATIONS COMPLETED SUCCESSFULLY")
         print()
-        print("Next steps:")
-        print("  1. Restart the ForensicBridge service:")
-        print("     sudo systemctl restart forensicbridge")
+        logger.info("Next steps:")
+        logger.info("  1. Restart the ForensicBridge service:")
+        logger.info("     sudo systemctl restart forensicbridge")
         print()
-        print("  2. Verify the service is running:")
-        print("     sudo systemctl status forensicbridge")
+        logger.info("  2. Verify the service is running:")
+        logger.info("     sudo systemctl status forensicbridge")
         print()
-        print("  3. Check the logs for any errors:")
-        print("     sudo journalctl -u forensicbridge -n 20 --no-pager")
+        logger.error("  3. Check the logs for any errors:")
+        logger.info("     sudo journalctl -u forensicbridge -n 20 --no-pager")
     else:
-        print(f"⚠ {success}/{total} migrations completed")
-        print("Some migrations failed. Check the error messages above.")
+        logger.info(f"⚠ {success}/{total} migrations completed")
+        logger.error("Some migrations failed. Check the error messages above.")
     
-    print("=" * 60)
+    logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()
