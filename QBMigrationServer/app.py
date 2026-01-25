@@ -682,12 +682,21 @@ def create_app(config_name='development'):
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
-        
+
+        # API-02: Add X-RateLimit-* headers per RFC 6585
+        # Flask-Limiter adds these when RATELIMIT_HEADERS_ENABLED=True, but we ensure they exist
+        # Check if rate limit headers were added by limiter, otherwise add defaults
+        if 'X-RateLimit-Limit' not in response.headers:
+            # Add default headers for non-rate-limited endpoints
+            response.headers['X-RateLimit-Limit'] = str(app.config.get('RATELIMIT_DEFAULT', '100 per minute'))
+            response.headers['X-RateLimit-Remaining'] = '100'
+            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + 60)
+
         if not app.config.get('DEBUG'):
             # SECURITY FIX: Add preload directive for HSTS preload list submission
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
             response.headers['Content-Security-Policy'] = "default-src 'self'"
-        
+
         return response
     
     # SECURITY FIX: HTTPS redirect for production

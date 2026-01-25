@@ -421,3 +421,66 @@ config = {
     'production': ProductionConfig,
     'default': DevelopmentConfig
 }
+
+
+def validate_config():
+    """
+    CFG-01: Startup configuration validation.
+    Call this at application startup to ensure all required settings are present.
+
+    Raises:
+        RuntimeError: If required configuration is missing
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    env = os.getenv('FLASK_ENV', 'development')
+
+    # Always required settings
+    base_required = ['SECRET_KEY', 'DATABASE_URL']
+
+    # Production-only required settings
+    production_required = [
+        'AWS_S3_BUCKET',
+        'AWS_EC2_AMI_ID',
+        'WEBHOOK_SECRET',
+        'BACKUP_ENCRYPTION_KEY'
+    ]
+
+    # Check base requirements
+    missing = [k for k in base_required if not os.getenv(k)]
+
+    # Add production requirements in production
+    if env == 'production':
+        missing.extend([k for k in production_required if not os.getenv(k)])
+
+    if missing:
+        error_msg = f"Missing required configuration: {', '.join(missing)}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
+    # Validate SECRET_KEY length
+    secret_key = os.getenv('SECRET_KEY', '')
+    if len(secret_key) < 32:
+        raise RuntimeError("SECRET_KEY must be at least 32 characters")
+
+    # Validate BACKUP_ENCRYPTION_KEY format if set
+    backup_key = os.getenv('BACKUP_ENCRYPTION_KEY')
+    if backup_key:
+        try:
+            from cryptography.fernet import Fernet
+            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+            Fernet(key_bytes)  # Will raise if invalid
+        except Exception as e:
+            raise RuntimeError(
+                f"BACKUP_ENCRYPTION_KEY is invalid: {e}. "
+                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+
+    # Validate DATABASE_URL format
+    db_url = os.getenv('DATABASE_URL', '')
+    if db_url and not db_url.startswith(('postgresql://', 'postgres://', 'sqlite://')):
+        logger.warning(f"Unusual DATABASE_URL format: {db_url[:20]}...")
+
+    logger.info(f"Configuration validated successfully for environment: {env}")
+    return True
