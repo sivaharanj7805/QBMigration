@@ -653,7 +653,6 @@ python3 worker.py \\
     --credentials qbo_credentials.json \\
     --server-url {server_url} \\
     --webhook-secret "$WEBHOOK_SECRET"
-"""
 
 EXIT_CODE=$?
 
