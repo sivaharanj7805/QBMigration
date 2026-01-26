@@ -10,13 +10,13 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from models.database import db, init_db
 from models.user import User
+from config import config  # Import config BEFORE dashboard_api to avoid path conflict
 from api.auth import auth_bp
 from api.upload import upload_bp
 from extensions import limiter
 from api.migrations import migrations_bp
 from api.webhooks import webhooks_bp
 from api.dashboard_api import dashboard_bp
-from config import config
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
 from utils.error_sanitizer import sanitize_error_message, create_error_response, is_production
