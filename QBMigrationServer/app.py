@@ -646,10 +646,32 @@ def create_app(config_name='development'):
         from flask import render_template
         return render_template('disconnect.html')
     
-    # Health check endpoint
-    @app.route('/health')
+    # Helper function to add CORS headers to health check responses
+    # This ensures CORS works even if reverse proxy strips Flask-CORS headers
+    def _add_cors_headers_to_health_response(response, origins_list):
+        """Add CORS headers to health check response for www/non-www compatibility"""
+        origin = request.headers.get('Origin')
+        if origin:
+            # Check if origin is in allowed list (case-insensitive)
+            origin_lower = origin.lower()
+            if any(o.lower() == origin_lower for o in origins_list):
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+                response.headers['Access-Control-Max-Age'] = '3600'
+        return response
+
+    # Health check endpoint with explicit CORS support
+    # This ensures health checks work regardless of reverse proxy configuration
+    @app.route('/health', methods=['GET', 'OPTIONS'])
     def health():
-        """Health check endpoint for monitoring"""
+        """Health check endpoint for monitoring with explicit CORS headers"""
+        # Handle preflight OPTIONS request explicitly
+        if request.method == 'OPTIONS':
+            response = app.make_default_options_response()
+            return _add_cors_headers_to_health_response(response, allowed_origins)
+
+        # Continue with actual health check for GET requests
         health_status = {
             'status': 'healthy',
             'timestamp': datetime.utcnow().isoformat() + 'Z',
@@ -664,7 +686,8 @@ def create_app(config_name='development'):
             app.logger.error(f"Database health check failed: {str(e)}")
             health_status['status'] = 'unhealthy'
             health_status['checks']['database'] = 'unhealthy'
-            return jsonify(health_status), 503
+            response = jsonify(health_status)
+            return _add_cors_headers_to_health_response(response, allowed_origins), 503
 
         # RELIABILITY FIX: Check database connection pool health
         try:
@@ -725,9 +748,11 @@ def create_app(config_name='development'):
             health_status['checks']['disk_space'] = 'unknown'
         
         if health_status['status'] == 'unhealthy':
-            return jsonify(health_status), 503
-        
-        return jsonify(health_status), 200
+            response = jsonify(health_status)
+            return _add_cors_headers_to_health_response(response, allowed_origins), 503
+
+        response = jsonify(health_status)
+        return _add_cors_headers_to_health_response(response, allowed_origins), 200
     
     # Security headers middleware
     @app.after_request
