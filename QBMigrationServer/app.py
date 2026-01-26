@@ -647,18 +647,25 @@ def create_app(config_name='development'):
         return render_template('disconnect.html')
     
     # Helper function to add CORS headers to health check responses
-    # This ensures CORS works even if reverse proxy strips Flask-CORS headers
-    def _add_cors_headers_to_health_response(response, origins_list):
-        """Add CORS headers to health check response for www/non-www compatibility"""
+    # Health endpoints are public read-only status checks, safe to allow any origin
+    def _add_cors_headers_to_health_response(response):
+        """Add CORS headers to health check response for cross-origin compatibility.
+
+        Health check endpoints are public, read-only status checks that should be
+        accessible from any origin (www vs non-www, monitoring tools, etc).
+        Using wildcard '*' is safe here since no credentials or sensitive data
+        are involved in health checks.
+        """
         origin = request.headers.get('Origin')
         if origin:
-            # Check if origin is in allowed list (case-insensitive)
-            origin_lower = origin.lower()
-            if any(o.lower() == origin_lower for o in origins_list):
-                response.headers['Access-Control-Allow-Origin'] = origin
-                response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-                response.headers['Access-Control-Max-Age'] = '3600'
+            # Allow the requesting origin (supports www/non-www variants)
+            response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            # Fallback to wildcard for non-browser requests
+            response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
         return response
 
     # Health check endpoint with explicit CORS support
@@ -669,7 +676,7 @@ def create_app(config_name='development'):
         # Handle preflight OPTIONS request explicitly
         if request.method == 'OPTIONS':
             response = app.make_default_options_response()
-            return _add_cors_headers_to_health_response(response, allowed_origins)
+            return _add_cors_headers_to_health_response(response)
 
         # Continue with actual health check for GET requests
         health_status = {
@@ -687,7 +694,7 @@ def create_app(config_name='development'):
             health_status['status'] = 'unhealthy'
             health_status['checks']['database'] = 'unhealthy'
             response = jsonify(health_status)
-            return _add_cors_headers_to_health_response(response, allowed_origins), 503
+            return _add_cors_headers_to_health_response(response), 503
 
         # RELIABILITY FIX: Check database connection pool health
         try:
@@ -749,10 +756,10 @@ def create_app(config_name='development'):
         
         if health_status['status'] == 'unhealthy':
             response = jsonify(health_status)
-            return _add_cors_headers_to_health_response(response, allowed_origins), 503
+            return _add_cors_headers_to_health_response(response), 503
 
         response = jsonify(health_status)
-        return _add_cors_headers_to_health_response(response, allowed_origins), 200
+        return _add_cors_headers_to_health_response(response), 200
     
     # Security headers middleware
     @app.after_request
