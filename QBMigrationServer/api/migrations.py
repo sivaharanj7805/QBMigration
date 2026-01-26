@@ -332,66 +332,6 @@ def start_migration(migration_id):
                 'error': 'Migration file not found in cloud storage'
             }), 400
         
-        # ===== MIGRATION CREDIT CHECK =====
-        # TEMPORARILY DISABLED FOR TESTING - Re-enable before production!
-        # TODO: Remove this bypass and uncomment the credit check below
-        logger.warning(f"PAYMENT BYPASS ACTIVE: Skipping credit check for migration {migration_id}")
-
-        # # Use the new MigrationCredit system for proper type-based tracking
-        # from models.migration_credit import MigrationCredit
-        #
-        # # FIX #50: Validate transaction count before checking credits (prevents credit waste)
-        # # BILLING FIX: Validate transaction count against tier limits before starting EC2
-        # transaction_count = getattr(migration, 'total_transactions', 0) or 0
-        #
-        # # If transaction count is missing/zero, estimate from file size as fallback
-        # if transaction_count == 0 and migration.encrypted_data_size_bytes:
-        #     # Rough estimate: 1 transaction ≈ 2KB
-        #     estimated_count = max(100, migration.encrypted_data_size_bytes // 2048)
-        #     logger.warning(f"Transaction count missing for {migration_id}, estimating {estimated_count:,} from file size")
-        #     transaction_count = estimated_count
-        #
-        # # Sanity check: If still zero, reject migration to prevent credit abuse
-        # if transaction_count == 0:
-        #     return jsonify({
-        #         'success': False,
-        #         'error': 'Transaction count unknown. Please re-upload your QuickBooks file.',
-        #         'error_code': 'TRANSACTION_COUNT_MISSING'
-        #     }), 400
-        #
-        # # Find a suitable credit for this migration
-        # credit = MigrationCredit.find_best_credit(current_user.id, transaction_count)
-        #
-        # if not credit:
-        #     # Check if user has any credits at all
-        #     available_credits = MigrationCredit.get_available_for_user(current_user.id)
-        #
-        #     if not available_credits:
-        #         # No credits at all
-        #         return jsonify({
-        #             'success': False,
-        #             'error': 'No migration credits available. Please purchase a migration first.',
-        #             'migrations_remaining': 0,
-        #             'upgrade_required': True,
-        #             'redirect_to': '/select-tier'
-        #         }), 403
-        #     else:
-        #         # Has credits but none suitable for this transaction count
-        #         highest_limit = max(c.transaction_limit for c in available_credits if c.transaction_limit != -1)
-        #         return jsonify({
-        #             'success': False,
-        #             'error': f'This file has {transaction_count:,} transactions but your highest available credit only covers {highest_limit:,} transactions. Please purchase a larger migration tier.',
-        #             'transaction_count': transaction_count,
-        #             'highest_available_limit': highest_limit,
-        #             'upgrade_required': True,
-        #             'redirect_to': '/select-tier'
-        #         }), 403
-        #
-        # # Store the credit ID to use after migration completes
-        # # This will be used by the webhook to mark the credit as used
-        # migration.migration_credit_id = credit.id
-        # db.session.commit()  # Ensure credit ID is saved before starting migration
-        
         # SECURITY: Get QBO credentials from request
         # WARNING: Credentials transmitted in plain JSON over HTTPS
         # TODO: Implement client-side encryption with server public key
