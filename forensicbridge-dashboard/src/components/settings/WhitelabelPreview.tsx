@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
 import {
     Upload,
     Eye,
@@ -10,7 +9,6 @@ import {
     Shield,
     CheckCircle,
     Zap,
-    Building2
 } from "lucide-react";
 
 interface WhitelabelConfig {
@@ -27,7 +25,6 @@ interface WhitelabelConfig {
 interface WhitelabelPreviewProps {
     initialConfig?: Partial<WhitelabelConfig>;
     onSave?: (config: WhitelabelConfig) => void;
-    isEnterprise?: boolean;
 }
 
 const DEFAULT_CONFIG: WhitelabelConfig = {
@@ -44,7 +41,6 @@ const DEFAULT_CONFIG: WhitelabelConfig = {
 export function WhitelabelPreview({
     initialConfig,
     onSave,
-    isEnterprise = true
 }: WhitelabelPreviewProps) {
     const [config, setConfig] = useState<WhitelabelConfig>({
         ...DEFAULT_CONFIG,
@@ -53,7 +49,6 @@ export function WhitelabelPreview({
     const [previewLogo, setPreviewLogo] = useState<string | null>(config.logo_url);
     const [isPreviewMode, setIsPreviewMode] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const router = useRouter();
 
     const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -83,24 +78,6 @@ export function WhitelabelPreview({
         "--preview-secondary": config.secondary_color,
         "--preview-accent": config.accent_color,
     } as React.CSSProperties;
-
-    if (!isEnterprise) {
-        return (
-            <div className="card-forensic p-8 text-center">
-                <Building2 className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                <h2 className="text-xl font-semibold mb-2">Enterprise Feature</h2>
-                <p className="text-gray-500 mb-4">
-                    White-labeling is available on Enterprise and Forensic plans.
-                </p>
-                <button
-                    onClick={() => router.push('/select-tier?upgrade=true')}
-                    className="px-6 py-3 bg-gradient-to-r from-[#F59E0B] to-[#D97706] text-white font-medium rounded-lg hover:from-[#D97706] hover:to-[#B45309] transition-all"
-                >
-                    Upgrade to Enterprise
-                </button>
-            </div>
-        );
-    }
 
     return (
         <div className="space-y-6">

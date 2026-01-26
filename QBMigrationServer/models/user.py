@@ -51,7 +51,6 @@ class User(UserMixin, db.Model):
     # Indexes for performance
     __table_args__ = (
         db.Index('idx_user_email_active', 'email', 'is_active'),
-        db.Index('idx_user_stripe_customer', 'stripe_customer_id'),
         db.Index('idx_user_subscription_tier', 'subscription_tier'),
     )
     
@@ -151,13 +150,10 @@ class User(UserMixin, db.Model):
         self.qbo_token_expires_at = None
     
     # Subscription Tier & Migration Tracking
-    # Tiers: starter ($497), business ($997), professional ($1997), enterprise ($3997), forensic ($7997+)
     subscription_tier = db.Column(db.String(20), default=None, nullable=True)  # None = not selected yet
     tier_purchased_at = db.Column(db.DateTime, nullable=True)
     migrations_purchased = db.Column(db.Integer, default=0, nullable=False)  # Total purchased
     migrations_used = db.Column(db.Integer, default=0, nullable=False)  # Total consumed
-    stripe_customer_id = db.Column(db.String(100), nullable=True)  # For payment integration
-    stripe_payment_intent = db.Column(db.String(100), nullable=True)  # Last payment
     
     # Relationships
     migrations = db.relationship('Migration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
@@ -467,13 +463,13 @@ class User(UserMixin, db.Model):
     # SUBSCRIPTION TIER MANAGEMENT
     # ========================================================================
     
-    # Tier configuration with pricing and migrations
+    # Tier configuration
     TIER_CONFIG = {
-        'starter': {'price': 497, 'migrations': 1, 'name': 'Starter', 'max_transactions': 5000},
-        'business': {'price': 997, 'migrations': 1, 'name': 'Business', 'max_transactions': 25000},
-        'professional': {'price': 1997, 'migrations': 1, 'name': 'Professional', 'max_transactions': 100000},
-        'enterprise': {'price': 3997, 'migrations': 1, 'name': 'Enterprise', 'max_transactions': 500000},
-        'forensic': {'price': 7997, 'migrations': 1, 'name': 'Forensic', 'max_transactions': -1}  # -1 = unlimited
+        'starter': {'migrations': 1, 'name': 'Starter', 'max_transactions': 5000},
+        'business': {'migrations': 1, 'name': 'Business', 'max_transactions': 25000},
+        'professional': {'migrations': 1, 'name': 'Professional', 'max_transactions': 100000},
+        'enterprise': {'migrations': 1, 'name': 'Enterprise', 'max_transactions': 500000},
+        'forensic': {'migrations': 1, 'name': 'Forensic', 'max_transactions': -1}  # -1 = unlimited
     }
     
     def get_migrations_remaining(self):
@@ -529,7 +525,6 @@ class User(UserMixin, db.Model):
         return {
             'tier': tier,
             'tier_name': config.get('name', 'Free Trial'),
-            'price': config.get('price', 0),
             'max_transactions': config.get('max_transactions', 0),
             'migrations_purchased': migrations_purchased,
             'migrations_used': migrations_used,

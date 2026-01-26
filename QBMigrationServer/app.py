@@ -33,7 +33,6 @@ from api.webhook_delivery_log import webhook_logs_bp
 from api.license_api import license_bp
 from api.qbo import qbo_bp
 from api.legal import legal_bp
-from api.payments import payments_bp
 import sys
 
 
@@ -179,7 +178,7 @@ def auto_migrate_database(app):
         with db.engine.connect() as conn:
             # Add all potentially missing columns to users table
             conn.execute(text("""
-                ALTER TABLE users 
+                ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS qbo_access_token TEXT,
                 ADD COLUMN IF NOT EXISTS qbo_refresh_token TEXT,
                 ADD COLUMN IF NOT EXISTS qbo_realm_id VARCHAR(255),
@@ -188,105 +187,9 @@ def auto_migrate_database(app):
                 ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(50) DEFAULT 'free',
                 ADD COLUMN IF NOT EXISTS tier_purchased_at TIMESTAMP,
                 ADD COLUMN IF NOT EXISTS migrations_purchased INTEGER DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS migrations_used INTEGER DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255),
-                ADD COLUMN IF NOT EXISTS stripe_payment_intent VARCHAR(255)
-            """))
-            
-            # Create migration_credits table if it doesn't exist
-            # SECURITY FIX: Add CASCADE delete for GDPR "right to be forgotten" compliance
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS migration_credits (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    tier_type VARCHAR(50) NOT NULL,
-                    transaction_limit INTEGER NOT NULL,
-                    price_cents INTEGER NOT NULL,
-                    stripe_checkout_session_id VARCHAR(255),
-                    stripe_payment_intent_id VARCHAR(255),
-                    payment_status VARCHAR(50) DEFAULT 'pending',
-                    status VARCHAR(50) DEFAULT 'pending',
-                    migration_id VARCHAR(36),
-                    transactions_used INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    paid_at TIMESTAMP,
-                    used_at TIMESTAMP
-                )
+                ADD COLUMN IF NOT EXISTS migrations_used INTEGER DEFAULT 0
             """))
 
-            # Fix existing foreign key constraints to add CASCADE (for existing installations)
-            try:
-                # Drop old constraint if exists
-                conn.execute(text("""
-                    DO $$
-                    BEGIN
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.table_constraints
-                            WHERE constraint_name = 'migration_credits_user_id_fkey'
-                        ) THEN
-                            ALTER TABLE migration_credits
-                            DROP CONSTRAINT migration_credits_user_id_fkey;
-                        END IF;
-                    END $$;
-                """))
-
-                # Add new constraint with CASCADE
-                conn.execute(text("""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.table_constraints
-                            WHERE constraint_name = 'migration_credits_user_id_cascade_fkey'
-                        ) THEN
-                            ALTER TABLE migration_credits
-                            ADD CONSTRAINT migration_credits_user_id_cascade_fkey
-                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-                        END IF;
-                    END $$;
-                """))
-            except Exception as e:
-                app.logger.warning(f'Could not update CASCADE constraint on migration_credits: {str(e)}')
-            
-            # Add migration_credit_id to migrations table for tracking which credit was used
-            # SECURITY FIX: Add CASCADE constraints for GDPR compliance
-            try:
-                # Add columns if not exist
-                conn.execute(text("""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'migrations' AND column_name = 'migration_credit_id'
-                        ) THEN
-                            ALTER TABLE migrations ADD COLUMN migration_credit_id INTEGER;
-                        END IF;
-
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'migrations' AND column_name = 'total_transactions'
-                        ) THEN
-                            ALTER TABLE migrations ADD COLUMN total_transactions INTEGER DEFAULT 0;
-                        END IF;
-                    END $$;
-                """))
-
-                # Add CASCADE foreign key constraint
-                conn.execute(text("""
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.table_constraints
-                            WHERE constraint_name = 'migrations_credit_cascade_fkey'
-                        ) THEN
-                            ALTER TABLE migrations
-                            ADD CONSTRAINT migrations_credit_cascade_fkey
-                            FOREIGN KEY (migration_credit_id) REFERENCES migration_credits(id) ON DELETE SET NULL;
-                        END IF;
-                    END $$;
-                """))
-            except Exception as e:
-                app.logger.warning(f'Could not add CASCADE to migrations.migration_credit_id: {str(e)}')
-            
             # Create team_invites table if it doesn't exist
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS team_invites (
@@ -565,8 +468,7 @@ def create_app(config_name='development'):
     app.register_blueprint(license_bp)
     app.register_blueprint(qbo_bp)
     app.register_blueprint(legal_bp)
-    app.register_blueprint(payments_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, payments')
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):
