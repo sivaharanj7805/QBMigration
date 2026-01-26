@@ -845,7 +845,7 @@ def get_migration_stats():
         ).count()
         
         # Total records migrated (sum of records across all migrations)
-        total_records = db.session.query(func.sum(Migration.total_records)).filter(
+        total_records = db.session.query(func.sum(Migration.total_records_migrated)).filter(
             Migration.user_id == user_id
         ).scalar() or 0
         
