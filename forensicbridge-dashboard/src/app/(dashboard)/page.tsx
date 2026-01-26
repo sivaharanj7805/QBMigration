@@ -16,6 +16,7 @@ import {
     RefreshCw,
     Loader2
 } from "lucide-react";
+import { authFetch, getAuthHeader } from "@/lib/auth";
 
 // API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -72,7 +73,6 @@ export default function DashboardHome() {
         try {
             const response = await fetch(`${API_URL}/health`, {
                 method: 'GET',
-                credentials: 'include'
             });
             setApiConnected(response.ok);
         } catch (error) {
@@ -85,9 +85,7 @@ export default function DashboardHome() {
         setLoading(true);
         try {
             // Fetch stats
-            const statsResponse = await fetch(`${API_URL}/api/migrations/stats`, {
-                credentials: 'include'
-            });
+            const statsResponse = await authFetch(`${API_URL}/api/migrations/stats`);
             if (statsResponse.ok) {
                 const statsData = await statsResponse.json();
                 if (statsData.success) {
@@ -96,9 +94,7 @@ export default function DashboardHome() {
             }
 
             // Fetch recent migrations
-            const migrationsResponse = await fetch(`${API_URL}/api/migrations?limit=5`, {
-                credentials: 'include'
-            });
+            const migrationsResponse = await authFetch(`${API_URL}/api/migrations?per_page=5`);
             if (migrationsResponse.ok) {
                 const migrationsData = await migrationsResponse.json();
                 if (migrationsData.success) {
@@ -183,7 +179,7 @@ export default function DashboardHome() {
             const response = await fetch(`${API_URL}/api/upload`, {
                 method: 'POST',
                 body: formData,
-                credentials: 'include'
+                headers: getAuthHeader(),
             });
 
             if (response.ok) {
