@@ -56,7 +56,6 @@ export default function DashboardLayout({
         try {
             const response = await fetch(`${API_URL}/health`, {
                 method: 'GET',
-                credentials: 'include'
             });
             if (response.ok) {
                 const data = await response.json();
