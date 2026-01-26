@@ -445,8 +445,41 @@ def create_app(config_name='development'):
         auto_migrate_database(app)
     
     # SECURITY FIX: Enable CORS with origins from environment variable
-    allowed_origins = os.getenv('ALLOWED_ORIGINS',
-                                'http://localhost:3000,http://localhost:5000').split(',')
+    allowed_origins_env = os.getenv('ALLOWED_ORIGINS',
+                                    'http://localhost:3000,http://localhost:5000').split(',')
+    allowed_origins = []
+
+    # FIX: Automatically add both www and non-www variants for each origin
+    # This prevents CORS errors when users access via www.domain.com vs domain.com
+    for origin in allowed_origins_env:
+        origin = origin.strip()
+        if not origin:
+            continue
+        allowed_origins.append(origin)
+
+        # Parse the origin to handle www/non-www variants
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            if parsed.netloc:
+                host = parsed.netloc
+                # If origin has www, also add non-www variant
+                if host.startswith('www.'):
+                    non_www_host = host[4:]  # Remove 'www.'
+                    non_www_origin = f"{parsed.scheme}://{non_www_host}"
+                    if non_www_origin not in allowed_origins:
+                        allowed_origins.append(non_www_origin)
+                # If origin doesn't have www, also add www variant
+                else:
+                    # Don't add www to localhost
+                    if not host.startswith('localhost') and not host.startswith('127.'):
+                        www_host = f"www.{host}"
+                        www_origin = f"{parsed.scheme}://{www_host}"
+                        if www_origin not in allowed_origins:
+                            allowed_origins.append(www_origin)
+        except Exception as e:
+            app.logger.warning(f"Could not parse origin '{origin}': {e}")
+
     # Warn if using default development origins in production
     if os.getenv('FLASK_ENV', 'development') == 'production' and 'localhost' in str(allowed_origins):
         app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
@@ -454,7 +487,7 @@ def create_app(config_name='development'):
     # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
     CORS(app,
          supports_credentials=True,
-         origins=[origin.strip() for origin in allowed_origins],
+         origins=allowed_origins,
          allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
          max_age=3600)  # Cache preflight for 1 hour (reduces OPTIONS requests)
