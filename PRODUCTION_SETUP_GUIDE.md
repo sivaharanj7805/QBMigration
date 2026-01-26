@@ -552,6 +552,13 @@ sudo nano /etc/nginx/sites-available/forensicbridge
 Paste this configuration:
 
 ```nginx
+# Map to validate CORS origins for health endpoint (www/non-www support)
+# Add this OUTSIDE the server blocks (at http level, or in nginx.conf)
+map $http_origin $cors_origin {
+    default "";
+    "~^https://(www\.)?yourdomain\.com$" $http_origin;
+}
+
 # Redirect HTTP to HTTPS (preserve original host to avoid www/non-www redirect loops)
 server {
     listen 80;
@@ -592,17 +599,36 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Origin $http_origin;
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
     }
 
-    # Health check endpoint (include X-Forwarded-Proto to prevent redirect loops)
+    # Health check endpoint with CORS support for www/non-www compatibility
+    # This handles cross-origin requests when www.domain.com fetches from domain.com
     location /health {
+        # Handle preflight OPTIONS request at nginx level
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
+            add_header 'Access-Control-Max-Age' '3600' always;
+            add_header 'Content-Type' 'text/plain; charset=utf-8';
+            add_header 'Content-Length' '0';
+            return 204;
+        }
+
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Origin $http_origin;
+
+        # Add CORS headers to response (nginx level ensures they're not stripped)
+        add_header 'Access-Control-Allow-Origin' $cors_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
     }
 
     # WebSocket support
@@ -646,6 +672,34 @@ sudo nginx -t
 # If test passes, reload
 sudo systemctl reload nginx
 ```
+
+### 12.3 Quick Fix: Apply CORS Fix to Existing Deployment
+
+If you already have nginx deployed and are seeing CORS errors like:
+```
+Access to fetch at 'https://forensicbridge.ca/health' from origin 'https://www.forensicbridge.ca'
+has been blocked by CORS policy
+```
+
+Run these commands to apply the fix:
+
+```bash
+# 1. Edit nginx config
+sudo nano /etc/nginx/sites-available/forensicbridge
+
+# 2. Add this map directive at the TOP of the file (before any server blocks):
+# map $http_origin $cors_origin {
+#     default "";
+#     "~^https://(www\.)?forensicbridge\.ca$" $http_origin;
+# }
+
+# 3. Update the /health location block to include CORS headers (see full config above)
+
+# 4. Test and reload
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**Important**: The `map` directive must be placed at the `http` context level (outside server blocks). If your config file only contains server blocks, you may need to add it to `/etc/nginx/nginx.conf` inside the `http {}` block instead.
 
 ---
 
