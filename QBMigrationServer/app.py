@@ -693,13 +693,18 @@ def create_app(config_name='development'):
     @app.before_request
     def redirect_to_https():
         """Force HTTPS in production (exempt health check endpoints to avoid redirect loops)"""
+        # Always exempt health check endpoints to prevent redirect loops
+        # with load balancers, reverse proxies, and monitoring services
+        if request.path in ('/health', '/api/health', '/api/health/detailed'):
+            return None
+
         if os.getenv('FLASK_ENV', 'development') == 'production':
-            # Skip HTTPS redirect for health check endpoints used by load balancers/proxies
-            if request.path in ('/health', '/api/health', '/api/health/detailed'):
-                return None
-            if not request.is_secure and not request.headers.get('X-Forwarded-Proto', '') == 'https':
+            # Check both request.is_secure and X-Forwarded-Proto header
+            # to correctly detect HTTPS behind reverse proxies (ALB, nginx)
+            forwarded_proto = request.headers.get('X-Forwarded-Proto', '')
+            if not request.is_secure and forwarded_proto != 'https':
                 url = request.url.replace('http://', 'https://', 1)
-                return redirect(url, code=301)
+                return redirect(url, code=302)
 
     # Request logging middleware
     @app.before_request

@@ -56,16 +56,19 @@ export default function DashboardLayout({
         try {
             const response = await fetch(`${API_URL}/health`, {
                 method: 'GET',
+                redirect: 'manual', // Prevent ERR_TOO_MANY_REDIRECTS from redirect loops
             });
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'healthy') {
-                    setSystemStatus("operational");
-                } else {
-                    setSystemStatus("degraded");
-                }
-            } else {
+            // redirect: 'manual' returns opaque redirect responses (type === 'opaqueredirect')
+            // which have status 0 — treat as server being down
+            if (response.type === 'opaqueredirect' || !response.ok) {
                 setSystemStatus("down");
+                return;
+            }
+            const data = await response.json();
+            if (data.status === 'healthy') {
+                setSystemStatus("operational");
+            } else {
+                setSystemStatus("degraded");
             }
         } catch (error) {
             setSystemStatus("down");

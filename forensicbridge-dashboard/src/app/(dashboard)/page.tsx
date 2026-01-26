@@ -73,8 +73,11 @@ export default function DashboardHome() {
         try {
             const response = await fetch(`${API_URL}/health`, {
                 method: 'GET',
+                redirect: 'manual', // Prevent ERR_TOO_MANY_REDIRECTS from redirect loops
             });
-            setApiConnected(response.ok);
+            // redirect: 'manual' returns opaque redirect responses (type === 'opaqueredirect')
+            // which have status 0 — treat redirects as not connected
+            setApiConnected(response.type !== 'opaqueredirect' && response.ok);
         } catch (error) {
             console.error("API connection failed:", error);
             setApiConnected(false);

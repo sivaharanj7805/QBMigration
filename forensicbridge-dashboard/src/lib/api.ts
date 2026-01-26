@@ -85,6 +85,14 @@ class ApiClient {
             });
             clearTimeout(timeoutId);
 
+            // Handle opaque redirect responses (from redirect: 'manual')
+            if (response.type === 'opaqueredirect') {
+                return {
+                    success: false,
+                    error: 'Server returned a redirect. The API endpoint may be misconfigured.',
+                };
+            }
+
             // SECURITY FIX: Parse and validate JSON with schema
             const rawData = await response.json();
 
@@ -342,7 +350,7 @@ class ApiClient {
             status: string;
             timestamp: string;
             checks: Record<string, string>;
-        }>("/health");
+        }>("/health", { redirect: 'manual' });
     }
 
     // ==========================================
