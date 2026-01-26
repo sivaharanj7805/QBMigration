@@ -480,12 +480,33 @@ def create_app(config_name='development'):
     
     @login_manager.user_loader
     def load_user(user_id):
-        """Load user by ID for Flask-Login"""
+        """Load user by ID for Flask-Login (session-based)"""
         try:
             return User.query.get(int(user_id))
         except Exception as e:
             app.logger.error(f"Error loading user {user_id}: {str(e)}")
             return None
+
+    @login_manager.request_loader
+    def load_user_from_request(req):
+        """Load user from JWT Bearer token in Authorization header.
+
+        This bridges JWT auth with Flask-Login's @login_required decorator,
+        so endpoints using @login_required work with both session cookies
+        and JWT Bearer tokens.
+        """
+        auth_header = req.headers.get('Authorization')
+        if auth_header:
+            try:
+                parts = auth_header.split()
+                if len(parts) == 2 and parts[0].lower() == 'bearer':
+                    from api.auth import decode_token
+                    payload = decode_token(parts[1])
+                    if payload and 'user_id' in payload:
+                        return User.query.get(int(payload['user_id']))
+            except Exception as e:
+                app.logger.error(f"JWT request auth failed: {str(e)}")
+        return None
     
     @login_manager.unauthorized_handler
     def unauthorized():
