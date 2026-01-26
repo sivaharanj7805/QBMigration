@@ -583,7 +583,20 @@ server {
     client_max_body_size 100M;
 
     # API routes → Backend (Gunicorn on port 8000)
+    # CORS support for www/non-www cross-origin requests
     location /api {
+        # Handle CORS preflight requests at nginx level
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, X-Migration-Id, X-Webhook-Signature' always;
+            add_header 'Access-Control-Allow-Credentials' 'true' always;
+            add_header 'Access-Control-Max-Age' '3600' always;
+            add_header 'Content-Length' 0;
+            add_header 'Content-Type' 'text/plain';
+            return 204;
+        }
+
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -592,8 +605,13 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Origin $http_origin;
         proxy_read_timeout 300;
         proxy_connect_timeout 300;
+
+        # Add CORS headers to response
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
     }
 
     # Health check endpoint with CORS support for www/non-www compatibility
