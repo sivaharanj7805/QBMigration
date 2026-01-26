@@ -46,8 +46,6 @@ def init_database():
             'subscription_tier': 'VARCHAR(50) DEFAULT NULL',
             'migrations_purchased': 'INTEGER DEFAULT 0',
             'migrations_used': 'INTEGER DEFAULT 0',
-            'stripe_customer_id': 'VARCHAR(255) DEFAULT NULL',
-            'stripe_payment_intent': 'VARCHAR(255) DEFAULT NULL',
             'tier_purchased_at': 'TIMESTAMP DEFAULT NULL'
         }
         
