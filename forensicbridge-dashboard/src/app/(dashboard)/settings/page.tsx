@@ -41,7 +41,6 @@ export default function SettingsPage() {
         tierName: "Starter",
         features: []
     });
-    const [isEnterprise, setIsEnterprise] = useState(false);
 
     useEffect(() => {
         loadUserData();
@@ -91,7 +90,6 @@ export default function SettingsPage() {
                         features: config.features,
                         migrationsRemaining: data.user.migrations_remaining
                     });
-                    setIsEnterprise(tier === 'enterprise' || tier === 'reseller');
                 }
             }
         } catch (error) {
@@ -167,7 +165,6 @@ export default function SettingsPage() {
                 {activeTab === "branding" && (
                     <WhitelabelPreview
                         onSave={handleSaveWhitelabel}
-                        isEnterprise={isEnterprise}
                     />
                 )}
 

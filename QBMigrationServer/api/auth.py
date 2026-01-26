@@ -449,23 +449,6 @@ def get_current_user():
             'error_code': 'TIER_INFO_UNAVAILABLE'
         }), 500
     
-    # Get migration credits breakdown by type
-    try:
-        from models.migration_credit import MigrationCredit
-        credits_summary = MigrationCredit.get_credits_summary(user.id)
-        
-        # Calculate totals from credits
-        total_available = sum(t.get('available', 0) for t in credits_summary.values())
-        total_used = sum(t.get('used', 0) for t in credits_summary.values())
-        has_credits = total_available > 0
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Could not get credits summary: {e}")
-        credits_summary = {}
-        total_available = tier_info['migrations_remaining']
-        total_used = tier_info['migrations_used']
-        has_credits = total_available > 0
-    
     return jsonify({
         'success': True,
         'user': {
@@ -476,17 +459,12 @@ def get_current_user():
             'name': user.first_name,  # Alias for frontend compatibility
             'company_name': user.company_name,
             'created_at': user.created_at.isoformat() if user.created_at else None,
-            # Legacy tier info (for backward compatibility)
             'subscription_tier': tier_info['tier'],
             'tier_name': tier_info['tier_name'],
-            'migrations_remaining': total_available,
-            'migrations_purchased': total_available + total_used,
-            'migrations_used': total_used,
-            'has_tier': has_credits or tier_info['has_tier'],
-            # New: Credits breakdown by type
-            'migration_credits': credits_summary,
-            'total_credits_available': total_available,
-            'total_credits_used': total_used
+            'migrations_remaining': tier_info['migrations_remaining'],
+            'migrations_purchased': tier_info['migrations_purchased'],
+            'migrations_used': tier_info['migrations_used'],
+            'has_tier': tier_info['has_tier'],
         }
     })
 
@@ -529,7 +507,7 @@ def get_available_tiers():
         {
             'id': 'starter',
             'name': 'Starter',
-            'price': 497,
+            'price': 0,
             'max_transactions': 5000,
             'description': 'Small business, 1-2 years of data',
             'migrations': 1
@@ -537,7 +515,7 @@ def get_available_tiers():
         {
             'id': 'business',
             'name': 'Business',
-            'price': 997,
+            'price': 0,
             'max_transactions': 25000,
             'description': 'Established business, 3-5 years of history',
             'migrations': 1
@@ -545,7 +523,7 @@ def get_available_tiers():
         {
             'id': 'professional',
             'name': 'Professional',
-            'price': 1997,
+            'price': 0,
             'max_transactions': 100000,
             'description': 'Complex business, multi-year audit trail',
             'migrations': 1
@@ -553,7 +531,7 @@ def get_available_tiers():
         {
             'id': 'enterprise',
             'name': 'Enterprise',
-            'price': 3997,
+            'price': 0,
             'max_transactions': 500000,
             'description': 'Large company, decade+ of records',
             'migrations': 1
@@ -561,7 +539,7 @@ def get_available_tiers():
         {
             'id': 'forensic',
             'name': 'Forensic',
-            'price': 7997,
+            'price': 0,
             'max_transactions': -1,
             'description': 'Litigation-ready, expert documentation',
             'migrations': 1
@@ -615,10 +593,7 @@ def select_tier():
         'success': True,
         'message': f'Successfully selected {tier_config.get("name", tier_id)} tier',
         'tier': tier_id,
-        'migrations_remaining': user.get_migrations_remaining(),
-        # In production: return Stripe checkout URL
-        'payment_required': True,
-        'checkout_url': None  # Would be Stripe checkout URL
+        'migrations_remaining': user.get_migrations_remaining()
     })
 
 
@@ -737,14 +712,6 @@ def invite_team_member():
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
-    
-    # Check if user has Enterprise tier (required for team features)
-    tier = getattr(user, 'subscription_tier', None)
-    if tier not in ['enterprise', 'forensic']:
-        return jsonify({
-            'success': False,
-            'error': 'Team management requires Enterprise or Forensic tier. Please upgrade your plan.'
-        }), 403
     
     # Placeholder: In production, this would:
     # 1. Create invite record in database

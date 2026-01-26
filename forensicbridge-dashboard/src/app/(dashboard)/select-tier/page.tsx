@@ -34,8 +34,9 @@ export default function TierSelectionPage() {
     const [tiers, setTiers] = useState<Tier[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedTier, setSelectedTier] = useState<string | null>(null);
-    const [purchasing, setPurchasing] = useState(false);
+    const [selecting, setSelecting] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
     useEffect(() => {
         loadTiers();
@@ -58,11 +59,11 @@ export default function TierSelectionPage() {
             console.error('Failed to load tiers:', err);
             // Use fallback tiers
             setTiers([
-                { id: 'starter', name: 'Starter', price: 497, max_transactions: 5000, description: 'Small business, 1-2 years of data', migrations: 1, icon: Zap },
-                { id: 'business', name: 'Business', price: 997, max_transactions: 25000, description: 'Established business, 3-5 years', migrations: 1, icon: Building2, popular: true },
-                { id: 'professional', name: 'Professional', price: 1997, max_transactions: 100000, description: 'Complex business, multi-year audit', migrations: 1, icon: Shield },
-                { id: 'enterprise', name: 'Enterprise', price: 3997, max_transactions: 500000, description: 'Large company, decade+ of records', migrations: 1, icon: Crown },
-                { id: 'forensic', name: 'Forensic', price: 7997, max_transactions: -1, description: 'Litigation-ready, expert documentation', migrations: 1, icon: Scale }
+                { id: 'starter', name: 'Starter', price: 0, max_transactions: 5000, description: 'Small business, 1-2 years of data', migrations: 1, icon: Zap },
+                { id: 'business', name: 'Business', price: 0, max_transactions: 25000, description: 'Established business, 3-5 years', migrations: 1, icon: Building2, popular: true },
+                { id: 'professional', name: 'Professional', price: 0, max_transactions: 100000, description: 'Complex business, multi-year audit', migrations: 1, icon: Shield },
+                { id: 'enterprise', name: 'Enterprise', price: 0, max_transactions: 500000, description: 'Large company, decade+ of records', migrations: 1, icon: Crown },
+                { id: 'forensic', name: 'Forensic', price: 0, max_transactions: -1, description: 'Litigation-ready, expert documentation', migrations: 1, icon: Scale }
             ]);
         } finally {
             setLoading(false);
@@ -71,48 +72,43 @@ export default function TierSelectionPage() {
 
     const handleSelectTier = async (tierId: string) => {
         setSelectedTier(tierId);
-        setPurchasing(true);
+        setSelecting(true);
         setError('');
+        setSuccess('');
 
         try {
             const token = localStorage.getItem('token');
 
-            // Create Stripe checkout session
-            const response = await fetch(`${API_URL}/api/payments/create-checkout`, {
+            const response = await fetch(`${API_URL}/api/auth/select-tier`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({ tier_type: tierId })
+                body: JSON.stringify({ tier_id: tierId })
             });
 
             const data = await response.json();
 
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to create checkout session');
+                throw new Error(data.error || 'Failed to select tier');
             }
 
-            if (data.checkout_url) {
-                // Redirect to Stripe Checkout
-                window.location.href = data.checkout_url;
+            if (data.success) {
+                setSuccess(data.message || `Successfully selected ${tierId} tier!`);
+                // Redirect to dashboard after a brief delay
+                setTimeout(() => {
+                    router.push('/');
+                }, 1500);
             } else {
-                throw new Error('No checkout URL returned');
+                throw new Error(data.error || 'Failed to select tier');
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to start checkout');
+            setError(err instanceof Error ? err.message : 'Failed to select tier');
             setSelectedTier(null);
         } finally {
-            setPurchasing(false);
+            setSelecting(false);
         }
-    };
-
-    const formatPrice = (price: number) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: 0
-        }).format(price);
     };
 
     const formatTransactions = (count: number) => {
@@ -136,10 +132,10 @@ export default function TierSelectionPage() {
                 {/* Header */}
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-bold text-white mb-4">
-                        {isUpgrade ? 'Purchase Another Migration' : 'Purchase a Migration'}
+                        {isUpgrade ? 'Select Another Migration Plan' : 'Select a Migration Plan'}
                     </h1>
                     <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-                        Select the migration that matches your QuickBooks file size. Pay once, migrate once. Buy more anytime you need.
+                        Select the migration plan that matches your QuickBooks file size.
                     </p>
                 </div>
 
@@ -147,6 +143,13 @@ export default function TierSelectionPage() {
                 {error && (
                     <div className="max-w-md mx-auto mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-center">
                         {error}
+                    </div>
+                )}
+
+                {/* Success Message */}
+                {success && (
+                    <div className="max-w-md mx-auto mb-8 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-center">
+                        {success} Redirecting to dashboard...
                     </div>
                 )}
 
@@ -179,10 +182,10 @@ export default function TierSelectionPage() {
                                     <Icon className={`w-6 h-6 ${tier.popular ? 'text-emerald-400' : 'text-slate-400'}`} />
                                 </div>
 
-                                {/* Name & Price */}
+                                {/* Name & Free label */}
                                 <h3 className="text-xl font-bold text-white mb-1">{tier.name}</h3>
                                 <div className="mb-4">
-                                    <span className="text-3xl font-bold text-white">{formatPrice(tier.price)}</span>
+                                    <span className="text-3xl font-bold text-emerald-400">Free</span>
                                     <span className="text-slate-400 text-sm"> / migration</span>
                                 </div>
 
@@ -219,22 +222,22 @@ export default function TierSelectionPage() {
                                 {/* Select Button */}
                                 <button
                                     onClick={() => handleSelectTier(tier.id)}
-                                    disabled={purchasing}
+                                    disabled={selecting}
                                     className={`w-full py-3 rounded-lg font-medium transition-all ${tier.popular
                                         ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600'
                                         : 'bg-slate-700 text-white hover:bg-slate-600'
                                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
-                                    {purchasing && isSelected ? (
+                                    {selecting && isSelected ? (
                                         <span className="flex items-center justify-center gap-2">
                                             <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                             </svg>
-                                            Processing...
+                                            Selecting...
                                         </span>
                                     ) : (
-                                        `Buy ${tier.name} Migration`
+                                        `Select ${tier.name}`
                                     )}
                                 </button>
                             </div>
@@ -245,8 +248,6 @@ export default function TierSelectionPage() {
                 {/* Footer Note */}
                 <p className="text-center text-slate-500 text-sm mt-12">
                     All migrations include AES-256 encryption, AWS-hosted processing, and audit certificate.
-                    <br />
-                    Migrations never expire. Buy now, use whenever you're ready.
                 </p>
             </div>
         </div>
