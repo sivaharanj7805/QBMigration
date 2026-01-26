@@ -552,11 +552,11 @@ sudo nano /etc/nginx/sites-available/forensicbridge
 Paste this configuration:
 
 ```nginx
-# Redirect HTTP to HTTPS
+# Redirect HTTP to HTTPS (preserve original host to avoid www/non-www redirect loops)
 server {
     listen 80;
     server_name yourdomain.com www.yourdomain.com;
-    return 301 https://$server_name$request_uri;
+    return 301 https://$host$request_uri;
 }
 
 # Main HTTPS server
@@ -596,10 +596,13 @@ server {
         proxy_connect_timeout 300;
     }
 
-    # Health check endpoint
+    # Health check endpoint (include X-Forwarded-Proto to prevent redirect loops)
     location /health {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # WebSocket support
@@ -609,6 +612,9 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # Frontend → Next.js (port 3000)
