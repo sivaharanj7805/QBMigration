@@ -139,6 +139,18 @@ export default function NewProjectPage() {
                                 )}
                             </a>
 
+                            {/* Download Instructions */}
+                            {downloadStarted && (
+                                <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm">
+                                    <p className="font-medium mb-2">Download Instructions:</p>
+                                    <ol className="list-decimal list-inside space-y-1">
+                                        <li>Run the downloaded file on the Windows machine</li>
+                                        <li>If it&apos;s a .bat file, it will download and install the full extractor</li>
+                                        <li>Follow the on-screen instructions to complete installation</li>
+                                    </ol>
+                                </div>
+                            )}
+
                             {/* Alternative Download Options */}
                             <div className="flex items-center gap-2 text-sm text-slate-400">
                                 <span>Alternative:</span>
