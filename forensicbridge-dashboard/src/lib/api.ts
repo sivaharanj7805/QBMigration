@@ -163,6 +163,17 @@ class ApiClient {
     // Migration Endpoints
     // ==========================================
 
+    async getMigrationStats() {
+        return this.request<{
+            stats: {
+                migrations_this_month: number;
+                total_records: string;
+                avg_duration: string;
+                success_rate: string;
+            };
+        }>("/api/migrations/stats");
+    }
+
     async getMigrations() {
         return this.request<{
             migrations: Array<{

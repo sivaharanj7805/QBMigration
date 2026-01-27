@@ -259,7 +259,7 @@ namespace QBMigrationLauncher.ViewModels
 
             try
             {
-                await _runner.RunExtractionAsync(SelectedFile);
+                await _runner.RunExtractionAsync(SelectedFile, migrationId, _outputDirectory);
 
                 CurrentStatusMessage = "Migration Complete! Generating certificate...";
 
@@ -326,8 +326,7 @@ namespace QBMigrationLauncher.ViewModels
         }
 
         /// <summary>
-        /// FIX WPF-03: Compute SHA-256 hash of a file for the certificate.
-        /// Returns placeholder if file cannot be hashed.
+        /// Compute SHA-256 hash of a file for the migration certificate.
         /// </summary>
         private string ComputeFileHash(string? filePath)
         {
@@ -336,14 +335,46 @@ namespace QBMigrationLauncher.ViewModels
 
             try
             {
-                // For QB files, we compute hash of the extraction results, not the .qbw file directly
-                // Since extraction is async, return a marker that will be updated
-                return $"PENDING_EXTRACTION_{DateTime.Now:yyyyMMddHHmmss}";
+                // Resolve to full path - check if it's a filename from DetectedFiles
+                var fullPath = Path.IsPathRooted(filePath) ? filePath : null;
+
+                // Try to find extracted output files to hash
+                var extractedDir = Path.Combine(_outputDirectory, "extracted");
+                if (Directory.Exists(extractedDir))
+                {
+                    // Hash the extraction manifest/summary if available
+                    var manifestFiles = Directory.GetFiles(extractedDir, "*.ndjson", SearchOption.TopDirectoryOnly);
+                    if (manifestFiles.Length > 0)
+                    {
+                        using var sha256 = System.Security.Cryptography.SHA256.Create();
+                        using var combinedStream = new MemoryStream();
+                        foreach (var file in manifestFiles.OrderBy(f => f))
+                        {
+                            var fileBytes = File.ReadAllBytes(file);
+                            combinedStream.Write(fileBytes, 0, fileBytes.Length);
+                        }
+                        combinedStream.Position = 0;
+                        var hashBytes = sha256.ComputeHash(combinedStream);
+                        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                    }
+                }
+
+                // Fallback: hash the company file directly if accessible
+                if (fullPath != null && File.Exists(fullPath))
+                {
+                    using var sha256 = System.Security.Cryptography.SHA256.Create();
+                    using var stream = File.OpenRead(fullPath);
+                    var hashBytes = sha256.ComputeHash(stream);
+                    return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+
+                // If no file accessible yet, return pending marker
+                return $"PENDING_{DateTime.UtcNow:yyyyMMddHHmmss}";
             }
             catch (Exception ex)
             {
                 LogOutput += $"[WARN] Could not compute file hash: {ex.Message}\n";
-                return "HASH_COMPUTATION_FAILED";
+                return "HASH_ERROR";
             }
         }
     }

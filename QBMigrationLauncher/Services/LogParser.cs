@@ -14,9 +14,6 @@ namespace QBMigrationLauncher.Services
         public event EventHandler<ProgressEventArgs>? ProgressChanged;
         public event EventHandler<string>? LogReceived;
 
-        private int _currentEntityIndex = 0;
-        private int _totalEntities = 55; // Approximate count from codebase
-
         public void ProcessLogLine(string line)
         {
             if (string.IsNullOrWhiteSpace(line)) return;

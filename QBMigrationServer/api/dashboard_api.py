@@ -545,8 +545,6 @@ def download_audit_certificate(migration_id):
         if not os.path.exists(cert_path):
             # Generate certificate using verifier
             try:
-                import sys
-                sys.path.insert(0, os.path.join(os.path.dirname(current_app.root_path), 'QBMigrationService'))
                 from verifier import PremiumMigrationVerifier
                 
                 # Create verifier instance for certificate generation
@@ -694,11 +692,6 @@ def export_caseware_bundle(migration_id):
         
         try:
             # Import the CasewareExporter
-            import sys
-            service_path = os.path.join(os.path.dirname(current_app.root_path), 'QBMigrationService')
-            if service_path not in sys.path:
-                sys.path.insert(0, service_path)
-            
             from caseware_exporter import CasewareExporter
             
             # Create exporter

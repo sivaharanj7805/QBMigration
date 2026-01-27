@@ -64,6 +64,7 @@ export default function ReportsPage() {
     const [filter, setFilter] = useState<string>("all");
     const [loading, setLoading] = useState(true);
     const [reports, setReports] = useState<Report[]>([]);
+    const [showGenerateModal, setShowGenerateModal] = useState(false);
 
     useEffect(() => {
         fetchReports();
@@ -72,17 +73,16 @@ export default function ReportsPage() {
     const fetchReports = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/reports`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setReports(data.reports || []);
-            // }
-
-            // For now, start with empty data
-            setReports([]);
+            const response = await fetch(`${API_URL}/api/reports`, { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                setReports(data.reports || []);
+            } else {
+                setReports([]);
+            }
         } catch (error) {
             console.error("Failed to fetch reports:", error);
+            setReports([]);
         } finally {
             setLoading(false);
         }
@@ -132,7 +132,10 @@ export default function ReportsPage() {
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         Refresh
                     </button>
-                    <button className="btn-primary flex items-center gap-2">
+                    <button
+                        className="btn-primary flex items-center gap-2"
+                        onClick={() => setShowGenerateModal(true)}
+                    >
                         <FileSpreadsheet className="w-4 h-4" />
                         Generate New Report
                     </button>
@@ -228,6 +231,62 @@ export default function ReportsPage() {
                     </table>
                 )}
             </div>
+
+            {/* Generate Report Modal */}
+            {showGenerateModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Generate New Report</h3>
+                        <p className="text-sm text-gray-600 mb-4">
+                            Select a report type to generate from your completed migrations.
+                        </p>
+                        <div className="space-y-2">
+                            {reportTypes.map((type) => {
+                                const Icon = type.icon;
+                                return (
+                                    <button
+                                        key={type.type}
+                                        className="w-full p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-left flex items-center gap-3 transition-colors"
+                                        onClick={async () => {
+                                            setShowGenerateModal(false);
+                                            try {
+                                                const response = await fetch(`${API_URL}/api/reports/generate`, {
+                                                    method: 'POST',
+                                                    credentials: 'include',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ type: type.type }),
+                                                });
+                                                if (response.ok) {
+                                                    fetchReports();
+                                                } else {
+                                                    alert("Failed to generate report");
+                                                }
+                                            } catch (error) {
+                                                console.error("Generate report error:", error);
+                                                alert("Failed to connect to server");
+                                            }
+                                        }}
+                                    >
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${type.color}`}>
+                                            <Icon className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <p className="font-medium text-sm text-gray-900">{type.name}</p>
+                                            <p className="text-xs text-gray-500">{type.description}</p>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <button
+                            className="mt-4 w-full py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-200 rounded-lg"
+                            onClick={() => setShowGenerateModal(false)}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Info Card */}
             <div className="card-forensic p-6 bg-blue-50 border-blue-200">

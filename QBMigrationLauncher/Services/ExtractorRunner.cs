@@ -14,35 +14,18 @@ namespace QBMigrationLauncher.Services
             _parser = parser;
         }
 
-        public async Task RunExtractionAsync(string? companyFile)
+        public async Task RunExtractionAsync(string? companyFile, string sessionCode, string outputDir)
         {
-            // Find exe (Assuming strictly relative path for now)
-            // In dev: ..\..\..\QBDesktopReader\bin\Debug\net48\QBExtractor.exe
-            // In prod: .\QBExtractor.exe
-            
-            string exePath = "QBExtractor.exe";
-            if (!File.Exists(exePath))
-            {
-                // Fallback for dev environment
-                exePath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\QBDesktopReader\bin\Debug\net48\QBExtractor.exe"));
-            }
-
-            if (!File.Exists(exePath))
-            {
-                 // Try one more common spot
-                 exePath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"QBExtractor.exe"));
-            }
-
-            // If still not found, search? For MVP, fail.
-            if (!File.Exists(exePath))
-            {
-                throw new FileNotFoundException($"Could not find migration engine at: {exePath}");
-            }
+            // Resolve QBExtractor.exe path with production-first priority:
+            // 1. Next to the launcher (production deployment)
+            // 2. Standard install path
+            // 3. Development fallback
+            string exePath = ResolveExtractorPath();
 
             var startInfo = new ProcessStartInfo
             {
                 FileName = exePath,
-                Arguments = "--no-pause --auto-incremental", // Auto-run flags
+                Arguments = $"--company-file \"{companyFile}\" --session \"{sessionCode}\" --no-pause --auto-incremental --output-dir \"{outputDir}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -65,6 +48,41 @@ namespace QBMigrationLauncher.Services
             {
                 throw new Exception($"Migration engine failed with code {process.ExitCode}");
             }
+        }
+
+        private static string ResolveExtractorPath()
+        {
+            const string exeName = "QBExtractor.exe";
+
+            // 1. Production: next to the launcher executable
+            string productionPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, exeName);
+            if (File.Exists(productionPath))
+            {
+                return Path.GetFullPath(productionPath);
+            }
+
+            // 2. Standard install path
+            string installPath = Path.Combine(@"C:\Program Files\ForensicBridge", exeName);
+            if (File.Exists(installPath))
+            {
+                return installPath;
+            }
+
+            // 3. Development fallback
+            string devPath = Path.GetFullPath(Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                @"..\..\..\..\QBDesktopReader\bin\Debug\net48",
+                exeName));
+            if (File.Exists(devPath))
+            {
+                return devPath;
+            }
+
+            throw new FileNotFoundException(
+                $"Could not find migration engine ({exeName}). Searched:\n" +
+                $"  Production: {productionPath}\n" +
+                $"  Install: {installPath}\n" +
+                $"  Dev: {devPath}");
         }
     }
 }
