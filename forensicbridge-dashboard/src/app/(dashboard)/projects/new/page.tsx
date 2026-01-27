@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft, Building2, Mail, FileText, Loader2, Download } from 'lucide-react';
 import Link from 'next/link';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 export default function NewProjectPage() {
     const router = useRouter();
     const [name, setName] = useState('');
@@ -31,7 +33,7 @@ export default function NewProjectPage() {
                 return;
             }
 
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/projects`, {
+            const response = await fetch(`${API_URL}/api/projects`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -115,7 +117,7 @@ export default function NewProjectPage() {
 
                         <div className="flex gap-3">
                             <a
-                                href={`${process.env.NEXT_PUBLIC_API_URL || ''}/api/extractor/download`}
+                                href={`${API_URL}/api/extractor/download`}
                                 className="flex-1 py-3 px-4 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium hover:from-emerald-600 hover:to-teal-600 flex items-center justify-center gap-2 transition-all"
                             >
                                 <Download className="w-5 h-5" />
