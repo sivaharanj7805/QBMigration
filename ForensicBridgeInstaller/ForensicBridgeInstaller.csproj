@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <LangVersion>9.0</LangVersion>
+
+    <!-- Application settings -->
+    <AssemblyName>ForensicBridge</AssemblyName>
+    <RootNamespace>ForensicBridgeInstaller</RootNamespace>
+    <Version>1.0.0</Version>
+    <Description>ForensicBridge QuickBooks Desktop Migration Tool</Description>
+    <Company>ForensicBridge Inc.</Company>
+    <Product>ForensicBridge</Product>
+
+    <!-- Windows Forms -->
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <!-- Enable nullable types -->
+    <Nullable>enable</Nullable>
+
+    <!-- Application icon -->
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- NuGet packages -->
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Copy config files to output -->
+  <ItemGroup>
+    <None Update="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
