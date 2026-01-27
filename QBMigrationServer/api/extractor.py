@@ -1,5 +1,5 @@
 """
-ForensicBridge Extractor Download API v2.0
+ForensicBridge Extractor Download API v4.4
 Serves the ForensicBridge Windows extractor executable
 
 Download Priority:
@@ -7,6 +7,16 @@ Download Priority:
 2. Cached GitHub release (downloaded and cached)
 3. Redirect to GitHub releases (fallback)
 4. Bootstrap installer script (last resort)
+
+Endpoints:
+- GET  /download      - Smart download (exe or bootstrap)
+- GET  /download-exe  - Direct exe download
+- GET  /bootstrap     - Bootstrap installer (.bat)
+- GET  /info          - Availability info
+- GET  /status        - Full status of all sources
+- GET  /version       - Current version info
+- POST /cache/refresh - Force refresh from GitHub
+- POST /cache/clear   - Clear cached files
 """
 
 import os
@@ -48,6 +58,10 @@ DEFAULT_EXTRACTOR_PATHS = [
 # Cache settings
 CACHE_DURATION_HOURS = 24
 CACHE_METADATA_FILE = os.path.join(CACHE_DIR, 'metadata.json')
+
+# Current extractor version (should match QBDesktopReader version)
+EXTRACTOR_VERSION = "4.4.0"
+MINIMUM_FILE_SIZE = 50000  # 50KB minimum for valid executable
 
 
 def ensure_cache_dir():
@@ -580,3 +594,111 @@ start "" "{GITHUB_RELEASES_PAGE}"
 echo.
 pause
 '''
+
+
+@extractor_bp.route('/version', methods=['GET'])
+def extractor_version():
+    """Get the current extractor version and compatibility info."""
+    return jsonify({
+        'version': EXTRACTOR_VERSION,
+        'minimum_qb_version': 'QuickBooks Desktop 2018+',
+        'supported_backends': [
+            {
+                'name': 'QBFC16',
+                'type': 'QuickBooks SDK',
+                'recommended': True,
+                'download_url': 'https://developer.intuit.com'
+            },
+            {
+                'name': 'QODBC',
+                'type': 'ODBC Driver',
+                'recommended': False,
+                'download_url': 'https://qodbc.com/qodbc-downloads/'
+            }
+        ],
+        'features': [
+            'Multi-backend support (QBFC + QODBC)',
+            'Automatic backend detection',
+            'Retry with exponential backoff',
+            'Entity-level failure isolation',
+            'Checkpoint/resume support',
+            'AES-256-GCM encryption',
+            'Low-memory streaming'
+        ],
+        'documentation': '/api/extractor/docs'
+    })
+
+
+@extractor_bp.route('/docs', methods=['GET'])
+def extractor_docs():
+    """Return documentation for the extractor API."""
+    return jsonify({
+        'title': 'ForensicBridge Extractor API',
+        'version': EXTRACTOR_VERSION,
+        'endpoints': {
+            'GET /api/extractor/download': {
+                'description': 'Smart download - returns exe if available, otherwise bootstrap installer',
+                'params': {'format': 'Optional: "bat" to force bootstrap download'}
+            },
+            'GET /api/extractor/download-exe': {
+                'description': 'Direct executable download, falls back to GitHub redirect'
+            },
+            'GET /api/extractor/bootstrap': {
+                'description': 'Download the bootstrap installer batch file'
+            },
+            'GET /api/extractor/info': {
+                'description': 'Get availability information about the extractor'
+            },
+            'GET /api/extractor/status': {
+                'description': 'Full status of all download sources'
+            },
+            'GET /api/extractor/version': {
+                'description': 'Get current version and compatibility info'
+            },
+            'POST /api/extractor/cache/refresh': {
+                'description': 'Force refresh cached extractor from GitHub'
+            },
+            'POST /api/extractor/cache/clear': {
+                'description': 'Clear cached extractor files'
+            }
+        },
+        'installation_steps': [
+            '1. Download ForensicBridge_Install.bat from /api/extractor/bootstrap',
+            '2. Right-click and "Run as Administrator"',
+            '3. The installer will download and install QBExtractor.exe',
+            '4. Open QuickBooks Desktop with your company file',
+            '5. Run QBExtractor.exe and enter your session code',
+            '6. When prompted in QuickBooks, click "Yes, always allow"'
+        ],
+        'troubleshooting': {
+            'no_backend': 'Install QuickBooks SDK (QBFC16) from developer.intuit.com or QODBC from qodbc.com',
+            'connection_failed': 'Ensure QuickBooks Desktop is open with a company file',
+            'permission_denied': 'Run as Administrator and allow the application in QuickBooks',
+            'download_failed': 'Check firewall settings or download directly from GitHub releases'
+        }
+    })
+
+
+@extractor_bp.route('/health', methods=['GET'])
+def extractor_health():
+    """Health check endpoint for monitoring."""
+    extractor_path = find_extractor_path()
+    cache_valid = is_cache_valid()
+    github_available = check_github_release_exists()
+
+    # Determine overall health
+    is_healthy = extractor_path is not None or cache_valid or github_available
+
+    response = {
+        'healthy': is_healthy,
+        'version': EXTRACTOR_VERSION,
+        'sources': {
+            'local': extractor_path is not None,
+            'cache': cache_valid,
+            'github': github_available,
+            'bootstrap': os.path.isfile(BOOTSTRAP_BAT)
+        }
+    }
+
+    status_code = 200 if is_healthy else 503
+    return jsonify(response), status_code
