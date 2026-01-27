@@ -7,6 +7,18 @@ using Newtonsoft.Json.Converters;
 namespace QBDesktopExtractor
 {
     /// <summary>
+    /// Centralized URL constants used across the application.
+    /// Avoids scattering hardcoded URLs in display/help messages.
+    /// </summary>
+    public static class KnownUrls
+    {
+        public const string ForensicBridge = "https://forensicbridge.ca";
+        public const string ForensicBridgeNewProject = "https://forensicbridge.ca/projects/new";
+        public const string IntuitDeveloperSDK = "https://developer.intuit.com";
+        public const string QODBCDownloads = "https://qodbc.com/qodbc-downloads/";
+    }
+
+    /// <summary>
     /// Type-safe configuration with comprehensive validation
     /// v4.2: Enterprise-grade config with proper validation, error handling, and security
     /// 

@@ -99,11 +99,39 @@ export default function UploadPage() {
     const readyFiles = files.filter(f => f.status === "ready");
 
     const handleStartMigration = async () => {
-        if (!destination) return;
+        if (!destination || readyFiles.length === 0) return;
 
         setIsProcessing(true);
-        // Would trigger actual migration with destination
-        // POST to /api/migrations with { destination: "qbo" | "caseware" }
+        try {
+            const formData = new FormData();
+            formData.append('destination', destination);
+            readyFiles.forEach(f => {
+                formData.append('file_names', f.name);
+            });
+
+            const response = await fetch(`${API_URL}/api/migrations`, {
+                method: 'POST',
+                body: JSON.stringify({ destination, files: readyFiles.map(f => f.name) }),
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const migrationId = data.migration_id || data.id;
+                if (migrationId) {
+                    window.location.href = `/migrations/${migrationId}`;
+                }
+            } else {
+                const errorData = await response.json();
+                alert(errorData.error || "Failed to start migration");
+            }
+        } catch (error) {
+            console.error("Migration start error:", error);
+            alert("Failed to connect to server. Please try again.");
+        } finally {
+            setIsProcessing(false);
+        }
     };
 
     return (
