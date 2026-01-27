@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useLiveStatus, useTrialBalance, useAuditCertificate } from "@/lib/hooks/useLiveStatus";
 import { PizzaTracker } from "@/components/dashboard/PizzaTracker";
 import { ReconciliationShield } from "@/components/dashboard/ReconciliationShield";
@@ -18,6 +18,7 @@ type DestinationType = "qbo" | "caseware";
 
 export default function MigrationDetailPage() {
     const params = useParams();
+    const router = useRouter();
     const id = params?.id as string;
 
     // Hooks using forced mocks
@@ -27,6 +28,26 @@ export default function MigrationDetailPage() {
     // Destination - would come from API in production
     // For now, check if this is a caseware migration based on status or stored preference
     const [destination] = useState<DestinationType>((liveStatus as any)?.destination || "qbo");
+
+    const [isCancelling, setIsCancelling] = useState(false);
+
+    const handleCancelMigration = async () => {
+        if (!confirm("Are you sure you want to cancel this migration?")) return;
+        setIsCancelling(true);
+        try {
+            const result = await api.cancelMigration(id);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert(result.error || "Failed to cancel migration");
+            }
+        } catch (error) {
+            console.error("Cancel error:", error);
+            alert("Failed to cancel migration");
+        } finally {
+            setIsCancelling(false);
+        }
+    };
 
     // Mock download handler since api is removed
     const [isDownloading, setIsDownloading] = useState(false);
@@ -123,8 +144,12 @@ export default function MigrationDetailPage() {
                 </div>
                 <div className="flex items-center gap-3">
                     {isProcessing && (
-                        <button className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                            Cancel Migration
+                        <button
+                            className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            onClick={handleCancelMigration}
+                            disabled={isCancelling}
+                        >
+                            {isCancelling ? "Cancelling..." : "Cancel Migration"}
                         </button>
                     )}
                 </div>

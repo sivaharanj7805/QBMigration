@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import {
     FileSpreadsheet,
@@ -14,11 +14,51 @@ import {
     Calendar,
     Timer,
     Loader2,
+    Play,
+    XCircle,
+    RefreshCw,
 } from "lucide-react";
 
 export default function MigrationsPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [actionLoading, setActionLoading] = useState<string | null>(null);
+    const queryClient = useQueryClient();
+
+    const handleCancelMigration = async (migrationId: string) => {
+        if (!confirm("Are you sure you want to cancel this migration?")) return;
+        setActionLoading(migrationId);
+        try {
+            const result = await api.cancelMigration(migrationId);
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["migrations"] });
+            } else {
+                alert(result.error || "Failed to cancel migration");
+            }
+        } catch (error) {
+            console.error("Cancel error:", error);
+            alert("Failed to cancel migration");
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const handleRetryMigration = async (migrationId: string) => {
+        setActionLoading(migrationId);
+        try {
+            const result = await api.retryMigration(migrationId);
+            if (result.success) {
+                queryClient.invalidateQueries({ queryKey: ["migrations"] });
+            } else {
+                alert(result.error || "Failed to retry migration");
+            }
+        } catch (error) {
+            console.error("Retry error:", error);
+            alert("Failed to retry migration");
+        } finally {
+            setActionLoading(null);
+        }
+    };
 
     // Real Backend Connection
     const { data, isLoading } = useQuery({
@@ -194,12 +234,34 @@ export default function MigrationsPage() {
                                     )}
                                 </td>
                                 <td>
-                                    <Link
-                                        href={`/migrations/${migration.migration_id}`}
-                                        className="btn-secondary text-sm py-1.5 flex items-center gap-1"
-                                    >
-                                        View <ArrowUpRight className="w-3 h-3" />
-                                    </Link>
+                                    <div className="flex items-center gap-2">
+                                        <Link
+                                            href={`/migrations/${migration.migration_id}`}
+                                            className="btn-secondary text-sm py-1.5 flex items-center gap-1"
+                                        >
+                                            View <ArrowUpRight className="w-3 h-3" />
+                                        </Link>
+                                        {(migration.status === "processing" || migration.status === "in_progress") && (
+                                            <button
+                                                className="text-sm py-1.5 px-2 text-red-600 hover:bg-red-50 rounded flex items-center gap-1"
+                                                onClick={() => handleCancelMigration(migration.migration_id)}
+                                                disabled={actionLoading === migration.migration_id}
+                                            >
+                                                <XCircle className="w-3 h-3" />
+                                                Cancel
+                                            </button>
+                                        )}
+                                        {migration.status === "failed" && (
+                                            <button
+                                                className="text-sm py-1.5 px-2 text-blue-600 hover:bg-blue-50 rounded flex items-center gap-1"
+                                                onClick={() => handleRetryMigration(migration.migration_id)}
+                                                disabled={actionLoading === migration.migration_id}
+                                            >
+                                                <RefreshCw className="w-3 h-3" />
+                                                Retry
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         ))}

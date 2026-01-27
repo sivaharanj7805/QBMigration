@@ -17,6 +17,8 @@ import {
     Loader2
 } from "lucide-react";
 import { authFetch, getAuthHeader } from "@/lib/auth";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 // API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -47,6 +49,7 @@ interface Stats {
 }
 
 export default function DashboardHome() {
+    const router = useRouter();
     const [isDragActive, setIsDragActive] = useState(false);
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
     const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "processing" | "complete" | "error">("idle");
@@ -351,10 +354,16 @@ export default function DashboardHome() {
                             <p className="text-lg font-medium text-gray-700 mb-2">Ready to Migrate!</p>
                             <p className="text-sm text-gray-500 mb-4">{uploadedFile?.name}</p>
                             <div className="flex items-center justify-center gap-3">
-                                <button className="btn-primary flex items-center gap-2">
+                                <button
+                                    className="btn-primary flex items-center gap-2"
+                                    onClick={() => router.push("/upload?destination=qbo")}
+                                >
                                     Migrate to QBO <ArrowRight className="w-4 h-4" />
                                 </button>
-                                <button className="btn-secondary flex items-center gap-2">
+                                <button
+                                    className="btn-secondary flex items-center gap-2"
+                                    onClick={() => router.push("/upload?destination=caseware")}
+                                >
                                     <Download className="w-4 h-4" /> Caseware Bundle
                                 </button>
                             </div>
@@ -367,9 +376,9 @@ export default function DashboardHome() {
             <div className="card-forensic">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                     <h2 className="text-lg font-semibold text-gray-900">Recent Migrations</h2>
-                    <button className="text-sm text-[var(--bridge-blue)] hover:underline flex items-center gap-1">
+                    <Link href="/migrations" className="text-sm text-[var(--bridge-blue)] hover:underline flex items-center gap-1">
                         View All <ChevronRight className="w-4 h-4" />
-                    </button>
+                    </Link>
                 </div>
 
                 {loading ? (
@@ -415,9 +424,12 @@ export default function DashboardHome() {
                                     </td>
                                     <td>{getStatusBadge(migration.status)}</td>
                                     <td>
-                                        <button className="text-[var(--bridge-blue)] hover:underline text-sm">
+                                        <Link
+                                            href={`/migrations/${migration.migration_id || migration.id}`}
+                                            className="text-[var(--bridge-blue)] hover:underline text-sm"
+                                        >
                                             View
-                                        </button>
+                                        </Link>
                                     </td>
                                 </tr>
                             ))}
@@ -428,7 +440,7 @@ export default function DashboardHome() {
 
             {/* Quick Actions */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <button className="card-forensic-hover p-6 text-left group">
+                <button className="card-forensic-hover p-6 text-left group" onClick={() => router.push("/reports")}>
                     <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
                         <FileSpreadsheet className="w-5 h-5 text-[var(--bridge-blue)]" />
                     </div>
@@ -436,7 +448,7 @@ export default function DashboardHome() {
                     <p className="text-sm text-gray-500">Create variance reports and audit certificates</p>
                 </button>
 
-                <button className="card-forensic-hover p-6 text-left group">
+                <button className="card-forensic-hover p-6 text-left group" onClick={() => router.push("/vault")}>
                     <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center mb-3 group-hover:bg-green-100 transition-colors">
                         <Database className="w-5 h-5 text-[var(--success)]" />
                     </div>
@@ -444,7 +456,7 @@ export default function DashboardHome() {
                     <p className="text-sm text-gray-500">Browse archived historical data</p>
                 </button>
 
-                <button className="card-forensic-hover p-6 text-left group">
+                <button className="card-forensic-hover p-6 text-left group" onClick={() => router.push("/migrations")}>
                     <div className="w-10 h-10 bg-purple-50 rounded-lg flex items-center justify-center mb-3 group-hover:bg-purple-100 transition-colors">
                         <Shield className="w-5 h-5 text-purple-600" />
                     </div>

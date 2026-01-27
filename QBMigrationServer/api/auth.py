@@ -12,6 +12,7 @@ import re
 import hmac
 import hashlib
 from typing import Optional, Tuple
+import logging
 
 from models.database import db
 from models.user import User
@@ -22,6 +23,8 @@ from utils.captcha_verifier import (
     verify_captcha_token, is_captcha_required, get_client_ip, get_captcha_config
 )
 from utils.anomaly_detector import check_login_anomalies, log_anomaly
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -158,13 +161,17 @@ def validate_password(password: str) -> Tuple[bool, str]:
     return True, ''
 
 
+def sanitize(value, max_length=255):
+    if not value:
+        return value
+    value = re.sub(r'[<>"\'/\\;]', '', str(value).strip())
+    return value[:max_length]
+
+
 @auth_bp.route('/register', methods=['POST'])
 @limiter.limit("3 per hour")  # SECURITY FIX: Reduced from 5/min to prevent abuse
 def register():
     """Register a new user with comprehensive error handling"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
         data = request.get_json()
         
@@ -181,13 +188,6 @@ def register():
         company = data.get('company_name', data.get('company', '')).strip()
         
         # Sanitize inputs - remove potentially dangerous characters
-        import re
-        def sanitize(value, max_length=255):
-            if not value:
-                return value
-            value = re.sub(r'[<>"\'/\\;]', '', str(value).strip())
-            return value[:max_length]
-        
         first_name = sanitize(first_name, 100)
         last_name = sanitize(last_name, 100)
         company = sanitize(company, 255)
@@ -319,8 +319,6 @@ def login():
         )
 
         if not captcha_valid:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"CAPTCHA verification failed for {hash_email(email)}: {captcha_error}")
             return jsonify({
                 'success': False,
@@ -384,8 +382,6 @@ def login():
         # For critical anomalies, add warning to response
         critical_anomalies = [a for a in anomalies if a['severity'] == 'critical']
         if critical_anomalies:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(
                 f"CRITICAL anomaly detected for user {user.id}: "
                 f"{', '.join(a['reason'] for a in critical_anomalies)}"
@@ -555,9 +551,6 @@ def select_tier():
     Select/purchase a tier after registration.
     In production, this would integrate with Stripe Checkout.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
@@ -672,8 +665,7 @@ def list_team_members():
         })
         
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Team fetch error (table may not exist): {e}")
+        logger.warning(f"Team fetch error (table may not exist): {e}")
         # Fallback if table doesn't exist
         return jsonify({
             'success': True,
@@ -694,9 +686,6 @@ def list_team_members():
 @require_auth
 def invite_team_member():
     """Invite a new team member"""
-    import logging
-    logger = logging.getLogger(__name__)
-    
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400

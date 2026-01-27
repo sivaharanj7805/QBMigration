@@ -9,8 +9,6 @@ File Upload API Endpoints
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
@@ -293,7 +291,7 @@ def _handle_original_upload(data, user):
         if not result:
             logger.error(f"S3 upload failed for migration {migration_id}")
             migration.status = 'failed'
-            migration.error_message = 'Failed to upload file to secure storage'
+            migration.set_error_message('Failed to upload file to secure storage')
             db.session.commit()
             
             return jsonify({
@@ -319,9 +317,9 @@ def _handle_original_upload(data, user):
     except Exception as e:
         logger.error(f"S3 upload error for migration {migration_id}: {str(e)}")
         migration.status = 'failed'
-        migration.error_message = f'Upload error: {str(e)}'
+        migration.set_error_message(f'Upload error: {str(e)}')
         db.session.commit()
-        
+
         return jsonify({
             'success': False,
             'error': 'Failed to upload file to secure storage'
@@ -506,7 +504,7 @@ def _handle_v31_upload(data, user):
         if not result:
             logger.error(f"S3 upload failed for migration {migration_id}")
             migration.status = 'failed'
-            migration.error_message = 'Failed to upload to secure storage'
+            migration.set_error_message('Failed to upload to secure storage')
             db.session.commit()
             
             return jsonify({
@@ -537,7 +535,7 @@ def _handle_v31_upload(data, user):
     except Exception as e:
         logger.error(f"S3 upload error for migration {migration_id}: {str(e)}")
         migration.status = 'failed'
-        migration.error_message = f'Upload error: {str(e)}'
+        migration.set_error_message(f'Upload error: {str(e)}')
         db.session.commit()
         
         return jsonify({
@@ -692,7 +690,7 @@ def upload_ndjson_bundle():
         except Exception as e:
             logger.error(f"S3 upload error for NDJSON bundle {migration_id}: {str(e)}")
             migration.status = 'failed'
-            migration.error_message = f'Bundle upload error: {str(e)}'
+            migration.set_error_message(f'Bundle upload error: {str(e)}')
             db.session.commit()
             
             return jsonify({

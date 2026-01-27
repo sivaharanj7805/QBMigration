@@ -99,13 +99,32 @@ export default function SettingsPage() {
         }
     };
 
-    const handleSaveWhitelabel = (_config: WhitelabelConfig) => {
+    const handleSaveWhitelabel = async (config: WhitelabelConfig) => {
         setSaveStatus("saving");
-        // Simulate API call
-        setTimeout(() => {
-            setSaveStatus("saved");
-            setTimeout(() => setSaveStatus("idle"), 2000);
-        }, 1000);
+        try {
+            const response = await fetch(`${API_URL}/api/settings/whitelabel`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                },
+                body: JSON.stringify(config),
+            });
+
+            if (response.ok) {
+                setSaveStatus("saved");
+                setTimeout(() => setSaveStatus("idle"), 2000);
+            } else {
+                console.error("Failed to save whitelabel config");
+                setSaveStatus("idle");
+                alert("Failed to save branding settings");
+            }
+        } catch (error) {
+            console.error("Save whitelabel error:", error);
+            setSaveStatus("idle");
+            alert("Failed to connect to server");
+        }
     };
 
     const tabs = [
