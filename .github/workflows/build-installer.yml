@@ -1,4 +1,4 @@
-name: Build ForensicBridge Installer
+name: Build ForensicBridge Installer & Extractor
 
 # Trigger on push to main, tags, or manual dispatch
 on:
@@ -6,6 +6,8 @@ on:
     branches: [ "main" ]
     tags:
       - 'v*'
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       create_release:
@@ -15,8 +17,90 @@ on:
         type: boolean
 
 jobs:
-  build:
-    name: Build & Package
+  build-extractor:
+    name: Build QBExtractor
+    runs-on: windows-latest
+
+    steps:
+    # 1. Checkout Code
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 2. Setup .NET (net48 needs MSBuild, but dotnet SDK can restore)
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    # 3. Setup MSBuild (needed for net48 builds)
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    # 4. Install QBFC16 SDK (required for COM reference)
+    - name: Check QBFC16 COM Registration
+      run: |
+        Write-Host "Checking for QBFC16 COM registration..."
+        $qbfc = Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\CLSID\{4EADF8C9-0D1E-4F68-83D6-3F9F0E6FE0FE}" -ErrorAction SilentlyContinue
+        if ($qbfc) {
+          Write-Host "QBFC16 COM is registered"
+        } else {
+          Write-Host "QBFC16 COM not found - build may use embedded interop types"
+          Write-Host "Note: The QBFC16 SDK must be installed on the build machine for full COM support."
+          Write-Host "Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop"
+        }
+
+    # 5. Restore NuGet packages for QBDesktopReader
+    - name: Restore QBDesktopReader Dependencies
+      run: |
+        dotnet restore QBDesktopReader/QBDesktopReader.csproj
+
+    # 6. Build QBDesktopReader (produces QBExtractor.exe)
+    - name: Build QBDesktopReader
+      run: |
+        dotnet build QBDesktopReader/QBDesktopReader.csproj --configuration Release --no-restore
+      continue-on-error: true
+
+    # 7. Publish QBExtractor as self-contained single-file exe
+    - name: Publish QBExtractor
+      run: |
+        dotnet publish QBDesktopReader/QBDesktopReader.csproj `
+          --configuration Release `
+          --runtime win-x86 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:EnableCompressionInSingleFile=true `
+          --output QBDesktopReader/publish
+      continue-on-error: true
+
+    # 8. Verify QBExtractor output
+    - name: Verify QBExtractor Build
+      id: verify_extractor
+      run: |
+        $exePath = "QBDesktopReader/publish/QBExtractor.exe"
+        if (Test-Path $exePath) {
+          $size = (Get-Item $exePath).Length
+          Write-Host "QBExtractor.exe: $size bytes"
+          echo "extractor_built=true" >> $env:GITHUB_OUTPUT
+        } else {
+          Write-Host "WARNING: QBExtractor.exe not found in publish output"
+          Write-Host "This is expected if QBFC16 SDK is not installed on the build machine."
+          Write-Host "Listing available files:"
+          Get-ChildItem -Path "QBDesktopReader/publish" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+          echo "extractor_built=false" >> $env:GITHUB_OUTPUT
+        }
+
+    # 9. Upload QBExtractor artifact
+    - name: Upload QBExtractor Artifact
+      if: steps.verify_extractor.outputs.extractor_built == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: QBExtractor
+        path: QBDesktopReader/publish/QBExtractor.exe
+        if-no-files-found: warn
+
+  build-launcher:
+    name: Build Launcher & Package
     runs-on: windows-latest
 
     steps:
@@ -30,7 +114,7 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    # 3. Setup MSBuild for .NET Framework
+    # 3. Setup MSBuild
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
@@ -39,79 +123,148 @@ jobs:
       run: |
         dotnet restore ForensicBridgeInstaller/ForensicBridgeInstaller.csproj
 
-    # 5. Build the application
-    - name: Build Application
+    # 5. Build the launcher application
+    - name: Build Launcher
       run: |
         dotnet build ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-restore
-        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-build --output ForensicBridgeInstaller/publish
 
-    # 6. List build output
+    # 6. Publish self-contained for Inno Setup installer
+    - name: Publish for Installer
+      run: |
+        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
+          --configuration Release `
+          --runtime win-x86 `
+          --self-contained true `
+          --output ForensicBridgeInstaller/publish
+
+    # 7. Publish single-file standalone exe
+    - name: Publish Standalone Launcher
+      run: |
+        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
+          --configuration Release `
+          --runtime win-x86 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:EnableCompressionInSingleFile=true `
+          --output ForensicBridgeInstaller/standalone
+
+    # 8. List build output
     - name: List Build Output
       run: |
-        Write-Host "=== Build output ==="
-        Get-ChildItem -Path "ForensicBridgeInstaller/publish" -Recurse | Select-Object FullName
+        Write-Host "=== Launcher publish output ==="
+        Get-ChildItem -Path "ForensicBridgeInstaller/publish" -Recurse | Select-Object FullName, Length
+        Write-Host ""
+        Write-Host "=== Standalone launcher output ==="
+        Get-ChildItem -Path "ForensicBridgeInstaller/standalone" -Recurse | Select-Object FullName, Length
 
-    # 7. Compile Installer using Inno Setup
+    # 9. Compile Installer using Inno Setup
     - name: Compile Installer
       uses: Minionguyjosh/INNO-Setup-Action@v1.2.2
       with:
         path: ForensicBridgeInstaller/ForensicBridge.iss
 
-    # 8. List installer output
-    - name: Verify Installer Output
+    # 10. Verify outputs
+    - name: Verify Outputs
       run: |
-        Write-Host "=== Installer output ==="
+        Write-Host "=== Inno Setup installer ==="
         Get-ChildItem -Path "ForensicBridgeInstaller/Output" -Recurse | Select-Object FullName, Length
+        Write-Host ""
+        Write-Host "=== Standalone launcher ==="
+        $exe = Get-Item "ForensicBridgeInstaller/standalone/ForensicBridge.exe" -ErrorAction SilentlyContinue
+        if ($exe) {
+          Write-Host "ForensicBridge.exe (launcher): $($exe.Length) bytes"
+        } else {
+          Write-Host "WARNING: Standalone launcher not found"
+        }
 
-    # 9. Upload the Result as Artifact
-    - name: Upload Installer Artifact
+    # 11. Upload artifacts
+    - name: Upload Setup Installer Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ForensicBridge-Setup
         path: ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe
         if-no-files-found: error
 
-    # 10. Prepare Release Asset
-    - name: Prepare Release Asset
-      run: |
-        Copy-Item "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe" "ForensicBridge_Setup.exe"
-        Write-Host "Release asset prepared: ForensicBridge_Setup.exe"
-        Get-Item "ForensicBridge_Setup.exe" | Select-Object Name, Length
+    - name: Upload Standalone Launcher Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ForensicBridge-Launcher
+        path: ForensicBridgeInstaller/standalone/ForensicBridge.exe
+        if-no-files-found: warn
 
-    # 11. Create GitHub Release
+  release:
+    name: Create Release
+    needs: [build-extractor, build-launcher]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true) || github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-assets
+
+    - name: Prepare Release Assets
+      run: |
+        echo "=== Downloaded artifacts ==="
+        find release-assets -type f -ls
+
+        # Copy launcher assets
+        if [ -f "release-assets/ForensicBridge-Setup/ForensicBridge-Setup.exe" ]; then
+          cp "release-assets/ForensicBridge-Setup/ForensicBridge-Setup.exe" "ForensicBridge_Setup.exe"
+          echo "Launcher Setup installer prepared"
+        fi
+
+        if [ -f "release-assets/ForensicBridge-Launcher/ForensicBridge.exe" ]; then
+          cp "release-assets/ForensicBridge-Launcher/ForensicBridge.exe" "ForensicBridge_Launcher.exe"
+          echo "Standalone launcher prepared"
+        fi
+
+        # Copy extractor
+        if [ -f "release-assets/QBExtractor/QBExtractor.exe" ]; then
+          cp "release-assets/QBExtractor/QBExtractor.exe" "QBExtractor.exe"
+          echo "QBExtractor.exe prepared"
+        else
+          echo "WARNING: QBExtractor.exe not available (QBFC16 SDK may not be on build machine)"
+        fi
+
     - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true) || github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.run_number) }}
         name: ForensicBridge ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Build {0}', github.run_number) }}
         body: |
-          ## ForensicBridge Windows Extractor
+          ## ForensicBridge QuickBooks Desktop Migration
 
-          Download the installer below to extract data from QuickBooks Desktop.
+          ### Downloads
+          - **QBExtractor.exe** - QuickBooks Desktop data extractor (the real extraction engine)
+          - **ForensicBridge_Setup.exe** - GUI launcher with installer (recommended for end users)
+          - **ForensicBridge_Launcher.exe** - Standalone GUI launcher (no installation, downloads QBExtractor automatically)
 
           ### Requirements
           - Windows 10 or later
-          - QuickBooks Desktop installed
-          - Administrator privileges
+          - QuickBooks Desktop installed and running with a company file open
+          - QuickBooks SDK (QBFC16) installed
 
-          ### Installation
-          1. Download `ForensicBridge_Setup.exe`
-          2. Run the installer as Administrator
-          3. Follow the setup wizard
-          4. Enter your Session Code when prompted
+          ### Quick Start
+          1. Download `QBExtractor.exe` (or `ForensicBridge_Setup.exe` for the GUI launcher)
+          2. Run the application
+          3. Enter your Session Code from the migration portal
+          4. Authorize access in QuickBooks when prompted
+          5. Data is extracted, encrypted with AES-256-GCM, and uploaded securely
 
-          ### Usage
-          1. Open ForensicBridge from the Start Menu
-          2. Enter the Session Code from your migration project
-          3. Click "Validate Session"
-          4. Click "Start Extraction" to begin the data migration
-
-          ### Notes
-          - Make sure QuickBooks Desktop is installed and accessible
-          - The QuickBooks SDK (QBFC16) is required for full functionality
-          - You may need to authorize ForensicBridge in QuickBooks when prompted
-        files: ForensicBridge_Setup.exe
+          ### What It Does
+          - Connects to QuickBooks Desktop via QBFC16 COM SDK
+          - Extracts all financial data (customers, invoices, vendors, bills, accounts, etc.)
+          - Sanitizes and validates data with forensic hashing
+          - Encrypts with AES-256-GCM chunked encryption
+          - Uploads securely to ForensicBridge for migration
+        files: |
+          QBExtractor.exe
+          ForensicBridge_Setup.exe
+          ForensicBridge_Launcher.exe
+        fail-on-unmatched-files: false
         draft: false
         prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
         make_latest: ${{ startsWith(github.ref, 'refs/tags/') }}

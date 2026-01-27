@@ -2,7 +2,7 @@
 ; Created with Inno Setup 6.x
 
 #define MyAppName "ForensicBridge"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "ForensicBridge Inc."
 #define MyAppURL "https://forensicbridge.ca"
 #define MyAppExeName "ForensicBridge.exe"
