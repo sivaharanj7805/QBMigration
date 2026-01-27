@@ -33,6 +33,7 @@ from api.webhook_delivery_log import webhook_logs_bp
 from api.license_api import license_bp
 from api.qbo import qbo_bp
 from api.legal import legal_bp
+from api.extractor import extractor_bp
 import sys
 
 
@@ -468,7 +469,8 @@ def create_app(config_name='development'):
     app.register_blueprint(license_bp)
     app.register_blueprint(qbo_bp)
     app.register_blueprint(legal_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal')
+    app.register_blueprint(extractor_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

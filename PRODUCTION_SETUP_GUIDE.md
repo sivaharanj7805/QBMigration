@@ -278,6 +278,15 @@ SESSION_TIMEOUT_HOURS=24
 # ============================================================================
 AUTO_CLEANUP_ENABLED=true
 CLEANUP_CHECK_INTERVAL_MINUTES=15
+
+# ============================================================================
+# EXTRACTOR CONFIGURATION (OPTIONAL)
+# ============================================================================
+# Path to the ForensicBridge Windows extractor executable
+# If not set, the server will look in default locations:
+#   - /var/www/forensicbridge/extractor/ForensicBridge_Setup.exe
+#   - /opt/forensicbridge/extractor/ForensicBridge_Setup.exe
+EXTRACTOR_PATH=/var/www/forensicbridge/extractor/ForensicBridge_Setup.exe
 ```
 
 ### 4.5 Generate Required Keys
