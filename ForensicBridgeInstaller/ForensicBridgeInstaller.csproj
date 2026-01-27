@@ -2,15 +2,15 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
-    <LangVersion>9.0</LangVersion>
+    <LangVersion>latest</LangVersion>
 
     <!-- Application settings -->
     <AssemblyName>ForensicBridge</AssemblyName>
     <RootNamespace>ForensicBridgeInstaller</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Description>ForensicBridge QuickBooks Desktop Migration Tool</Description>
     <Company>ForensicBridge Inc.</Company>
     <Product>ForensicBridge</Product>
@@ -21,8 +21,14 @@
     <!-- Enable nullable types -->
     <Nullable>enable</Nullable>
 
+    <!-- Self-contained for distribution -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
     <!-- Application icon -->
-    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <ApplicationIcon Condition="Exists('icon.ico')">icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- NuGet packages -->

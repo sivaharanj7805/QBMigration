@@ -3,8 +3,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Management;
-using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -24,15 +25,21 @@ namespace ForensicBridgeInstaller
 
         private bool _isQuickBooksInstalled;
         private bool _isQBFCInstalled;
-        private string _sessionCode;
+        private string? _sessionCode;
         private bool _autoStart;
+        private bool _sessionValidated;
+        private string? _deviceFingerprint;
+        private readonly DataUploader _uploader;
 
-        public MainForm(string sessionCode = null, bool autoStart = false)
+        public MainForm(string? sessionCode = null, bool autoStart = false)
         {
             _sessionCode = sessionCode;
             _autoStart = autoStart;
+            _uploader = new DataUploader(logCallback: msg => Log(msg));
+
             InitializeComponents();
             CheckQuickBooksInstallation();
+            _deviceFingerprint = GetDeviceFingerprint();
 
             if (!string.IsNullOrEmpty(_sessionCode))
             {
@@ -41,7 +48,6 @@ namespace ForensicBridgeInstaller
 
             if (_autoStart && !string.IsNullOrEmpty(_sessionCode))
             {
-                // Auto-start extraction after form loads
                 this.Load += (s, e) => btnConnect_Click(null, null);
             }
         }
@@ -190,34 +196,34 @@ namespace ForensicBridgeInstaller
             this.Controls.Add(txtLog);
 
             // Initial log message
-            Log("ForensicBridge Extractor v1.0.0");
+            Log("ForensicBridge Extractor v2.0.0");
             Log("Ready to migrate QuickBooks Desktop data.");
         }
 
         private void CheckQuickBooksInstallation()
         {
             _isQuickBooksInstalled = IsQuickBooksInstalled();
-            _isQBFCInstalled = IsQBFCInstalled();
+            _isQBFCInstalled = QBExtractor.IsQBFCInstalled();
 
             if (_isQuickBooksInstalled && _isQBFCInstalled)
             {
-                lblQBStatus.Text = "QuickBooks Desktop: Installed";
+                lblQBStatus.Text = "QuickBooks Desktop: Installed | SDK: Ready";
                 lblQBStatus.ForeColor = Color.Green;
-                Log("QuickBooks Desktop detected.");
+                Log("QuickBooks Desktop and SDK (QBFC16) detected.");
             }
             else if (_isQuickBooksInstalled && !_isQBFCInstalled)
             {
-                lblQBStatus.Text = "QuickBooks SDK (QBFC16) not found. Please install the QuickBooks SDK.";
+                lblQBStatus.Text = "QuickBooks SDK (QBFC16) not found. Required for extraction.";
                 lblQBStatus.ForeColor = Color.Orange;
-                Log("WARNING: QuickBooks found but SDK is missing.");
-                Log("The extraction requires the QuickBooks SDK (QBFC16).");
+                Log("WARNING: QuickBooks found but SDK (QBFC16) is missing.");
+                Log("The extraction requires the QuickBooks SDK.");
             }
             else
             {
-                lblQBStatus.Text = "QuickBooks Desktop: Not detected. Please install QuickBooks Desktop.";
+                lblQBStatus.Text = "QuickBooks Desktop: Not detected";
                 lblQBStatus.ForeColor = Color.Red;
                 Log("WARNING: QuickBooks Desktop not detected.");
-                Log("Please ensure QuickBooks Desktop is installed on this machine.");
+                Log("Please ensure QuickBooks Desktop is installed and running.");
             }
         }
 
@@ -225,7 +231,6 @@ namespace ForensicBridgeInstaller
         {
             try
             {
-                // Check registry for QuickBooks
                 using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Intuit\QuickBooks"))
                 {
                     if (key != null) return true;
@@ -235,11 +240,9 @@ namespace ForensicBridgeInstaller
                     if (key != null) return true;
                 }
 
-                // Check for QuickBooks processes
                 var processes = Process.GetProcessesByName("QBW32");
                 if (processes.Length > 0) return true;
 
-                // Check common installation paths
                 var paths = new[]
                 {
                     @"C:\Program Files (x86)\Intuit\QuickBooks",
@@ -256,20 +259,7 @@ namespace ForensicBridgeInstaller
             return false;
         }
 
-        private bool IsQBFCInstalled()
-        {
-            try
-            {
-                // Check for QBFC16 COM registration
-                var qbType = Type.GetTypeFromProgID("QBFC16.QBSessionManager");
-                return qbType != null;
-            }
-            catch { }
-
-            return false;
-        }
-
-        private async void btnConnect_Click(object sender, EventArgs e)
+        private async void btnConnect_Click(object? sender, EventArgs? e)
         {
             var sessionCode = txtSessionCode.Text.Trim();
             if (string.IsNullOrEmpty(sessionCode))
@@ -285,29 +275,45 @@ namespace ForensicBridgeInstaller
 
             try
             {
-                var isValid = await ValidateSession(sessionCode);
+                var result = await _uploader.ValidateSessionAsync(
+                    sessionCode, _deviceFingerprint ?? "");
 
-                if (isValid)
+                if (result.Valid)
                 {
+                    _sessionValidated = true;
                     Log("Session validated successfully!");
                     lblStatus.Text = "Session validated. Ready to extract.";
                     btnStartExtraction.Enabled = true;
                     btnStartExtraction.BackColor = Color.FromArgb(34, 197, 94);
                 }
+                else if (result.ServerUnreachable)
+                {
+                    _sessionValidated = false;
+                    Log($"Server unreachable: {result.Error}");
+                    lblStatus.Text = "Cannot reach server. Please check your internet connection.";
+                    MessageBox.Show(
+                        "Cannot connect to the ForensicBridge server.\n\n" +
+                        "Please check your internet connection and try again.\n\n" +
+                        $"Details: {result.Error}",
+                        "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
                 else
                 {
-                    Log("Session validation failed.");
-                    lblStatus.Text = "Invalid session code. Please check and try again.";
-                    MessageBox.Show("The session code is invalid or expired.\n\nPlease check the code from your migration project.",
+                    _sessionValidated = false;
+                    Log($"Session validation failed: {result.Error}");
+                    lblStatus.Text = "Invalid session code.";
+                    MessageBox.Show(
+                        "The session code is invalid or expired.\n\n" +
+                        "Please check the code from your migration project.",
                         "Invalid Session", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)
             {
                 Log($"Error: {ex.Message}");
-                lblStatus.Text = "Validation failed. Check connection.";
+                lblStatus.Text = "Validation failed.";
                 MessageBox.Show($"Could not validate session:\n{ex.Message}",
-                    "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -315,66 +321,12 @@ namespace ForensicBridgeInstaller
             }
         }
 
-        private async Task<bool> ValidateSession(string sessionCode)
-        {
-            try
-            {
-                using (var client = new HttpClient())
-                {
-                    client.Timeout = TimeSpan.FromSeconds(30);
-
-                    // Get device fingerprint
-                    var fingerprint = GetDeviceFingerprint();
-
-                    var url = $"https://api.forensicbridge.ca/api/session/validate";
-                    var content = new StringContent(
-                        Newtonsoft.Json.JsonConvert.SerializeObject(new
-                        {
-                            session_code = sessionCode,
-                            device_fingerprint = fingerprint
-                        }),
-                        System.Text.Encoding.UTF8,
-                        "application/json"
-                    );
-
-                    var response = await client.PostAsync(url, content);
-
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var json = await response.Content.ReadAsStringAsync();
-                        var result = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(json);
-                        return result?.valid == true;
-                    }
-
-                    // For demo/testing, also accept if server is unreachable
-                    // but code matches a pattern
-                    if (sessionCode.Length >= 6)
-                    {
-                        Log("Note: Running in offline mode for testing.");
-                        return true;
-                    }
-                }
-            }
-            catch (HttpRequestException)
-            {
-                // Server unreachable - allow demo mode
-                if (sessionCode.Length >= 6)
-                {
-                    Log("Note: Server unreachable. Running in offline mode.");
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private string GetDeviceFingerprint()
         {
             try
             {
-                var info = new System.Text.StringBuilder();
+                var info = new StringBuilder();
 
-                // CPU ID
                 using (var searcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
@@ -384,7 +336,6 @@ namespace ForensicBridgeInstaller
                     }
                 }
 
-                // Motherboard serial
                 using (var searcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_BaseBoard"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
@@ -394,10 +345,9 @@ namespace ForensicBridgeInstaller
                     }
                 }
 
-                // Hash the info
-                using (var sha = System.Security.Cryptography.SHA256.Create())
+                using (var sha = SHA256.Create())
                 {
-                    var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(info.ToString()));
+                    var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(info.ToString()));
                     return BitConverter.ToString(bytes).Replace("-", "").Substring(0, 32);
                 }
             }
@@ -407,8 +357,15 @@ namespace ForensicBridgeInstaller
             }
         }
 
-        private async void btnStartExtraction_Click(object sender, EventArgs e)
+        private async void btnStartExtraction_Click(object? sender, EventArgs? e)
         {
+            if (!_sessionValidated)
+            {
+                MessageBox.Show("Please validate your session code first.",
+                    "Session Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             if (!_isQBFCInstalled)
             {
                 var result = MessageBox.Show(
@@ -416,8 +373,7 @@ namespace ForensicBridgeInstaller
                     "Would you like to open the QuickBooks SDK download page?",
                     "SDK Required",
                     MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning
-                );
+                    MessageBoxIcon.Warning);
 
                 if (result == DialogResult.Yes)
                 {
@@ -430,101 +386,178 @@ namespace ForensicBridgeInstaller
                 return;
             }
 
+            if (!QBExtractor.IsQuickBooksRunning())
+            {
+                var result = MessageBox.Show(
+                    "QuickBooks Desktop does not appear to be running.\n\n" +
+                    "Please open QuickBooks Desktop and your company file before extraction.\n\n" +
+                    "Continue anyway?",
+                    "QuickBooks Not Running",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.No) return;
+            }
+
             btnStartExtraction.Enabled = false;
             btnConnect.Enabled = false;
+            txtSessionCode.Enabled = false;
             progressBar.Value = 0;
 
+            var sessionCode = txtSessionCode.Text.Trim();
+
+            Log("========================================");
             Log("Starting QuickBooks data extraction...");
+            Log("========================================");
             lblStatus.Text = "Connecting to QuickBooks...";
 
             try
             {
-                await Task.Run(() => RunExtraction());
+                await Task.Run(async () => await RunRealExtraction(sessionCode));
             }
             catch (Exception ex)
             {
-                Log($"Extraction failed: {ex.Message}");
+                Log($"EXTRACTION FAILED: {ex.Message}");
                 lblStatus.Text = "Extraction failed. See log for details.";
-                MessageBox.Show($"Extraction failed:\n{ex.Message}",
+                MessageBox.Show(
+                    $"Extraction failed:\n{ex.Message}\n\n" +
+                    "Please ensure QuickBooks is running and try again.",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
                 btnStartExtraction.Enabled = true;
                 btnConnect.Enabled = true;
+                txtSessionCode.Enabled = true;
             }
         }
 
-        private void RunExtraction()
+        /// <summary>
+        /// Real extraction: connect to QB, extract data, encrypt, upload
+        /// </summary>
+        private async Task RunRealExtraction(string sessionCode)
         {
-            // This would call the actual QBFC extraction logic
-            // For the installer version, we show instructions
-
-            UpdateUI(() =>
+            using (var extractor = new QBExtractor(
+                logCallback: msg => Log(msg),
+                progressCallback: pct => UpdateUI(() => progressBar.Value = Math.Min(pct, 100))))
             {
-                progressBar.Value = 10;
-                lblStatus.Text = "Initializing QuickBooks connection...";
-                Log("Initializing QBFC16 session manager...");
-            });
+                // Step 1: Initialize QBFC
+                UpdateUI(() =>
+                {
+                    progressBar.Value = 5;
+                    lblStatus.Text = "Initializing QuickBooks connection...";
+                });
 
-            System.Threading.Thread.Sleep(1000);
+                if (!extractor.Initialize())
+                {
+                    throw new Exception(
+                        "Could not initialize QuickBooks SDK (QBFC16). " +
+                        "Please ensure the QuickBooks SDK is properly installed.");
+                }
 
-            UpdateUI(() =>
-            {
-                progressBar.Value = 30;
-                lblStatus.Text = "Requesting QuickBooks authorization...";
-                Log("Please authorize this application in QuickBooks.");
-                Log("If QuickBooks prompts you, click 'Yes, Always Allow'.");
-            });
+                // Step 2: Open session
+                UpdateUI(() =>
+                {
+                    progressBar.Value = 10;
+                    lblStatus.Text = "Connecting to QuickBooks Desktop...";
+                });
 
-            System.Threading.Thread.Sleep(2000);
+                Log("Please authorize ForensicBridge in QuickBooks if prompted.");
+                Log("Click 'Yes, Always Allow' when the QuickBooks dialog appears.");
 
-            UpdateUI(() =>
-            {
-                progressBar.Value = 50;
-                lblStatus.Text = "Extracting data...";
-                Log("Extracting customer data...");
-            });
+                if (!extractor.OpenSession())
+                {
+                    throw new Exception(
+                        "Could not connect to QuickBooks. Please ensure:\n" +
+                        "1. QuickBooks Desktop is running\n" +
+                        "2. A company file is open\n" +
+                        "3. You authorized ForensicBridge when prompted");
+                }
 
-            System.Threading.Thread.Sleep(1500);
+                UpdateUI(() => lblStatus.Text = $"Connected to: {extractor.CompanyName}");
 
-            UpdateUI(() =>
-            {
-                progressBar.Value = 70;
-                Log("Extracting invoice data...");
-            });
+                // Step 3: Extract data
+                UpdateUI(() =>
+                {
+                    lblStatus.Text = "Extracting data from QuickBooks...";
+                });
 
-            System.Threading.Thread.Sleep(1500);
+                var extractionResult = extractor.ExtractAll();
 
-            UpdateUI(() =>
-            {
-                progressBar.Value = 90;
-                lblStatus.Text = "Encrypting and uploading...";
-                Log("Encrypting data with AES-256-GCM...");
-                Log("Uploading to secure server...");
-            });
+                if (!extractionResult.Success)
+                {
+                    throw new Exception(
+                        $"Data extraction failed: {extractionResult.Error}");
+                }
 
-            System.Threading.Thread.Sleep(1000);
+                Log($"Extracted {extractionResult.TotalRecords} total records");
+                foreach (var kvp in extractionResult.EntityCounts)
+                {
+                    Log($"  {kvp.Key}: {kvp.Value}");
+                }
 
-            UpdateUI(() =>
-            {
-                progressBar.Value = 100;
-                lblStatus.Text = "Extraction complete!";
-                Log("=================================");
+                // Step 4: Encrypt data
+                UpdateUI(() =>
+                {
+                    progressBar.Value = 85;
+                    lblStatus.Text = "Encrypting data with AES-256-GCM...";
+                });
+
+                Log("Encrypting extracted data...");
+                var encryptionResult = DataEncryptor.Encrypt(extractionResult.JsonData);
+                var originalSizeKB = encryptionResult.OriginalSizeBytes / 1024.0;
+                var encryptedSizeKB = encryptionResult.EncryptedSizeBytes / 1024.0;
+                Log($"Encryption complete: {originalSizeKB:F1} KB -> {encryptedSizeKB:F1} KB");
+
+                // Step 5: Upload to server
+                UpdateUI(() =>
+                {
+                    progressBar.Value = 90;
+                    lblStatus.Text = "Uploading encrypted data to server...";
+                });
+
+                Log("Uploading to ForensicBridge server...");
+                var uploadResult = await _uploader.UploadAsync(
+                    sessionCode,
+                    extractionResult,
+                    encryptionResult,
+                    _deviceFingerprint ?? "");
+
+                if (!uploadResult.Success)
+                {
+                    throw new Exception($"Upload failed: {uploadResult.Error}");
+                }
+
+                // Step 6: Success!
+                UpdateUI(() =>
+                {
+                    progressBar.Value = 100;
+                    lblStatus.Text = "Extraction and upload complete!";
+                });
+
+                Log("========================================");
                 Log("EXTRACTION COMPLETE!");
-                Log("Your data has been securely uploaded.");
-                Log("You can now view your data in the dashboard.");
-                Log("=================================");
+                Log($"Company: {extractionResult.CompanyName}");
+                Log($"Records extracted: {extractionResult.TotalRecords}");
+                Log($"Migration ID: {uploadResult.MigrationId ?? "N/A"}");
+                Log("Your data has been securely encrypted and uploaded.");
+                Log("You can now view your data in the ForensicBridge dashboard.");
+                Log("========================================");
 
-                MessageBox.Show(
-                    "Data extraction completed successfully!\n\n" +
-                    "Your QuickBooks data has been securely uploaded.\n" +
-                    "You can now view your data in the ForensicBridge dashboard.",
-                    "Success",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information
-                );
-            });
+                UpdateUI(() =>
+                {
+                    MessageBox.Show(
+                        $"Data extraction completed successfully!\n\n" +
+                        $"Company: {extractionResult.CompanyName}\n" +
+                        $"Records: {extractionResult.TotalRecords}\n\n" +
+                        "Your QuickBooks data has been securely encrypted\n" +
+                        "and uploaded to ForensicBridge.\n\n" +
+                        "You can now view your data in the dashboard.",
+                        "Extraction Complete",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                });
+            }
         }
 
         private void UpdateUI(Action action)

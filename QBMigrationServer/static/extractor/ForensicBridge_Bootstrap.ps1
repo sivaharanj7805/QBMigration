@@ -1,189 +1,266 @@
-# ForensicBridge Bootstrap Installer
-# Creates ForensicBridge launcher on Windows
+# ============================================================================
+# ForensicBridge Bootstrap Installer v2.0
+# Downloads and runs the ForensicBridge QuickBooks Desktop Extractor
+#
+# This script:
+# 1. Shows a professional GUI for session code entry
+# 2. Downloads the real extractor from GitHub releases
+# 3. Validates prerequisites (QuickBooks SDK)
+# 4. Runs the extractor with the session code
+# ============================================================================
 
 param(
-    [string]$SessionCode = ""
+    [string]$SessionCode = "",
+    [switch]$Silent = $false
 )
 
 $ErrorActionPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # Configuration
+$GitHubRepo = "sivaharanj7805/QBMigration"
+$GitHubExeUrl = "https://github.com/$GitHubRepo/releases/latest/download/ForensicBridge.exe"
+$ServerApiUrl = "https://api.forensicbridge.ca/api/extractor"
 $InstallDir = Join-Path $env:LOCALAPPDATA "ForensicBridge"
+$ExtractorPath = Join-Path $InstallDir "ForensicBridge.exe"
 
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  ForensicBridge Installer" -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
-
-# Create install directory
+# Ensure install directory exists
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
-Write-Host "  Install directory: $InstallDir" -ForegroundColor White
 
-# Create the launcher script
-Write-Host "  Creating launcher..." -ForegroundColor White
+# ============================================================================
+# Download Functions
+# ============================================================================
 
-$LauncherScript = @'
-# ForensicBridge Launcher
+function Download-Extractor {
+    param([System.Windows.Forms.Label]$StatusLabel = $null)
+
+    if (Test-Path $ExtractorPath) {
+        $fileSize = (Get-Item $ExtractorPath).Length
+        if ($fileSize -gt 50000) {
+            return $true
+        }
+    }
+
+    $methods = @(
+        @{ Name = "primary server"; Url = "$ServerApiUrl/download-exe"; Timeout = 60 },
+        @{ Name = "GitHub releases"; Url = $GitHubExeUrl; Timeout = 120 }
+    )
+
+    foreach ($method in $methods) {
+        if ($StatusLabel) {
+            $StatusLabel.Text = "Downloading from $($method.Name)..."
+            $StatusLabel.Refresh()
+        }
+
+        try {
+            Invoke-WebRequest -Uri $method.Url -OutFile $ExtractorPath -UseBasicParsing -TimeoutSec $method.Timeout
+            if ((Test-Path $ExtractorPath) -and (Get-Item $ExtractorPath).Length -gt 50000) {
+                return $true
+            }
+        } catch {
+            continue
+        }
+    }
+
+    # Method 3: GitHub API
+    if ($StatusLabel) {
+        $StatusLabel.Text = "Querying GitHub API..."
+        $StatusLabel.Refresh()
+    }
+
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" -UseBasicParsing -TimeoutSec 30
+        $asset = $release.assets | Where-Object { $_.name -like "*ForensicBridge*.exe" } | Select-Object -First 1
+        if ($asset) {
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ExtractorPath -UseBasicParsing -TimeoutSec 120
+            if ((Test-Path $ExtractorPath) -and (Get-Item $ExtractorPath).Length -gt 50000) {
+                return $true
+            }
+        }
+    } catch { }
+
+    return $false
+}
+
+# ============================================================================
+# GUI
+# ============================================================================
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object Windows.Forms.Form
 $form.Text = "ForensicBridge"
-$form.Size = New-Object Drawing.Size(460, 300)
+$form.Size = New-Object Drawing.Size(500, 380)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox = $false
 $form.BackColor = [Drawing.Color]::FromArgb(245, 247, 250)
 
-# Title
+# Header panel
+$headerPanel = New-Object Windows.Forms.Panel
+$headerPanel.Dock = "Top"
+$headerPanel.Height = 70
+$headerPanel.BackColor = [Drawing.Color]::FromArgb(37, 99, 235)
+$form.Controls.Add($headerPanel)
+
 $title = New-Object Windows.Forms.Label
 $title.Text = "ForensicBridge"
 $title.Font = New-Object Drawing.Font("Segoe UI", 20, [Drawing.FontStyle]::Bold)
-$title.ForeColor = [Drawing.Color]::FromArgb(37, 99, 235)
-$title.Location = New-Object Drawing.Point(20, 15)
+$title.ForeColor = [Drawing.Color]::White
+$title.Location = New-Object Drawing.Point(15, 8)
 $title.AutoSize = $true
-$form.Controls.Add($title)
+$headerPanel.Controls.Add($title)
 
-# Subtitle
 $subtitle = New-Object Windows.Forms.Label
-$subtitle.Text = "QuickBooks Desktop Migration Tool"
+$subtitle.Text = "QuickBooks Desktop Data Migration Tool"
 $subtitle.Font = New-Object Drawing.Font("Segoe UI", 9)
-$subtitle.ForeColor = [Drawing.Color]::Gray
-$subtitle.Location = New-Object Drawing.Point(22, 50)
+$subtitle.ForeColor = [Drawing.Color]::FromArgb(200, 220, 255)
+$subtitle.Location = New-Object Drawing.Point(17, 42)
 $subtitle.AutoSize = $true
-$form.Controls.Add($subtitle)
+$headerPanel.Controls.Add($subtitle)
 
-# Session code label
+# QB Status
+$lblQBStatus = New-Object Windows.Forms.Label
+$lblQBStatus.Font = New-Object Drawing.Font("Segoe UI", 9)
+$lblQBStatus.Location = New-Object Drawing.Point(15, 80)
+$lblQBStatus.Size = New-Object Drawing.Size(460, 20)
+$form.Controls.Add($lblQBStatus)
+
+$qbfcInstalled = $null -ne [Type]::GetTypeFromProgID("QBFC16.QBSessionManager")
+if ($qbfcInstalled) {
+    $lblQBStatus.Text = "QuickBooks SDK: Ready"
+    $lblQBStatus.ForeColor = [Drawing.Color]::Green
+} else {
+    $lblQBStatus.Text = "QuickBooks SDK (QBFC16): Not detected - required for extraction"
+    $lblQBStatus.ForeColor = [Drawing.Color]::Orange
+}
+
+# Session code section
 $lblCode = New-Object Windows.Forms.Label
 $lblCode.Text = "Session Code:"
-$lblCode.Font = New-Object Drawing.Font("Segoe UI", 10)
-$lblCode.Location = New-Object Drawing.Point(20, 100)
+$lblCode.Font = New-Object Drawing.Font("Segoe UI", 10, [Drawing.FontStyle]::Bold)
+$lblCode.Location = New-Object Drawing.Point(15, 115)
 $lblCode.AutoSize = $true
 $form.Controls.Add($lblCode)
 
-# Session code textbox
 $txtCode = New-Object Windows.Forms.TextBox
-$txtCode.Font = New-Object Drawing.Font("Consolas", 14)
-$txtCode.Location = New-Object Drawing.Point(130, 96)
-$txtCode.Size = New-Object Drawing.Size(150, 30)
+$txtCode.Font = New-Object Drawing.Font("Consolas", 12)
+$txtCode.Location = New-Object Drawing.Point(15, 140)
+$txtCode.Size = New-Object Drawing.Size(300, 30)
 $txtCode.CharacterCasing = "Upper"
-$txtCode.MaxLength = 6
+if ($SessionCode) { $txtCode.Text = $SessionCode }
 $form.Controls.Add($txtCode)
 
-# Status message
+# Status label
 $lblStatus = New-Object Windows.Forms.Label
-$lblStatus.Text = "Enter your 6-character session code from the migration portal."
+$lblStatus.Text = "Enter your session code from the migration portal."
 $lblStatus.Font = New-Object Drawing.Font("Segoe UI", 9)
-$lblStatus.Location = New-Object Drawing.Point(20, 140)
-$lblStatus.Size = New-Object Drawing.Size(420, 40)
+$lblStatus.Location = New-Object Drawing.Point(15, 180)
+$lblStatus.Size = New-Object Drawing.Size(460, 40)
 $form.Controls.Add($lblStatus)
+
+# Progress bar
+$progressBar = New-Object Windows.Forms.ProgressBar
+$progressBar.Location = New-Object Drawing.Point(15, 220)
+$progressBar.Size = New-Object Drawing.Size(455, 20)
+$progressBar.Style = "Continuous"
+$progressBar.Visible = $false
+$form.Controls.Add($progressBar)
 
 # Start button
 $btnStart = New-Object Windows.Forms.Button
 $btnStart.Text = "Start Migration"
 $btnStart.Font = New-Object Drawing.Font("Segoe UI", 11, [Drawing.FontStyle]::Bold)
-$btnStart.Location = New-Object Drawing.Point(20, 185)
-$btnStart.Size = New-Object Drawing.Size(180, 40)
-$btnStart.BackColor = [Drawing.Color]::FromArgb(37, 99, 235)
+$btnStart.Location = New-Object Drawing.Point(15, 255)
+$btnStart.Size = New-Object Drawing.Size(220, 45)
+$btnStart.BackColor = [Drawing.Color]::FromArgb(34, 197, 94)
 $btnStart.ForeColor = [Drawing.Color]::White
 $btnStart.FlatStyle = "Flat"
 $btnStart.Cursor = "Hand"
 $form.Controls.Add($btnStart)
 
-# Portal button
-$btnPortal = New-Object Windows.Forms.Button
-$btnPortal.Text = "Open Portal"
-$btnPortal.Font = New-Object Drawing.Font("Segoe UI", 10)
-$btnPortal.Location = New-Object Drawing.Point(210, 185)
-$btnPortal.Size = New-Object Drawing.Size(110, 40)
-$btnPortal.FlatStyle = "Flat"
-$btnPortal.Cursor = "Hand"
-$form.Controls.Add($btnPortal)
-
 # Exit button
 $btnExit = New-Object Windows.Forms.Button
 $btnExit.Text = "Exit"
 $btnExit.Font = New-Object Drawing.Font("Segoe UI", 10)
-$btnExit.Location = New-Object Drawing.Point(330, 185)
-$btnExit.Size = New-Object Drawing.Size(100, 40)
+$btnExit.Location = New-Object Drawing.Point(370, 255)
+$btnExit.Size = New-Object Drawing.Size(100, 45)
 $btnExit.FlatStyle = "Flat"
 $btnExit.Cursor = "Hand"
 $form.Controls.Add($btnExit)
 
-# Button click handlers
+# ============================================================================
+# Button Handlers
+# ============================================================================
+
 $btnStart.Add_Click({
     $code = $txtCode.Text.Trim().ToUpper()
-    if ($code.Length -ne 6) {
+
+    if ($code.Length -lt 4) {
         $lblStatus.ForeColor = [Drawing.Color]::Red
-        $lblStatus.Text = "Please enter a valid 6-character session code."
+        $lblStatus.Text = "Please enter a valid session code."
         return
     }
+
+    $btnStart.Enabled = $false
+    $progressBar.Visible = $true
+    $progressBar.Value = 10
+
+    # Check if extractor exists, download if needed
     $lblStatus.ForeColor = [Drawing.Color]::Blue
-    $lblStatus.Text = "Opening migration portal..."
+    $lblStatus.Text = "Checking extractor..."
     $form.Refresh()
-    Start-Process "https://forensicbridge.ca/extract?session=$code"
+
+    if (-not (Test-Path $ExtractorPath) -or (Get-Item $ExtractorPath -ErrorAction SilentlyContinue).Length -lt 50000) {
+        $progressBar.Value = 20
+        $lblStatus.Text = "Downloading ForensicBridge extractor..."
+        $form.Refresh()
+
+        $downloaded = Download-Extractor -StatusLabel $lblStatus
+
+        if (-not $downloaded) {
+            $lblStatus.ForeColor = [Drawing.Color]::Red
+            $lblStatus.Text = "Download failed. Opening GitHub releases..."
+            $progressBar.Visible = $false
+            $btnStart.Enabled = $true
+            Start-Process "https://github.com/$GitHubRepo/releases"
+            return
+        }
+    }
+
+    $progressBar.Value = 80
+    $lblStatus.ForeColor = [Drawing.Color]::Blue
+    $lblStatus.Text = "Starting ForensicBridge with session code..."
+    $form.Refresh()
+
+    # Launch the real extractor with the session code
+    try {
+        Start-Process -FilePath $ExtractorPath -ArgumentList "--session", $code -WorkingDirectory $InstallDir
+        $progressBar.Value = 100
+        $lblStatus.ForeColor = [Drawing.Color]::Green
+        $lblStatus.Text = "ForensicBridge started! You can close this window."
+
+        # Close this launcher after a short delay
+        Start-Sleep -Seconds 2
+        $form.Close()
+    } catch {
+        $lblStatus.ForeColor = [Drawing.Color]::Red
+        $lblStatus.Text = "Failed to start extractor: $_"
+        $progressBar.Visible = $false
+        $btnStart.Enabled = $true
+    }
 })
 
-$btnPortal.Add_Click({ Start-Process "https://forensicbridge.ca" })
 $btnExit.Add_Click({ $form.Close() })
-$form.Add_Shown({ $txtCode.Focus() })
+
+$form.Add_Shown({
+    $txtCode.Focus()
+    if ($SessionCode -and $SessionCode.Length -ge 4) {
+        $btnStart.PerformClick()
+    }
+})
 
 [void]$form.ShowDialog()
-'@
-
-$LauncherPath = Join-Path $InstallDir "ForensicBridge.ps1"
-$LauncherScript | Out-File -FilePath $LauncherPath -Encoding UTF8
-Write-Host "  [OK] ForensicBridge.ps1" -ForegroundColor Green
-
-# Create batch launcher
-$BatchContent = '@echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0ForensicBridge.ps1"'
-$BatchPath = Join-Path $InstallDir "ForensicBridge.bat"
-$BatchContent | Out-File -FilePath $BatchPath -Encoding ASCII
-Write-Host "  [OK] ForensicBridge.bat" -ForegroundColor Green
-
-# Create VBS launcher (hides console)
-$VbsContent = @'
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & Replace(WScript.ScriptFullName, "ForensicBridge.vbs", "ForensicBridge.ps1") & """", 0, False
-'@
-$VbsPath = Join-Path $InstallDir "ForensicBridge.vbs"
-$VbsContent | Out-File -FilePath $VbsPath -Encoding ASCII
-Write-Host "  [OK] ForensicBridge.vbs" -ForegroundColor Green
-
-# Create desktop shortcut
-Write-Host "  Creating shortcut..." -ForegroundColor White
-try {
-    $Desktop = [Environment]::GetFolderPath("Desktop")
-    $WshShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WshShell.CreateShortcut("$Desktop\ForensicBridge.lnk")
-    $Shortcut.TargetPath = "wscript.exe"
-    $Shortcut.Arguments = "`"$VbsPath`""
-    $Shortcut.WorkingDirectory = $InstallDir
-    $Shortcut.Description = "ForensicBridge QuickBooks Migration"
-    $Shortcut.Save()
-    Write-Host "  [OK] Desktop shortcut" -ForegroundColor Green
-} catch {
-    Write-Host "  [--] Could not create shortcut" -ForegroundColor Yellow
-}
-
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host "  Installation Complete!" -ForegroundColor Green
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "  ForensicBridge installed to: $InstallDir" -ForegroundColor Cyan
-Write-Host ""
-
-# Ask to launch
-$Launch = Read-Host "  Launch ForensicBridge now? (Y/n)"
-if ($Launch -ne "n" -and $Launch -ne "N") {
-    Write-Host "  Starting ForensicBridge..." -ForegroundColor White
-    Start-Process "wscript.exe" -ArgumentList "`"$VbsPath`""
-}
-
-Write-Host ""
