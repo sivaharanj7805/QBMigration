@@ -19,10 +19,10 @@ $ErrorActionPreference = "SilentlyContinue"
 
 # Configuration
 $GitHubRepo = "sivaharanj7805/QBMigration"
-$GitHubExeUrl = "https://github.com/$GitHubRepo/releases/latest/download/ForensicBridge.exe"
+$GitHubExeUrl = "https://github.com/$GitHubRepo/releases/latest/download/QBExtractor.exe"
 $ServerApiUrl = "https://api.forensicbridge.ca/api/extractor"
 $InstallDir = Join-Path $env:LOCALAPPDATA "ForensicBridge"
-$ExtractorPath = Join-Path $InstallDir "ForensicBridge.exe"
+$ExtractorPath = Join-Path $InstallDir "QBExtractor.exe"
 
 # Ensure install directory exists
 if (-not (Test-Path $InstallDir)) {
@@ -72,7 +72,7 @@ function Download-Extractor {
 
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" -UseBasicParsing -TimeoutSec 30
-        $asset = $release.assets | Where-Object { $_.name -like "*ForensicBridge*.exe" } | Select-Object -First 1
+        $asset = $release.assets | Where-Object { $_.name -like "*QBExtractor*.exe" } | Select-Object -First 1
         if ($asset) {
             Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ExtractorPath -UseBasicParsing -TimeoutSec 120
             if ((Test-Path $ExtractorPath) -and (Get-Item $ExtractorPath).Length -gt 50000) {

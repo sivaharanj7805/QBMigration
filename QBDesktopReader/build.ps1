@@ -45,14 +45,13 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Rename output to ForensicBridge
+# Verify output
 $exePath = "$PublishDir\QBExtractor.exe"
-$newExePath = "$PublishDir\ForensicBridge.exe"
 if (Test-Path $exePath) {
-    Rename-Item -Path $exePath -NewName "ForensicBridge.exe"
+    Write-Host "Build successful: $exePath" -ForegroundColor Green
+} else {
+    Write-Host "Build output not found at expected path" -ForegroundColor Yellow
 }
-
-Write-Host "Build successful: $newExePath" -ForegroundColor Green
 
 # Step 4: Code signing (optional)
 if ($SignCode -and $CertificatePath) {
@@ -65,7 +64,7 @@ if ($SignCode -and $CertificatePath) {
             /td sha256 `
             /fd sha256 `
             /f $CertificatePath `
-            $newExePath
+            $exePath
     } else {
         Write-Host "signtool.exe not found. Install Windows SDK." -ForegroundColor Yellow
     }
@@ -96,7 +95,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Build Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Output: $PublishDir\ForensicBridge.exe"
+Write-Host "Output: $PublishDir\QBExtractor.exe"
 Write-Host ""
 Write-Host "To create installer:"
 Write-Host "  .\build.ps1 -Release -CreateInstaller"
