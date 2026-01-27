@@ -6,6 +6,8 @@ on:
     branches: [ "main" ]
     tags:
       - 'v*'
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       create_release:
@@ -30,7 +32,7 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    # 3. Setup MSBuild for .NET Framework
+    # 3. Setup MSBuild
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
@@ -43,42 +45,85 @@ jobs:
     - name: Build Application
       run: |
         dotnet build ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-restore
-        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-build --output ForensicBridgeInstaller/publish
 
-    # 6. List build output
+    # 6. Publish self-contained for Inno Setup installer
+    - name: Publish for Installer
+      run: |
+        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
+          --configuration Release `
+          --runtime win-x86 `
+          --self-contained true `
+          --output ForensicBridgeInstaller/publish
+
+    # 7. Publish single-file standalone exe
+    - name: Publish Standalone Exe
+      run: |
+        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
+          --configuration Release `
+          --runtime win-x86 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:EnableCompressionInSingleFile=true `
+          --output ForensicBridgeInstaller/standalone
+
+    # 8. List build output
     - name: List Build Output
       run: |
-        Write-Host "=== Build output ==="
-        Get-ChildItem -Path "ForensicBridgeInstaller/publish" -Recurse | Select-Object FullName
+        Write-Host "=== Installer publish output ==="
+        Get-ChildItem -Path "ForensicBridgeInstaller/publish" -Recurse | Select-Object FullName, Length
+        Write-Host ""
+        Write-Host "=== Standalone exe output ==="
+        Get-ChildItem -Path "ForensicBridgeInstaller/standalone" -Recurse | Select-Object FullName, Length
 
-    # 7. Compile Installer using Inno Setup
+    # 9. Compile Installer using Inno Setup
     - name: Compile Installer
       uses: Minionguyjosh/INNO-Setup-Action@v1.2.2
       with:
         path: ForensicBridgeInstaller/ForensicBridge.iss
 
-    # 8. List installer output
-    - name: Verify Installer Output
+    # 10. Verify outputs
+    - name: Verify Outputs
       run: |
-        Write-Host "=== Installer output ==="
+        Write-Host "=== Inno Setup installer ==="
         Get-ChildItem -Path "ForensicBridgeInstaller/Output" -Recurse | Select-Object FullName, Length
+        Write-Host ""
+        Write-Host "=== Standalone exe ==="
+        $exe = Get-Item "ForensicBridgeInstaller/standalone/ForensicBridge.exe" -ErrorAction SilentlyContinue
+        if ($exe) {
+          Write-Host "ForensicBridge.exe: $($exe.Length) bytes"
+        } else {
+          Write-Host "WARNING: Standalone exe not found"
+        }
 
-    # 9. Upload the Result as Artifact
-    - name: Upload Installer Artifact
+    # 11. Upload artifacts
+    - name: Upload Setup Installer Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ForensicBridge-Setup
         path: ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe
         if-no-files-found: error
 
-    # 10. Prepare Release Asset
-    - name: Prepare Release Asset
+    - name: Upload Standalone Exe Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ForensicBridge-Standalone
+        path: ForensicBridgeInstaller/standalone/ForensicBridge.exe
+        if-no-files-found: warn
+
+    # 12. Prepare Release Assets
+    - name: Prepare Release Assets
       run: |
         Copy-Item "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe" "ForensicBridge_Setup.exe"
-        Write-Host "Release asset prepared: ForensicBridge_Setup.exe"
-        Get-Item "ForensicBridge_Setup.exe" | Select-Object Name, Length
+        $standalone = "ForensicBridgeInstaller/standalone/ForensicBridge.exe"
+        if (Test-Path $standalone) {
+          Copy-Item $standalone "ForensicBridge.exe"
+          Write-Host "Both release assets prepared"
+        } else {
+          Write-Host "Only Setup installer prepared (standalone not available)"
+        }
 
-    # 11. Create GitHub Release
+    # 13. Create GitHub Release
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true) || github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v2
@@ -88,30 +133,33 @@ jobs:
         body: |
           ## ForensicBridge Windows Extractor
 
-          Download the installer below to extract data from QuickBooks Desktop.
+          Download the installer or standalone executable to extract data from QuickBooks Desktop.
+
+          ### Downloads
+          - **ForensicBridge_Setup.exe** - Full installer with Start Menu shortcuts (recommended)
+          - **ForensicBridge.exe** - Standalone executable (no installation required)
 
           ### Requirements
           - Windows 10 or later
-          - QuickBooks Desktop installed
-          - Administrator privileges
+          - QuickBooks Desktop installed and running
+          - QuickBooks SDK (QBFC16) for data extraction
 
-          ### Installation
-          1. Download `ForensicBridge_Setup.exe`
-          2. Run the installer as Administrator
-          3. Follow the setup wizard
-          4. Enter your Session Code when prompted
+          ### Quick Start
+          1. Download `ForensicBridge_Setup.exe` or `ForensicBridge.exe`
+          2. Run the application
+          3. Enter your Session Code from the migration project
+          4. Click "Validate Session"
+          5. Click "Start Extraction"
+          6. Authorize ForensicBridge in QuickBooks when prompted
 
-          ### Usage
-          1. Open ForensicBridge from the Start Menu
-          2. Enter the Session Code from your migration project
-          3. Click "Validate Session"
-          4. Click "Start Extraction" to begin the data migration
-
-          ### Notes
-          - Make sure QuickBooks Desktop is installed and accessible
-          - The QuickBooks SDK (QBFC16) is required for full functionality
-          - You may need to authorize ForensicBridge in QuickBooks when prompted
-        files: ForensicBridge_Setup.exe
+          ### What It Does
+          - Connects to QuickBooks Desktop via QBFC16
+          - Extracts all financial data (customers, invoices, vendors, bills, etc.)
+          - Encrypts data with AES-256-GCM
+          - Uploads securely to ForensicBridge for migration
+        files: |
+          ForensicBridge_Setup.exe
+          ForensicBridge.exe
         draft: false
         prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
         make_latest: ${{ startsWith(github.ref, 'refs/tags/') }}
