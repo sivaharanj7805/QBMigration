@@ -18,7 +18,7 @@ on:
 
 jobs:
   build-extractor:
-    name: Build QBExtractor
+    name: Build QBExtractor (QODBC Mode)
     runs-on: windows-latest
 
     steps:
@@ -26,7 +26,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    # 2. Setup .NET (net48 needs MSBuild, but dotnet SDK can restore)
+    # 2. Setup .NET
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -36,29 +36,27 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 4. Install QBFC16 SDK (required for COM reference)
-    - name: Check QBFC16 COM Registration
+    # 4. Display build info
+    - name: Build Info
       run: |
-        Write-Host "Checking for QBFC16 COM registration..."
-        $qbfc = Get-ItemProperty -Path "HKLM:\SOFTWARE\Classes\CLSID\{4EADF8C9-0D1E-4F68-83D6-3F9F0E6FE0FE}" -ErrorAction SilentlyContinue
-        if ($qbfc) {
-          Write-Host "QBFC16 COM is registered"
-        } else {
-          Write-Host "QBFC16 COM not found - build may use embedded interop types"
-          Write-Host "Note: The QBFC16 SDK must be installed on the build machine for full COM support."
-          Write-Host "Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop"
-        }
+        Write-Host "================================================"
+        Write-Host "Building QBExtractor v4.4 - Multi-Backend Support"
+        Write-Host "================================================"
+        Write-Host ""
+        Write-Host "This build supports QODBC backend (no SDK required)"
+        Write-Host "Users need QODBC Driver installed for extraction"
+        Write-Host "Download QODBC: https://qodbc.com/qodbc-downloads/"
+        Write-Host ""
 
     # 5. Restore NuGet packages for QBDesktopReader
     - name: Restore QBDesktopReader Dependencies
       run: |
         dotnet restore QBDesktopReader/QBDesktopReader.csproj
 
-    # 6. Build QBDesktopReader (produces QBExtractor.exe)
-    - name: Build QBDesktopReader
+    # 6. Build QBDesktopReader (QODBC mode - no SDK flag)
+    - name: Build QBDesktopReader (QODBC Mode)
       run: |
         dotnet build QBDesktopReader/QBDesktopReader.csproj --configuration Release --no-restore
-      continue-on-error: true
 
     # 7. Publish QBExtractor as self-contained single-file exe
     - name: Publish QBExtractor
@@ -71,7 +69,6 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:EnableCompressionInSingleFile=true `
           --output QBDesktopReader/publish
-      continue-on-error: true
 
     # 8. Verify QBExtractor output
     - name: Verify QBExtractor Build
@@ -80,14 +77,17 @@ jobs:
         $exePath = "QBDesktopReader/publish/QBExtractor.exe"
         if (Test-Path $exePath) {
           $size = (Get-Item $exePath).Length
-          Write-Host "QBExtractor.exe: $size bytes"
+          $sizeKB = [math]::Round($size / 1KB, 1)
+          Write-Host "SUCCESS: QBExtractor.exe built ($sizeKB KB)"
+          Write-Host ""
+          Write-Host "This build supports QODBC backend"
+          Write-Host "Users need QODBC Driver for extraction"
           echo "extractor_built=true" >> $env:GITHUB_OUTPUT
         } else {
-          Write-Host "WARNING: QBExtractor.exe not found in publish output"
-          Write-Host "This is expected if QBFC16 SDK is not installed on the build machine."
-          Write-Host "Listing available files:"
+          Write-Host "ERROR: QBExtractor.exe not found in publish output"
           Get-ChildItem -Path "QBDesktopReader/publish" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
           echo "extractor_built=false" >> $env:GITHUB_OUTPUT
+          exit 1
         }
 
     # 9. Upload QBExtractor artifact
@@ -97,7 +97,7 @@ jobs:
       with:
         name: QBExtractor
         path: QBDesktopReader/publish/QBExtractor.exe
-        if-no-files-found: warn
+        if-no-files-found: error
 
   build-launcher:
     name: Build Launcher & Package
@@ -225,8 +225,6 @@ jobs:
         if [ -f "release-assets/QBExtractor/QBExtractor.exe" ]; then
           cp "release-assets/QBExtractor/QBExtractor.exe" "QBExtractor.exe"
           echo "QBExtractor.exe prepared"
-        else
-          echo "WARNING: QBExtractor.exe not available (QBFC16 SDK may not be on build machine)"
         fi
 
     - name: Create GitHub Release
@@ -235,31 +233,40 @@ jobs:
         tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', github.run_number) }}
         name: ForensicBridge ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Build {0}', github.run_number) }}
         body: |
-          ## ForensicBridge QuickBooks Desktop Migration
+          ## ForensicBridge QuickBooks Desktop Migration v4.4
+
+          ### Multi-Backend Support
+          This release supports **QODBC backend** for QuickBooks data extraction without SDK installation.
 
           ### Downloads
-          - **QBExtractor.exe** - QuickBooks Desktop data extractor (the real extraction engine)
+          - **QBExtractor.exe** - QuickBooks Desktop data extractor (QODBC backend)
           - **ForensicBridge_Setup.exe** - GUI launcher with installer (recommended for end users)
-          - **ForensicBridge_Launcher.exe** - Standalone GUI launcher (no installation, downloads QBExtractor automatically)
+          - **ForensicBridge_Launcher.exe** - Standalone GUI launcher
 
           ### Requirements
           - Windows 10 or later
           - QuickBooks Desktop installed and running with a company file open
-          - QuickBooks SDK (QBFC16) installed
+          - **QODBC Driver** (free for read operations)
+            - Download: https://qodbc.com/qodbc-downloads/
 
           ### Quick Start
-          1. Download `QBExtractor.exe` (or `ForensicBridge_Setup.exe` for the GUI launcher)
-          2. Run the application
-          3. Enter your Session Code from the migration portal
-          4. Authorize access in QuickBooks when prompted
+          1. Install QODBC Driver from https://qodbc.com/qodbc-downloads/
+          2. Download `QBExtractor.exe` (or `ForensicBridge_Setup.exe` for the GUI launcher)
+          3. Run the application
+          4. Enter your Session Code from the migration portal
           5. Data is extracted, encrypted with AES-256-GCM, and uploaded securely
 
           ### What It Does
-          - Connects to QuickBooks Desktop via QBFC16 COM SDK
+          - Connects to QuickBooks Desktop via QODBC driver
           - Extracts all financial data (customers, invoices, vendors, bills, accounts, etc.)
           - Sanitizes and validates data with forensic hashing
           - Encrypts with AES-256-GCM chunked encryption
           - Uploads securely to ForensicBridge for migration
+
+          ### Backend Options
+          Run `QBExtractor.exe --diagnostics` to check available backends:
+          - **QODBC** (default): SQL-based access via QODBC driver
+          - **SDK** (optional): Full QBFC16 SDK access (requires separate SDK installation)
         files: |
           QBExtractor.exe
           ForensicBridge_Setup.exe

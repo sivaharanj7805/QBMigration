@@ -2,34 +2,53 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- CRITICAL: QBFC16 is 32-bit only - must target x86 -->
+    <!-- Target .NET Framework 4.8 for maximum Windows compatibility -->
     <TargetFramework>net48</TargetFramework>
+    <!-- QBFC16 is 32-bit only - must target x86 when using SDK -->
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <LangVersion>9.0</LangVersion>
-    
+
     <!-- Application settings -->
     <AssemblyName>QBExtractor</AssemblyName>
     <RootNamespace>QBDesktopExtractor</RootNamespace>
-    <Version>4.3.0</Version>
-    <Description>QuickBooks Desktop to Cloud Migration Tool</Description>
-    
+    <Version>4.4.0</Version>
+    <Description>QuickBooks Desktop Data Extractor - Supports SDK and QODBC backends</Description>
+
     <!-- Enable nullable types -->
     <Nullable>enable</Nullable>
-    
-    <!-- Generate COM interop wrapper -->
+
+    <!-- Windows Forms not needed -->
     <UseWindowsForms>false</UseWindowsForms>
   </PropertyGroup>
 
-  <!-- 
-    QBFC16 COM Reference
+  <!--
+    BUILD CONFIGURATIONS:
+
+    1. Default (no SDK): Build with QODBC support only
+       dotnet build -c Release
+
+    2. With SDK: Build with both QBFC16 SDK and QODBC support
+       dotnet build -c Release -p:UseSDK=true
+
+    Note: SDK build requires QBFC16 to be installed on the build machine.
+    Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/get-started
+  -->
+
+  <!-- SDK conditional compilation -->
+  <PropertyGroup Condition="'$(UseSDK)' == 'true'">
+    <DefineConstants>$(DefineConstants);USE_SDK</DefineConstants>
+  </PropertyGroup>
+
+  <!--
+    QBFC16 COM Reference - Only included when UseSDK=true
     IMPORTANT: The QuickBooks Desktop SDK must be installed first!
     Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop
-    
+
     After SDK installation, QBFC16 is registered as a COM component.
     The SDK installs to: C:\Program Files (x86)\Intuit\IDN\
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseSDK)' == 'true'">
     <COMReference Include="QBFC16Lib">
       <Guid>{4EADF8C9-0D1E-4F68-83D6-3F9F0E6FE0FE}</Guid>
       <VersionMajor>1</VersionMajor>
@@ -41,6 +60,14 @@
     </COMReference>
   </ItemGroup>
 
+  <!-- Exclude SDK-specific files when not using SDK -->
+  <ItemGroup Condition="'$(UseSDK)' != 'true'">
+    <Compile Remove="QBSessionManager.cs" />
+    <Compile Remove="QBDataExtractor.cs" />
+    <Compile Remove="QBIteratorHelper.cs" />
+    <Compile Remove="SDKDataExtractor.cs" />
+  </ItemGroup>
+
   <!-- NuGet packages -->
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
@@ -48,6 +75,8 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- ODBC support for QODBC backend -->
+    <PackageReference Include="System.Data.Odbc" Version="8.0.0" />
   </ItemGroup>
 
   <!-- Copy config files to output -->
@@ -61,6 +90,11 @@
     <None Update="config_schema.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <!-- Reference Microsoft.VisualBasic for ComputerInfo -->
+  <ItemGroup>
+    <Reference Include="Microsoft.VisualBasic" />
   </ItemGroup>
 
 </Project>
