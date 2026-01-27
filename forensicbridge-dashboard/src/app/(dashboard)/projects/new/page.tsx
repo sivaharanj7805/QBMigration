@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Mail, FileText, Loader2, Download } from 'lucide-react';
+import { ArrowLeft, Building2, Mail, FileText, Loader2, Download, ExternalLink, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
+// GitHub release URL as fallback
+const GITHUB_RELEASES_URL = 'https://github.com/sivaharanj7805/QBMigration/releases';
 
 export default function NewProjectPage() {
     const router = useRouter();
@@ -20,6 +23,7 @@ export default function NewProjectPage() {
         session_id: string;
         name: string;
     } | null>(null);
+    const [downloadStarted, setDownloadStarted] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -115,19 +119,46 @@ export default function NewProjectPage() {
                             </ol>
                         </div>
 
-                        <div className="flex gap-3">
+                        <div className="space-y-4">
+                            {/* Primary Download Button */}
                             <a
                                 href={`${API_URL}/api/extractor/download`}
-                                className="flex-1 py-3 px-4 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium hover:from-emerald-600 hover:to-teal-600 flex items-center justify-center gap-2 transition-all"
+                                onClick={() => setDownloadStarted(true)}
+                                className="w-full py-3 px-4 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium hover:from-emerald-600 hover:to-teal-600 flex items-center justify-center gap-2 transition-all"
                             >
-                                <Download className="w-5 h-5" />
-                                Download Extractor
+                                {downloadStarted ? (
+                                    <>
+                                        <CheckCircle2 className="w-5 h-5" />
+                                        Download Started
+                                    </>
+                                ) : (
+                                    <>
+                                        <Download className="w-5 h-5" />
+                                        Download ForensicBridge Extractor
+                                    </>
+                                )}
                             </a>
+
+                            {/* Alternative Download Options */}
+                            <div className="flex items-center gap-2 text-sm text-slate-400">
+                                <span>Alternative:</span>
+                                <a
+                                    href={GITHUB_RELEASES_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                                >
+                                    Download from GitHub Releases
+                                    <ExternalLink className="w-3 h-3" />
+                                </a>
+                            </div>
+
+                            {/* View Project Button */}
                             <Link
                                 href={`/projects/${createdProject.id}`}
-                                className="py-3 px-6 rounded-lg bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors"
+                                className="w-full py-3 px-6 rounded-lg bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors flex items-center justify-center"
                             >
-                                View Project
+                                View Project Dashboard
                             </Link>
                         </div>
                     </div>
