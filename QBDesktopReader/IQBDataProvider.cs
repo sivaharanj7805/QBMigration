@@ -252,8 +252,10 @@ namespace QBDesktopExtractor
         {
             switch (backend)
             {
+#if USE_QBFC
                 case ExtractionBackend.QBFC:
                     return new QBFCDataProvider(logger, maxQBXMLVersion);
+#endif
 
                 case ExtractionBackend.QODBC:
                     return new QODBCDataProvider(logger);
@@ -266,7 +268,7 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Create the best available provider based on system detection
-        /// Priority: QBFC > QODBC
+        /// Priority: QODBC (primary), QBFC (if available)
         /// </summary>
         public static IQBDataProvider CreateBestAvailableProvider(
             IRedactingLogger logger = null,
@@ -274,15 +276,17 @@ namespace QBDesktopExtractor
         {
             logger?.Log(LogLevel.Info, "Auto-detecting best available QuickBooks backend...");
 
-            // Try QBFC first (most reliable)
+#if USE_QBFC
+            // Try QBFC first if compiled with SDK support
             var qbfcResult = CheckQBFCAvailability(logger);
             if (qbfcResult.Available)
             {
                 logger?.Log(LogLevel.Info, "Using QBFC backend (SDK detected)");
                 return new QBFCDataProvider(logger, maxQBXMLVersion);
             }
+#endif
 
-            // Try QODBC
+            // Try QODBC (primary backend)
             var qodbcResult = CheckQODBCAvailability(logger);
             if (qodbcResult.Available)
             {
@@ -293,14 +297,15 @@ namespace QBDesktopExtractor
             // No backend available - throw helpful error
             throw new QBBackendNotFoundException(
                 "No QuickBooks extraction backend found.\n\n" +
-                "Please install one of the following:\n\n" +
-                "Option 1 (Recommended): QuickBooks Desktop SDK (QBFC16)\n" +
-                "  - Download from: https://developer.intuit.com\n" +
-                "  - Requires free Intuit Developer account\n\n" +
-                "Option 2: QODBC Driver\n" +
-                "  - Download from: https://qodbc.com/qodbc-downloads/\n" +
-                "  - Free for read-only operations\n\n" +
-                "After installation, restart this application.");
+                "Please install QODBC Driver:\n\n" +
+                "  1. Go to: https://qodbc.com/qodbc-downloads/\n" +
+                "  2. Download 'QODBC Desktop Read-Only Driver' (FREE)\n" +
+                "  3. Run installer as Administrator\n" +
+                "  4. Restart your computer\n" +
+                "  5. Run this application again\n\n" +
+                "Note: The Intuit QBFC SDK is no longer available for download.\n" +
+                "QODBC is the recommended solution and works with all QB Desktop versions.\n\n" +
+                "After installation, ensure QuickBooks Desktop is running with your company file open.");
         }
     }
 
