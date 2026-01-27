@@ -2,34 +2,54 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- CRITICAL: QBFC16 is 32-bit only - must target x86 -->
+    <!-- CRITICAL: QODBC/QBFC16 are 32-bit only - must target x86 -->
     <TargetFramework>net48</TargetFramework>
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <LangVersion>9.0</LangVersion>
-    
+
     <!-- Application settings -->
     <AssemblyName>QBExtractor</AssemblyName>
     <RootNamespace>QBDesktopExtractor</RootNamespace>
     <Version>4.4.0</Version>
     <Description>QuickBooks Desktop to Cloud Migration Tool</Description>
-    
+
     <!-- Enable nullable types -->
     <Nullable>enable</Nullable>
-    
+
     <!-- Generate COM interop wrapper -->
     <UseWindowsForms>false</UseWindowsForms>
+
+    <!--
+      QBFC SDK Configuration:
+      Set to 'true' ONLY if you have the legacy Intuit QBFC16 SDK installed.
+      The SDK is no longer available for download from Intuit (deprecated 2024).
+
+      Default: false - Uses QODBC as the primary backend (recommended)
+
+      To enable QBFC (if SDK is installed from old QuickBooks):
+        dotnet build -c Release /p:UseQBFC=true
+    -->
+    <UseQBFC Condition="'$(UseQBFC)' == ''">false</UseQBFC>
+
+    <!-- Define USE_QBFC symbol when QBFC is enabled -->
+    <DefineConstants Condition="'$(UseQBFC)' == 'true'">$(DefineConstants);USE_QBFC</DefineConstants>
   </PropertyGroup>
 
-  <!-- 
-    QBFC16 COM Reference
-    IMPORTANT: The QuickBooks Desktop SDK must be installed first!
-    Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop
-    
-    After SDK installation, QBFC16 is registered as a COM component.
-    The SDK installs to: C:\Program Files (x86)\Intuit\IDN\
+  <!--
+    QBFC16 COM Reference (OPTIONAL - Legacy SDK)
+    =============================================
+    NOTE: The Intuit QuickBooks Desktop SDK is NO LONGER AVAILABLE for download.
+    Intuit deprecated the SDK in 2024.
+
+    This reference is ONLY included if UseQBFC=true AND the SDK is installed.
+    The SDK may still be present on systems with older QuickBooks installations.
+
+    PRIMARY SOLUTION: Use QODBC Driver instead
+    Download from: https://qodbc.com/qodbc-downloads/
+    Free for read-only operations.
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(UseQBFC)' == 'true'">
     <COMReference Include="QBFC16Lib">
       <Guid>{4EADF8C9-0D1E-4F68-83D6-3F9F0E6FE0FE}</Guid>
       <VersionMajor>1</VersionMajor>

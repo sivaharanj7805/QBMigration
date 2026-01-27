@@ -1,7 +1,14 @@
+// Conditionally compiled - only when USE_QBFC is defined (QBFC SDK installed)
+// The Intuit QBFC SDK is no longer available for download (deprecated 2024).
+// Use QODBC as the primary backend instead.
+// To build with QBFC support: dotnet build /p:UseQBFC=true
+#if USE_QBFC
+
 using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using QBFC16Lib;
 
 namespace QBDesktopExtractor
 {
@@ -333,3 +340,5 @@ namespace QBDesktopExtractor
         }
     }
 }
+
+#endif // USE_QBFC
