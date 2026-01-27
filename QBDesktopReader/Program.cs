@@ -11,18 +11,19 @@ namespace QBDesktopExtractor
 {
     /// <summary>
     /// QuickBooks Desktop to Cloud - Enterprise Migration Tool
-    /// v4.2: Production-Ready with Accurate Claims
-    /// 
-    /// FIXES FROM REVIEW:
-    /// - Accurate algorithm description (AES-256-GCM-Chunked)
-    /// - Correct entity type count (dynamic)
-    /// - No "zero-footprint" claim (uses "low-memory streaming")
-    /// - Progress-based, not time estimates
+    /// v4.4: Multi-Backend Support with Auto-Fallback
+    ///
+    /// FEATURES:
+    /// - Multiple extraction backends: QBFC SDK (recommended), QODBC (fallback)
+    /// - Auto-detection of available backends
+    /// - Graceful fallback when primary backend unavailable
+    /// - AES-256-GCM chunked encryption
+    /// - Low-memory streaming for large datasets
+    /// - Incremental sync support
+    /// - NDJSON warehouse-ready output
     /// - Automation-friendly (--no-pause, exit codes)
-    /// - Single cleanup path (idempotent)
+    /// - Comprehensive error handling with retries
     /// - Sensitive data redacted by default
-    /// - CLI args support (--config, --extract-only, etc.)
-    /// - Structured logging
     /// </summary>
     class Program
     {
@@ -60,9 +61,16 @@ namespace QBDesktopExtractor
             string sessionId = Guid.NewGuid().ToString();
             
             var logConfig = new RedactionConfig { Enabled = true };
-            _logger = new RedactingConsoleLogger(logConfig, 
+            _logger = new RedactingConsoleLogger(logConfig,
                 options.Verbose ? LogLevel.Debug : LogLevel.Info);
-            
+
+            // Handle --show-backends
+            if (options.ShowBackends)
+            {
+                ShowAvailableBackends(_logger);
+                return ExitCode.Success;
+            }
+
             _logger.Log(LogLevel.Info, "Migration Session ID: {0}", sessionId);
             _logger.Log(LogLevel.Info, "Started: {0}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 
@@ -112,8 +120,8 @@ namespace QBDesktopExtractor
             Console.WriteLine();
             Console.WriteLine(new string('=', 80));
             Console.WriteLine("  QuickBooks Desktop to Cloud - Enterprise Migration Tool");
-            Console.WriteLine("  Version 4.2 - Production-Ready Low-Memory Streaming");
-            Console.WriteLine("  AES-256-GCM Chunked Encryption | COM Thread-Safe");
+            Console.WriteLine("  Version 4.4 - Multi-Backend Support with Auto-Fallback");
+            Console.WriteLine("  AES-256-GCM Encryption | QBFC SDK + QODBC | COM Thread-Safe");
             Console.WriteLine(new string('=', 80));
             Console.WriteLine();
         }
@@ -507,21 +515,46 @@ namespace QBDesktopExtractor
 
         private static void CheckPrerequisites()
         {
-            try
+            // Check for any available backend
+            var backends = QBDataProviderFactory.DetectAvailableBackends(_logger);
+            bool hasBackend = backends.Exists(b => b.Available);
+
+            if (!hasBackend)
             {
-                var qbType = Type.GetTypeFromProgID("QBFC16.QBSessionManager");
-                if (qbType == null)
-                {
-                    throw new Exception(
-                        "QuickBooks SDK (QBFC16) not installed.\n" +
-                        "Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/get-started/install-the-sdk");
-                }
-            }
-            catch (Exception ex) when (!(ex.Message.Contains("QuickBooks SDK")))
-            {
-                throw new Exception("QuickBooks SDK check failed. Ensure QBFC16 is properly installed.");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("ERROR: No QuickBooks extraction backend available!");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.WriteLine("Please install one of the following:");
+                Console.WriteLine();
+                Console.WriteLine("  Option 1: QuickBooks Desktop SDK (QBFC16) - RECOMMENDED");
+                Console.WriteLine("    - Download from: https://developer.intuit.com");
+                Console.WriteLine("    - Requires free Intuit Developer account");
+                Console.WriteLine("    - Most reliable for full data extraction");
+                Console.WriteLine();
+                Console.WriteLine("  Option 2: QODBC Driver");
+                Console.WriteLine("    - Download from: https://qodbc.com/qodbc-downloads/");
+                Console.WriteLine("    - Free for read-only operations");
+                Console.WriteLine("    - Works without SDK installation");
+                Console.WriteLine();
+                Console.WriteLine("After installation, restart this application.");
+                Console.WriteLine();
+
+                throw new QBBackendNotFoundException(
+                    "No QuickBooks extraction backend available. Install QBFC16 SDK or QODBC driver.");
             }
 
+            // Log available backends
+            foreach (var backend in backends)
+            {
+                if (backend.Available)
+                {
+                    _logger?.Log(LogLevel.Info, "Backend available: {0} ({1})", backend.Backend, backend.Version);
+                }
+            }
+
+            // Check memory
             try
             {
                 var computerInfo = new Microsoft.VisualBasic.Devices.ComputerInfo();
@@ -529,11 +562,58 @@ namespace QBDesktopExtractor
 
                 if (availableGB < 2)
                 {
-                    _logger?.Log(LogLevel.Warning, 
+                    _logger?.Log(LogLevel.Warning,
                         "Low RAM ({0}GB available). Recommend 4GB+ for large companies.", availableGB);
                 }
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Check prerequisites with enhanced backend detection
+        /// Returns the best available backend
+        /// </summary>
+        private static ExtractionBackend CheckPrerequisitesAndGetBackend(CommandLineOptions options)
+        {
+            // If specific backend requested, check just that one
+            if (options.Backend != ExtractionBackend.Auto)
+            {
+                var result = options.Backend == ExtractionBackend.QBFC
+                    ? QBDataProviderFactory.CheckQBFCAvailability(_logger)
+                    : QBDataProviderFactory.CheckQODBCAvailability(_logger);
+
+                if (!result.Available)
+                {
+                    throw new QBBackendNotFoundException(
+                        $"Requested backend {options.Backend} is not available: {result.Message}");
+                }
+
+                _logger?.Log(LogLevel.Info, "Using requested backend: {0}", options.Backend);
+                return options.Backend;
+            }
+
+            // Auto-detect best backend
+            var backends = QBDataProviderFactory.DetectAvailableBackends(_logger);
+
+            // Prefer QBFC (most reliable)
+            var qbfc = backends.Find(b => b.Backend == ExtractionBackend.QBFC);
+            if (qbfc != null && qbfc.Available)
+            {
+                _logger?.Log(LogLevel.Info, "Using QBFC backend (auto-detected)");
+                return ExtractionBackend.QBFC;
+            }
+
+            // Fallback to QODBC
+            var qodbc = backends.Find(b => b.Backend == ExtractionBackend.QODBC);
+            if (qodbc != null && qodbc.Available)
+            {
+                _logger?.Log(LogLevel.Info, "Using QODBC backend (auto-detected, SDK not available)");
+                return ExtractionBackend.QODBC;
+            }
+
+            // No backend available
+            CheckPrerequisites(); // This will throw with detailed message
+            return ExtractionBackend.Auto; // Never reached
         }
 
         private static int CountTotalRecords(QBExtractedData data)
@@ -670,6 +750,24 @@ namespace QBDesktopExtractor
                     case "--auto-incremental": options.AutoIncremental = true; break;
                     case "--generate-bundle": options.GenerateSupportBundle = true; break;
                     case "--help": case "-h": PrintHelp(); Environment.Exit(0); break;
+                    case "--backend":
+                        if (i + 1 < args.Length)
+                        {
+                            var backendStr = args[++i].ToLower();
+                            if (backendStr == "qbfc" || backendStr == "sdk")
+                                options.Backend = ExtractionBackend.QBFC;
+                            else if (backendStr == "qodbc" || backendStr == "odbc")
+                                options.Backend = ExtractionBackend.QODBC;
+                            else
+                                options.Backend = ExtractionBackend.Auto;
+                        }
+                        break;
+                    case "--show-backends": options.ShowBackends = true; break;
+                    case "--max-retries":
+                        if (i + 1 < args.Length && int.TryParse(args[++i], out int retries))
+                            options.MaxRetries = retries;
+                        break;
+                    case "--skip-validation": options.SkipValidation = true; break;
                 }
             }
             return options;
@@ -677,7 +775,7 @@ namespace QBDesktopExtractor
 
         private static void PrintHelp()
         {
-            Console.WriteLine("QuickBooks Desktop Extractor v4.3");
+            Console.WriteLine("QuickBooks Desktop Extractor v4.4");
             Console.WriteLine("\nUsage: QBExtractor.exe [options]");
             Console.WriteLine("\nRequired:");
             Console.WriteLine("  --session, -s <code>  Session code from ForensicBridge dashboard");
@@ -695,18 +793,86 @@ namespace QBDesktopExtractor
             Console.WriteLine("  --extract-only        Extract to local file, don't upload");
             Console.WriteLine("  --no-sanitize         Skip data sanitization");
             Console.WriteLine("  --help, -h            Show this help");
+            Console.WriteLine("\nBackend options:");
+            Console.WriteLine("  --backend <type>      Force specific backend: auto, qbfc, qodbc");
+            Console.WriteLine("  --show-backends       Show available backends and exit");
+            Console.WriteLine("  --max-retries <n>     Max retry attempts (default: 3)");
+            Console.WriteLine("  --skip-validation     Skip license/session validation (dev mode)");
+            Console.WriteLine("\nBackend priority (auto mode):");
+            Console.WriteLine("  1. QBFC (Official SDK) - Most reliable, requires SDK installation");
+            Console.WriteLine("  2. QODBC - Works without SDK, requires QODBC driver");
             Console.WriteLine("\nOutput modes:");
             Console.WriteLine("  Default: Single JSON blob, upload to server");
             Console.WriteLine("  --ndjson: Per-entity NDJSON files with run_manifest.json");
             Console.WriteLine("\nExit codes:");
             Console.WriteLine("  0   Success");
             Console.WriteLine("  10  Configuration error");
-            Console.WriteLine("  20  SDK not installed");
+            Console.WriteLine("  15  License invalid");
+            Console.WriteLine("  20  No backend available (install SDK or QODBC)");
             Console.WriteLine("  30  QuickBooks connection failed");
             Console.WriteLine("  40  Extraction failed");
             Console.WriteLine("  50  Upload failed");
             Console.WriteLine("  60  Cancelled by user");
             Console.WriteLine("  99  Unknown error");
+        }
+
+        /// <summary>
+        /// Show available backends and their status
+        /// </summary>
+        private static void ShowAvailableBackends(IRedactingLogger logger)
+        {
+            Console.WriteLine();
+            Console.WriteLine("=== Available QuickBooks Backends ===");
+            Console.WriteLine();
+
+            var backends = QBDataProviderFactory.DetectAvailableBackends(logger);
+
+            foreach (var backend in backends)
+            {
+                string status = backend.Available ? "[AVAILABLE]" : "[NOT FOUND]";
+                Console.ForegroundColor = backend.Available ? ConsoleColor.Green : ConsoleColor.Yellow;
+                Console.Write($"  {status}");
+                Console.ResetColor();
+                Console.WriteLine($" {backend.Backend}");
+
+                if (backend.Available)
+                {
+                    Console.WriteLine($"           Version: {backend.Version}");
+                }
+                else
+                {
+                    Console.WriteLine($"           {backend.Message}");
+                }
+                Console.WriteLine();
+            }
+
+            // Show recommendations
+            Console.WriteLine("=== Recommendations ===");
+            Console.WriteLine();
+
+            bool hasAny = backends.Exists(b => b.Available);
+            if (!hasAny)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("  No backends available! Please install one of the following:");
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.WriteLine("  Option 1: QuickBooks Desktop SDK (QBFC16) - RECOMMENDED");
+                Console.WriteLine("    Download from: https://developer.intuit.com");
+                Console.WriteLine("    Requires free Intuit Developer account");
+                Console.WriteLine();
+                Console.WriteLine("  Option 2: QODBC Driver");
+                Console.WriteLine("    Download from: https://qodbc.com/qodbc-downloads/");
+                Console.WriteLine("    Free for read-only operations");
+            }
+            else
+            {
+                var best = backends.Find(b => b.Available);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"  Ready to extract using: {best.Backend}");
+                Console.ResetColor();
+            }
+            Console.WriteLine();
         }
     }
 
@@ -724,5 +890,9 @@ namespace QBDesktopExtractor
         public bool NDJSONMode { get; set; }
         public bool AutoIncremental { get; set; }
         public bool GenerateSupportBundle { get; set; }
+        public ExtractionBackend Backend { get; set; } = ExtractionBackend.Auto;
+        public bool ShowBackends { get; set; }
+        public int MaxRetries { get; set; } = 3;
+        public bool SkipValidation { get; set; }
     }
 }
