@@ -200,7 +200,111 @@ namespace QBDesktopExtractor
                     _logger.Log(LogLevel.Error, "License check failed: {0}", ex.Message);
                     return ExitCode.LicenseInvalid;
                 }
-                
+
+                // PHASE 0.5: SESSION CODE VALIDATION (CRITICAL)
+                _logger.Log(LogLevel.Info, "Validating session code...");
+
+                string? sessionCode = options.SessionCode;
+
+                // Try to get cached session if not provided
+                if (string.IsNullOrWhiteSpace(sessionCode))
+                {
+                    sessionCode = SessionValidator.GetCachedSessionId();
+                    if (!string.IsNullOrWhiteSpace(sessionCode))
+                    {
+                        _logger.Log(LogLevel.Info, "Using cached session: {0}", sessionCode);
+                    }
+                }
+
+                // Prompt for session code if not provided
+                if (string.IsNullOrWhiteSpace(sessionCode))
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                    Console.WriteLine("║  SESSION CODE REQUIRED                                            ║");
+                    Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                    Console.WriteLine("║  Enter your session code from the ForensicBridge dashboard:      ║");
+                    Console.WriteLine("║  Example: FB-20260127123456-ABCD1234                              ║");
+                    Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                    Console.WriteLine();
+                    Console.Write("Session Code: ");
+                    sessionCode = Console.ReadLine()?.Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(sessionCode))
+                {
+                    _logger.Log(LogLevel.Error, "No session code provided");
+                    Console.WriteLine();
+                    Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                    Console.WriteLine("║  SESSION CODE REQUIRED                                            ║");
+                    Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                    Console.WriteLine("║  Create a project at: https://forensicbridge.ca/projects/new     ║");
+                    Console.WriteLine("║  Use --session <code> to provide your session code               ║");
+                    Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                    Console.WriteLine();
+                    return ExitCode.ConfigError;
+                }
+
+                try
+                {
+                    var sessionResult = await SessionValidator.ValidateAsync(sessionCode);
+
+                    if (!sessionResult.Valid)
+                    {
+                        _logger.Log(LogLevel.Error, "Session validation failed: {0}", sessionResult.Error);
+                        Console.WriteLine();
+                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                        Console.WriteLine("║  SESSION VALIDATION FAILED                                        ║");
+                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                        Console.WriteLine($"║  {sessionResult.Error,-64} ║");
+                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                        Console.WriteLine();
+                        return ExitCode.ConfigError;
+                    }
+
+                    if (sessionResult.RemainingExtractions <= 0)
+                    {
+                        _logger.Log(LogLevel.Error, "No extractions remaining for this session");
+                        Console.WriteLine();
+                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
+                        Console.WriteLine("║  EXTRACTIONS EXHAUSTED                                            ║");
+                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
+                        Console.WriteLine("║  This session has used all available extractions.                ║");
+                        Console.WriteLine("║  Please create a new project at: https://forensicbridge.ca      ║");
+                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
+                        Console.WriteLine();
+                        return ExitCode.LicenseInvalid;
+                    }
+
+                    _logger.Log(LogLevel.Info, "Session validated:");
+                    _logger.Log(LogLevel.Info, "  Project: {0}", sessionResult.ProjectName);
+                    _logger.Log(LogLevel.Info, "  Client: {0}", sessionResult.ClientName);
+                    _logger.Log(LogLevel.Info, "  Tier: {0}", sessionResult.TierName);
+                    _logger.Log(LogLevel.Info, "  Remaining Extractions: {0}", sessionResult.RemainingExtractions);
+
+                    // Activate device if new
+                    if (sessionResult.IsNewDevice)
+                    {
+                        _logger.Log(LogLevel.Info, "Activating device...");
+                        var activationResult = await SessionValidator.ActivateAsync(sessionCode);
+                        if (!activationResult.Valid)
+                        {
+                            _logger.Log(LogLevel.Error, "Device activation failed: {0}", activationResult.Error);
+                            return ExitCode.ConfigError;
+                        }
+                        _logger.Log(LogLevel.Info, "Device activated (device {0} of {1})",
+                            activationResult.DeviceNumber, activationResult.MaxDevices);
+                    }
+
+                    // Store session ID for use later
+                    sessionId = $"{sessionCode}-{sessionId}";
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, "Session check failed: {0}", ex.Message);
+                    return ExitCode.ConfigError;
+                }
+
                 // PHASE 1: LOAD CONFIGURATION
                 _logger.Log(LogLevel.Info, "Loading configuration...");
 
@@ -554,6 +658,9 @@ namespace QBDesktopExtractor
                     case "--license": case "-l":
                         if (i + 1 < args.Length) options.LicenseKey = args[++i];
                         break;
+                    case "--session": case "-s":
+                        if (i + 1 < args.Length) options.SessionCode = args[++i];
+                        break;
                     case "--no-pause": options.NoPause = true; break;
                     case "--quiet": case "-q": options.Quiet = true; break;
                     case "--verbose": case "-v": options.Verbose = true; break;
@@ -572,9 +679,13 @@ namespace QBDesktopExtractor
         {
             Console.WriteLine("QuickBooks Desktop Extractor v4.3");
             Console.WriteLine("\nUsage: QBExtractor.exe [options]");
+            Console.WriteLine("\nRequired:");
+            Console.WriteLine("  --session, -s <code>  Session code from ForensicBridge dashboard");
+            Console.WriteLine("                        Example: FB-20260127123456-ABCD1234");
             Console.WriteLine("\nOptions:");
             Console.WriteLine("  --config, -c <path>   Path to config.json (default: config.json)");
             Console.WriteLine("  --output-dir, -o      Output directory for NDJSON files");
+            Console.WriteLine("  --license, -l <key>   License key (optional, cached after first use)");
             Console.WriteLine("  --ndjson              Output NDJSON per-entity files (warehouse-ready)");
             Console.WriteLine("  --auto-incremental    Auto-detect last sync and extract changes only");
             Console.WriteLine("  --generate-bundle     Generate support bundle after extraction");
@@ -604,6 +715,7 @@ namespace QBDesktopExtractor
         public string ConfigPath { get; set; } = "config.json";
         public string OutputDirectory { get; set; } = "output";
         public string? LicenseKey { get; set; }
+        public string? SessionCode { get; set; }
         public bool NoPause { get; set; }
         public bool Quiet { get; set; }
         public bool Verbose { get; set; }
