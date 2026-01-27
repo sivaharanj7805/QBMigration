@@ -4,11 +4,11 @@
 #define MyAppName "ForensicBridge"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "ForensicBridge Inc."
-#define MyAppURL "https://forensicbridge.io"
-#define MyAppExeName "QBExtractor.exe"
+#define MyAppURL "https://forensicbridge.ca"
+#define MyAppExeName "ForensicBridge.exe"
 
 [Setup]
-AppId={{12345678-1234-1234-1234-123456789012}
+AppId={{A7B8C9D0-E1F2-3456-7890-ABCDEF123456}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -19,14 +19,10 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=Output
 OutputBaseFilename=ForensicBridge-Setup
-; SetupIconFile=assets\icon.ico  ; Commented out - icon is optional
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-
-; Signing (uncomment when you have a certificate)
-; SignTool=signtool sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a $f
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -35,11 +31,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Main executable and all dependencies
-Source: "publish\QBDesktopReader\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-; Configuration (if not in publish dir)
-Source: "config.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
+; Main executable and all dependencies from publish directory
+Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -58,41 +51,18 @@ begin
     Result := RegKeyExists(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Intuit\QuickBooks');
 end;
 
-// Check for QBFC16 SDK
-function IsQBFC16Installed: Boolean;
-begin
-  Result := FileExists(ExpandConstant('{commonpf32}\Intuit\IDN\QBFC16\Interop.QBFC16.dll'));
-end;
-
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  
-  // Warn if QuickBooks is not installed
+
+  // Warn if QuickBooks is not installed (but don't block)
   if not IsQuickBooksInstalled then
   begin
-    if MsgBox('QuickBooks Desktop does not appear to be installed.' + #13#10 +
-              'ForensicBridge requires QuickBooks Desktop to extract data.' + #13#10#13#10 +
-              'Do you want to continue anyway?', mbConfirmation, MB_YESNO) = IDNO then
-    begin
-      Result := False;
-      Exit;
-    end;
-  end;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  ResultCode: Integer;
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Create config with server URL
-    SaveStringToFile(ExpandConstant('{app}\config.json'),
-      '{' + #13#10 +
-      '  "serverUrl": "https://api.forensicbridge.io",' + #13#10 +
-      '  "version": "1.0.0"' + #13#10 +
-      '}', False);
+    MsgBox('Note: QuickBooks Desktop was not detected on this machine.' + #13#10#13#10 +
+           'ForensicBridge will be installed, but you will need QuickBooks Desktop ' +
+           'and the QuickBooks SDK to extract data.' + #13#10#13#10 +
+           'You can still use ForensicBridge to view existing extractions.',
+           mbInformation, MB_OK);
   end;
 end;
 
