@@ -24,7 +24,7 @@ extractor_bp = Blueprint('extractor', __name__, url_prefix='/api/extractor')
 # GitHub repository for releases
 GITHUB_REPO = 'sivaharanj7805/QBMigration'
 GITHUB_API_URL = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
-GITHUB_RELEASE_URL = f'https://github.com/{GITHUB_REPO}/releases/latest/download/ForensicBridge.exe'
+GITHUB_RELEASE_URL = f'https://github.com/{GITHUB_REPO}/releases/latest/download/QBExtractor.exe'
 GITHUB_RELEASES_PAGE = f'https://github.com/{GITHUB_REPO}/releases'
 
 # Get the static directory path
@@ -38,11 +38,11 @@ BOOTSTRAP_PS1 = os.path.join(EXTRACTOR_DIR, 'ForensicBridge_Bootstrap.ps1')
 
 # Default locations to search for the extractor
 DEFAULT_EXTRACTOR_PATHS = [
-    '/var/www/forensicbridge/extractor/ForensicBridge.exe',
-    '/opt/forensicbridge/extractor/ForensicBridge.exe',
-    os.path.join(STATIC_DIR, 'ForensicBridge.exe'),
-    os.path.join(EXTRACTOR_DIR, 'ForensicBridge.exe'),
-    os.path.join(CACHE_DIR, 'ForensicBridge.exe'),
+    '/var/www/forensicbridge/extractor/QBExtractor.exe',
+    '/opt/forensicbridge/extractor/QBExtractor.exe',
+    os.path.join(STATIC_DIR, 'QBExtractor.exe'),
+    os.path.join(EXTRACTOR_DIR, 'QBExtractor.exe'),
+    os.path.join(CACHE_DIR, 'QBExtractor.exe'),
 ]
 
 # Cache settings
@@ -109,7 +109,7 @@ def is_cache_valid():
     except Exception:
         return False
 
-    cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+    cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
     if not os.path.exists(cache_path):
         return False
 
@@ -134,7 +134,7 @@ def is_cache_valid():
 def download_and_cache_from_github():
     """Download the extractor from GitHub and cache it"""
     ensure_cache_dir()
-    cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+    cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
 
     try:
         headers = {'User-Agent': 'ForensicBridge-Server/2.0'}
@@ -150,7 +150,7 @@ def download_and_cache_from_github():
             if api_response.status_code == 200:
                 release_info = api_response.json()
                 for asset in release_info.get('assets', []):
-                    if 'ForensicBridge' in asset.get('name', '') and asset.get('name', '').endswith('.exe'):
+                    if 'QBExtractor' in asset.get('name', '') and asset.get('name', '').endswith('.exe'):
                         download_url = asset.get('browser_download_url', download_url)
                         break
         except Exception as e:
@@ -244,18 +244,18 @@ def download_extractor():
         return send_file(
             extractor_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
     # Try cached version
     if is_cache_valid():
-        cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+        cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
         logger.info(f"Serving extractor from cache: {cache_path}")
         return send_file(
             cache_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
@@ -266,7 +266,7 @@ def download_extractor():
         return send_file(
             cached_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
@@ -302,16 +302,16 @@ def download_extractor_exe():
         return send_file(
             extractor_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
     if is_cache_valid():
-        cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+        cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
         return send_file(
             cache_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
@@ -320,7 +320,7 @@ def download_extractor_exe():
         return send_file(
             cached_path,
             as_attachment=True,
-            download_name='ForensicBridge.exe',
+            download_name='QBExtractor.exe',
             mimetype='application/octet-stream'
         )
 
@@ -390,7 +390,7 @@ def extractor_info():
         })
 
     if cache_valid:
-        cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+        cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
         file_size = os.path.getsize(cache_path)
         return jsonify({
             'available': True,
@@ -445,7 +445,7 @@ def extractor_status():
     cache_metadata = get_cache_metadata()
     github_available = check_github_release_exists()
 
-    cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+    cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
 
     return jsonify({
         'local_installer': {
@@ -487,7 +487,7 @@ def refresh_cache():
     """Force refresh the cached extractor from GitHub."""
     logger.info("Force refreshing extractor cache...")
 
-    cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+    cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
     if os.path.exists(cache_path):
         os.remove(cache_path)
     if os.path.exists(CACHE_METADATA_FILE):
@@ -515,7 +515,7 @@ def refresh_cache():
 def clear_cache():
     """Clear the cached extractor."""
     try:
-        cache_path = os.path.join(CACHE_DIR, 'ForensicBridge.exe')
+        cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
         if os.path.exists(cache_path):
             os.remove(cache_path)
         if os.path.exists(CACHE_METADATA_FILE):
@@ -547,8 +547,8 @@ echo ============================================================
 echo.
 
 set "INSTALL_DIR=%LOCALAPPDATA%\\ForensicBridge"
-set "DOWNLOAD_URL=https://github.com/{GITHUB_REPO}/releases/latest/download/ForensicBridge.exe"
-set "EXTRACTOR=%INSTALL_DIR%\\ForensicBridge.exe"
+set "DOWNLOAD_URL=https://github.com/{GITHUB_REPO}/releases/latest/download/QBExtractor.exe"
+set "EXTRACTOR=%INSTALL_DIR%\\QBExtractor.exe"
 
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 

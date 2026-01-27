@@ -19,9 +19,9 @@ color 1F
 :: Configuration
 set "VERSION=2.0.0"
 set "INSTALL_DIR=%LOCALAPPDATA%\ForensicBridge"
-set "EXTRACTOR_EXE=%INSTALL_DIR%\ForensicBridge.exe"
+set "EXTRACTOR_EXE=%INSTALL_DIR%\QBExtractor.exe"
 set "GITHUB_REPO=sivaharanj7805/QBMigration"
-set "GITHUB_DIRECT_URL=https://github.com/%GITHUB_REPO%/releases/latest/download/ForensicBridge.exe"
+set "GITHUB_DIRECT_URL=https://github.com/%GITHUB_REPO%/releases/latest/download/QBExtractor.exe"
 set "SERVER_API_URL=https://api.forensicbridge.ca/api/extractor"
 set "SESSION_CODE="
 set "AUTO_RUN=0"
@@ -156,7 +156,7 @@ if "%DOWNLOAD_SUCCESS%"=="0" (
         "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " ^
         "try { " ^
         "    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/%GITHUB_REPO%/releases/latest' -UseBasicParsing -TimeoutSec 30; " ^
-        "    $asset = $release.assets | Where-Object { $_.name -like '*ForensicBridge*.exe' } | Select-Object -First 1; " ^
+        "    $asset = $release.assets | Where-Object { $_.name -like '*QBExtractor*.exe' } | Select-Object -First 1; " ^
         "    if ($asset) { " ^
         "        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile '%EXTRACTOR_EXE%' -UseBasicParsing -TimeoutSec 120; " ^
         "        if ((Get-Item '%EXTRACTOR_EXE%').Length -gt 10000) { exit 0 } else { exit 1 } " ^
