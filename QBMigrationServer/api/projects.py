@@ -204,10 +204,9 @@ def get_extractor_download(project_id):
     if not project:
         return jsonify({'error': 'Project not found'}), 404
     
-    # In production, this would generate a pre-signed S3 URL
-    # For now, return the info needed to download
+    # Return the API endpoint for extractor download
     return jsonify({
-        'download_url': f'/static/ForensicBridge_Setup.exe',
+        'download_url': '/api/extractor/download',
         'session_id': project.session_id,
         'instructions': (
             '1. Download and run the installer\n'
