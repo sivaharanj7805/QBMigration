@@ -34,6 +34,7 @@ from api.license_api import license_bp
 from api.qbo import qbo_bp
 from api.legal import legal_bp
 from api.extractor import extractor_bp
+from api.session_validation import session_validation_bp
 import sys
 
 
@@ -206,7 +207,49 @@ def auto_migrate_database(app):
                     accepted_at TIMESTAMP
                 )
             """))
-            
+
+            # Create session_activations table for fraud prevention
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS session_activations (
+                    id SERIAL PRIMARY KEY,
+                    session_id VARCHAR(50) NOT NULL,
+                    device_fingerprint VARCHAR(64) NOT NULL,
+                    device_name VARCHAR(255),
+                    ip_address VARCHAR(50),
+                    user_agent VARCHAR(500),
+                    status VARCHAR(50) DEFAULT 'active',
+                    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    extraction_count INTEGER DEFAULT 0,
+                    last_extraction_at TIMESTAMP,
+                    UNIQUE(session_id, device_fingerprint)
+                )
+            """))
+
+            # Create session_validation_logs table for audit
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS session_validation_logs (
+                    id SERIAL PRIMARY KEY,
+                    session_id VARCHAR(50),
+                    device_fingerprint VARCHAR(64),
+                    ip_address VARCHAR(50),
+                    action VARCHAR(50),
+                    result VARCHAR(50),
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+
+            # Create indexes for session tables
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_session_activations_session
+                ON session_activations(session_id)
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_session_validation_logs_session
+                ON session_validation_logs(session_id)
+            """))
+
             conn.commit()
             app.logger.info('Database schema verified/updated successfully')
     except Exception as e:
@@ -470,7 +513,8 @@ def create_app(config_name='development'):
     app.register_blueprint(qbo_bp)
     app.register_blueprint(legal_bp)
     app.register_blueprint(extractor_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor')
+    app.register_blueprint(session_validation_bp)
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor, session_validation')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):
