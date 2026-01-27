@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Management;
 using System.Net;
 using System.Net.Http;
@@ -16,12 +17,13 @@ namespace ForensicBridgeInstaller
 {
     /// <summary>
     /// GUI launcher for the QBExtractor (QBDesktopReader).
-    /// Downloads the real extractor if needed, validates session codes,
-    /// and launches the extraction process.
+    /// Downloads the real extractor zip (exe + DLLs + config) if needed,
+    /// validates session codes, and launches the extraction process.
     /// </summary>
     public partial class MainForm : Form
     {
         private TextBox txtSessionCode;
+        private TextBox txtLicenseKey;
         private Button btnConnect;
         private Button btnStartExtraction;
         private Label lblStatus;
@@ -29,6 +31,7 @@ namespace ForensicBridgeInstaller
         private RichTextBox txtLog;
         private Label lblQBStatus;
         private Panel panelHeader;
+        private Label lblLicenseStatus;
 
         private bool _isQuickBooksInstalled;
         private bool _isQBFCInstalled;
@@ -42,12 +45,14 @@ namespace ForensicBridgeInstaller
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ForensicBridge");
         private static readonly string ExtractorExePath = Path.Combine(InstallDir, "QBExtractor.exe");
+        private static readonly string ExtractorZipPath = Path.Combine(InstallDir, "QBExtractor.zip");
+        private static readonly string LicenseKeyPath = Path.Combine(InstallDir, "license.key");
 
-        // Download sources
+        // Download sources — zip file containing exe + DLLs + config
         private const string GITHUB_REPO = "sivaharanj7805/QBMigration";
         private const string SERVER_API = "https://api.forensicbridge.ca/api/extractor";
-        private static readonly string GitHubExeUrl =
-            $"https://github.com/{GITHUB_REPO}/releases/latest/download/QBExtractor.exe";
+        private static readonly string GitHubZipUrl =
+            $"https://github.com/{GITHUB_REPO}/releases/latest/download/QBExtractor.zip";
         private static readonly string GitHubApiUrl =
             $"https://api.github.com/repos/{GITHUB_REPO}/releases/latest";
         private const string SESSION_VALIDATE_URL = "https://api.forensicbridge.ca/api/session/validate";
@@ -59,6 +64,7 @@ namespace ForensicBridgeInstaller
             InitializeComponents();
             CheckQuickBooksInstallation();
             CheckExtractorAvailability();
+            CheckLicenseKeyStored();
 
             if (!string.IsNullOrEmpty(_sessionCode))
             {
@@ -74,7 +80,7 @@ namespace ForensicBridgeInstaller
         private void InitializeComponents()
         {
             this.Text = "ForensicBridge - QuickBooks Desktop Extractor";
-            this.Size = new Size(600, 550);
+            this.Size = new Size(600, 620);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -116,18 +122,45 @@ namespace ForensicBridgeInstaller
                 Size = new Size(540, 20)
             };
 
+            // License key section
+            var lblLicense = new Label
+            {
+                Text = "License Key:",
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Location = new Point(20, 125),
+                AutoSize = true
+            };
+
+            txtLicenseKey = new TextBox
+            {
+                Font = new Font("Consolas", 11),
+                Location = new Point(20, 148),
+                Size = new Size(350, 28),
+                UseSystemPasswordChar = true
+            };
+
+            lblLicenseStatus = new Label
+            {
+                Text = "",
+                Font = new Font("Segoe UI", 8),
+                ForeColor = Color.Gray,
+                Location = new Point(380, 152),
+                Size = new Size(180, 20)
+            };
+
+            // Session code section
             var lblSession = new Label
             {
                 Text = "Session Code:",
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(20, 130),
+                Location = new Point(20, 185),
                 AutoSize = true
             };
 
             txtSessionCode = new TextBox
             {
                 Font = new Font("Consolas", 12),
-                Location = new Point(20, 155),
+                Location = new Point(20, 210),
                 Size = new Size(350, 30),
                 CharacterCasing = CharacterCasing.Upper
             };
@@ -136,7 +169,7 @@ namespace ForensicBridgeInstaller
             {
                 Text = "Validate Session",
                 Font = new Font("Segoe UI", 10),
-                Location = new Point(380, 153),
+                Location = new Point(380, 208),
                 Size = new Size(180, 32),
                 BackColor = Color.FromArgb(37, 99, 235),
                 ForeColor = Color.White,
@@ -150,7 +183,7 @@ namespace ForensicBridgeInstaller
             {
                 Text = "Start Extraction",
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                Location = new Point(20, 200),
+                Location = new Point(20, 255),
                 Size = new Size(540, 45),
                 BackColor = Color.Gray,
                 ForeColor = Color.White,
@@ -165,13 +198,13 @@ namespace ForensicBridgeInstaller
             {
                 Text = "Ready",
                 Font = new Font("Segoe UI", 9),
-                Location = new Point(20, 260),
+                Location = new Point(20, 315),
                 Size = new Size(540, 20)
             };
 
             progressBar = new ProgressBar
             {
-                Location = new Point(20, 285),
+                Location = new Point(20, 340),
                 Size = new Size(540, 20),
                 Style = ProgressBarStyle.Continuous
             };
@@ -180,14 +213,14 @@ namespace ForensicBridgeInstaller
             {
                 Text = "Activity Log:",
                 Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Location = new Point(20, 320),
+                Location = new Point(20, 375),
                 AutoSize = true
             };
 
             txtLog = new RichTextBox
             {
-                Location = new Point(20, 345),
-                Size = new Size(540, 150),
+                Location = new Point(20, 398),
+                Size = new Size(540, 165),
                 ReadOnly = true,
                 BackColor = Color.FromArgb(30, 30, 30),
                 ForeColor = Color.FromArgb(200, 200, 200),
@@ -197,6 +230,9 @@ namespace ForensicBridgeInstaller
 
             this.Controls.Add(panelHeader);
             this.Controls.Add(lblQBStatus);
+            this.Controls.Add(lblLicense);
+            this.Controls.Add(txtLicenseKey);
+            this.Controls.Add(lblLicenseStatus);
             this.Controls.Add(lblSession);
             this.Controls.Add(txtSessionCode);
             this.Controls.Add(btnConnect);
@@ -206,7 +242,7 @@ namespace ForensicBridgeInstaller
             this.Controls.Add(lblLog);
             this.Controls.Add(txtLog);
 
-            Log("ForensicBridge Launcher v2.0.0");
+            Log("ForensicBridge Launcher v2.1.0");
             Log("Powered by QBDesktopReader v4.3");
         }
 
@@ -247,6 +283,24 @@ namespace ForensicBridgeInstaller
                 }
             }
             Log("Extractor not installed locally. Will download when needed.");
+        }
+
+        private void CheckLicenseKeyStored()
+        {
+            if (File.Exists(LicenseKeyPath))
+            {
+                lblLicenseStatus.Text = "(stored from previous run)";
+                lblLicenseStatus.ForeColor = Color.Green;
+                txtLicenseKey.Text = "********";
+                txtLicenseKey.Enabled = false;
+                Log("License key found (cached from previous activation).");
+            }
+            else
+            {
+                lblLicenseStatus.Text = "(required on first run)";
+                lblLicenseStatus.ForeColor = Color.Orange;
+                Log("No stored license key. Enter your license key above.");
+            }
         }
 
         private bool IsQuickBooksInstalled()
@@ -356,10 +410,13 @@ namespace ForensicBridgeInstaller
                 client.Timeout = TimeSpan.FromSeconds(30);
 
                 var fingerprint = GetDeviceFingerprint();
+
+                // Use session_id to match the extractor's SessionValidator field name
                 var payload = Newtonsoft.Json.JsonConvert.SerializeObject(new
                 {
-                    session_code = sessionCode,
-                    device_fingerprint = fingerprint
+                    session_id = sessionCode,
+                    device_fingerprint = fingerprint,
+                    device_name = Environment.MachineName
                 });
 
                 var content = new StringContent(payload, Encoding.UTF8, "application/json");
@@ -425,6 +482,21 @@ namespace ForensicBridgeInstaller
                 return;
             }
 
+            // Check license key on first run
+            if (!File.Exists(LicenseKeyPath) && txtLicenseKey.Enabled)
+            {
+                var licenseKey = txtLicenseKey.Text.Trim();
+                if (string.IsNullOrEmpty(licenseKey))
+                {
+                    MessageBox.Show(
+                        "A license key is required for first-time use.\n\n" +
+                        "Enter your license key in the field above.\n" +
+                        "Purchase a license at: https://forensicbridge.ca",
+                        "License Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
             if (!_isQBFCInstalled)
             {
                 var result = MessageBox.Show(
@@ -446,31 +518,32 @@ namespace ForensicBridgeInstaller
             btnStartExtraction.Enabled = false;
             btnConnect.Enabled = false;
             txtSessionCode.Enabled = false;
+            txtLicenseKey.Enabled = false;
             progressBar.Value = 0;
 
             var sessionCode = txtSessionCode.Text.Trim();
 
             try
             {
-                // Step 1: Ensure extractor is downloaded
+                // Step 1: Ensure extractor is downloaded and extracted
                 if (!IsExtractorAvailable())
                 {
-                    Log("Downloading QBExtractor...");
+                    Log("Downloading QBExtractor package...");
                     lblStatus.Text = "Downloading extractor...";
-                    progressBar.Value = 10;
+                    progressBar.Value = 5;
 
                     var downloaded = await DownloadExtractor();
                     if (!downloaded)
                     {
                         MessageBox.Show(
                             "Could not download the extractor.\n\n" +
-                            "Please download QBExtractor.exe manually from:\n" +
+                            "Please download QBExtractor.zip manually from:\n" +
                             $"https://github.com/{GITHUB_REPO}/releases",
                             "Download Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return;
                     }
 
-                    Log("Extractor downloaded successfully.");
+                    Log("Extractor package downloaded and extracted.");
                 }
 
                 progressBar.Value = 20;
@@ -495,6 +568,11 @@ namespace ForensicBridgeInstaller
                 btnStartExtraction.Enabled = true;
                 btnConnect.Enabled = true;
                 txtSessionCode.Enabled = true;
+                // Re-enable license key only if not stored
+                if (!File.Exists(LicenseKeyPath))
+                {
+                    txtLicenseKey.Enabled = true;
+                }
             }
         }
 
@@ -505,20 +583,25 @@ namespace ForensicBridgeInstaller
             return info.Length > 50000;
         }
 
+        /// <summary>
+        /// Download QBExtractor.zip (contains exe + DLLs + config) and extract to InstallDir.
+        /// net48 cannot produce single-file executables, so the extractor needs
+        /// its dependency DLLs and config.json alongside it.
+        /// </summary>
         private async Task<bool> DownloadExtractor()
         {
             Directory.CreateDirectory(InstallDir);
 
             var sources = new[]
             {
-                new { Name = "server API", Url = $"{SERVER_API}/download-exe" },
-                new { Name = "GitHub releases", Url = GitHubExeUrl }
+                new { Name = "server API", Url = $"{SERVER_API}/download-zip" },
+                new { Name = "GitHub releases", Url = GitHubZipUrl }
             };
 
             using (var client = new HttpClient())
             {
-                client.Timeout = TimeSpan.FromMinutes(2);
-                client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.0");
+                client.Timeout = TimeSpan.FromMinutes(3);
+                client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.1");
 
                 foreach (var source in sources)
                 {
@@ -530,14 +613,18 @@ namespace ForensicBridgeInstaller
                         if (!response.IsSuccessStatusCode) continue;
 
                         var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+                        // Reject HTML responses (GitHub login pages, etc.)
                         if (contentType.Contains("html")) continue;
 
                         var bytes = await response.Content.ReadAsByteArrayAsync();
-                        if (bytes.Length < 50000) continue;
+                        // A real zip with exe + DLLs + config should be at least 100KB
+                        if (bytes.Length < 100000) continue;
 
-                        File.WriteAllBytes(ExtractorExePath, bytes);
+                        File.WriteAllBytes(ExtractorZipPath, bytes);
                         Log($"  Downloaded from {source.Name} ({bytes.Length / 1024}KB)");
-                        return true;
+
+                        // Extract zip to install directory
+                        return ExtractZipToInstallDir();
                     }
                     catch (Exception ex)
                     {
@@ -546,14 +633,14 @@ namespace ForensicBridgeInstaller
                 }
             }
 
-            // Method 3: Try GitHub API to find asset
+            // Method 3: Try GitHub API to find zip asset
             try
             {
                 Log("  Querying GitHub API...");
                 using (var client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromSeconds(30);
-                    client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.0");
+                    client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.1");
 
                     var json = await client.GetStringAsync(GitHubApiUrl);
                     var release = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(json);
@@ -561,18 +648,18 @@ namespace ForensicBridgeInstaller
                     foreach (var asset in release.assets)
                     {
                         string name = asset.name;
-                        if (name != null && name.Contains("QBExtractor") && name.EndsWith(".exe"))
+                        if (name != null && name.Contains("QBExtractor") && name.EndsWith(".zip"))
                         {
                             string downloadUrl = asset.browser_download_url;
                             var response = await client.GetAsync(downloadUrl);
                             if (response.IsSuccessStatusCode)
                             {
                                 var bytes = await response.Content.ReadAsByteArrayAsync();
-                                if (bytes.Length > 50000)
+                                if (bytes.Length > 100000)
                                 {
-                                    File.WriteAllBytes(ExtractorExePath, bytes);
+                                    File.WriteAllBytes(ExtractorZipPath, bytes);
                                     Log($"  Downloaded via GitHub API ({bytes.Length / 1024}KB)");
-                                    return true;
+                                    return ExtractZipToInstallDir();
                                 }
                             }
                             break;
@@ -589,11 +676,119 @@ namespace ForensicBridgeInstaller
         }
 
         /// <summary>
-        /// Launch QBExtractor.exe with session code and stream its output to the log.
+        /// Extract QBExtractor.zip to InstallDir.
+        /// net48 ZipFile.ExtractToDirectory has no overwrite parameter,
+        /// so we extract to a temp dir first, then copy files over.
+        /// </summary>
+        private bool ExtractZipToInstallDir()
+        {
+            try
+            {
+                if (!File.Exists(ExtractorZipPath))
+                {
+                    Log("  ERROR: Zip file not found after download.");
+                    return false;
+                }
+
+                Log("  Extracting package...");
+
+                // Extract to a temporary directory first (net48 ZipFile has no overwrite option)
+                var tempExtractDir = Path.Combine(Path.GetTempPath(),
+                    "ForensicBridge_extract_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                if (Directory.Exists(tempExtractDir))
+                    Directory.Delete(tempExtractDir, true);
+
+                ZipFile.ExtractToDirectory(ExtractorZipPath, tempExtractDir);
+
+                // Find where QBExtractor.exe landed (could be root or a subdirectory)
+                string sourceDir = tempExtractDir;
+                if (!File.Exists(Path.Combine(sourceDir, "QBExtractor.exe")))
+                {
+                    // Check subdirectories (zip may have a root folder)
+                    foreach (var subDir in Directory.GetDirectories(tempExtractDir))
+                    {
+                        if (File.Exists(Path.Combine(subDir, "QBExtractor.exe")))
+                        {
+                            sourceDir = subDir;
+                            break;
+                        }
+                    }
+                }
+
+                if (!File.Exists(Path.Combine(sourceDir, "QBExtractor.exe")))
+                {
+                    Log("  ERROR: QBExtractor.exe not found in zip contents.");
+                    try { Directory.Delete(tempExtractDir, true); } catch { }
+                    return false;
+                }
+
+                // Copy all files from source to install dir, overwriting existing
+                foreach (var file in Directory.GetFiles(sourceDir))
+                {
+                    var destFile = Path.Combine(InstallDir, Path.GetFileName(file));
+                    if (File.Exists(destFile)) File.Delete(destFile);
+                    File.Move(file, destFile);
+                }
+
+                // Copy subdirectories too (if any runtime folders exist)
+                foreach (var dir in Directory.GetDirectories(sourceDir))
+                {
+                    var destDir = Path.Combine(InstallDir, Path.GetFileName(dir));
+                    if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
+                    Directory.Move(dir, destDir);
+                }
+
+                // Clean up temp directory and zip
+                try { Directory.Delete(tempExtractDir, true); } catch { }
+                try { File.Delete(ExtractorZipPath); } catch { }
+
+                // Verify
+                if (File.Exists(ExtractorExePath))
+                {
+                    var info = new FileInfo(ExtractorExePath);
+                    Log($"  Extracted QBExtractor.exe ({info.Length / 1024}KB)");
+
+                    // Verify config.json was included
+                    var configPath = Path.Combine(InstallDir, "config.json");
+                    if (File.Exists(configPath))
+                    {
+                        Log("  config.json: present");
+                    }
+                    else
+                    {
+                        Log("  WARNING: config.json not found in package.");
+                    }
+
+                    return true;
+                }
+
+                Log("  ERROR: QBExtractor.exe not found after extraction.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log($"  Extraction failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Launch QBExtractor.exe with session code and license key, stream its output to the log.
         /// </summary>
         private async Task LaunchExtractor(string sessionCode)
         {
-            var args = $"--session \"{sessionCode}\" --no-pause";
+            // Build command line arguments
+            var argsBuilder = new StringBuilder();
+            argsBuilder.Append($"--session \"{sessionCode}\" --no-pause");
+
+            // Pass license key if the user entered one (first run)
+            if (txtLicenseKey.Enabled && !string.IsNullOrEmpty(txtLicenseKey.Text.Trim())
+                && txtLicenseKey.Text.Trim() != "********")
+            {
+                argsBuilder.Append($" --license \"{txtLicenseKey.Text.Trim()}\"");
+            }
+
+            var args = argsBuilder.ToString();
 
             var startInfo = new ProcessStartInfo
             {
@@ -656,6 +851,9 @@ namespace ForensicBridgeInstaller
                     Log("EXTRACTION COMPLETE! (Exit code: 0)");
                     Log("========================================");
 
+                    // After successful extraction, license key is now cached by the extractor
+                    CheckLicenseKeyStored();
+
                     MessageBox.Show(
                         "Data extraction completed successfully!\n\n" +
                         "Your QuickBooks data has been securely encrypted\n" +
@@ -685,8 +883,12 @@ namespace ForensicBridgeInstaller
         {
             var lower = line.ToLower();
 
-            if (lower.Contains("connecting") || lower.Contains("session"))
+            if (lower.Contains("validating license") || lower.Contains("validating session"))
+                progressBar.Value = Math.Max(progressBar.Value, 22);
+            else if (lower.Contains("session validated") || lower.Contains("license validated"))
                 progressBar.Value = Math.Max(progressBar.Value, 25);
+            else if (lower.Contains("connecting") || lower.Contains("connected to quickbooks"))
+                progressBar.Value = Math.Max(progressBar.Value, 28);
             else if (lower.Contains("extracting customers"))
                 progressBar.Value = Math.Max(progressBar.Value, 30);
             else if (lower.Contains("extracting vendors"))
@@ -697,11 +899,13 @@ namespace ForensicBridgeInstaller
                 progressBar.Value = Math.Max(progressBar.Value, 55);
             else if (lower.Contains("extracting bills"))
                 progressBar.Value = Math.Max(progressBar.Value, 65);
-            else if (lower.Contains("encrypting"))
+            else if (lower.Contains("extraction complete"))
+                progressBar.Value = Math.Max(progressBar.Value, 75);
+            else if (lower.Contains("encrypting") || lower.Contains("streaming upload"))
                 progressBar.Value = Math.Max(progressBar.Value, 80);
-            else if (lower.Contains("uploading"))
+            else if (lower.Contains("uploading") || lower.Contains("pipeline"))
                 progressBar.Value = Math.Max(progressBar.Value, 90);
-            else if (lower.Contains("complete") || lower.Contains("success"))
+            else if (lower.Contains("success") && lower.Contains("all data"))
                 progressBar.Value = 100;
 
             // Also try to parse percentage from output like "[50%]" or "Progress: 50%"
@@ -727,13 +931,14 @@ namespace ForensicBridgeInstaller
         {
             switch (exitCode)
             {
-                case 10: return "Configuration error. Check config.json.";
-                case 15: return "License is invalid or expired.";
-                case 20: return "QuickBooks SDK (QBFC16) not installed.";
+                case 10: return "Configuration error. The config.json may be missing or invalid.";
+                case 15: return "License key is missing, invalid, or expired.\nEnter a valid license key and try again.";
+                case 20: return "QuickBooks SDK (QBFC16) not installed.\nDownload from: https://developer.intuit.com/app/developer/qbdesktop/docs/get-started";
                 case 30: return "Could not connect to QuickBooks Desktop.\nEnsure QuickBooks is running with a company file open.";
                 case 40: return "Data extraction failed.\nSee log for details.";
                 case 50: return "Upload to server failed.\nCheck your internet connection.";
                 case 60: return "Extraction was cancelled.";
+                case 99: return "An unexpected error occurred. See log for details.";
                 default: return $"Unknown error (code: {exitCode}).";
             }
         }

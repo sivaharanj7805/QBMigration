@@ -10,7 +10,7 @@
     <!-- Application settings -->
     <AssemblyName>ForensicBridge</AssemblyName>
     <RootNamespace>ForensicBridgeInstaller</RootNamespace>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <Description>ForensicBridge QuickBooks Desktop Migration Launcher</Description>
     <Company>ForensicBridge Inc.</Company>
     <Product>ForensicBridge</Product>
@@ -24,6 +24,12 @@
     <!-- Application icon -->
     <ApplicationIcon Condition="Exists('icon.ico')">icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!-- Framework assembly references (net48) -->
+  <ItemGroup>
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.IO.Compression" />
+  </ItemGroup>
 
   <!-- NuGet packages -->
   <ItemGroup>

@@ -1,12 +1,16 @@
 # ============================================================================
-# ForensicBridge Bootstrap Installer v2.0
-# Downloads and runs the ForensicBridge QuickBooks Desktop Extractor
+# ForensicBridge Bootstrap Installer v2.1
+# Downloads and runs the QBExtractor package (exe + DLLs + config)
 #
 # This script:
 # 1. Shows a professional GUI for session code entry
-# 2. Downloads the real extractor from GitHub releases
-# 3. Validates prerequisites (QuickBooks SDK)
-# 4. Runs the extractor with the session code
+# 2. Downloads QBExtractor.zip (exe + DLLs + config.json)
+# 3. Extracts to AppData\Local\ForensicBridge
+# 4. Validates prerequisites (QuickBooks SDK)
+# 5. Runs the extractor with the session code
+#
+# NOTE: The extractor is distributed as a zip because .NET Framework 4.8
+# does not support single-file publishing.
 # ============================================================================
 
 param(
@@ -19,10 +23,11 @@ $ErrorActionPreference = "SilentlyContinue"
 
 # Configuration
 $GitHubRepo = "sivaharanj7805/QBMigration"
-$GitHubExeUrl = "https://github.com/$GitHubRepo/releases/latest/download/QBExtractor.exe"
+$GitHubZipUrl = "https://github.com/$GitHubRepo/releases/latest/download/QBExtractor.zip"
 $ServerApiUrl = "https://api.forensicbridge.ca/api/extractor"
 $InstallDir = Join-Path $env:LOCALAPPDATA "ForensicBridge"
 $ExtractorPath = Join-Path $InstallDir "QBExtractor.exe"
+$ZipPath = Join-Path $InstallDir "QBExtractor.zip"
 
 # Ensure install directory exists
 if (-not (Test-Path $InstallDir)) {
@@ -30,22 +35,27 @@ if (-not (Test-Path $InstallDir)) {
 }
 
 # ============================================================================
-# Download Functions
+# Download and Extract Functions
 # ============================================================================
 
-function Download-Extractor {
+function Download-ExtractorPackage {
     param([System.Windows.Forms.Label]$StatusLabel = $null)
 
+    # Check if already installed
     if (Test-Path $ExtractorPath) {
         $fileSize = (Get-Item $ExtractorPath).Length
         if ($fileSize -gt 50000) {
-            return $true
+            # Also check config.json exists (part of the package)
+            $configPath = Join-Path $InstallDir "config.json"
+            if (Test-Path $configPath) {
+                return $true
+            }
         }
     }
 
     $methods = @(
-        @{ Name = "primary server"; Url = "$ServerApiUrl/download-exe"; Timeout = 60 },
-        @{ Name = "GitHub releases"; Url = $GitHubExeUrl; Timeout = 120 }
+        @{ Name = "primary server"; Url = "$ServerApiUrl/download-zip"; Timeout = 120 },
+        @{ Name = "GitHub releases"; Url = $GitHubZipUrl; Timeout = 180 }
     )
 
     foreach ($method in $methods) {
@@ -55,9 +65,10 @@ function Download-Extractor {
         }
 
         try {
-            Invoke-WebRequest -Uri $method.Url -OutFile $ExtractorPath -UseBasicParsing -TimeoutSec $method.Timeout
-            if ((Test-Path $ExtractorPath) -and (Get-Item $ExtractorPath).Length -gt 50000) {
-                return $true
+            Invoke-WebRequest -Uri $method.Url -OutFile $ZipPath -UseBasicParsing -TimeoutSec $method.Timeout
+            if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 100000) {
+                $extracted = Extract-Package
+                if ($extracted) { return $true }
             }
         } catch {
             continue
@@ -72,16 +83,50 @@ function Download-Extractor {
 
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$GitHubRepo/releases/latest" -UseBasicParsing -TimeoutSec 30
-        $asset = $release.assets | Where-Object { $_.name -like "*QBExtractor*.exe" } | Select-Object -First 1
+        $asset = $release.assets | Where-Object { $_.name -like "*QBExtractor*.zip" } | Select-Object -First 1
         if ($asset) {
-            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ExtractorPath -UseBasicParsing -TimeoutSec 120
-            if ((Test-Path $ExtractorPath) -and (Get-Item $ExtractorPath).Length -gt 50000) {
-                return $true
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ZipPath -UseBasicParsing -TimeoutSec 180
+            if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 100000) {
+                $extracted = Extract-Package
+                if ($extracted) { return $true }
             }
         }
     } catch { }
 
     return $false
+}
+
+function Extract-Package {
+    try {
+        # Extract zip to install directory (Expand-Archive supports -Force for overwrite)
+        Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
+
+        # Clean up zip
+        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+
+        # Check if exe exists directly
+        if (Test-Path $ExtractorPath) {
+            return $true
+        }
+
+        # Some zips have a root folder - check subdirectories
+        $dirs = Get-ChildItem -Path $InstallDir -Directory
+        foreach ($d in $dirs) {
+            $nestedExe = Join-Path $d.FullName "QBExtractor.exe"
+            if (Test-Path $nestedExe) {
+                # Move all files up to install dir
+                Get-ChildItem $d.FullName | Move-Item -Destination $InstallDir -Force
+                Remove-Item $d.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path $ExtractorPath) {
+                    return $true
+                }
+            }
+        }
+
+        return $false
+    } catch {
+        return $false
+    }
 }
 
 # ============================================================================
@@ -209,17 +254,17 @@ $btnStart.Add_Click({
     $progressBar.Visible = $true
     $progressBar.Value = 10
 
-    # Check if extractor exists, download if needed
+    # Check if extractor package is installed, download if needed
     $lblStatus.ForeColor = [Drawing.Color]::Blue
-    $lblStatus.Text = "Checking extractor..."
+    $lblStatus.Text = "Checking extractor package..."
     $form.Refresh()
 
     if (-not (Test-Path $ExtractorPath) -or (Get-Item $ExtractorPath -ErrorAction SilentlyContinue).Length -lt 50000) {
         $progressBar.Value = 20
-        $lblStatus.Text = "Downloading ForensicBridge extractor..."
+        $lblStatus.Text = "Downloading QBExtractor package..."
         $form.Refresh()
 
-        $downloaded = Download-Extractor -StatusLabel $lblStatus
+        $downloaded = Download-ExtractorPackage -StatusLabel $lblStatus
 
         if (-not $downloaded) {
             $lblStatus.ForeColor = [Drawing.Color]::Red
@@ -233,7 +278,7 @@ $btnStart.Add_Click({
 
     $progressBar.Value = 80
     $lblStatus.ForeColor = [Drawing.Color]::Blue
-    $lblStatus.Text = "Starting ForensicBridge with session code..."
+    $lblStatus.Text = "Starting QBExtractor with session code..."
     $form.Refresh()
 
     # Launch the real extractor with the session code
@@ -241,7 +286,7 @@ $btnStart.Add_Click({
         Start-Process -FilePath $ExtractorPath -ArgumentList "--session", $code -WorkingDirectory $InstallDir
         $progressBar.Value = 100
         $lblStatus.ForeColor = [Drawing.Color]::Green
-        $lblStatus.Text = "ForensicBridge started! You can close this window."
+        $lblStatus.Text = "QBExtractor started! You can close this window."
 
         # Close this launcher after a short delay
         Start-Sleep -Seconds 2

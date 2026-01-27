@@ -1,6 +1,5 @@
 {
-  "$comment": "Production Configuration - EDIT serverUrl BEFORE DEPLOYMENT",
-  "serverUrl": "https://api.yourcompany.com",
+  "serverUrl": "https://api.forensicbridge.ca",
   "incrementalSyncFromDate": null,
   "version": "4.3",
   "schemaVersion": "4.3",

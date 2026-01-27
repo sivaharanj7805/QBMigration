@@ -26,7 +26,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    # 2. Setup .NET (net48 needs MSBuild, but dotnet SDK can restore)
+    # 2. Setup .NET
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
@@ -36,7 +36,7 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v2
 
-    # 4. Install QBFC16 SDK (required for COM reference)
+    # 4. Check QBFC16 COM registration
     - name: Check QBFC16 COM Registration
       run: |
         Write-Host "Checking for QBFC16 COM registration..."
@@ -44,59 +44,77 @@ jobs:
         if ($qbfc) {
           Write-Host "QBFC16 COM is registered"
         } else {
-          Write-Host "QBFC16 COM not found - build may use embedded interop types"
-          Write-Host "Note: The QBFC16 SDK must be installed on the build machine for full COM support."
+          Write-Host "QBFC16 COM not found - build requires QBFC16 SDK installed."
           Write-Host "Download from: https://developer.intuit.com/app/developer/qbdesktop/docs/develop/sdks-and-samples-for-qb-desktop"
+          Write-Host ""
+          Write-Host "To build QBExtractor, use a self-hosted runner with QBFC16 installed,"
+          Write-Host "or build locally with: dotnet publish QBDesktopReader/QBDesktopReader.csproj -c Release -r win-x86 -o publish"
         }
 
-    # 5. Restore NuGet packages for QBDesktopReader
+    # 5. Restore NuGet packages
     - name: Restore QBDesktopReader Dependencies
-      run: |
-        dotnet restore QBDesktopReader/QBDesktopReader.csproj
-
-    # 6. Build QBDesktopReader (produces QBExtractor.exe)
-    - name: Build QBDesktopReader
-      run: |
-        dotnet build QBDesktopReader/QBDesktopReader.csproj --configuration Release --no-restore
+      run: dotnet restore QBDesktopReader/QBDesktopReader.csproj
       continue-on-error: true
 
-    # 7. Publish QBExtractor as self-contained single-file exe
+    # 6. Publish QBDesktopReader (net48 produces a folder, NOT a single file)
+    # NOTE: net48 does not support PublishSingleFile or --self-contained.
+    # The output is a folder with QBExtractor.exe + DLLs + config.json.
+    # We zip this folder for distribution.
     - name: Publish QBExtractor
       run: |
         dotnet publish QBDesktopReader/QBDesktopReader.csproj `
           --configuration Release `
           --runtime win-x86 `
-          --self-contained true `
-          -p:PublishSingleFile=true `
-          -p:IncludeNativeLibrariesForSelfExtract=true `
-          -p:EnableCompressionInSingleFile=true `
           --output QBDesktopReader/publish
       continue-on-error: true
 
-    # 8. Verify QBExtractor output
-    - name: Verify QBExtractor Build
+    # 7. Verify and zip the publish output
+    - name: Package QBExtractor
       id: verify_extractor
       run: |
-        $exePath = "QBDesktopReader/publish/QBExtractor.exe"
+        $publishDir = "QBDesktopReader/publish"
+        $exePath = "$publishDir/QBExtractor.exe"
+
         if (Test-Path $exePath) {
           $size = (Get-Item $exePath).Length
           Write-Host "QBExtractor.exe: $size bytes"
+
+          # List all files that will be in the zip
+          Write-Host ""
+          Write-Host "=== Package contents ==="
+          Get-ChildItem -Path $publishDir -Recurse | Select-Object FullName, Length
+
+          # Verify config.json is included
+          if (Test-Path "$publishDir/config.json") {
+            Write-Host ""
+            Write-Host "config.json: present"
+          } else {
+            Write-Host ""
+            Write-Host "WARNING: config.json not found in publish output"
+          }
+
+          # Create zip containing the entire publish folder contents
+          Compress-Archive -Path "$publishDir/*" -DestinationPath "QBExtractor.zip" -Force
+          $zipSize = (Get-Item "QBExtractor.zip").Length
+          Write-Host ""
+          Write-Host "QBExtractor.zip: $zipSize bytes"
           echo "extractor_built=true" >> $env:GITHUB_OUTPUT
         } else {
           Write-Host "WARNING: QBExtractor.exe not found in publish output"
           Write-Host "This is expected if QBFC16 SDK is not installed on the build machine."
-          Write-Host "Listing available files:"
-          Get-ChildItem -Path "QBDesktopReader/publish" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
+          Write-Host ""
+          Write-Host "Available files:"
+          Get-ChildItem -Path $publishDir -Recurse -ErrorAction SilentlyContinue | Select-Object FullName, Length
           echo "extractor_built=false" >> $env:GITHUB_OUTPUT
         }
 
-    # 9. Upload QBExtractor artifact
+    # 8. Upload QBExtractor.zip artifact
     - name: Upload QBExtractor Artifact
       if: steps.verify_extractor.outputs.extractor_built == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: QBExtractor
-        path: QBDesktopReader/publish/QBExtractor.exe
+        path: QBExtractor.zip
         if-no-files-found: warn
 
   build-launcher:
@@ -120,78 +138,46 @@ jobs:
 
     # 4. Restore NuGet packages
     - name: Restore Dependencies
-      run: |
-        dotnet restore ForensicBridgeInstaller/ForensicBridgeInstaller.csproj
+      run: dotnet restore ForensicBridgeInstaller/ForensicBridgeInstaller.csproj
 
     # 5. Build the launcher application
     - name: Build Launcher
-      run: |
-        dotnet build ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-restore
+      run: dotnet build ForensicBridgeInstaller/ForensicBridgeInstaller.csproj --configuration Release --no-restore
 
-    # 6. Publish self-contained for Inno Setup installer
+    # 6. Publish for Inno Setup installer
+    # NOTE: net48 does not support PublishSingleFile or --self-contained
     - name: Publish for Installer
       run: |
         dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
           --configuration Release `
           --runtime win-x86 `
-          --self-contained true `
           --output ForensicBridgeInstaller/publish
 
-    # 7. Publish single-file standalone exe
-    - name: Publish Standalone Launcher
-      run: |
-        dotnet publish ForensicBridgeInstaller/ForensicBridgeInstaller.csproj `
-          --configuration Release `
-          --runtime win-x86 `
-          --self-contained true `
-          -p:PublishSingleFile=true `
-          -p:IncludeNativeLibrariesForSelfExtract=true `
-          -p:EnableCompressionInSingleFile=true `
-          --output ForensicBridgeInstaller/standalone
-
-    # 8. List build output
+    # 7. List build output
     - name: List Build Output
       run: |
         Write-Host "=== Launcher publish output ==="
         Get-ChildItem -Path "ForensicBridgeInstaller/publish" -Recurse | Select-Object FullName, Length
-        Write-Host ""
-        Write-Host "=== Standalone launcher output ==="
-        Get-ChildItem -Path "ForensicBridgeInstaller/standalone" -Recurse | Select-Object FullName, Length
 
-    # 9. Compile Installer using Inno Setup
+    # 8. Compile Installer using Inno Setup
     - name: Compile Installer
       uses: Minionguyjosh/INNO-Setup-Action@v1.2.2
       with:
         path: ForensicBridgeInstaller/ForensicBridge.iss
 
-    # 10. Verify outputs
+    # 9. Verify outputs
     - name: Verify Outputs
       run: |
         Write-Host "=== Inno Setup installer ==="
         Get-ChildItem -Path "ForensicBridgeInstaller/Output" -Recurse | Select-Object FullName, Length
-        Write-Host ""
-        Write-Host "=== Standalone launcher ==="
-        $exe = Get-Item "ForensicBridgeInstaller/standalone/ForensicBridge.exe" -ErrorAction SilentlyContinue
-        if ($exe) {
-          Write-Host "ForensicBridge.exe (launcher): $($exe.Length) bytes"
-        } else {
-          Write-Host "WARNING: Standalone launcher not found"
-        }
 
-    # 11. Upload artifacts
+    # 10. Upload Setup Installer artifact
     - name: Upload Setup Installer Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ForensicBridge-Setup
         path: ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe
         if-no-files-found: error
-
-    - name: Upload Standalone Launcher Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ForensicBridge-Launcher
-        path: ForensicBridgeInstaller/standalone/ForensicBridge.exe
-        if-no-files-found: warn
 
   release:
     name: Create Release
@@ -210,23 +196,18 @@ jobs:
         echo "=== Downloaded artifacts ==="
         find release-assets -type f -ls
 
-        # Copy launcher assets
+        # Copy launcher Setup installer
         if [ -f "release-assets/ForensicBridge-Setup/ForensicBridge-Setup.exe" ]; then
           cp "release-assets/ForensicBridge-Setup/ForensicBridge-Setup.exe" "ForensicBridge_Setup.exe"
           echo "Launcher Setup installer prepared"
         fi
 
-        if [ -f "release-assets/ForensicBridge-Launcher/ForensicBridge.exe" ]; then
-          cp "release-assets/ForensicBridge-Launcher/ForensicBridge.exe" "ForensicBridge_Launcher.exe"
-          echo "Standalone launcher prepared"
-        fi
-
-        # Copy extractor
-        if [ -f "release-assets/QBExtractor/QBExtractor.exe" ]; then
-          cp "release-assets/QBExtractor/QBExtractor.exe" "QBExtractor.exe"
-          echo "QBExtractor.exe prepared"
+        # Copy extractor zip (contains exe + DLLs + config.json)
+        if [ -f "release-assets/QBExtractor/QBExtractor.zip" ]; then
+          cp "release-assets/QBExtractor/QBExtractor.zip" "QBExtractor.zip"
+          echo "QBExtractor.zip prepared"
         else
-          echo "WARNING: QBExtractor.exe not available (QBFC16 SDK may not be on build machine)"
+          echo "WARNING: QBExtractor.zip not available (QBFC16 SDK may not be on build machine)"
         fi
 
     - name: Create GitHub Release
@@ -238,32 +219,34 @@ jobs:
           ## ForensicBridge QuickBooks Desktop Migration
 
           ### Downloads
-          - **QBExtractor.exe** - QuickBooks Desktop data extractor (the real extraction engine)
-          - **ForensicBridge_Setup.exe** - GUI launcher with installer (recommended for end users)
-          - **ForensicBridge_Launcher.exe** - Standalone GUI launcher (no installation, downloads QBExtractor automatically)
+          - **QBExtractor.zip** - QuickBooks data extractor package (exe + DLLs + config)
+          - **ForensicBridge_Setup.exe** - GUI launcher installer (recommended for end users)
+
+          ### Installation
+          **Option A: GUI Launcher (Recommended)**
+          1. Download and run `ForensicBridge_Setup.exe`
+          2. The launcher automatically downloads QBExtractor when needed
+
+          **Option B: Direct Extractor**
+          1. Download `QBExtractor.zip`
+          2. Extract to a folder (e.g., `C:\ForensicBridge\`)
+          3. Run `QBExtractor.exe --session YOUR-SESSION-CODE`
 
           ### Requirements
           - Windows 10 or later
-          - QuickBooks Desktop installed and running with a company file open
+          - .NET Framework 4.8 (pre-installed on Windows 10+)
+          - QuickBooks Desktop installed with a company file open
           - QuickBooks SDK (QBFC16) installed
-
-          ### Quick Start
-          1. Download `QBExtractor.exe` (or `ForensicBridge_Setup.exe` for the GUI launcher)
-          2. Run the application
-          3. Enter your Session Code from the migration portal
-          4. Authorize access in QuickBooks when prompted
-          5. Data is extracted, encrypted with AES-256-GCM, and uploaded securely
 
           ### What It Does
           - Connects to QuickBooks Desktop via QBFC16 COM SDK
-          - Extracts all financial data (customers, invoices, vendors, bills, accounts, etc.)
-          - Sanitizes and validates data with forensic hashing
+          - Extracts all financial data (40+ entity types)
+          - Sanitizes data with forensic hashing (SHA-256 per record)
           - Encrypts with AES-256-GCM chunked encryption
-          - Uploads securely to ForensicBridge for migration
+          - Uploads securely to ForensicBridge with resume support
         files: |
-          QBExtractor.exe
+          QBExtractor.zip
           ForensicBridge_Setup.exe
-          ForensicBridge_Launcher.exe
         fail-on-unmatched-files: false
         draft: false
         prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}

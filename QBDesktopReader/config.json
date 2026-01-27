@@ -1,6 +1,5 @@
 {
-  "$comment": "QuickBooks Extractor v4.3 Configuration",
-  "serverUrl": "https://localhost:5000",
+  "serverUrl": "https://api.forensicbridge.ca",
   "incrementalSyncFromDate": null,
   "version": "4.3",
   "schemaVersion": "4.3",
@@ -22,7 +21,7 @@
     "retryMaxDelayMs": 30000,
     "retryJitterPercent": 20,
     "enableExponentialBackoff": true,
-    "allowInsecureHttpForLocalhost": true,
+    "allowInsecureHttpForLocalhost": false,
     "maxQBXMLVersion": null
   }
 }
