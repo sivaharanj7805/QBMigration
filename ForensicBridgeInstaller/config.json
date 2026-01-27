@@ -1,6 +1,6 @@
 {
   "serverUrl": "https://api.forensicbridge.ca",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "applicationName": "ForensicBridge",
   "supportEmail": "support@forensicbridge.com",
   "documentationUrl": "https://forensicbridge.ca/docs"
