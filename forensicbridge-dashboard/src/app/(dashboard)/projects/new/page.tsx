@@ -115,7 +115,7 @@ export default function NewProjectPage() {
 
                         <div className="flex gap-3">
                             <a
-                                href="/static/ForensicBridge_Setup.exe"
+                                href={`${process.env.NEXT_PUBLIC_API_URL || ''}/api/extractor/download`}
                                 className="flex-1 py-3 px-4 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium hover:from-emerald-600 hover:to-teal-600 flex items-center justify-center gap-2 transition-all"
                             >
                                 <Download className="w-5 h-5" />
