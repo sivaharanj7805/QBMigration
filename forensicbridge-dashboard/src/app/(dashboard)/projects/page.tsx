@@ -44,6 +44,7 @@ export default function ProjectsPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [loading, setLoading] = useState(true);
     const [companyFiles, setCompanyFiles] = useState<CompanyFile[]>([]);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [stats, setStats] = useState<ProjectStats>({
         totalFiles: 0,
         migrated: 0,
@@ -58,24 +59,20 @@ export default function ProjectsPage() {
     const fetchProjectData = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/projects`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setCompanyFiles(data.files || []);
-            //     setStats(data.stats || { totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
-            // }
-
-            // For now, start with empty data
-            setCompanyFiles([]);
-            setStats({
-                totalFiles: 0,
-                migrated: 0,
-                pending: 0,
-                totalRecords: 0
-            });
+            const response = await fetch(`${API_URL}/api/projects`, { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                setCompanyFiles(data.files || []);
+                setStats(data.stats || { totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
+            } else {
+                // Fallback to empty data if API not available
+                setCompanyFiles([]);
+                setStats({ totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
+            }
         } catch (error) {
             console.error("Failed to fetch project data:", error);
+            setCompanyFiles([]);
+            setStats({ totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
         } finally {
             setLoading(false);
         }
@@ -242,16 +239,53 @@ export default function ProjectsPage() {
                                     </td>
                                     <td>{getStatusBadge(file.status)}</td>
                                     <td>
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 relative">
                                             <Link
                                                 href={`/migrations/${file.id}`}
                                                 className="text-[var(--bridge-blue)] hover:underline text-sm"
                                             >
                                                 View
                                             </Link>
-                                            <button className="p-1.5 hover:bg-gray-100 rounded">
+                                            <button
+                                                className="p-1.5 hover:bg-gray-100 rounded"
+                                                onClick={() => setOpenMenuId(openMenuId === file.id ? null : file.id)}
+                                            >
                                                 <MoreVertical className="w-4 h-4 text-gray-400" />
                                             </button>
+                                            {openMenuId === file.id && (
+                                                <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                                                    <Link
+                                                        href={`/migrations/${file.id}`}
+                                                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-t-lg"
+                                                        onClick={() => setOpenMenuId(null)}
+                                                    >
+                                                        View Details
+                                                    </Link>
+                                                    <button
+                                                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-b-lg"
+                                                        onClick={async () => {
+                                                            setOpenMenuId(null);
+                                                            if (!confirm("Are you sure you want to delete this file?")) return;
+                                                            try {
+                                                                const response = await fetch(`${API_URL}/api/projects/${file.id}`, {
+                                                                    method: 'DELETE',
+                                                                    credentials: 'include',
+                                                                });
+                                                                if (response.ok) {
+                                                                    fetchProjectData();
+                                                                } else {
+                                                                    alert("Failed to delete file");
+                                                                }
+                                                            } catch (error) {
+                                                                console.error("Delete error:", error);
+                                                                alert("Failed to connect to server");
+                                                            }
+                                                        }}
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </td>
                                 </tr>

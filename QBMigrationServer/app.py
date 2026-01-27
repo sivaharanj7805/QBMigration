@@ -6,8 +6,6 @@ load_dotenv()
 from flask import Flask, jsonify, request, redirect
 from flask_login import LoginManager
 from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from models.database import db, init_db
 from models.user import User
 from config import config  # Import config BEFORE dashboard_api to avoid path conflict
@@ -534,7 +532,10 @@ def create_app(config_name='development'):
     
     # Verify AWS configuration
     verify_aws_configuration(app)
-    
+
+    # Initialize WebSocket support
+    init_socketio(app, app.config.get('SECRET_KEY', 'dev-secret'))
+
     # Root endpoint
     @app.route('/')
     def index():

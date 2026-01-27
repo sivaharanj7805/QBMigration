@@ -59,24 +59,19 @@ export default function VaultPage() {
     const fetchVaultData = async () => {
         setLoading(true);
         try {
-            // TODO: Fetch from real API endpoint when available
-            // const response = await fetch(`${API_URL}/api/vault`, { credentials: 'include' });
-            // if (response.ok) {
-            //     const data = await response.json();
-            //     setArchivedCompanies(data.companies || []);
-            //     setStats(data.stats || { archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
-            // }
-
-            // For now, start with empty data
-            setArchivedCompanies([]);
-            setStats({
-                archivedCompanies: 0,
-                totalRecords: 0,
-                storageSize: "0 GB",
-                monthlyCost: "$0.00"
-            });
+            const response = await fetch(`${API_URL}/api/vault`, { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                setArchivedCompanies(data.companies || []);
+                setStats(data.stats || { archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
+            } else {
+                setArchivedCompanies([]);
+                setStats({ archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
+            }
         } catch (error) {
             console.error("Failed to fetch vault data:", error);
+            setArchivedCompanies([]);
+            setStats({ archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
         } finally {
             setLoading(false);
         }
@@ -253,9 +248,22 @@ export default function VaultPage() {
                                     {archive.status === "archived" && (
                                         <button
                                             className="btn-secondary text-sm py-1.5 flex items-center gap-1"
-                                            onClick={(e) => {
+                                            onClick={async (e) => {
                                                 e.stopPropagation();
-                                                // Would trigger restore
+                                                try {
+                                                    const response = await fetch(`${API_URL}/api/vault/${archive.id}/restore`, {
+                                                        method: 'POST',
+                                                        credentials: 'include',
+                                                    });
+                                                    if (response.ok) {
+                                                        fetchVaultData();
+                                                    } else {
+                                                        alert("Failed to initiate restore");
+                                                    }
+                                                } catch (error) {
+                                                    console.error("Restore error:", error);
+                                                    alert("Failed to connect to server");
+                                                }
                                             }}
                                         >
                                             <RefreshCw className="w-4 h-4" />
@@ -268,7 +276,7 @@ export default function VaultPage() {
                                             className="btn-primary text-sm py-1.5 flex items-center gap-1"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                // Would open browser
+                                                window.open(`/vault/${archive.id}`, '_blank');
                                             }}
                                         >
                                             <Search className="w-4 h-4" />

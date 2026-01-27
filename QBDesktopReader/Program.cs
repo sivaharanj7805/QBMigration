@@ -176,7 +176,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
                         Console.WriteLine("║  LICENSE REQUIRED                                                 ║");
                         Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
-                        Console.WriteLine("║  Please purchase a license at: https://forensicbridge.ca         ║");
+                        Console.WriteLine($"║  Please purchase a license at: {KnownUrls.ForensicBridge,-34}║");
                         Console.WriteLine("║  Use --license <key> to provide your license key                 ║");
                         Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                         Console.WriteLine();
@@ -191,7 +191,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine("║  MIGRATIONS EXHAUSTED                                             ║");
                         Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
                         Console.WriteLine("║  Your license has used all available migrations.                 ║");
-                        Console.WriteLine("║  Please upgrade at: https://forensicbridge.ca                    ║");
+                        Console.WriteLine($"║  Please upgrade at: {KnownUrls.ForensicBridge,-45}║");
                         Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                         Console.WriteLine();
                         return ExitCode.LicenseInvalid;
@@ -246,7 +246,7 @@ namespace QBDesktopExtractor
                     Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
                     Console.WriteLine("║  SESSION CODE REQUIRED                                            ║");
                     Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
-                    Console.WriteLine("║  Create a project at: https://forensicbridge.ca/projects/new     ║");
+                    Console.WriteLine($"║  Create a project at: {KnownUrls.ForensicBridgeNewProject,-43}║");
                     Console.WriteLine("║  Use --session <code> to provide your session code               ║");
                     Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                     Console.WriteLine();
@@ -278,7 +278,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine("║  EXTRACTIONS EXHAUSTED                                            ║");
                         Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
                         Console.WriteLine("║  This session has used all available extractions.                ║");
-                        Console.WriteLine("║  Please create a new project at: https://forensicbridge.ca      ║");
+                        Console.WriteLine($"║  Please create a new project at: {KnownUrls.ForensicBridge,-32}║");
                         Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                         Console.WriteLine();
                         return ExitCode.LicenseInvalid;
@@ -529,12 +529,12 @@ namespace QBDesktopExtractor
                 Console.WriteLine("Please install one of the following:");
                 Console.WriteLine();
                 Console.WriteLine("  Option 1: QuickBooks Desktop SDK (QBFC16) - RECOMMENDED");
-                Console.WriteLine("    - Download from: https://developer.intuit.com");
+                Console.WriteLine($"    - Download from: {KnownUrls.IntuitDeveloperSDK}");
                 Console.WriteLine("    - Requires free Intuit Developer account");
                 Console.WriteLine("    - Most reliable for full data extraction");
                 Console.WriteLine();
                 Console.WriteLine("  Option 2: QODBC Driver");
-                Console.WriteLine("    - Download from: https://qodbc.com/qodbc-downloads/");
+                Console.WriteLine($"    - Download from: {KnownUrls.QODBCDownloads}");
                 Console.WriteLine("    - Free for read-only operations");
                 Console.WriteLine("    - Works without SDK installation");
                 Console.WriteLine();
@@ -567,53 +567,6 @@ namespace QBDesktopExtractor
                 }
             }
             catch { }
-        }
-
-        /// <summary>
-        /// Check prerequisites with enhanced backend detection
-        /// Returns the best available backend
-        /// </summary>
-        private static ExtractionBackend CheckPrerequisitesAndGetBackend(CommandLineOptions options)
-        {
-            // If specific backend requested, check just that one
-            if (options.Backend != ExtractionBackend.Auto)
-            {
-                var result = options.Backend == ExtractionBackend.QBFC
-                    ? QBDataProviderFactory.CheckQBFCAvailability(_logger)
-                    : QBDataProviderFactory.CheckQODBCAvailability(_logger);
-
-                if (!result.Available)
-                {
-                    throw new QBBackendNotFoundException(
-                        $"Requested backend {options.Backend} is not available: {result.Message}");
-                }
-
-                _logger?.Log(LogLevel.Info, "Using requested backend: {0}", options.Backend);
-                return options.Backend;
-            }
-
-            // Auto-detect best backend
-            var backends = QBDataProviderFactory.DetectAvailableBackends(_logger);
-
-            // Prefer QBFC (most reliable)
-            var qbfc = backends.Find(b => b.Backend == ExtractionBackend.QBFC);
-            if (qbfc != null && qbfc.Available)
-            {
-                _logger?.Log(LogLevel.Info, "Using QBFC backend (auto-detected)");
-                return ExtractionBackend.QBFC;
-            }
-
-            // Fallback to QODBC
-            var qodbc = backends.Find(b => b.Backend == ExtractionBackend.QODBC);
-            if (qodbc != null && qodbc.Available)
-            {
-                _logger?.Log(LogLevel.Info, "Using QODBC backend (auto-detected, SDK not available)");
-                return ExtractionBackend.QODBC;
-            }
-
-            // No backend available
-            CheckPrerequisites(); // This will throw with detailed message
-            return ExtractionBackend.Auto; // Never reached
         }
 
         private static int CountTotalRecords(QBExtractedData data)
@@ -858,11 +811,11 @@ namespace QBDesktopExtractor
                 Console.ResetColor();
                 Console.WriteLine();
                 Console.WriteLine("  Option 1: QuickBooks Desktop SDK (QBFC16) - RECOMMENDED");
-                Console.WriteLine("    Download from: https://developer.intuit.com");
+                Console.WriteLine($"    Download from: {KnownUrls.IntuitDeveloperSDK}");
                 Console.WriteLine("    Requires free Intuit Developer account");
                 Console.WriteLine();
                 Console.WriteLine("  Option 2: QODBC Driver");
-                Console.WriteLine("    Download from: https://qodbc.com/qodbc-downloads/");
+                Console.WriteLine($"    Download from: {KnownUrls.QODBCDownloads}");
                 Console.WriteLine("    Free for read-only operations");
             }
             else
