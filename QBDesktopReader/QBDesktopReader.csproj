@@ -74,9 +74,19 @@
     <PackageReference Include="JsonPointer.Net" Version="5.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
-    <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="System.Data.Odbc" Version="8.0.0" />
-    <PackageReference Include="Microsoft.VisualBasic" Version="10.3.0" />
+    <!--
+      NOTE: System.Management, System.Data.Odbc, and Microsoft.VisualBasic are
+      part of .NET Framework 4.8 (in the GAC). DO NOT use the NuGet packages
+      (8.0.0, 10.3.0) which are designed for .NET Core/.NET 6+ and cause
+      assembly loading crashes on .NET Framework 4.8.
+    -->
+  </ItemGroup>
+
+  <!-- .NET Framework 4.8 built-in assemblies (from GAC) -->
+  <ItemGroup>
+    <Reference Include="System.Management" />
+    <Reference Include="Microsoft.VisualBasic" />
+    <Reference Include="System.Data" />
   </ItemGroup>
 
   <!-- Exclude test files from main build -->

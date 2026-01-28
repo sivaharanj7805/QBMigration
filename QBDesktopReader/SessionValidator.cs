@@ -6,7 +6,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Management;
 
 namespace QBDesktopExtractor
 {
