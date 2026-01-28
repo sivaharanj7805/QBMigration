@@ -223,7 +223,7 @@ namespace QBDesktopExtractor
                         EntityType = entity.EntityName,
                         RecordCount = entity.RecordCount,
                         ContentBase64 = Convert.ToBase64String(fileBytes),
-                        SHA256 = entity.SHA256
+                        SHA256 = entity.Sha256
                     });
                 }
             }

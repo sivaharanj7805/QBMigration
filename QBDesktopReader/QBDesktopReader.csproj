@@ -14,8 +14,9 @@
     <Version>4.4.0</Version>
     <Description>QuickBooks Desktop to Cloud Migration Tool</Description>
 
-    <!-- Enable nullable types -->
-    <Nullable>enable</Nullable>
+    <!-- Enable nullable annotations without warnings for data model properties -->
+    <Nullable>annotations</Nullable>
+    <NoWarn>$(NoWarn);CS0649;CS0169</NoWarn>
 
     <!-- Generate COM interop wrapper -->
     <UseWindowsForms>false</UseWindowsForms>
@@ -76,6 +77,11 @@
     <PackageReference Include="System.Management" Version="8.0.0" />
     <PackageReference Include="System.Data.Odbc" Version="8.0.0" />
     <PackageReference Include="Microsoft.VisualBasic" Version="10.3.0" />
+  </ItemGroup>
+
+  <!-- Exclude test files from main build -->
+  <ItemGroup>
+    <Compile Remove="tests\**" />
   </ItemGroup>
 
   <!-- Copy config files to output -->

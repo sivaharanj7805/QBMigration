@@ -174,9 +174,11 @@ namespace QBDesktopExtractor
             byte[] ciphertext = new byte[length];
             byte[] tag = new byte[TagSize];
 
-            using (var aes = new AesGcm(key))
+            using (var aes = new AesGcmCompat(key))
             {
-                aes.Encrypt(nonce, data.AsSpan(0, length), ciphertext, tag);
+                byte[] plaintextSlice = new byte[length];
+                Buffer.BlockCopy(data, 0, plaintextSlice, 0, length);
+                aes.Encrypt(nonce, plaintextSlice, ciphertext, tag);
             }
 
             // Output: nonce + tag + ciphertext
@@ -271,7 +273,7 @@ namespace QBDesktopExtractor
             Buffer.BlockCopy(encryptedChunk, NonceSize, tag, 0, TagSize);
             Buffer.BlockCopy(encryptedChunk, NonceSize + TagSize, ciphertext, 0, ciphertextLen);
 
-            using (var aes = new AesGcm(key))
+            using (var aes = new AesGcmCompat(key))
             {
                 aes.Decrypt(nonce, ciphertext, tag, plaintext);
             }
@@ -364,7 +366,7 @@ namespace QBDesktopExtractor
                         }
                         else
                         {
-                            Array.Fill(buffer, pattern);
+                            for (int i = 0; i < buffer.Length; i++) buffer[i] = pattern;
                             long remaining = length;
                             while (remaining > 0)
                             {
@@ -429,6 +431,94 @@ namespace QBDesktopExtractor
             public string KeyBase64 { get; set; }
             public string IVBase64 { get; set; }
             public string TagBase64 { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// AES-GCM polyfill for .NET Framework 4.8 (which lacks System.Security.Cryptography.AesGcm).
+    /// Uses AES-CBC with HMAC-SHA256 for authenticated encryption.
+    /// </summary>
+    internal sealed class AesGcmCompat : IDisposable
+    {
+        private readonly byte[] _key;
+
+        public AesGcmCompat(byte[] key)
+        {
+            _key = (byte[])key.Clone();
+        }
+
+        public void Encrypt(byte[] nonce, byte[] plaintext, byte[] ciphertext, byte[] tag)
+        {
+            using (var aes = Aes.Create())
+            {
+                aes.Key = _key;
+                var iv = new byte[16];
+                Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                aes.IV = iv;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.None;
+
+                // Pad plaintext manually to block size for CBC (no padding mode)
+                int blockSize = aes.BlockSize / 8;
+                int paddedLen = ((plaintext.Length + blockSize - 1) / blockSize) * blockSize;
+                byte[] paddedPlaintext = new byte[paddedLen];
+                Buffer.BlockCopy(plaintext, 0, paddedPlaintext, 0, plaintext.Length);
+
+                using (var encryptor = aes.CreateEncryptor())
+                {
+                    byte[] encrypted = encryptor.TransformFinalBlock(paddedPlaintext, 0, paddedPlaintext.Length);
+                    Buffer.BlockCopy(encrypted, 0, ciphertext, 0, Math.Min(encrypted.Length, ciphertext.Length));
+                }
+            }
+
+            // Generate authentication tag using HMAC-SHA256 (truncated to TagSize)
+            using (var hmac = new HMACSHA256(_key))
+            {
+                byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
+                Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
+                Buffer.BlockCopy(ciphertext, 0, dataToMac, nonce.Length, ciphertext.Length);
+                byte[] fullHash = hmac.ComputeHash(dataToMac);
+                Buffer.BlockCopy(fullHash, 0, tag, 0, tag.Length);
+            }
+        }
+
+        public void Decrypt(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] plaintext)
+        {
+            // Verify authentication tag first
+            using (var hmac = new HMACSHA256(_key))
+            {
+                byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
+                Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
+                Buffer.BlockCopy(ciphertext, 0, dataToMac, nonce.Length, ciphertext.Length);
+                byte[] fullHash = hmac.ComputeHash(dataToMac);
+                for (int i = 0; i < tag.Length; i++)
+                {
+                    if (tag[i] != fullHash[i])
+                        throw new CryptographicException("Authentication tag mismatch");
+                }
+            }
+
+            // Decrypt
+            using (var aes = Aes.Create())
+            {
+                aes.Key = _key;
+                var iv = new byte[16];
+                Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                aes.IV = iv;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.None;
+
+                using (var decryptor = aes.CreateDecryptor())
+                {
+                    byte[] decrypted = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+                    Buffer.BlockCopy(decrypted, 0, plaintext, 0, Math.Min(decrypted.Length, plaintext.Length));
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            Array.Clear(_key, 0, _key.Length);
         }
     }
 }
