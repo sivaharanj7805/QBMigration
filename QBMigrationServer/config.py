@@ -347,33 +347,39 @@ class TestingConfig(Config):
     """Testing configuration"""
     TESTING = True
     DEBUG = False
-    
-    # CRITICAL: Override the database URI directly as class attribute
-    # This MUST be set here, not in init_app, because the parent class
-    # already sets SQLALCHEMY_DATABASE_URI from DATABASE_URL env var
-    SQLALCHEMY_DATABASE_URI = 'postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_test'
-    
+
+    # Use DATABASE_URL env var if available, otherwise use SQLite for testing
+    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///:memory:')
+
     RATELIMIT_ENABLED = False
     AUTO_CLEANUP_ENABLED = False
     BACKUP_ENABLED = False
     BACKUP_TO_S3 = False
     WTF_CSRF_ENABLED = False
     AWS_S3_BUCKET = None
-    
-    # Use simpler connection pool for tests
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_size': 5,
-        'pool_recycle': 1800,
-        'pool_pre_ping': True,
-        'pool_timeout': 10,
-        'max_overflow': 5,
-    }
-    
+
+    # Use simpler connection pool for tests (only for non-SQLite)
+    @property
+    def SQLALCHEMY_ENGINE_OPTIONS(self):
+        if 'sqlite' in str(self.SQLALCHEMY_DATABASE_URI):
+            return {}  # SQLite doesn't support connection pooling
+        return {
+            'pool_size': 5,
+            'pool_recycle': 1800,
+            'pool_pre_ping': True,
+            'pool_timeout': 10,
+            'max_overflow': 5,
+        }
+
     @classmethod
     def init_app(cls, app):
         """Initialize app with test database"""
-        # Ensure the test database URI is set (belt and suspenders)
-        app.config['SQLALCHEMY_DATABASE_URI'] = cls.SQLALCHEMY_DATABASE_URI
+        # Use environment variable if set, otherwise use class default
+        db_url = os.getenv('DATABASE_URL', cls.SQLALCHEMY_DATABASE_URI)
+        app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+        # Adjust engine options based on database type
+        if 'sqlite' in db_url:
+            app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {}
 
 
 class ProductionConfig(Config):
