@@ -72,6 +72,41 @@ CACHE_METADATA_FILE = os.path.join(CACHE_DIR, 'metadata.json')
 EXTRACTOR_VERSION = "4.4.0"
 MINIMUM_FILE_SIZE = 50000  # 50KB minimum for valid executable
 
+# Windows security bypass instructions for unsigned executables
+WINDOWS_SECURITY_INSTRUCTIONS = {
+    'title': 'Windows Security Notice',
+    'summary': 'Windows may show a security warning because this software is not yet code-signed. This is normal for new software.',
+    'browser_warning': {
+        'title': 'Browser Download Warning',
+        'description': 'Your browser may show "This file is not commonly downloaded" or similar.',
+        'steps': [
+            'Click the "..." or dropdown arrow next to the download',
+            'Select "Keep" or "Keep anyway"',
+            'If prompted again, click "Keep anyway" or "Show more" → "Keep anyway"'
+        ]
+    },
+    'smartscreen_warning': {
+        'title': 'Windows SmartScreen Warning',
+        'description': 'When running the file, Windows Defender SmartScreen may show "Windows protected your PC".',
+        'steps': [
+            'Click "More info" on the SmartScreen popup',
+            'Click "Run anyway" button that appears',
+            'The application will now start normally'
+        ]
+    },
+    'zip_extraction': {
+        'title': 'Extracting the ZIP file',
+        'steps': [
+            'Right-click the downloaded ZIP file',
+            'Select "Extract All..." or use your preferred extraction tool',
+            'Choose a destination folder (e.g., Desktop or Documents)',
+            'After extraction, navigate to the folder and run QBExtractor.exe'
+        ]
+    },
+    'why_warning': 'Windows shows these warnings for any software that is not signed with an Extended Validation (EV) code signing certificate. Our software is safe and verified - we are working on obtaining an EV certificate.',
+    'support_url': 'https://forensicbridge.ca/support'
+}
+
 
 def ensure_cache_dir():
     """Ensure the cache directory exists"""
@@ -499,7 +534,9 @@ def extractor_info():
             'sha256': zip_metadata.get('sha256'),
             'version': zip_metadata.get('version', EXTRACTOR_VERSION),
             'verify_url': '/api/extractor/zip/verify',
-            'message': 'Full deployment package with all DLLs included'
+            'message': 'Full deployment package with all DLLs included',
+            'security_info_url': '/api/extractor/security-info',
+            'security_note': WINDOWS_SECURITY_INSTRUCTIONS['summary']
         })
 
     if extractor_path:
@@ -559,6 +596,22 @@ def github_download():
 def releases_page():
     """Redirect to GitHub releases page."""
     return redirect(GITHUB_RELEASES_PAGE, code=302)
+
+
+@extractor_bp.route('/security-info', methods=['GET'])
+def security_info():
+    """
+    Get Windows security bypass instructions for the extractor.
+
+    Windows may show security warnings when downloading or running the extractor
+    because it is not signed with an EV code signing certificate. These instructions
+    help users understand and bypass these warnings safely.
+    """
+    return jsonify({
+        'success': True,
+        'security_instructions': WINDOWS_SECURITY_INSTRUCTIONS,
+        'version': EXTRACTOR_VERSION
+    })
 
 
 @extractor_bp.route('/status', methods=['GET'])

@@ -190,20 +190,26 @@ def delete_project(project_id):
 def get_extractor_download(project_id):
     """Get download link for ForensicBridge extractor with embedded session ID"""
     user_id = request.current_user['user_id']
-    
+
     project = Project.query.filter_by(id=project_id, user_id=user_id).first()
-    
+
     if not project:
         return jsonify({'error': 'Project not found'}), 404
-    
-    # Return the API endpoint for extractor download
+
+    # Return the API endpoint for extractor download with security instructions
     return jsonify({
         'download_url': '/api/extractor/download',
         'session_id': project.session_id,
+        'security_info_url': '/api/extractor/security-info',
         'instructions': (
-            '1. Download and run the installer\n'
-            '2. When prompted, enter this Session ID: ' + project.session_id + '\n'
-            '3. Follow the on-screen instructions to connect to QuickBooks\n'
-            '4. Return to this dashboard to monitor progress'
-        )
+            '1. Download the QBExtractor-deploy.zip file\n'
+            '2. If your browser shows a warning, click "Keep" or "Keep anyway"\n'
+            '3. Extract the ZIP file to a folder (right-click → Extract All)\n'
+            '4. Run QBExtractor.exe from the extracted folder\n'
+            '5. If Windows SmartScreen appears, click "More info" then "Run anyway"\n'
+            '6. When prompted, enter this Session ID: ' + project.session_id + '\n'
+            '7. Follow the on-screen instructions to connect to QuickBooks\n'
+            '8. Return to this dashboard to monitor progress'
+        ),
+        'security_note': 'Windows may show security warnings because the software is not yet code-signed. This is normal for new software. Click "More info" → "Run anyway" to proceed safely.'
     })
