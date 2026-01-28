@@ -12,12 +12,25 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
+@pytest.fixture
+def auth_headers(client, test_user):
+    """Get JWT auth headers for authenticated requests."""
+    response = client.post('/api/auth/login', json={
+        'email': 'test@example.com',
+        'password': 'Test1234'
+    })
+    assert response.status_code == 200
+    data = response.get_json()
+    token = data.get('token')
+    return {'Authorization': f'Bearer {token}'}
+
+
 class TestReportGeneration:
     """Test Report Generation feature end-to-end."""
 
-    def test_list_reports_endpoint(self, authenticated_client, test_migration):
+    def test_list_reports_endpoint(self, client, auth_headers, test_migration):
         """Test listing reports returns correct structure."""
-        response = authenticated_client.get('/api/reports')
+        response = client.get('/api/reports', headers=auth_headers)
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
@@ -25,7 +38,7 @@ class TestReportGeneration:
         assert 'count' in data
         assert isinstance(data['reports'], list)
 
-    def test_generate_variance_report(self, authenticated_client, test_migration, db_session):
+    def test_generate_variance_report(self, client, auth_headers, test_migration, db_session):
         """Test generating a variance report."""
         # First mark migration as completed
         test_migration.status = 'completed'
@@ -38,30 +51,34 @@ class TestReportGeneration:
         })
         db_session.commit()
 
-        response = authenticated_client.post('/api/reports/generate', json={
-            'type': 'variance',
-            'migration_id': test_migration.migration_id
-        })
+        response = client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'variance',
+                'migration_id': test_migration.migration_id
+            })
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
         assert 'report_id' in data
         assert 'download_url' in data
 
-    def test_generate_health_report(self, authenticated_client, test_migration, db_session):
+    def test_generate_health_report(self, client, auth_headers, test_migration, db_session):
         """Test generating a health report."""
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.post('/api/reports/generate', json={
-            'type': 'health',
-            'migration_id': test_migration.migration_id
-        })
+        response = client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'health',
+                'migration_id': test_migration.migration_id
+            })
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
 
-    def test_generate_discrepancy_report(self, authenticated_client, test_migration, db_session):
+    def test_generate_discrepancy_report(self, client, auth_headers, test_migration, db_session):
         """Test generating a discrepancy report."""
         test_migration.status = 'completed'
         test_migration.verification_results = json.dumps({
@@ -76,28 +93,32 @@ class TestReportGeneration:
         })
         db_session.commit()
 
-        response = authenticated_client.post('/api/reports/generate', json={
-            'type': 'discrepancy',
-            'migration_id': test_migration.migration_id
-        })
+        response = client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'discrepancy',
+                'migration_id': test_migration.migration_id
+            })
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
 
-    def test_download_report(self, authenticated_client, test_migration, db_session):
+    def test_download_report(self, client, auth_headers, test_migration, db_session):
         """Test downloading a generated report."""
         test_migration.status = 'completed'
         db_session.commit()
 
         # Generate report first
-        authenticated_client.post('/api/reports/generate', json={
-            'type': 'variance',
-            'migration_id': test_migration.migration_id
-        })
+        client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'variance',
+                'migration_id': test_migration.migration_id
+            })
 
         # Download the report
         report_id = f'{test_migration.migration_id}_variance'
-        response = authenticated_client.get(f'/api/reports/{report_id}/download')
+        response = client.get(f'/api/reports/{report_id}/download', headers=auth_headers)
         # Either 200 (success) or 404 (file not yet created due to missing reportlab)
         assert response.status_code in [200, 404]
 
@@ -105,17 +126,18 @@ class TestReportGeneration:
 class TestReconciliationShield:
     """Test Reconciliation Shield (Trial Balance) feature end-to-end."""
 
-    def test_get_trial_balance_pending(self, authenticated_client, test_migration):
+    def test_get_trial_balance_pending(self, client, auth_headers, test_migration):
         """Test trial balance returns PENDING for incomplete migration."""
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/trial-balance'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/trial-balance',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
         assert data['forensic_status'] in ['PENDING', 'NOT_AVAILABLE']
 
-    def test_get_trial_balance_verified(self, authenticated_client, test_migration, db_session):
+    def test_get_trial_balance_verified(self, client, auth_headers, test_migration, db_session):
         """Test trial balance returns VERIFIED for balanced migration."""
         test_migration.status = 'completed'
         test_migration.verification_results = json.dumps({
@@ -134,8 +156,9 @@ class TestReconciliationShield:
         })
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/trial-balance'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/trial-balance',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -146,7 +169,7 @@ class TestReconciliationShield:
         assert data['destination_trial_balance'] == 1000000.00
         assert data['discrepancy'] == 0.00
 
-    def test_get_trial_balance_discrepancy(self, authenticated_client, test_migration, db_session):
+    def test_get_trial_balance_discrepancy(self, client, auth_headers, test_migration, db_session):
         """Test trial balance returns DISCREPANCY_DETECTED when unbalanced."""
         test_migration.status = 'completed'
         test_migration.verification_results = json.dumps({
@@ -158,8 +181,9 @@ class TestReconciliationShield:
         })
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/trial-balance'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/trial-balance',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -168,10 +192,11 @@ class TestReconciliationShield:
         assert data['is_balanced'] is False
         assert data['discrepancy'] == 500.00
 
-    def test_trial_balance_not_found(self, authenticated_client):
+    def test_trial_balance_not_found(self, client, auth_headers):
         """Test trial balance returns 404 for non-existent migration."""
-        response = authenticated_client.get(
-            '/api/migrations/non_existent_id/trial-balance'
+        response = client.get(
+            '/api/migrations/non_existent_id/trial-balance',
+            headers=auth_headers
         )
         assert response.status_code == 404
 
@@ -186,13 +211,14 @@ class TestCasewareBundle:
         )
         assert response.status_code == 401
 
-    def test_export_caseware_creates_bundle(self, authenticated_client, test_migration, db_session):
+    def test_export_caseware_creates_bundle(self, client, auth_headers, test_migration, db_session):
         """Test Caseware export creates bundle files."""
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.post(
-            f'/api/migrations/{test_migration.migration_id}/export-caseware'
+        response = client.post(
+            f'/api/migrations/{test_migration.migration_id}/export-caseware',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -201,27 +227,30 @@ class TestCasewareBundle:
         assert 'files' in data
         assert 'download_url' in data
 
-    def test_download_caseware_bundle(self, authenticated_client, test_migration, db_session):
+    def test_download_caseware_bundle(self, client, auth_headers, test_migration, db_session):
         """Test downloading Caseware bundle."""
         test_migration.status = 'completed'
         db_session.commit()
 
         # Generate bundle first
-        authenticated_client.post(
-            f'/api/migrations/{test_migration.migration_id}/export-caseware'
+        client.post(
+            f'/api/migrations/{test_migration.migration_id}/export-caseware',
+            headers=auth_headers
         )
 
         # Download bundle
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/caseware-bundle'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/caseware-bundle',
+            headers=auth_headers
         )
         # Should either succeed or tell us to regenerate
         assert response.status_code in [200, 400]
 
-    def test_caseware_bundle_without_generation_fails(self, authenticated_client, test_migration):
+    def test_caseware_bundle_without_generation_fails(self, client, auth_headers, test_migration):
         """Test downloading bundle without generating fails."""
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/caseware-bundle'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/caseware-bundle',
+            headers=auth_headers
         )
         assert response.status_code == 400
         data = response.get_json()
@@ -231,10 +260,11 @@ class TestCasewareBundle:
 class TestDiscrepancyDoctor:
     """Test Discrepancy Doctor feature end-to-end."""
 
-    def test_get_discrepancies_empty(self, authenticated_client, test_migration):
+    def test_get_discrepancies_empty(self, client, auth_headers, test_migration):
         """Test getting discrepancies when none exist."""
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/discrepancies'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/discrepancies',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -242,7 +272,7 @@ class TestDiscrepancyDoctor:
         assert data['has_discrepancies'] is False
         assert data['discrepancies'] == []
 
-    def test_get_discrepancies_with_data(self, authenticated_client, test_migration, db_session):
+    def test_get_discrepancies_with_data(self, client, auth_headers, test_migration, db_session):
         """Test getting discrepancies when they exist."""
         test_migration.verification_results = json.dumps({
             'discrepancies': [
@@ -268,8 +298,9 @@ class TestDiscrepancyDoctor:
         })
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/discrepancies'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/discrepancies',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -278,7 +309,7 @@ class TestDiscrepancyDoctor:
         assert len(data['discrepancies']) == 2
         assert data['total_discrepancy'] == 1500.00  # 500 + 1000
 
-    def test_download_discrepancy_report(self, authenticated_client, test_migration, db_session):
+    def test_download_discrepancy_report(self, client, auth_headers, test_migration, db_session):
         """Test downloading discrepancy report."""
         test_migration.status = 'completed'
         test_migration.verification_results = json.dumps({
@@ -293,8 +324,9 @@ class TestDiscrepancyDoctor:
         })
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/discrepancy-report'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/discrepancy-report',
+            headers=auth_headers
         )
         # Either 200 (success) or 500 (missing reportlab)
         assert response.status_code in [200, 500]
@@ -303,13 +335,14 @@ class TestDiscrepancyDoctor:
 class TestAuditCertificate:
     """Test Audit Certificate feature end-to-end."""
 
-    def test_certificate_preview(self, authenticated_client, test_migration, db_session):
+    def test_certificate_preview(self, client, auth_headers, test_migration, db_session):
         """Test getting certificate preview metadata."""
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/audit-certificate/preview'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/audit-certificate/preview',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -317,22 +350,24 @@ class TestAuditCertificate:
         assert data['available'] is True
         assert 'download_url' in data
 
-    def test_certificate_not_available_for_incomplete(self, authenticated_client, test_migration):
+    def test_certificate_not_available_for_incomplete(self, client, auth_headers, test_migration):
         """Test certificate not available for incomplete migration."""
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/audit-certificate/preview'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/audit-certificate/preview',
+            headers=auth_headers
         )
         assert response.status_code == 200
         data = response.get_json()
         assert data['available'] is False
 
-    def test_download_certificate(self, authenticated_client, test_migration, db_session):
+    def test_download_certificate(self, client, auth_headers, test_migration, db_session):
         """Test downloading audit certificate."""
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/audit-certificate'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/audit-certificate',
+            headers=auth_headers
         )
         # Either 200 (success) or 500 (certificate generation issue)
         assert response.status_code in [200, 500]
@@ -341,16 +376,13 @@ class TestAuditCertificate:
 class TestDashboardOverview:
     """Test Dashboard Overview API."""
 
-    def test_overview_statistics(self, authenticated_client, test_migration, db_session):
+    def test_overview_statistics(self, client, auth_headers, test_migration, db_session):
         """Test dashboard overview returns statistics."""
-        # Create some migrations with different statuses
-        from models.migration import Migration
-
         # Update test migration to completed
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.get('/api/dashboard/overview')
+        response = client.get('/api/dashboard/overview', headers=auth_headers)
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
@@ -359,9 +391,9 @@ class TestDashboardOverview:
         assert 'success_rate' in data
         assert 'avg_completion_time' in data
 
-    def test_recent_activity(self, authenticated_client, test_migration):
+    def test_recent_activity(self, client, auth_headers, test_migration):
         """Test recent activity feed."""
-        response = authenticated_client.get('/api/dashboard/recent-activity')
+        response = client.get('/api/dashboard/recent-activity', headers=auth_headers)
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
@@ -372,7 +404,7 @@ class TestDashboardOverview:
 class TestAPIDataFlow:
     """Test complete data flow through API."""
 
-    def test_complete_migration_flow(self, authenticated_client, test_migration, db_session):
+    def test_complete_migration_flow(self, client, auth_headers, test_migration, db_session):
         """Test complete flow from migration to report generation."""
         # 1. Start with pending migration
         assert test_migration.status == 'pending'
@@ -394,37 +426,41 @@ class TestAPIDataFlow:
         db_session.commit()
 
         # 3. Verify trial balance endpoint
-        response = authenticated_client.get(
-            f'/api/migrations/{test_migration.migration_id}/trial-balance'
+        response = client.get(
+            f'/api/migrations/{test_migration.migration_id}/trial-balance',
+            headers=auth_headers
         )
         assert response.status_code == 200
         tb_data = response.get_json()
         assert tb_data['forensic_status'] == 'VERIFIED'
 
         # 4. Generate reports
-        response = authenticated_client.post('/api/reports/generate', json={
-            'type': 'variance',
-            'migration_id': test_migration.migration_id
-        })
+        response = client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'variance',
+                'migration_id': test_migration.migration_id
+            })
         assert response.status_code == 200
 
         # 5. Export Caseware bundle
-        response = authenticated_client.post(
-            f'/api/migrations/{test_migration.migration_id}/export-caseware'
+        response = client.post(
+            f'/api/migrations/{test_migration.migration_id}/export-caseware',
+            headers=auth_headers
         )
         assert response.status_code == 200
 
         # 6. Verify reports list
-        response = authenticated_client.get('/api/reports')
+        response = client.get('/api/reports', headers=auth_headers)
         assert response.status_code == 200
 
 
 class TestErrorHandling:
     """Test error handling scenarios."""
 
-    def test_invalid_migration_id(self, authenticated_client):
+    def test_invalid_migration_id(self, client, auth_headers):
         """Test handling of invalid migration ID."""
-        response = authenticated_client.get('/api/migrations/invalid_id/trial-balance')
+        response = client.get('/api/migrations/invalid_id/trial-balance', headers=auth_headers)
         assert response.status_code == 404
 
     def test_unauthorized_access(self, client, test_migration):
@@ -434,15 +470,17 @@ class TestErrorHandling:
         )
         assert response.status_code == 401
 
-    def test_invalid_report_type(self, authenticated_client, test_migration, db_session):
+    def test_invalid_report_type(self, client, auth_headers, test_migration, db_session):
         """Test handling of invalid report type."""
         test_migration.status = 'completed'
         db_session.commit()
 
-        response = authenticated_client.post('/api/reports/generate', json={
-            'type': 'invalid_type',
-            'migration_id': test_migration.migration_id
-        })
+        response = client.post('/api/reports/generate',
+            headers=auth_headers,
+            json={
+                'type': 'invalid_type',
+                'migration_id': test_migration.migration_id
+            })
         assert response.status_code == 400
 
 
