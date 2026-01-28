@@ -11,8 +11,6 @@ C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\JsonSch
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\Microsoft.Bcl.AsyncInterfaces.dll
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\Newtonsoft.Json.dll
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.Buffers.dll
-C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.CodeDom.dll
-C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.Data.Odbc.dll
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.Memory.dll
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.Numerics.Vectors.dll
 C:\Users\Sivaharan\QBMigration\QBDesktopReader\bin\Release\net48\win-x86\System.Runtime.CompilerServices.Unsafe.dll
