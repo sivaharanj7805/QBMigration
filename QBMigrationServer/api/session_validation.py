@@ -214,10 +214,6 @@ def validate_session():
                 'devices_active': len(existing_activations)
             }), 403
 
-    # Check if user has available credits (for tier info, but don't block if none)
-    user_id = project.user_id
-    available_credits = MigrationCredit.get_available_for_user(user_id)
-
     # Calculate remaining extractions for this session
     total_extractions = sum(a.extraction_count for a in existing_activations)
     remaining = MAX_ACTIVATIONS_PER_SESSION - total_extractions
@@ -225,19 +221,12 @@ def validate_session():
     # Log successful validation
     log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'success')
 
-    # Determine tier info - use available credits if present, otherwise show pending status
-    if available_credits:
-        best_credit = available_credits[0]
-        tier = best_credit.tier_type
-        tier_name = best_credit.TIER_CONFIG.get(best_credit.tier_type, {}).get('name', 'Unknown')
-        transaction_limit = best_credit.transaction_limit
-        has_credits = True
-    else:
-        # Session is valid but no credits purchased yet
-        tier = 'none'
-        tier_name = 'No Credits'
-        transaction_limit = 0
-        has_credits = False
+    # Get tier info from the project itself (set when project was created with paid credit)
+    tier = project.tier_type
+    tier_name = project.get_tier_name()
+    transaction_limit = project.transaction_limit
+    transactions_used = project.transactions_used
+    transactions_remaining = project.get_remaining_transactions()
 
     return jsonify({
         'valid': True,
@@ -247,11 +236,12 @@ def validate_session():
         'tier': tier,
         'tier_name': tier_name,
         'transaction_limit': transaction_limit,
+        'transactions_used': transactions_used,
+        'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
+        'is_unlimited': transaction_limit == -1,
         'remaining_extractions': max(0, remaining),
         'is_new_device': device_activation is None,
-        'devices_active': len(existing_activations),
-        'has_credits': has_credits,
-        'purchase_url': 'https://forensicbridge.ca/pricing' if not has_credits else None
+        'devices_active': len(existing_activations)
     })
 
 
@@ -434,7 +424,7 @@ def start_extraction():
             'error': 'This device is not activated for this session. Please activate first.'
         }), 403
 
-    # Check extraction limit
+    # Check extraction limit per session
     total_extractions = SessionActivation.query.filter_by(
         session_id=session_id,
         status='active'
@@ -450,17 +440,19 @@ def start_extraction():
             'limit_reached': True
         }), 403
 
-    # Check user has credits
-    user_id = project.user_id
-    available_credits = MigrationCredit.get_available_for_user(user_id)
-
-    if not available_credits:
+    # Check project's transaction limit (from the paid tier)
+    transactions_remaining = project.get_remaining_transactions()
+    if transactions_remaining == 0:
         log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'failed',
-                              'No credits available')
+                              'Transaction limit reached')
         return jsonify({
             'success': False,
-            'error': 'No migration credits available',
-            'purchase_required': True
+            'error': f'Transaction limit ({project.transaction_limit:,}) reached for this session. '
+                     f'Used: {project.transactions_used:,}. Please purchase a higher tier.',
+            'transaction_limit_reached': True,
+            'tier': project.tier_type,
+            'transaction_limit': project.transaction_limit,
+            'transactions_used': project.transactions_used
         }), 403
 
     # Generate extraction token (used to complete extraction)
@@ -481,7 +473,12 @@ def start_extraction():
             'extraction_token': extraction_token,
             'extraction_number': activation.extraction_count,
             'remaining_extractions': MAX_ACTIVATIONS_PER_SESSION - total_extractions - 1,
-            'credit_tier': available_credits[0].tier_type
+            'tier': project.tier_type,
+            'tier_name': project.get_tier_name(),
+            'transaction_limit': project.transaction_limit,
+            'transactions_used': project.transactions_used,
+            'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
+            'is_unlimited': project.transaction_limit == -1
         })
     except Exception as e:
         db.session.rollback()
@@ -496,7 +493,7 @@ def start_extraction():
 def complete_extraction():
     """
     Called when extraction completes successfully.
-    Consumes a migration credit.
+    Records the transaction count against the project's tier limit.
 
     Request body:
     {
@@ -537,42 +534,53 @@ def complete_extraction():
             'error': 'Invalid session'
         }), 404
 
-    # Find and use the best available credit
-    user_id = project.user_id
-    best_credit = MigrationCredit.find_best_credit(user_id, transaction_count)
-
-    if not best_credit:
+    # Check if project can handle this transaction count
+    if not project.can_extract_transactions(transaction_count):
+        remaining = project.get_remaining_transactions()
+        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'failed',
+                              f'Transaction limit exceeded: {transaction_count} > {remaining}')
         return jsonify({
             'success': False,
-            'error': 'No suitable credit available for this transaction count',
-            'transaction_count': transaction_count
+            'error': f'Transaction count ({transaction_count:,}) exceeds remaining limit ({remaining:,}). '
+                     f'Your {project.get_tier_name()} tier allows {project.transaction_limit:,} transactions.',
+            'transaction_count': transaction_count,
+            'transaction_limit': project.transaction_limit,
+            'transactions_used': project.transactions_used,
+            'transactions_remaining': remaining
         }), 403
 
     # Generate a migration ID for tracking
     migration_id = f"MIG-{session_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
-    # Use the credit
-    if best_credit.use_for_migration(migration_id, transaction_count):
+    # Record the transactions against the project
+    if project.record_transactions(transaction_count):
         log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'success')
 
-        # Update project status
-        project.status = 'completed' if project.status == 'active' else project.status
+        # Update project status if all transactions used
+        remaining = project.get_remaining_transactions()
+        if remaining == 0:
+            project.status = 'completed'
+
         project.updated_at = datetime.utcnow()
         db.session.commit()
 
         return jsonify({
             'success': True,
             'migration_id': migration_id,
-            'credit_used': best_credit.tier_type,
+            'tier': project.tier_type,
+            'tier_name': project.get_tier_name(),
             'transaction_count': transaction_count,
-            'message': 'Extraction completed and credit consumed'
+            'transactions_used': project.transactions_used,
+            'transactions_remaining': remaining if remaining != -1 else 'unlimited',
+            'is_unlimited': project.transaction_limit == -1,
+            'message': 'Extraction completed successfully'
         })
     else:
         log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'failed',
-                              'Credit consumption failed')
+                              'Transaction recording failed')
         return jsonify({
             'success': False,
-            'error': 'Failed to consume credit'
+            'error': 'Failed to record transactions'
         }), 500
 
 
@@ -597,11 +605,20 @@ def session_status(session_id):
 
     total_extractions = sum(a.extraction_count for a in activations)
 
+    transactions_remaining = project.get_remaining_transactions()
+
     return jsonify({
         'found': True,
         'session_id': session_id,
         'project_name': project.name,
+        'client_name': project.client_name,
         'status': project.status,
+        'tier': project.tier_type,
+        'tier_name': project.get_tier_name(),
+        'transaction_limit': project.transaction_limit,
+        'transactions_used': project.transactions_used,
+        'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
+        'is_unlimited': project.transaction_limit == -1,
         'devices_active': len(activations),
         'max_devices': MAX_DEVICES_PER_SESSION,
         'extractions_used': total_extractions,
