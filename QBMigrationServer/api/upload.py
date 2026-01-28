@@ -18,6 +18,9 @@ import logging
 import uuid
 import base64
 import re
+import json
+import threading
+import time
 from datetime import datetime
 from io import BytesIO
 
@@ -704,6 +707,505 @@ def upload_ndjson_bundle():
             'success': False,
             'error': 'An error occurred during bundle upload'
         }), 500
+
+
+# ============================================================================
+# CHUNKED UPLOAD ENDPOINTS (v4.3)
+# ============================================================================
+
+# In-memory storage for chunked upload sessions.
+# In production, consider Redis or database for persistence across restarts.
+_chunked_uploads = {}
+_chunked_uploads_lock = threading.Lock()
+CHUNKED_UPLOAD_EXPIRY_SECONDS = 24 * 60 * 60  # 24 hours
+
+
+@upload_bp.route('/initiate', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+def initiate_chunked_upload():
+    """
+    Initiate a chunked upload session.
+
+    Request JSON:
+        {
+            "session_id": "guid",
+            "total_chunks": 10,
+            "key_id": "key-uuid",
+            "algorithm": "AES-256-GCM",
+            "encrypted_hash": "sha256-of-encrypted-file"
+        }
+
+    Returns:
+        200: {upload_id, expires_at}
+        400: Invalid input
+        401: Unauthorized
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+        session_id = data.get('session_id', '')
+        total_chunks = data.get('total_chunks', 0)
+        key_id = data.get('key_id', '')
+        algorithm = data.get('algorithm', '')
+        encrypted_hash = data.get('encrypted_hash', '')
+
+        if not session_id or not total_chunks or total_chunks < 1:
+            return jsonify({
+                'success': False,
+                'error': 'session_id and total_chunks (>= 1) are required'
+            }), 400
+
+        upload_id = str(uuid.uuid4())
+        now = time.time()
+        expires_at = now + CHUNKED_UPLOAD_EXPIRY_SECONDS
+        expires_at_iso = datetime.utcfromtimestamp(expires_at).isoformat() + 'Z'
+
+        session_data = {
+            'upload_id': upload_id,
+            'session_id': session_id,
+            'user_id': current_user.id,
+            'total_chunks': total_chunks,
+            'key_id': key_id,
+            'algorithm': algorithm,
+            'encrypted_hash': encrypted_hash,
+            'chunks': {},
+            'created_at': now,
+            'expires_at': expires_at,
+        }
+
+        with _chunked_uploads_lock:
+            _chunked_uploads[upload_id] = session_data
+
+        logger.info(f"Chunked upload initiated: {upload_id}, {total_chunks} chunks, session: {session_id}")
+
+        return jsonify({
+            'success': True,
+            'upload_id': upload_id,
+            'expires_at': expires_at_iso
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Initiate chunked upload error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to initiate upload'}), 500
+
+
+@upload_bp.route('/chunk', methods=['POST'])
+@limiter.limit("120 per minute")
+@login_required
+def upload_chunk():
+    """
+    Upload a single chunk of a chunked upload.
+
+    Multipart form data:
+        - chunk: binary file data
+        - upload_id: string
+        - chunk_index: int
+        - total_chunks: int
+        - chunk_hash: base64-encoded SHA-256 hash
+
+    Returns:
+        200: {received_hash, stored}
+        400: Invalid input / hash mismatch
+        401: Unauthorized
+        404: Upload session not found
+        410: Upload session expired
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+    try:
+        upload_id = request.form.get('upload_id', '')
+        chunk_index_str = request.form.get('chunk_index', '')
+        total_chunks_str = request.form.get('total_chunks', '')
+        chunk_hash = request.form.get('chunk_hash', '')
+
+        if not upload_id or chunk_index_str == '' or not total_chunks_str:
+            return jsonify({
+                'success': False,
+                'error': 'upload_id, chunk_index, and total_chunks are required'
+            }), 400
+
+        chunk_index = int(chunk_index_str)
+        total_chunks = int(total_chunks_str)
+
+        # Validate upload session
+        with _chunked_uploads_lock:
+            session_data = _chunked_uploads.get(upload_id)
+
+        if not session_data:
+            return jsonify({'success': False, 'error': 'Upload session not found'}), 404
+
+        if session_data['user_id'] != current_user.id:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+        if time.time() > session_data['expires_at']:
+            with _chunked_uploads_lock:
+                _chunked_uploads.pop(upload_id, None)
+            return jsonify({'success': False, 'error': 'Upload session expired'}), 410
+
+        # Get chunk file data
+        chunk_file = request.files.get('chunk')
+        if not chunk_file:
+            return jsonify({'success': False, 'error': 'No chunk data provided'}), 400
+
+        chunk_data = chunk_file.read()
+
+        # Verify chunk hash (base64-encoded SHA-256)
+        computed_hash = base64.b64encode(hashlib.sha256(chunk_data).digest()).decode('utf-8')
+        if chunk_hash and computed_hash != chunk_hash:
+            logger.warning(f"Chunk {chunk_index} hash mismatch for upload {upload_id}")
+            return jsonify({
+                'success': False,
+                'error': f'Chunk hash mismatch: expected {chunk_hash}, got {computed_hash}'
+            }), 400
+
+        # Store chunk in S3
+        aws = AWSMigrationManager()
+
+        result = aws.upload_to_s3(
+            file_obj=BytesIO(chunk_data),
+            migration_id=upload_id,
+            file_name=f"chunk_{chunk_index:06d}.bin",
+            metadata={
+                'upload_id': upload_id,
+                'chunk_index': str(chunk_index),
+                'chunk_hash': computed_hash
+            }
+        )
+
+        if not result:
+            return jsonify({'success': False, 'error': 'Failed to store chunk'}), 500
+
+        # Track chunk in session
+        with _chunked_uploads_lock:
+            if upload_id in _chunked_uploads:
+                _chunked_uploads[upload_id]['chunks'][chunk_index] = {
+                    'hash': computed_hash,
+                    's3_key': result.get('key', ''),
+                    'size': len(chunk_data)
+                }
+
+        logger.debug(f"Chunk {chunk_index}/{total_chunks} stored for upload {upload_id}")
+
+        return jsonify({
+            'success': True,
+            'received_hash': computed_hash,
+            'stored': True
+        }), 200
+
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid chunk_index or total_chunks'}), 400
+    except Exception as e:
+        logger.error(f"Upload chunk error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to upload chunk'}), 500
+
+
+@upload_bp.route('/chunk/exists', methods=['GET'])
+@limiter.limit("120 per minute")
+@login_required
+def chunk_exists():
+    """
+    Check if a chunk has already been uploaded (for resume support).
+
+    Query params:
+        - uploadId: string
+        - chunkIndex: int
+
+    Returns:
+        200: {exists, chunk_hash}
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({'exists': False, 'chunk_hash': None}), 200
+
+    try:
+        upload_id = request.args.get('uploadId', '')
+        chunk_index_str = request.args.get('chunkIndex', '')
+
+        if not upload_id or chunk_index_str == '':
+            return jsonify({'exists': False, 'chunk_hash': None}), 200
+
+        chunk_index = int(chunk_index_str)
+
+        with _chunked_uploads_lock:
+            session_data = _chunked_uploads.get(upload_id)
+
+        if not session_data:
+            return jsonify({'exists': False, 'chunk_hash': None}), 200
+
+        if session_data['user_id'] != current_user.id:
+            return jsonify({'exists': False, 'chunk_hash': None}), 200
+
+        chunk_info = session_data['chunks'].get(chunk_index)
+
+        if chunk_info:
+            return jsonify({
+                'exists': True,
+                'chunk_hash': chunk_info['hash']
+            }), 200
+        else:
+            return jsonify({
+                'exists': False,
+                'chunk_hash': None
+            }), 200
+
+    except (ValueError, Exception) as e:
+        logger.error(f"Chunk exists check error: {str(e)}")
+        return jsonify({'exists': False, 'chunk_hash': None}), 200
+
+
+@upload_bp.route('/commit', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+def commit_chunked_upload():
+    """
+    Commit a chunked upload - finalizes the upload and creates migration record.
+
+    Request JSON:
+        {
+            "upload_id": "guid",
+            "session_id": "guid",
+            "key_id": "key-uuid",
+            "encryption_metadata": {
+                "algorithm": "AES-256-GCM",
+                "data_hash_sha256": "...",
+                "encrypted_hash_sha256": "...",
+                "chunk_size": 1048576,
+                "total_chunks": 10,
+                "plaintext_size_bytes": 10000000,
+                "encrypted_size_bytes": 10000128
+            },
+            "metadata": {
+                "schema_version": "4.3",
+                "extraction_version": "4.3.0",
+                "is_incremental": false,
+                "incremental_from_date": null,
+                "qb_version": "Enterprise 23.0",
+                "extracted_at": "2024-01-01T00:00:00Z"
+            }
+        }
+
+    Returns:
+        200: Success with migration_id
+        400: Invalid input / missing chunks
+        401: Unauthorized
+        404: Upload session not found
+        410: Upload session expired
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+        upload_id = data.get('upload_id', '')
+        session_id = data.get('session_id', '')
+        key_id = data.get('key_id', '')
+        encryption_metadata = data.get('encryption_metadata', {})
+        metadata = data.get('metadata', {})
+
+        if not upload_id:
+            return jsonify({'success': False, 'error': 'upload_id is required'}), 400
+
+        # Validate upload session
+        with _chunked_uploads_lock:
+            session_data = _chunked_uploads.get(upload_id)
+
+        if not session_data:
+            return jsonify({'success': False, 'error': 'Upload session not found'}), 404
+
+        if session_data['user_id'] != current_user.id:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+        if time.time() > session_data['expires_at']:
+            with _chunked_uploads_lock:
+                _chunked_uploads.pop(upload_id, None)
+            return jsonify({'success': False, 'error': 'Upload session expired'}), 410
+
+        # Verify all chunks are present
+        total_chunks = session_data['total_chunks']
+        received_chunks = session_data['chunks']
+
+        missing_chunks = [i for i in range(total_chunks) if i not in received_chunks]
+
+        if missing_chunks:
+            return jsonify({
+                'success': False,
+                'error': f'Missing {len(missing_chunks)} chunks',
+                'missing_chunks': missing_chunks[:20]
+            }), 400
+
+        # Calculate total size from chunks
+        total_size = sum(c.get('size', 0) for c in received_chunks.values())
+
+        # Generate migration ID
+        migration_id = str(uuid.uuid4())
+
+        # Use encrypted hash from session or encryption_metadata
+        file_hash = encryption_metadata.get('encrypted_hash_sha256', session_data.get('encrypted_hash', ''))
+
+        logger.info(f"Committing chunked upload {upload_id}: {total_chunks} chunks, "
+                    f"{total_size:,} bytes, session: {session_id}")
+
+        # Create migration record
+        migration = Migration(
+            migration_id=migration_id,
+            user_id=current_user.id,
+            company_name=sanitize_input(metadata.get('company_name', 'Chunked Upload'), max_length=255),
+            qb_file_name=sanitize_input(metadata.get('qb_file_name', 'chunked_upload.enc'), max_length=255),
+            file_hash=file_hash,
+            data_size_bytes=total_size,
+            status='uploaded'
+        )
+
+        db.session.add(migration)
+
+        # Store commit manifest and encryption metadata in S3
+        try:
+            aws = AWSMigrationManager()
+
+            commit_manifest = {
+                'upload_id': upload_id,
+                'session_id': session_id,
+                'key_id': key_id,
+                'encryption_metadata': encryption_metadata,
+                'extraction_metadata': metadata,
+                'chunks': {
+                    str(k): {
+                        'hash': v['hash'],
+                        's3_key': v['s3_key'],
+                        'size': v.get('size', 0)
+                    }
+                    for k, v in received_chunks.items()
+                },
+                'total_size_bytes': total_size,
+                'committed_at': datetime.utcnow().isoformat() + 'Z'
+            }
+
+            # Store commit manifest
+            aws.upload_to_s3(
+                file_obj=BytesIO(json.dumps(commit_manifest, indent=2).encode('utf-8')),
+                migration_id=migration_id,
+                file_name='commit_manifest.json',
+                metadata={
+                    'upload_id': upload_id,
+                    'migration_id': migration_id,
+                    'type': 'commit_manifest'
+                }
+            )
+
+            # Store encryption metadata separately
+            aws.store_encryption_metadata(migration_id, {
+                'key_id': key_id,
+                'algorithm': encryption_metadata.get('algorithm', ''),
+                'data_hash_sha256': encryption_metadata.get('data_hash_sha256', ''),
+                'encrypted_hash_sha256': encryption_metadata.get('encrypted_hash_sha256', ''),
+                'chunk_size': encryption_metadata.get('chunk_size', 0),
+                'total_chunks': total_chunks
+            })
+
+        except Exception as e:
+            logger.error(f"Failed to store commit metadata for {upload_id}: {str(e)}")
+            # Continue - chunks are already stored in S3
+
+        db.session.commit()
+
+        # Clean up in-memory session
+        with _chunked_uploads_lock:
+            _chunked_uploads.pop(upload_id, None)
+
+        logger.info(f"Chunked upload committed: {upload_id} -> migration {migration_id}")
+
+        return jsonify({
+            'success': True,
+            'migration_id': migration_id,
+            'status': 'uploaded',
+            'total_chunks': total_chunks,
+            'total_size_bytes': total_size,
+            'message': 'Chunked upload committed successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Commit chunked upload error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to commit upload'}), 500
+
+
+@upload_bp.route('/abort', methods=['POST'])
+@limiter.limit("10 per minute")
+@login_required
+def abort_chunked_upload():
+    """
+    Abort a chunked upload session and clean up stored chunks.
+
+    Request JSON:
+        {
+            "upload_id": "guid",
+            "reason": "client_error"
+        }
+
+    Returns:
+        200: Success
+        400: Invalid input
+        401: Unauthorized
+    """
+    if not current_user or not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+        upload_id = data.get('upload_id', '')
+        reason = data.get('reason', 'unknown')
+
+        if not upload_id:
+            return jsonify({'success': False, 'error': 'upload_id is required'}), 400
+
+        with _chunked_uploads_lock:
+            session_data = _chunked_uploads.pop(upload_id, None)
+
+        if session_data:
+            if session_data['user_id'] != current_user.id:
+                # Put it back - not authorized to abort this session
+                with _chunked_uploads_lock:
+                    _chunked_uploads[upload_id] = session_data
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+            chunks_count = len(session_data['chunks'])
+            logger.info(f"Chunked upload aborted: {upload_id}, reason: {reason}, "
+                        f"chunks uploaded: {chunks_count}/{session_data['total_chunks']}")
+
+            # Best-effort cleanup of stored chunks from S3
+            try:
+                aws = AWSMigrationManager()
+                for chunk_info in session_data['chunks'].values():
+                    s3_key = chunk_info.get('s3_key')
+                    if s3_key:
+                        try:
+                            aws.delete_from_s3(s3_key)
+                        except Exception:
+                            pass  # Best effort
+            except Exception as e:
+                logger.warning(f"Cleanup failed for aborted upload {upload_id}: {str(e)}")
+        else:
+            logger.info(f"Abort request for unknown/already-cleaned upload: {upload_id}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Upload aborted'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Abort chunked upload error: {str(e)}")
+        return jsonify({'success': False, 'error': 'Failed to abort upload'}), 500
 
 
 # ============================================================================
