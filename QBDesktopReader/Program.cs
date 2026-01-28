@@ -50,68 +50,104 @@ namespace QBDesktopExtractor
         [STAThread]
         static int Main(string[] args)
         {
-            var options = ParseArgs(args);
-            
-            if (!options.Quiet)
-            {
-                PrintHeader();
-            }
-
-            string sessionId = Guid.NewGuid().ToString();
-            
-            var logConfig = new RedactionConfig { Enabled = true };
-            _logger = new RedactingConsoleLogger(logConfig,
-                options.Verbose ? LogLevel.Debug : LogLevel.Info);
-
-            // Handle --show-backends
-            if (options.ShowBackends)
-            {
-                ShowAvailableBackends(_logger);
-                return ExitCode.Success;
-            }
-
-            _logger.Log(LogLevel.Info, "Migration Session ID: {0}", sessionId);
-            _logger.Log(LogLevel.Info, "Started: {0}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-
-            _cts = new CancellationTokenSource();
-
-            Console.CancelKeyPress += (sender, e) =>
-            {
-                _logger.Log(LogLevel.Warning, "Interrupted by user. Cleaning up...");
-                _cts.Cancel();
-                SafeCleanup();
-                e.Cancel = false;
-            };
-
-            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
-            {
-                _logger.Log(LogLevel.Error, "FATAL ERROR: {0}", e.ExceptionObject);
-                SafeCleanup();
-            };
+            int exitCode = ExitCode.UnknownError;
+            bool noPause = false;
+            bool quiet = false;
 
             try
             {
-                int result = RunExtraction(sessionId, options).GetAwaiter().GetResult();
-                
-                if (!options.NoPause && !options.Quiet)
+                var options = ParseArgs(args);
+                noPause = options.NoPause;
+                quiet = options.Quiet;
+
+                if (!options.Quiet)
                 {
-                    Console.WriteLine("\nPress any key to exit...");
-                    Console.ReadKey();
+                    PrintHeader();
                 }
-                
-                return result;
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.Log(LogLevel.Warning, "Operation cancelled by user");
-                return ExitCode.Cancelled;
+
+                string sessionId = Guid.NewGuid().ToString();
+
+                var logConfig = new RedactionConfig { Enabled = true };
+                _logger = new RedactingConsoleLogger(logConfig,
+                    options.Verbose ? LogLevel.Debug : LogLevel.Info);
+
+                // Handle --show-backends
+                if (options.ShowBackends)
+                {
+                    ShowAvailableBackends(_logger);
+                    return ExitCode.Success;
+                }
+
+                _logger.Log(LogLevel.Info, "Migration Session ID: {0}", sessionId);
+                _logger.Log(LogLevel.Info, "Started: {0}", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                _cts = new CancellationTokenSource();
+
+                Console.CancelKeyPress += (sender, e) =>
+                {
+                    _logger.Log(LogLevel.Warning, "Interrupted by user. Cleaning up...");
+                    _cts.Cancel();
+                    SafeCleanup();
+                    e.Cancel = false;
+                };
+
+                AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+                {
+                    _logger.Log(LogLevel.Error, "FATAL ERROR: {0}", e.ExceptionObject);
+                    SafeCleanup();
+                };
+
+                try
+                {
+                    exitCode = RunExtraction(sessionId, options).GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.Log(LogLevel.Warning, "Operation cancelled by user");
+                    exitCode = ExitCode.Cancelled;
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, "Extraction failed: {0}", ex.Message);
+                    SafeCleanup();
+                    exitCode = ExitCode.UnknownError;
+                }
             }
             catch (Exception ex)
             {
-                _logger.Log(LogLevel.Error, "Extraction failed: {0}", ex.Message);
-                SafeCleanup();
-                return ExitCode.UnknownError;
+                // Top-level catch for crashes during startup (before logger is initialized)
+                try
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"\nFATAL ERROR: {ex.Message}");
+                    Console.ResetColor();
+                    if (ex.InnerException != null)
+                    {
+                        Console.WriteLine($"  Cause: {ex.InnerException.Message}");
+                    }
+                }
+                catch { /* Don't let error reporting crash */ }
+                exitCode = ExitCode.UnknownError;
             }
+            finally
+            {
+                // ALWAYS pause so the user can read output when running interactively
+                if (!noPause && !quiet)
+                {
+                    try
+                    {
+                        Console.WriteLine();
+                        Console.WriteLine("Press any key to exit...");
+                        Console.ReadKey(true);
+                    }
+                    catch
+                    {
+                        // ReadKey throws if stdin is redirected; ignore
+                    }
+                }
+            }
+
+            return exitCode;
         }
 
         private static void PrintHeader()
