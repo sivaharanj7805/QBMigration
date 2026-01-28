@@ -168,10 +168,10 @@ export default function NewProjectPage() {
 
                             {/* View Project Button */}
                             <Link
-                                href={`/projects/${createdProject.id}`}
+                                href="/projects"
                                 className="w-full py-3 px-6 rounded-lg bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors flex items-center justify-center"
                             >
-                                View Project Dashboard
+                                View All Projects
                             </Link>
                         </div>
                     </div>

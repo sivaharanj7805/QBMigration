@@ -55,8 +55,23 @@ class ApiClient {
         this.timeout = timeout;
     }
 
-    setToken(token: string) {
+    setToken(token: string | null) {
         this.token = token;
+    }
+
+    clearToken() {
+        this.token = null;
+    }
+
+    /**
+     * Get the current token, falling back to localStorage if not set
+     */
+    private getToken(): string | null {
+        if (this.token) return this.token;
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('token');
+        }
+        return null;
     }
 
     private async request<T>(
@@ -65,10 +80,11 @@ class ApiClient {
         schema?: z.ZodSchema<T>
     ): Promise<ApiResponse<T>> {
         const url = `${this.baseUrl}${endpoint}`;
+        const token = this.getToken();
 
         const headers: HeadersInit = {
             "Content-Type": "application/json",
-            ...(this.token && { Authorization: `Bearer ${this.token}` }),
+            ...(token && { Authorization: `Bearer ${token}` }),
             ...options.headers,
         };
 
@@ -315,11 +331,12 @@ class ApiClient {
 
     async downloadAuditCertificate(migrationId: string): Promise<Blob | null> {
         const url = `${this.baseUrl}/api/migrations/${migrationId}/audit-certificate`;
+        const token = this.getToken();
 
         try {
             const response = await fetch(url, {
                 credentials: "include",
-                headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
 
             if (!response.ok) {
@@ -375,11 +392,12 @@ class ApiClient {
 
     async downloadCasewareBundle(migrationId: string): Promise<Blob> {
         const url = `${this.baseUrl}/api/migrations/${migrationId}/caseware-bundle`;
+        const token = this.getToken();
 
         try {
             const response = await fetch(url, {
                 credentials: "include",
-                headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
 
             if (!response.ok) {

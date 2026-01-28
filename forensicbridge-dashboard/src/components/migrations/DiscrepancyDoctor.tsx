@@ -3,7 +3,7 @@
 import { AlertTriangle, XCircle, HelpCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-interface Discrepancy {
+export interface Discrepancy {
     account_name: string;
     account_type: string;
     source_balance: number;
@@ -17,12 +17,16 @@ interface DiscrepancyDoctorProps {
     discrepancies: Discrepancy[];
     totalDiscrepancy: number;
     onDismiss?: () => void;
+    onExportReport?: () => void;
+    onReviewResolve?: () => void;
 }
 
 export function DiscrepancyDoctor({
     discrepancies,
     totalDiscrepancy,
     onDismiss,
+    onExportReport,
+    onReviewResolve,
 }: DiscrepancyDoctorProps) {
     const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
@@ -182,10 +186,18 @@ export function DiscrepancyDoctor({
 
             {/* Actions */}
             <div className="px-6 py-4 bg-gray-50 border-t flex items-center justify-end gap-3">
-                <button className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                <button
+                    onClick={onExportReport}
+                    disabled={!onExportReport}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                     Export Report
                 </button>
-                <button className="px-4 py-2 text-sm font-medium text-white bg-[var(--bridge-blue)] hover:bg-[var(--bridge-blue)]/90 rounded-lg transition-colors">
+                <button
+                    onClick={onReviewResolve}
+                    disabled={!onReviewResolve}
+                    className="px-4 py-2 text-sm font-medium text-white bg-[var(--bridge-blue)] hover:bg-[var(--bridge-blue)]/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                     Review & Resolve
                 </button>
             </div>
