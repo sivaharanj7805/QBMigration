@@ -550,32 +550,51 @@ def select_tier():
     """
     Select/purchase a tier after registration.
     In production, this would integrate with Stripe Checkout.
+
+    CRITICAL FIX: This endpoint now creates MigrationCredit records to ensure
+    consistency with the credit verification system. Previously, it only updated
+    User.migrations_purchased which caused a mismatch.
     """
+    from models.migration_credit import MigrationCredit
+
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
+
     tier_id = data.get('tier_id', '').lower()
-    
+
     # Validate tier
     valid_tiers = ['starter', 'business', 'professional', 'enterprise', 'forensic']
     if tier_id not in valid_tiers:
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
-    
+
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
-    
+
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
-    
+
     # Get tier config
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get('migrations', 1)
-    
-    # In production: Create Stripe Checkout session here
-    # For now, we'll simulate successful payment
-    
-    # Add migrations and set tier
+
+    # CRITICAL FIX: Create MigrationCredit record(s) to ensure backend verification works
+    # This creates a 'paid' credit without going through Stripe (for dev/test use)
+    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
+    for _ in range(migrations_to_add):
+        credit = MigrationCredit(
+            user_id=user_id,
+            tier_type=tier_id,
+            transaction_limit=credit_config.get('transaction_limit', 5000),
+            price_cents=0,  # Free tier selection
+            stripe_checkout_session_id=f'free-tier-{tier_id}-{user_id}-{datetime.datetime.utcnow().timestamp()}',
+            payment_status='paid',
+            status='available'
+        )
+        credit.paid_at = datetime.datetime.utcnow()
+        db.session.add(credit)
+
+    # Also update legacy User fields for backwards compatibility
     user.add_migrations(migrations_to_add, tier=tier_id)
     db.session.commit()
 
@@ -593,30 +612,51 @@ def select_tier():
 @auth_bp.route('/upgrade-tier', methods=['POST'])
 @require_auth
 def upgrade_tier():
-    """Upgrade to a higher tier (adds more migrations)"""
+    """
+    Upgrade to a higher tier (adds more migrations).
+
+    CRITICAL FIX: Now creates MigrationCredit records for consistency.
+    """
+    from models.migration_credit import MigrationCredit
+
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
+
     tier_id = data.get('tier_id', '').lower()
-    
+
     valid_tiers = ['starter', 'business', 'professional', 'enterprise', 'forensic']
     if tier_id not in valid_tiers:
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
-    
+
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
-    
+
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
-    
+
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get('migrations', 1)
-    
-    # Add migrations and update tier
+
+    # CRITICAL FIX: Create MigrationCredit record(s) for backend verification
+    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
+    for _ in range(migrations_to_add):
+        credit = MigrationCredit(
+            user_id=user_id,
+            tier_type=tier_id,
+            transaction_limit=credit_config.get('transaction_limit', 5000),
+            price_cents=0,  # Upgrade (may have different pricing in production)
+            stripe_checkout_session_id=f'upgrade-{tier_id}-{user_id}-{datetime.datetime.utcnow().timestamp()}',
+            payment_status='paid',
+            status='available'
+        )
+        credit.paid_at = datetime.datetime.utcnow()
+        db.session.add(credit)
+
+    # Also update legacy User fields for backwards compatibility
     user.add_migrations(migrations_to_add, tier=tier_id)
     db.session.commit()
-    
+
     return jsonify({
         'success': True,
         'message': f'Successfully upgraded to {tier_config.get("name", tier_id)}',
@@ -793,4 +833,108 @@ def check_captcha_requirement():
         'captcha_required': captcha_required,
         'failed_attempts': failed_attempts,
         'threshold': 3  # CAPTCHA required after 3 failed attempts
+    })
+
+
+@auth_bp.route('/sync-credits', methods=['POST'])
+@require_auth
+def sync_credits():
+    """
+    Sync legacy User.migrations_purchased with MigrationCredit records.
+
+    This endpoint creates MigrationCredit records for users who have
+    User.migrations_purchased > 0 but no corresponding MigrationCredit records.
+    This fixes the UI/backend mismatch for existing users.
+
+    Should be called once per user after deployment of the credit fix.
+    """
+    from models.migration_credit import MigrationCredit
+
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    # Get legacy credit counts
+    legacy_purchased = getattr(user, 'migrations_purchased', None) or 0
+    legacy_used = getattr(user, 'migrations_used', None) or 0
+    legacy_available = max(0, legacy_purchased - legacy_used)
+
+    # Get actual MigrationCredit counts
+    actual_available = MigrationCredit.query.filter_by(
+        user_id=user_id,
+        status='available',
+        payment_status='paid'
+    ).count()
+
+    actual_used = MigrationCredit.query.filter_by(
+        user_id=user_id,
+        status='used',
+        payment_status='paid'
+    ).count()
+
+    # Calculate how many credits need to be created
+    missing_available = max(0, legacy_available - actual_available)
+    missing_used = max(0, legacy_used - actual_used)
+
+    credits_created = 0
+    tier = user.subscription_tier or 'starter'
+    credit_config = MigrationCredit.TIER_CONFIG.get(tier, MigrationCredit.TIER_CONFIG['starter'])
+
+    # Create missing available credits
+    for i in range(missing_available):
+        credit = MigrationCredit(
+            user_id=user_id,
+            tier_type=tier,
+            transaction_limit=credit_config.get('transaction_limit', 5000),
+            price_cents=0,
+            stripe_checkout_session_id=f'sync-available-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+            payment_status='paid',
+            status='available'
+        )
+        credit.paid_at = datetime.datetime.utcnow()
+        db.session.add(credit)
+        credits_created += 1
+
+    # Create missing used credits (for historical accuracy)
+    for i in range(missing_used):
+        credit = MigrationCredit(
+            user_id=user_id,
+            tier_type=tier,
+            transaction_limit=credit_config.get('transaction_limit', 5000),
+            price_cents=0,
+            stripe_checkout_session_id=f'sync-used-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+            payment_status='paid',
+            status='used'
+        )
+        credit.paid_at = datetime.datetime.utcnow()
+        credit.used_at = datetime.datetime.utcnow()
+        db.session.add(credit)
+        credits_created += 1
+
+    if credits_created > 0:
+        db.session.commit()
+        logger.info(f"Synced {credits_created} credits for user {user_id}")
+
+    # Get updated counts
+    new_available = MigrationCredit.query.filter_by(
+        user_id=user_id,
+        status='available',
+        payment_status='paid'
+    ).count()
+
+    return jsonify({
+        'success': True,
+        'message': f'Synced {credits_created} credit(s)',
+        'credits_created': credits_created,
+        'legacy': {
+            'purchased': legacy_purchased,
+            'used': legacy_used,
+            'available': legacy_available
+        },
+        'actual': {
+            'available': new_available,
+            'used': actual_used + missing_used
+        }
     })
