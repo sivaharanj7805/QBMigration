@@ -219,13 +219,35 @@ namespace QBDesktopExtractor
 
                     if (result?.success == true)
                     {
+                        // Parse transactions_remaining (can be int or "unlimited")
+                        int transactionsRemaining = -1;
+                        if (result.transactions_remaining != null)
+                        {
+                            if (result.transactions_remaining is JsonElement jsonElement)
+                            {
+                                if (jsonElement.ValueKind == JsonValueKind.Number)
+                                    transactionsRemaining = jsonElement.GetInt32();
+                                else if (jsonElement.ValueKind == JsonValueKind.String && jsonElement.GetString() == "unlimited")
+                                    transactionsRemaining = -1;
+                            }
+                            else if (result.transactions_remaining is int intVal)
+                            {
+                                transactionsRemaining = intVal;
+                            }
+                        }
+
                         return new ExtractionStartResult
                         {
                             Success = true,
                             ExtractionToken = result.extraction_token,
                             ExtractionNumber = result.extraction_number,
                             RemainingExtractions = result.remaining_extractions,
-                            CreditTier = result.credit_tier
+                            Tier = result.tier,
+                            TierName = result.tier_name,
+                            TransactionLimit = result.transaction_limit,
+                            TransactionsUsed = result.transactions_used,
+                            TransactionsRemaining = transactionsRemaining,
+                            IsUnlimited = result.is_unlimited
                         };
                     }
                 }
@@ -235,7 +257,7 @@ namespace QBDesktopExtractor
                 {
                     Success = false,
                     Error = errorResponse?.error ?? "Failed to start extraction",
-                    PurchaseRequired = responseBody.Contains("purchase_required")
+                    TransactionLimitReached = responseBody.Contains("transaction_limit_reached")
                 };
             }
             catch (Exception ex)
@@ -362,6 +384,23 @@ namespace QBDesktopExtractor
 
                 if (result?.valid == true)
                 {
+                    // Parse transactions_remaining (can be int or "unlimited")
+                    int transactionsRemaining = -1;
+                    if (result.transactions_remaining != null)
+                    {
+                        if (result.transactions_remaining is JsonElement jsonElement)
+                        {
+                            if (jsonElement.ValueKind == JsonValueKind.Number)
+                                transactionsRemaining = jsonElement.GetInt32();
+                            else if (jsonElement.ValueKind == JsonValueKind.String && jsonElement.GetString() == "unlimited")
+                                transactionsRemaining = -1;
+                        }
+                        else if (result.transactions_remaining is int intVal)
+                        {
+                            transactionsRemaining = intVal;
+                        }
+                    }
+
                     return new LicenseResult
                     {
                         Valid = true,
@@ -372,10 +411,11 @@ namespace QBDesktopExtractor
                         TierName = result.tier_name ?? "Starter",
                         RemainingMigrations = result.remaining_extractions,
                         TransactionLimit = result.transaction_limit,
+                        TransactionsUsed = result.transactions_used,
+                        TransactionsRemaining = transactionsRemaining,
+                        IsUnlimited = result.is_unlimited,
                         IsNewDevice = result.is_new_device,
-                        DevicesActive = result.devices_active,
-                        HasCredits = result.has_credits,
-                        PurchaseUrl = result.purchase_url
+                        DevicesActive = result.devices_active
                     };
                 }
 
@@ -453,8 +493,9 @@ namespace QBDesktopExtractor
                     TierName = cache.TierName,
                     RemainingMigrations = cache.RemainingExtractions,
                     TransactionLimit = cache.TransactionLimit,
-                    HasCredits = cache.HasCredits,
-                    PurchaseUrl = cache.PurchaseUrl,
+                    TransactionsUsed = cache.TransactionsUsed,
+                    TransactionsRemaining = cache.TransactionsRemaining,
+                    IsUnlimited = cache.IsUnlimited,
                     FromCache = true
                 };
             }
@@ -479,8 +520,9 @@ namespace QBDesktopExtractor
                     TierName = result.TierName,
                     RemainingExtractions = result.RemainingMigrations,
                     TransactionLimit = result.TransactionLimit,
-                    HasCredits = result.HasCredits,
-                    PurchaseUrl = result.PurchaseUrl,
+                    TransactionsUsed = result.TransactionsUsed,
+                    TransactionsRemaining = result.TransactionsRemaining,
+                    IsUnlimited = result.IsUnlimited,
                     CachedAt = DateTime.UtcNow
                 };
 
@@ -541,11 +583,12 @@ namespace QBDesktopExtractor
             public string? tier { get; set; }
             public string? tier_name { get; set; }
             public int transaction_limit { get; set; }
+            public int transactions_used { get; set; }
+            public object? transactions_remaining { get; set; }  // Can be int or "unlimited"
+            public bool is_unlimited { get; set; }
             public int remaining_extractions { get; set; }
             public bool is_new_device { get; set; }
             public int devices_active { get; set; }
-            public bool has_credits { get; set; }
-            public string? purchase_url { get; set; }
             public string? error { get; set; }
         }
 
@@ -563,7 +606,12 @@ namespace QBDesktopExtractor
             public string? extraction_token { get; set; }
             public int extraction_number { get; set; }
             public int remaining_extractions { get; set; }
-            public string? credit_tier { get; set; }
+            public string? tier { get; set; }
+            public string? tier_name { get; set; }
+            public int transaction_limit { get; set; }
+            public int transactions_used { get; set; }
+            public object? transactions_remaining { get; set; }  // Can be int or "unlimited"
+            public bool is_unlimited { get; set; }
         }
 
         private class ErrorResponse
@@ -581,8 +629,9 @@ namespace QBDesktopExtractor
             public string TierName { get; set; } = "Starter";
             public int RemainingExtractions { get; set; }
             public int TransactionLimit { get; set; }
-            public bool HasCredits { get; set; } = true;
-            public string? PurchaseUrl { get; set; }
+            public int TransactionsUsed { get; set; }
+            public int TransactionsRemaining { get; set; }
+            public bool IsUnlimited { get; set; }
             public DateTime CachedAt { get; set; }
         }
     }
@@ -600,6 +649,8 @@ namespace QBDesktopExtractor
         public string TierName { get; set; } = "Starter";
         public int RemainingMigrations { get; set; }
         public int TransactionLimit { get; set; }
+        public int TransactionsUsed { get; set; }
+        public int TransactionsRemaining { get; set; }  // -1 for unlimited
         public bool IsUnlimited { get; set; }
         public bool IsNewDevice { get; set; }
         public int DevicesActive { get; set; }
@@ -607,8 +658,6 @@ namespace QBDesktopExtractor
         public string? Token { get; set; }
         public string? Error { get; set; }
         public bool FromCache { get; set; }
-        public bool HasCredits { get; set; } = true;
-        public string? PurchaseUrl { get; set; }
 
         public static LicenseResult Invalid(string error)
         {
@@ -621,24 +670,38 @@ namespace QBDesktopExtractor
 
         public bool HasMigrationsRemaining => IsUnlimited || RemainingMigrations > 0;
 
+        public bool CanExtractTransactions(int count)
+        {
+            if (IsUnlimited) return true;
+            return count <= TransactionsRemaining;
+        }
+
         public string GetDisplayStatus()
         {
             if (!Valid)
                 return $"Invalid: {Error}";
-
-            if (!HasCredits)
-                return $"Session Valid - {ProjectName ?? "Project"} - No migration credits. Purchase at: {PurchaseUrl ?? "https://forensicbridge.ca/pricing"}";
 
             var status = $"{TierName}";
             if (!string.IsNullOrEmpty(ProjectName))
                 status += $" - {ProjectName}";
 
             if (IsUnlimited)
-                status += " (Unlimited)";
+            {
+                status += " (Unlimited transactions)";
+            }
             else
-                status += $" ({RemainingMigrations} extractions remaining)";
+            {
+                status += $" ({TransactionsRemaining:N0} of {TransactionLimit:N0} transactions remaining)";
+            }
 
             return status;
+        }
+
+        public string GetTransactionStatus()
+        {
+            if (IsUnlimited)
+                return "Unlimited transactions";
+            return $"{TransactionsUsed:N0} / {TransactionLimit:N0} transactions used ({TransactionsRemaining:N0} remaining)";
         }
     }
 
@@ -651,8 +714,19 @@ namespace QBDesktopExtractor
         public string? ExtractionToken { get; set; }
         public int ExtractionNumber { get; set; }
         public int RemainingExtractions { get; set; }
-        public string? CreditTier { get; set; }
+        public string? Tier { get; set; }
+        public string? TierName { get; set; }
+        public int TransactionLimit { get; set; }
+        public int TransactionsUsed { get; set; }
+        public int TransactionsRemaining { get; set; }  // -1 for unlimited
+        public bool IsUnlimited { get; set; }
         public string? Error { get; set; }
-        public bool PurchaseRequired { get; set; }
+        public bool TransactionLimitReached { get; set; }
+
+        public bool CanExtractTransactions(int count)
+        {
+            if (IsUnlimited) return true;
+            return count <= TransactionsRemaining;
+        }
     }
 }
