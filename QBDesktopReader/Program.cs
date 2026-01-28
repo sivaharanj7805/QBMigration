@@ -195,57 +195,11 @@ namespace QBDesktopExtractor
         {
             try
             {
-                // PHASE 0: LICENSE VALIDATION (CRITICAL - must come first)
-                _logger.Log(LogLevel.Info, "Validating license...");
-                
-                try
-                {
-                    var licenseResult = await LicenseValidator.ValidateAsync(options.LicenseKey);
-                    
-                    if (!licenseResult.Valid)
-                    {
-                        _logger.Log(LogLevel.Error, "License validation failed: {0}", licenseResult.Error);
-                        Console.WriteLine();
-                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
-                        Console.WriteLine("║  LICENSE REQUIRED                                                 ║");
-                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
-                        Console.WriteLine($"║  Please purchase a license at: {KnownUrls.ForensicBridge,-34}║");
-                        Console.WriteLine("║  Use --license <key> to provide your license key                 ║");
-                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
-                        Console.WriteLine();
-                        return ExitCode.LicenseInvalid;
-                    }
-                    
-                    if (!licenseResult.HasMigrationsRemaining)
-                    {
-                        _logger.Log(LogLevel.Error, "No migrations remaining on license");
-                        Console.WriteLine();
-                        Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
-                        Console.WriteLine("║  MIGRATIONS EXHAUSTED                                             ║");
-                        Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
-                        Console.WriteLine("║  Your license has used all available migrations.                 ║");
-                        Console.WriteLine($"║  Please upgrade at: {KnownUrls.ForensicBridge,-45}║");
-                        Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
-                        Console.WriteLine();
-                        return ExitCode.LicenseInvalid;
-                    }
-                    
-                    _logger.Log(LogLevel.Info, "License validated: {0}", licenseResult.GetDisplayStatus());
-                    if (licenseResult.FromCache)
-                    {
-                        _logger.Log(LogLevel.Warning, "Using cached license (offline mode)");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.Log(LogLevel.Error, "License check failed: {0}", ex.Message);
-                    return ExitCode.LicenseInvalid;
-                }
+                // PHASE 0: SESSION ID VALIDATION (CRITICAL - Session ID is the license)
+                _logger.Log(LogLevel.Info, "Validating Session ID...");
 
-                // PHASE 0.5: SESSION CODE VALIDATION (CRITICAL)
-                _logger.Log(LogLevel.Info, "Validating session code...");
-
-                string? sessionCode = options.SessionCode;
+                // Session ID can be provided via --session or --license (backwards compatible)
+                string? sessionCode = options.SessionCode ?? options.LicenseKey;
 
                 // Try to get cached session if not provided
                 if (string.IsNullOrWhiteSpace(sessionCode))
@@ -253,37 +207,37 @@ namespace QBDesktopExtractor
                     sessionCode = SessionValidator.GetCachedSessionId();
                     if (!string.IsNullOrWhiteSpace(sessionCode))
                     {
-                        _logger.Log(LogLevel.Info, "Using cached session: {0}", sessionCode);
+                        _logger.Log(LogLevel.Info, "Using cached Session ID: {0}", sessionCode);
                     }
                 }
 
-                // Prompt for session code if not provided
+                // Prompt for session ID if not provided
                 if (string.IsNullOrWhiteSpace(sessionCode))
                 {
                     Console.WriteLine();
                     Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
-                    Console.WriteLine("║  SESSION CODE REQUIRED                                            ║");
+                    Console.WriteLine("║  SESSION ID REQUIRED                                              ║");
                     Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
-                    Console.WriteLine("║  Enter your session code from the ForensicBridge dashboard:      ║");
-                    Console.WriteLine("║  Example: FB-20260127123456-ABCD1234                              ║");
+                    Console.WriteLine("║  Enter your Session ID from the ForensicBridge dashboard:        ║");
+                    Console.WriteLine("║  Example: FB-20260128170624-AXO52A38                              ║");
                     Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                     Console.WriteLine();
-                    Console.Write("Session Code: ");
+                    Console.Write("Session ID: ");
                     sessionCode = Console.ReadLine()?.Trim();
                 }
 
                 if (string.IsNullOrWhiteSpace(sessionCode))
                 {
-                    _logger.Log(LogLevel.Error, "No session code provided");
+                    _logger.Log(LogLevel.Error, "No Session ID provided");
                     Console.WriteLine();
                     Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
-                    Console.WriteLine("║  SESSION CODE REQUIRED                                            ║");
+                    Console.WriteLine("║  SESSION ID REQUIRED                                              ║");
                     Console.WriteLine("╠══════════════════════════════════════════════════════════════════╣");
                     Console.WriteLine($"║  Create a project at: {KnownUrls.ForensicBridgeNewProject,-43}║");
-                    Console.WriteLine("║  Use --session <code> to provide your session code               ║");
+                    Console.WriteLine("║  Use --session <ID> to provide your Session ID                   ║");
                     Console.WriteLine("╚══════════════════════════════════════════════════════════════════╝");
                     Console.WriteLine();
-                    return ExitCode.ConfigError;
+                    return ExitCode.LicenseInvalid;
                 }
 
                 try
@@ -716,12 +670,12 @@ namespace QBDesktopExtractor
             Console.WriteLine("QuickBooks Desktop Extractor v4.4");
             Console.WriteLine("\nUsage: QBExtractor.exe [options]");
             Console.WriteLine("\nRequired:");
-            Console.WriteLine("  --session, -s <code>  Session code from ForensicBridge dashboard");
-            Console.WriteLine("                        Example: FB-20260127123456-ABCD1234");
+            Console.WriteLine("  --session, -s <ID>    Session ID from ForensicBridge dashboard");
+            Console.WriteLine("                        Example: FB-20260128170624-AXO52A38");
+            Console.WriteLine("                        (Also accepts --license for backwards compatibility)");
             Console.WriteLine("\nOptions:");
             Console.WriteLine("  --config, -c <path>   Path to config.json (default: config.json)");
             Console.WriteLine("  --output-dir, -o      Output directory for NDJSON files");
-            Console.WriteLine("  --license, -l <key>   License key (optional, cached after first use)");
             Console.WriteLine("  --ndjson              Output NDJSON per-entity files (warehouse-ready)");
             Console.WriteLine("  --auto-incremental    Auto-detect last sync and extract changes only");
             Console.WriteLine("  --generate-bundle     Generate support bundle after extraction");
@@ -735,7 +689,7 @@ namespace QBDesktopExtractor
             Console.WriteLine("  --backend <type>      Force specific backend: auto, qbfc, qodbc");
             Console.WriteLine("  --show-backends       Show available backends and exit");
             Console.WriteLine("  --max-retries <n>     Max retry attempts (default: 3)");
-            Console.WriteLine("  --skip-validation     Skip license/session validation (dev mode)");
+            Console.WriteLine("  --skip-validation     Skip Session ID validation (dev mode only)");
             Console.WriteLine("\nBackend priority (auto mode):");
             Console.WriteLine("  1. QBFC (Official SDK) - Most reliable, requires SDK installation");
             Console.WriteLine("  2. QODBC - Works without SDK, requires QODBC driver");
@@ -745,7 +699,7 @@ namespace QBDesktopExtractor
             Console.WriteLine("\nExit codes:");
             Console.WriteLine("  0   Success");
             Console.WriteLine("  10  Configuration error");
-            Console.WriteLine("  15  License invalid");
+            Console.WriteLine("  15  Invalid or missing Session ID");
             Console.WriteLine("  20  No backend available (install SDK or QODBC)");
             Console.WriteLine("  30  QuickBooks connection failed");
             Console.WriteLine("  40  Extraction failed");
