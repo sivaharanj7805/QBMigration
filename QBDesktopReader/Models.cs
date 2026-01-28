@@ -824,6 +824,8 @@ namespace QBDesktopExtractor
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
         [JsonProperty("isTaxable")] public bool? IsTaxable { get; set; }
         [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("desc")] public string Desc { get; set; }
+        [JsonProperty("taxRate")] public decimal? TaxRate { get; set; }
     }
 
     public class QBCustomerType
@@ -1487,5 +1489,89 @@ namespace QBDesktopExtractor
         [JsonProperty("isFullyApplied")] public bool? IsFullyApplied { get; set; }
         [JsonProperty("discountAmount")] public decimal? DiscountAmount { get; set; }
         [JsonProperty("originalAmount")] public decimal? OriginalAmount { get; set; }
+    }
+
+    // =================================================================
+    // EXTRACTION TRACKING - Shared across all backends
+    // =================================================================
+
+    /// <summary>
+    /// Extraction run summary for audit trail
+    /// </summary>
+    public class ExtractionRunSummary
+    {
+        public string SessionId { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public TimeSpan Duration => (CompletedAt ?? DateTime.Now) - StartedAt;
+        public int TotalEntitiesAttempted { get; set; }
+        public int TotalEntitiesSucceeded { get; set; }
+        public int TotalEntitiesFailed { get; set; }
+        public int TotalRecordsExtracted { get; set; }
+        public List<EntityExtractionResult> EntityResults { get; set; } = new List<EntityExtractionResult>();
+        public List<string> Warnings { get; set; } = new List<string>();
+        public List<string> Errors { get; set; } = new List<string>();
+        public string ConfigHash { get; set; }
+        public bool IsIncremental { get; set; }
+        public DateTime? IncrementalFromDate { get; set; }
+    }
+
+    /// <summary>
+    /// Result of a single entity extraction
+    /// </summary>
+    public class EntityExtractionResult
+    {
+        public string EntityName { get; set; }
+        public bool Success { get; set; }
+        public int RecordCount { get; set; }
+        public TimeSpan Duration { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool Skipped { get; set; }
+    }
+
+    // =================================================================
+    // COMPANY INFO - Shared across all backends
+    // =================================================================
+
+    /// <summary>
+    /// Company information extracted from QuickBooks
+    /// </summary>
+    public class CompanyInfo
+    {
+        public string CompanyName { get; set; }
+        public string LegalCompanyName { get; set; }
+        public string Address { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string PostalCode { get; set; }
+        public string Country { get; set; }
+        public string Phone { get; set; }
+        public string Fax { get; set; }
+        public string Email { get; set; }
+        public string CompanyFilePath { get; set; }
+    }
+
+    /// <summary>
+    /// Company info with additional fields
+    /// </summary>
+    public class QBCompanyInfo : CompanyInfo
+    {
+        public string CompanyId { get; set; }
+        public string FiscalYearStartMonth { get; set; }
+        public string TaxForm { get; set; }
+    }
+
+    /// <summary>
+    /// QuickBooks-specific exception with error code
+    /// </summary>
+    public class QBException : Exception
+    {
+        public int ErrorCode { get; }
+
+        public QBException(string message, string qbMessage, int errorCode, Exception innerException = null)
+            : base($"{message}: {qbMessage}", innerException)
+        {
+            ErrorCode = errorCode;
+        }
     }
 }

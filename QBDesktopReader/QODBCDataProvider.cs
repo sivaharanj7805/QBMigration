@@ -1045,7 +1045,7 @@ namespace QBDesktopExtractor
                             };
 
                             // Get line items
-                            invoice.LineItems = await ExtractInvoiceLinesAsync(invoice.TxnID, ct);
+                            invoice.Lines = await ExtractInvoiceLinesAsync(invoice.TxnID, ct);
 
                             invoices.Add(invoice);
                         }
@@ -1062,9 +1062,9 @@ namespace QBDesktopExtractor
             return invoices;
         }
 
-        private async Task<List<QBInvoiceLineItem>> ExtractInvoiceLinesAsync(string txnId, CancellationToken ct)
+        private async Task<List<QBInvoiceLine>> ExtractInvoiceLinesAsync(string txnId, CancellationToken ct)
         {
-            var lines = new List<QBInvoiceLineItem>();
+            var lines = new List<QBInvoiceLine>();
 
             try
             {
@@ -1081,18 +1081,18 @@ namespace QBDesktopExtractor
                     {
                         while (await Task.Run(() => reader.Read(), ct))
                         {
-                            lines.Add(new QBInvoiceLineItem
+                            lines.Add(new QBInvoiceLine
                             {
                                 TxnLineID = GetString(reader, "TxnLineID"),
                                 ItemRefListID = GetString(reader, "ItemRefListID"),
                                 ItemRefFullName = GetString(reader, "ItemRefFullName"),
-                                Desc = GetString(reader, "Description"),
+                                Description = GetString(reader, "Description"),
                                 Quantity = GetDecimal(reader, "Quantity"),
                                 UnitOfMeasure = GetString(reader, "UnitOfMeasure"),
                                 Rate = GetDecimal(reader, "Rate"),
                                 Amount = GetDecimal(reader, "Amount"),
                                 ClassRefFullName = GetString(reader, "ClassRefFullName"),
-                                SalesTaxCodeRefFullName = GetString(reader, "SalesTaxCodeRefFullName"),
+                                SalesTaxCodeRefListID = GetString(reader, "SalesTaxCodeRefFullName"),
                                 ServiceDate = GetDateTime(reader, "ServiceDate")
                             });
                         }

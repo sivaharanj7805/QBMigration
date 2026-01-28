@@ -27,8 +27,7 @@ namespace QBDesktopExtractor
     /// </summary>
     class Program
     {
-        private static QBSessionManager _sessionManager;
-        private static QBDataExtractor _extractor;
+        private static IQBDataProvider _provider;
         private static ExtractionConfig _config;
         private static CancellationTokenSource _cts;
         private static IRedactingLogger _logger;
@@ -137,18 +136,16 @@ namespace QBDesktopExtractor
                 {
                     _logger?.Log(LogLevel.Info, "Cleaning up QuickBooks connection...");
 
-                    if (_sessionManager != null)
+                    if (_provider != null)
                     {
-                        _sessionManager.EndSession();
-                        _sessionManager.CloseConnection();
-                        _sessionManager.Dispose();
-                        _sessionManager = null;
+                        _provider.Disconnect();
+                        _provider.Dispose();
+                        _provider = null;
                     }
 
-                    _extractor = null;
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
-                    
+
                     _logger?.Log(LogLevel.Info, "Cleanup complete");
                 }
                 catch (Exception ex)
@@ -354,79 +351,31 @@ namespace QBDesktopExtractor
 
                 try
                 {
-                    _sessionManager = new QBSessionManager(
-                        _config.Advanced?.MaxQBXMLVersion,
-                        _logger);
-                    
-                    _sessionManager.BeginSession("", QBFC16Lib.ENOpenMode.omDontCare);
+                    _provider = QBDataProviderFactory.CreateProvider(
+                        options.Backend,
+                        _logger,
+                        _config.Advanced?.MaxQBXMLVersion);
 
-                    var companyInfo = _sessionManager.GetCompanyInfo();
+                    await _provider.ConnectAsync("", _cts.Token);
+
+                    var companyInfo = await _provider.GetCompanyInfoAsync(_cts.Token);
                     _logger.Log(LogLevel.Info, "Connected to QuickBooks");
                     _logger.Log(LogLevel.Info, "Company: {0}", companyInfo.CompanyName);
-                    _logger.Log(LogLevel.Info, "QB Version: {0}", _sessionManager.GetQBVersion());
+                    _logger.Log(LogLevel.Info, "QB Version: {0}", _provider.GetVersion());
 
-                    _logger.Log(LogLevel.Info, "Extracting data (sequential mode for COM safety)...");
-                    
-                    _extractor = new QBDataExtractor(_sessionManager, _logger);
+                    _logger.Log(LogLevel.Info, "Extracting data...");
 
                     // Handle incremental sync (auto or config-based)
                     DateTime? incrementalFrom = _config.IncrementalSyncFromDate;
-                    
+
                     if (options.AutoIncremental)
                     {
                         var syncMarker = new SyncMarker(options.OutputDirectory, companyInfo.CompanyName, _logger);
                         incrementalFrom = syncMarker.GetIncrementalFromDate();
                     }
 
-                    if (incrementalFrom.HasValue)
-                    {
-                        _extractor.SetIncrementalSyncDate(incrementalFrom.Value);
-                    }
-
-                    // NDJSON MODE: Per-entity files with manifest
-                    if (options.NDJSONMode)
-                    {
-                        _logger.Log(LogLevel.Info, "Using NDJSON output mode (warehouse-ready)");
-                        
-                        var configHash = ComputeHash(File.ReadAllText(options.ConfigPath));
-                        var manifest = await _extractor.ExtractAllDataToNDJSONAsync(
-                            options.OutputDirectory,
-                            sessionId,
-                            configHash,
-                            _cts.Token);
-
-                        _logger.Log(LogLevel.Info, "Closing QuickBooks session...");
-                        _sessionManager.EndSession();
-
-                        // Save sync marker for next incremental run
-                        if (options.AutoIncremental && manifest.TotalRecords > 0)
-                        {
-                            var syncMarker = new SyncMarker(options.OutputDirectory, companyInfo.CompanyName, _logger);
-                            syncMarker.Save(new SyncMarkerState
-                            {
-                                LastSyncTime = DateTime.UtcNow,
-                                LastSyncTimeLocal = DateTime.Now,
-                                SessionId = sessionId,
-                                RecordsExtracted = manifest.TotalRecords,
-                                CompanyFingerprint = manifest.CompanyFingerprint,
-                                QBVersion = manifest.QBVersion
-                            });
-                        }
-
-                        // Generate support bundle if requested
-                        if (options.GenerateSupportBundle)
-                        {
-                            var bundle = new SupportBundle(_logger);
-                            bundle.Generate(options.OutputDirectory, manifest, _extractor.RunSummary);
-                        }
-
-                        // Print summary
-                        PrintExtractionSummary(manifest, _extractor.RunSummary);
-                        return ExitCode.Success;
-                    }
-
-                    // LEGACY MODE: Single JSON blob
-                    var data = _extractor.ExtractAllData();
+                    // Extract all data via the provider (QBFC or QODBC)
+                    var data = await _provider.ExtractAllDataAsync(incrementalFrom, _cts.Token);
 
                     data.IsIncrementalSync = incrementalFrom.HasValue;
                     data.IncrementalFromDate = incrementalFrom;
@@ -444,7 +393,7 @@ namespace QBDesktopExtractor
                             SanitizationMode.Json,
                             new SanitizationConfig { IncludeRawValuesInReport = false },
                             _logger);
-                        
+
                         data = sanitizer.SanitizeExtractedData(data);
 
                         if (sanitizer.Report.TotalActions > 0)
@@ -454,13 +403,13 @@ namespace QBDesktopExtractor
                     }
 
                     _logger.Log(LogLevel.Info, "Closing QuickBooks session...");
-                    _sessionManager.EndSession();
+                    _provider.Disconnect();
 
                     // PHASE 3: STREAMING PIPELINE
                     if (options.ExtractOnly)
                     {
                         string outputPath = $"extraction_{sessionId}.json";
-                        File.WriteAllText(outputPath, 
+                        File.WriteAllText(outputPath,
                             JsonConvert.SerializeObject(data, Formatting.Indented));
                         _logger.Log(LogLevel.Info, "Data saved to: {0}", outputPath);
                     }
@@ -476,7 +425,7 @@ namespace QBDesktopExtractor
                             sessionId,
                             _cts.Token);
 
-                        _logger.Log(LogLevel.Info, "Pipeline complete in {0:F1}s", 
+                        _logger.Log(LogLevel.Info, "Pipeline complete in {0:F1}s",
                             pipelineResult.TotalDurationSeconds);
 
                         // PHASE 4: SUCCESS SUMMARY
@@ -485,7 +434,7 @@ namespace QBDesktopExtractor
 
                         _logger.Log(LogLevel.Info, "SUCCESS: All data extracted, encrypted, and uploaded");
                         _logger.Log(LogLevel.Info, "Session ID: {0}", sessionId);
-                        _logger.Log(LogLevel.Info, "Forensic Hash: {0}...", 
+                        _logger.Log(LogLevel.Info, "Forensic Hash: {0}...",
                             pipelineResult.DataHashSHA256?.Substring(0, 16) ?? "N/A");
                     }
 

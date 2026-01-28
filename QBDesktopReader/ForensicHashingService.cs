@@ -460,7 +460,7 @@ namespace QBDesktopExtractor
         /// <summary>
         /// FORENSIC REQUIREMENT: Compute forensic hash for TaxCode entity
         /// </summary>
-        public static string ComputeTaxCodeHash(QBTaxCode taxCode)
+        public static string ComputeTaxCodeHash(QBSalesTaxCode taxCode)
         {
             if (taxCode == null) return null;
 
