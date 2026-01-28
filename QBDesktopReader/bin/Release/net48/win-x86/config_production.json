@@ -1,6 +1,6 @@
 {
-  "$comment": "QuickBooks Extractor v4.3 Configuration",
-  "serverUrl": "https://forensicbridge.ca/api",
+  "$comment": "Production Configuration - EDIT serverUrl BEFORE DEPLOYMENT",
+  "serverUrl": "https://api.yourcompany.com",
   "incrementalSyncFromDate": null,
   "version": "4.3",
   "schemaVersion": "4.3",
@@ -17,12 +17,12 @@
     "maxFileStreamSizeMB": 2048,
     "enableLogRedaction": true,
     "logLevel": "INFO",
-    "retryAttempts": 3,
-    "retryDelayMs": 1000,
-    "retryMaxDelayMs": 30000,
-    "retryJitterPercent": 20,
+    "retryAttempts": 5,
+    "retryDelayMs": 2000,
+    "retryMaxDelayMs": 60000,
+    "retryJitterPercent": 25,
     "enableExponentialBackoff": true,
-    "allowInsecureHttpForLocalhost": true,
+    "allowInsecureHttpForLocalhost": false,
     "maxQBXMLVersion": null
   }
 }
