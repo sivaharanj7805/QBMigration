@@ -510,26 +510,70 @@ class User(UserMixin, db.Model):
     def get_tier_info(self):
         """
         Get current tier information for the user.
-        Uses getattr with defaults to handle missing database columns gracefully.
-        
+
+        CRITICAL FIX: Query MigrationCredit table for accurate credit counts.
+        The MigrationCredit table is the source of truth for purchased credits
+        (created via Stripe payments), while User.migrations_purchased/used
+        fields may be stale or out of sync.
+
         Returns:
             dict with tier details and migrations info
         """
         tier = getattr(self, 'subscription_tier', None) or 'none'
         config = self.TIER_CONFIG.get(tier, {})
-        
-        # Use getattr for all new columns to prevent errors if DB is not migrated
-        migrations_purchased = getattr(self, 'migrations_purchased', None) or 0
-        migrations_used = getattr(self, 'migrations_used', None) or 0
-        
+
+        # CRITICAL FIX: Get actual credit counts from MigrationCredit table
+        # This is the source of truth for paid credits
+        try:
+            from models.migration_credit import MigrationCredit
+
+            # Count credits by status (only paid credits)
+            credits_available = MigrationCredit.query.filter_by(
+                user_id=self.id,
+                status='available',
+                payment_status='paid'
+            ).count()
+
+            credits_used = MigrationCredit.query.filter_by(
+                user_id=self.id,
+                status='used',
+                payment_status='paid'
+            ).count()
+
+            # Total paid credits (available + used)
+            credits_purchased = credits_available + credits_used
+
+            # Determine tier from most recent paid credit if user tier is not set
+            if tier == 'none' or tier is None:
+                latest_credit = MigrationCredit.query.filter_by(
+                    user_id=self.id,
+                    payment_status='paid'
+                ).order_by(MigrationCredit.paid_at.desc()).first()
+
+                if latest_credit:
+                    tier = latest_credit.tier_type
+                    config = self.TIER_CONFIG.get(tier, {})
+
+        except Exception as e:
+            # Fallback to legacy User fields if MigrationCredit query fails
+            # This maintains backwards compatibility during migrations
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Failed to query MigrationCredit table for user {self.id}: {e}. "
+                "Falling back to User model fields."
+            )
+            credits_purchased = getattr(self, 'migrations_purchased', None) or 0
+            credits_used = getattr(self, 'migrations_used', None) or 0
+            credits_available = max(0, credits_purchased - credits_used)
+
         return {
             'tier': tier,
             'tier_name': config.get('name', 'Free Trial'),
             'max_transactions': config.get('max_transactions', 0),
-            'migrations_purchased': migrations_purchased,
-            'migrations_used': migrations_used,
-            'migrations_remaining': max(0, migrations_purchased - migrations_used),
-            'has_tier': tier != 'none' and tier is not None
+            'migrations_purchased': credits_purchased,
+            'migrations_used': credits_used,
+            'migrations_remaining': credits_available,
+            'has_tier': (tier != 'none' and tier is not None) or credits_available > 0
         }
     
     # ========================================================================
