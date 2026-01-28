@@ -644,8 +644,8 @@ namespace QBDesktopExtractor
         private bool IsValidDecimal(decimal value)
         {
             // Check for special values that indicate corruption
-            return !decimal.IsNaN((double)value) &&
-                   !decimal.IsInfinity((double)value) &&
+            return !double.IsNaN((double)value) &&
+                   !double.IsInfinity((double)value) &&
                    value < decimal.MaxValue / 2 &&
                    value > decimal.MinValue / 2;
         }

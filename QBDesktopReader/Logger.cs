@@ -55,7 +55,7 @@ namespace QBDesktopExtractor
             _useEventLog = false;
             try
             {
-                if (OperatingSystem.IsWindows() && _isProduction)
+                if (true /* .NET Framework 4.8 is Windows-only */ && _isProduction)
                 {
                     if (!EventLog.SourceExists(EventLogSource))
                     {
@@ -128,7 +128,7 @@ namespace QBDesktopExtractor
                 Data = data,
                 Exception = exception?.ToString(),
                 MachineName = Environment.MachineName,
-                ProcessId = Environment.ProcessId
+                ProcessId = Process.GetCurrentProcess().Id
             };
             
             lock (_logLock)
@@ -227,7 +227,7 @@ namespace QBDesktopExtractor
         {
             try
             {
-                if (!OperatingSystem.IsWindows())
+                if (!true /* .NET Framework 4.8 is Windows-only */)
                     return;
                 
                 var entryType = level switch
