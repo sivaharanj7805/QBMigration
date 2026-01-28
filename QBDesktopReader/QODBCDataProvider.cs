@@ -682,14 +682,14 @@ namespace QBDesktopExtractor
                                 Name = GetString(reader, "Name"),
                                 FullName = GetString(reader, "FullName"),
                                 IsActive = GetBool(reader, "IsActive"),
-                                ItemType = tableName.Replace("Item", ""),
+                                Type = tableName.Replace("Item", ""),
                                 ParentRefListID = GetString(reader, "ParentRefListID"),
                                 ParentRefFullName = GetString(reader, "ParentRefFullName"),
                                 Sublevel = GetInt(reader, "Sublevel"),
-                                SalesDesc = GetStringSafe(reader, "SalesDesc"),
+                                SalesDescription = GetStringSafe(reader, "SalesDesc"),
                                 SalesPrice = GetDecimalSafe(reader, "SalesPrice"),
                                 SalesTaxCodeRefFullName = GetStringSafe(reader, "SalesTaxCodeRefFullName"),
-                                PurchaseDesc = GetStringSafe(reader, "PurchaseDesc"),
+                                PurchaseDescription = GetStringSafe(reader, "PurchaseDesc"),
                                 PurchaseCost = GetDecimalSafe(reader, "PurchaseCost"),
                                 IncomeAccountRefFullName = GetStringSafe(reader, "IncomeAccountRefFullName"),
                                 ExpenseAccountRefFullName = GetStringSafe(reader, "ExpenseAccountRefFullName"),
@@ -816,8 +816,8 @@ namespace QBDesktopExtractor
                                 ListID = GetString(reader, "ListID"),
                                 Name = GetString(reader, "Name"),
                                 IsActive = GetBool(reader, "IsActive"),
-                                StdDueDays = GetInt(reader, "StdDueDays"),
-                                StdDiscountDays = GetInt(reader, "StdDiscountDays"),
+                                DueDays = GetInt(reader, "StdDueDays"),
+                                DiscountDays = GetInt(reader, "StdDiscountDays"),
                                 DiscountPct = GetDecimal(reader, "DiscountPct")
                             });
                         }
