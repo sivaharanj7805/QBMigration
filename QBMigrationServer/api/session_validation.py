@@ -214,22 +214,9 @@ def validate_session():
                 'devices_active': len(existing_activations)
             }), 403
 
-    # Check if user has available credits
+    # Check if user has available credits (for tier info, but don't block if none)
     user_id = project.user_id
     available_credits = MigrationCredit.get_available_for_user(user_id)
-
-    if not available_credits:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'failed',
-                              'No available credits')
-        return jsonify({
-            'valid': False,
-            'error': 'No migration credits available. Please purchase a migration package.',
-            'purchase_required': True,
-            'purchase_url': 'https://forensicbridge.ca/pricing'
-        }), 403
-
-    # Get the best available credit
-    best_credit = available_credits[0]  # Already sorted by tier
 
     # Calculate remaining extractions for this session
     total_extractions = sum(a.extraction_count for a in existing_activations)
@@ -238,17 +225,33 @@ def validate_session():
     # Log successful validation
     log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'success')
 
+    # Determine tier info - use available credits if present, otherwise show pending status
+    if available_credits:
+        best_credit = available_credits[0]
+        tier = best_credit.tier_type
+        tier_name = best_credit.TIER_CONFIG.get(best_credit.tier_type, {}).get('name', 'Unknown')
+        transaction_limit = best_credit.transaction_limit
+        has_credits = True
+    else:
+        # Session is valid but no credits purchased yet
+        tier = 'none'
+        tier_name = 'No Credits'
+        transaction_limit = 0
+        has_credits = False
+
     return jsonify({
         'valid': True,
         'session_id': session_id,
         'project_name': project.name,
         'client_name': project.client_name,
-        'tier': best_credit.tier_type,
-        'tier_name': best_credit.TIER_CONFIG.get(best_credit.tier_type, {}).get('name', 'Unknown'),
-        'transaction_limit': best_credit.transaction_limit,
+        'tier': tier,
+        'tier_name': tier_name,
+        'transaction_limit': transaction_limit,
         'remaining_extractions': max(0, remaining),
         'is_new_device': device_activation is None,
-        'devices_active': len(existing_activations)
+        'devices_active': len(existing_activations),
+        'has_credits': has_credits,
+        'purchase_url': 'https://forensicbridge.ca/pricing' if not has_credits else None
     })
 
 

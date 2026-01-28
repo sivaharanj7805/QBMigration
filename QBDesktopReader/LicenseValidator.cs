@@ -373,7 +373,9 @@ namespace QBDesktopExtractor
                         RemainingMigrations = result.remaining_extractions,
                         TransactionLimit = result.transaction_limit,
                         IsNewDevice = result.is_new_device,
-                        DevicesActive = result.devices_active
+                        DevicesActive = result.devices_active,
+                        HasCredits = result.has_credits,
+                        PurchaseUrl = result.purchase_url
                     };
                 }
 
@@ -451,6 +453,8 @@ namespace QBDesktopExtractor
                     TierName = cache.TierName,
                     RemainingMigrations = cache.RemainingExtractions,
                     TransactionLimit = cache.TransactionLimit,
+                    HasCredits = cache.HasCredits,
+                    PurchaseUrl = cache.PurchaseUrl,
                     FromCache = true
                 };
             }
@@ -475,6 +479,8 @@ namespace QBDesktopExtractor
                     TierName = result.TierName,
                     RemainingExtractions = result.RemainingMigrations,
                     TransactionLimit = result.TransactionLimit,
+                    HasCredits = result.HasCredits,
+                    PurchaseUrl = result.PurchaseUrl,
                     CachedAt = DateTime.UtcNow
                 };
 
@@ -538,6 +544,8 @@ namespace QBDesktopExtractor
             public int remaining_extractions { get; set; }
             public bool is_new_device { get; set; }
             public int devices_active { get; set; }
+            public bool has_credits { get; set; }
+            public string? purchase_url { get; set; }
             public string? error { get; set; }
         }
 
@@ -573,6 +581,8 @@ namespace QBDesktopExtractor
             public string TierName { get; set; } = "Starter";
             public int RemainingExtractions { get; set; }
             public int TransactionLimit { get; set; }
+            public bool HasCredits { get; set; } = true;
+            public string? PurchaseUrl { get; set; }
             public DateTime CachedAt { get; set; }
         }
     }
@@ -597,6 +607,8 @@ namespace QBDesktopExtractor
         public string? Token { get; set; }
         public string? Error { get; set; }
         public bool FromCache { get; set; }
+        public bool HasCredits { get; set; } = true;
+        public string? PurchaseUrl { get; set; }
 
         public static LicenseResult Invalid(string error)
         {
@@ -613,6 +625,9 @@ namespace QBDesktopExtractor
         {
             if (!Valid)
                 return $"Invalid: {Error}";
+
+            if (!HasCredits)
+                return $"Session Valid - {ProjectName ?? "Project"} - No migration credits. Purchase at: {PurchaseUrl ?? "https://forensicbridge.ca/pricing"}";
 
             var status = $"{TierName}";
             if (!string.IsNullOrEmpty(ProjectName))
