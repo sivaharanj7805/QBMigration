@@ -46,6 +46,15 @@ CACHE_DIR = os.path.join(EXTRACTOR_DIR, 'cache')
 BOOTSTRAP_BAT = os.path.join(EXTRACTOR_DIR, 'ForensicBridge_Install.bat')
 BOOTSTRAP_PS1 = os.path.join(EXTRACTOR_DIR, 'ForensicBridge_Bootstrap.ps1')
 
+# Zip deployment package paths
+DEFAULT_ZIP_PATHS = [
+    '/var/www/forensicbridge/extractor/QBExtractor-deploy.zip',
+    '/opt/forensicbridge/extractor/QBExtractor-deploy.zip',
+    os.path.join(EXTRACTOR_DIR, 'QBExtractor-deploy.zip'),
+    os.path.join(STATIC_DIR, 'QBExtractor-deploy.zip'),
+]
+ZIP_METADATA_FILE = os.path.join(EXTRACTOR_DIR, 'zip_metadata.json')
+
 # Default locations to search for the extractor
 DEFAULT_EXTRACTOR_PATHS = [
     '/var/www/forensicbridge/extractor/QBExtractor.exe',
@@ -85,6 +94,68 @@ def find_extractor_path():
                 return path
 
     return None
+
+
+def find_zip_path():
+    """Find the deployment zip file in configured or default locations"""
+    env_path = os.getenv('EXTRACTOR_ZIP_PATH')
+    if env_path and os.path.isfile(env_path):
+        return env_path
+
+    for path in DEFAULT_ZIP_PATHS:
+        if os.path.isfile(path):
+            return path
+
+    return None
+
+
+def get_zip_metadata():
+    """Load zip metadata (hash, size, etc.)"""
+    try:
+        if os.path.exists(ZIP_METADATA_FILE):
+            with open(ZIP_METADATA_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Could not read zip metadata: {e}")
+    return {}
+
+
+def save_zip_metadata(metadata):
+    """Save zip metadata"""
+    try:
+        with open(ZIP_METADATA_FILE, 'w') as f:
+            json.dump(metadata, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not save zip metadata: {e}")
+
+
+def compute_zip_hash(zip_path):
+    """Compute SHA256 hash of the zip file"""
+    sha256_hash = hashlib.sha256()
+    with open(zip_path, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+
+def generate_zip_metadata(zip_path):
+    """Generate and save metadata for the zip file"""
+    if not os.path.exists(zip_path):
+        return None
+
+    file_size = os.path.getsize(zip_path)
+    sha256 = compute_zip_hash(zip_path)
+
+    metadata = {
+        'sha256': sha256,
+        'size': file_size,
+        'filename': os.path.basename(zip_path),
+        'generated_at': datetime.now().isoformat(),
+        'version': EXTRACTOR_VERSION
+    }
+
+    save_zip_metadata(metadata)
+    return metadata
 
 
 def get_cache_metadata():
@@ -458,6 +529,8 @@ def extractor_status():
     cache_valid = is_cache_valid()
     cache_metadata = get_cache_metadata()
     github_available = check_github_release_exists()
+    zip_path = find_zip_path()
+    zip_metadata = get_zip_metadata() if zip_path else {}
 
     cache_path = os.path.join(CACHE_DIR, 'QBExtractor.exe')
 
@@ -475,6 +548,13 @@ def extractor_status():
             'sha256': cache_metadata.get('sha256', '')[:16] + '...' if cache_metadata.get('sha256') else None,
             'release_tag': cache_metadata.get('release_tag')
         },
+        'zip_package': {
+            'available': zip_path is not None,
+            'path': zip_path,
+            'size': os.path.getsize(zip_path) if zip_path else None,
+            'sha256': zip_metadata.get('sha256', '')[:16] + '...' if zip_metadata.get('sha256') else None,
+            'download_url': '/api/extractor/download-zip' if zip_path else None
+        },
         'bootstrap_bat': {
             'available': os.path.isfile(BOOTSTRAP_BAT),
             'path': BOOTSTRAP_BAT if os.path.isfile(BOOTSTRAP_BAT) else None
@@ -491,7 +571,7 @@ def extractor_status():
             'available': True,
             'description': 'Can always generate a minimal download script'
         },
-        'recommended_download': '/api/extractor/download-exe' if (extractor_path or cache_valid or github_available) else '/api/extractor/download',
+        'recommended_download': '/api/extractor/download-zip' if zip_path else ('/api/extractor/download-exe' if (extractor_path or cache_valid or github_available) else '/api/extractor/download'),
         'cache_dir': CACHE_DIR
     })
 
@@ -643,6 +723,19 @@ def extractor_docs():
             'GET /api/extractor/download-exe': {
                 'description': 'Direct executable download, falls back to GitHub redirect'
             },
+            'GET /api/extractor/download-zip': {
+                'description': 'Download the full deployment package (zip with exe + all DLLs)'
+            },
+            'GET /api/extractor/zip/info': {
+                'description': 'Get zip file info including SHA256 hash for verification'
+            },
+            'POST /api/extractor/zip/verify': {
+                'description': 'Verify a downloaded zip by submitting its SHA256 hash',
+                'body': {'sha256': 'your_computed_hash'}
+            },
+            'POST /api/extractor/zip/regenerate-hash': {
+                'description': 'Regenerate zip metadata after updating the file on server'
+            },
             'GET /api/extractor/bootstrap': {
                 'description': 'Download the bootstrap installer batch file'
             },
@@ -679,15 +772,162 @@ def extractor_docs():
     })
 
 
+# ============================================================================
+# ZIP DEPLOYMENT PACKAGE ENDPOINTS
+# ============================================================================
+
+@extractor_bp.route('/download-zip', methods=['GET'])
+def download_zip():
+    """
+    Download the full QBExtractor deployment package (zip).
+
+    The zip contains:
+    - QBExtractor.exe
+    - All required DLLs
+    - Configuration files
+    """
+    zip_path = find_zip_path()
+
+    if not zip_path:
+        return jsonify({
+            'error': 'Deployment package not available',
+            'message': 'The QBExtractor-deploy.zip file is not deployed on this server',
+            'alternative': '/api/extractor/download-exe'
+        }), 404
+
+    logger.info(f"Serving deployment zip from: {zip_path}")
+    return send_file(
+        zip_path,
+        as_attachment=True,
+        download_name='QBExtractor-deploy.zip',
+        mimetype='application/zip'
+    )
+
+
+@extractor_bp.route('/zip/info', methods=['GET'])
+def zip_info():
+    """
+    Get information about the deployment zip including hash for verification.
+
+    Returns:
+    - sha256: SHA256 hash for verification
+    - size: File size in bytes
+    - available: Whether the zip is available for download
+    """
+    zip_path = find_zip_path()
+
+    if not zip_path:
+        return jsonify({
+            'available': False,
+            'message': 'Deployment zip not available on this server'
+        })
+
+    # Check if we have cached metadata
+    metadata = get_zip_metadata()
+
+    # Regenerate if metadata is missing or file has changed
+    current_size = os.path.getsize(zip_path)
+    if not metadata or metadata.get('size') != current_size:
+        metadata = generate_zip_metadata(zip_path)
+
+    return jsonify({
+        'available': True,
+        'filename': 'QBExtractor-deploy.zip',
+        'sha256': metadata.get('sha256'),
+        'size': metadata.get('size'),
+        'size_mb': round(metadata.get('size', 0) / (1024 * 1024), 2),
+        'version': metadata.get('version', EXTRACTOR_VERSION),
+        'download_url': '/api/extractor/download-zip',
+        'generated_at': metadata.get('generated_at')
+    })
+
+
+@extractor_bp.route('/zip/verify', methods=['POST'])
+def verify_zip():
+    """
+    Verify a downloaded zip file by its hash.
+
+    Request body:
+    {
+        "sha256": "client_computed_hash"
+    }
+
+    Returns:
+    - valid: Boolean indicating if hash matches
+    - expected_hash: The server's hash (first 16 chars for security)
+    """
+    zip_path = find_zip_path()
+
+    if not zip_path:
+        return jsonify({
+            'error': 'Deployment zip not available for verification'
+        }), 404
+
+    data = request.get_json() or {}
+    client_hash = data.get('sha256', '').lower().strip()
+
+    if not client_hash:
+        return jsonify({
+            'error': 'Missing sha256 hash in request body',
+            'example': {'sha256': 'your_computed_hash_here'}
+        }), 400
+
+    # Get or compute server hash
+    metadata = get_zip_metadata()
+    current_size = os.path.getsize(zip_path)
+    if not metadata or metadata.get('size') != current_size:
+        metadata = generate_zip_metadata(zip_path)
+
+    server_hash = metadata.get('sha256', '').lower()
+    is_valid = client_hash == server_hash
+
+    response = {
+        'valid': is_valid,
+        'message': 'Hash verification successful' if is_valid else 'Hash mismatch - file may be corrupted or tampered',
+    }
+
+    if not is_valid:
+        # Provide partial hash for debugging
+        response['expected_hash_prefix'] = server_hash[:16] + '...'
+        response['provided_hash_prefix'] = client_hash[:16] + '...'
+
+    return jsonify(response)
+
+
+@extractor_bp.route('/zip/regenerate-hash', methods=['POST'])
+def regenerate_zip_hash():
+    """
+    Force regeneration of the zip file hash metadata.
+    Use this after updating the zip file on the server.
+    """
+    zip_path = find_zip_path()
+
+    if not zip_path:
+        return jsonify({
+            'error': 'No deployment zip found to hash'
+        }), 404
+
+    logger.info(f"Regenerating hash for: {zip_path}")
+    metadata = generate_zip_metadata(zip_path)
+
+    return jsonify({
+        'success': True,
+        'sha256': metadata.get('sha256'),
+        'size': metadata.get('size'),
+        'generated_at': metadata.get('generated_at')
+    })
+
+
 @extractor_bp.route('/health', methods=['GET'])
 def extractor_health():
     """Health check endpoint for monitoring."""
     extractor_path = find_extractor_path()
     cache_valid = is_cache_valid()
     github_available = check_github_release_exists()
+    zip_path = find_zip_path()
 
     # Determine overall health
-    is_healthy = extractor_path is not None or cache_valid or github_available
+    is_healthy = extractor_path is not None or cache_valid or github_available or zip_path is not None
 
     response = {
         'healthy': is_healthy,
@@ -696,7 +936,8 @@ def extractor_health():
             'local': extractor_path is not None,
             'cache': cache_valid,
             'github': github_available,
-            'bootstrap': os.path.isfile(BOOTSTRAP_BAT)
+            'bootstrap': os.path.isfile(BOOTSTRAP_BAT),
+            'zip_package': zip_path is not None
         }
     }
 
