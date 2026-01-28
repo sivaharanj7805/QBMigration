@@ -310,11 +310,14 @@ def download_extractor():
     Download the ForensicBridge extractor.
 
     Priority:
-    1. Local .exe file if available
-    2. Cached GitHub release
-    3. Bootstrap installer script (fallback)
+    1. Zip package (recommended - includes all DLLs)
+    2. Local .exe file if available
+    3. Cached GitHub release
+    4. Bootstrap installer script (fallback)
 
     Query params:
+        ?format=zip - Force zip package download
+        ?format=exe - Force exe-only download
         ?format=bat - Force bootstrap .bat download
     """
     requested_format = request.args.get('format', '').lower()
@@ -322,7 +325,21 @@ def download_extractor():
     if requested_format == 'bat':
         return download_bootstrap()
 
-    # Try local file
+    if requested_format == 'exe':
+        return download_extractor_exe()
+
+    # Try zip package first (recommended - includes all dependencies)
+    zip_path = find_zip_path()
+    if zip_path:
+        logger.info(f"Serving deployment zip from: {zip_path}")
+        return send_file(
+            zip_path,
+            as_attachment=True,
+            download_name='QBExtractor-deploy.zip',
+            mimetype='application/zip'
+        )
+
+    # Fall back to local exe file
     extractor_path = find_extractor_path()
     if extractor_path:
         logger.info(f"Serving extractor from: {extractor_path}")
@@ -459,9 +476,31 @@ def download_bootstrap_ps1():
 @extractor_bp.route('/info', methods=['GET'])
 def extractor_info():
     """Get information about the extractor availability."""
+    zip_path = find_zip_path()
+    zip_metadata = get_zip_metadata() if zip_path else {}
     extractor_path = find_extractor_path()
     cache_valid = is_cache_valid()
     cache_metadata = get_cache_metadata() if cache_valid else {}
+
+    # Prefer zip package (includes all DLLs)
+    if zip_path:
+        file_size = os.path.getsize(zip_path)
+        # Regenerate metadata if needed
+        if not zip_metadata or zip_metadata.get('size') != file_size:
+            zip_metadata = generate_zip_metadata(zip_path)
+        return jsonify({
+            'available': True,
+            'source': 'zip_package',
+            'type': 'full_package',
+            'download_url': '/api/extractor/download',
+            'direct_zip_url': '/api/extractor/download-zip',
+            'file_size': file_size,
+            'file_size_mb': round(file_size / (1024 * 1024), 2),
+            'sha256': zip_metadata.get('sha256'),
+            'version': zip_metadata.get('version', EXTRACTOR_VERSION),
+            'verify_url': '/api/extractor/zip/verify',
+            'message': 'Full deployment package with all DLLs included'
+        })
 
     if extractor_path:
         file_size = os.path.getsize(extractor_path)
@@ -717,8 +756,8 @@ def extractor_docs():
         'version': EXTRACTOR_VERSION,
         'endpoints': {
             'GET /api/extractor/download': {
-                'description': 'Smart download - returns exe if available, otherwise bootstrap installer',
-                'params': {'format': 'Optional: "bat" to force bootstrap download'}
+                'description': 'Smart download - returns zip package (preferred), exe, or bootstrap installer',
+                'params': {'format': 'Optional: "zip", "exe", or "bat" to force specific format'}
             },
             'GET /api/extractor/download-exe': {
                 'description': 'Direct executable download, falls back to GitHub redirect'
