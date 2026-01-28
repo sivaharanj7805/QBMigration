@@ -1,5 +1,5 @@
 {
-  "serverUrl": "https://api.yourcompany.com",
+  "serverUrl": "https://forensicbridge.ca/api",
   "incrementalSyncFromDate": null,
   "version": "4.3",
   "schemaVersion": "4.3",

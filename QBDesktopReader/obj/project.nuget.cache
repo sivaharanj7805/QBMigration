@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "78s4/hR6MTCC0k6wiG8CvV1hcxn/RD69tAJVw5eI0kYQVo46XnHAtmVZCldjHLdoWcXtRjKQBNu/btbaD30udg==",
+  "dgSpecHash": "39LgpJ6I/NJ8toMVI3MvOGLlZfmoP65B+HRnm2KMPU70Opdw8C/iD+BsYYr5Awz2txnCBlRaMstra3YOTeGTuA==",
   "success": true,
   "projectFilePath": "C:\\Users\\Sivaharan\\QBMigration\\QBDesktopReader\\QBDesktopReader.csproj",
   "expectedPackageFiles": [
@@ -11,12 +11,8 @@
     "C:\\Users\\Sivaharan\\.nuget\\packages\\microsoft.bcl.asyncinterfaces\\8.0.0\\microsoft.bcl.asyncinterfaces.8.0.0.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.2\\microsoft.netframework.referenceassemblies.1.0.2.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net48\\1.0.2\\microsoft.netframework.referenceassemblies.net48.1.0.2.nupkg.sha512",
-    "C:\\Users\\Sivaharan\\.nuget\\packages\\microsoft.visualbasic\\10.3.0\\microsoft.visualbasic.10.3.0.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\newtonsoft.json\\13.0.3\\newtonsoft.json.13.0.3.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\system.buffers\\4.5.1\\system.buffers.4.5.1.nupkg.sha512",
-    "C:\\Users\\Sivaharan\\.nuget\\packages\\system.codedom\\8.0.0\\system.codedom.8.0.0.nupkg.sha512",
-    "C:\\Users\\Sivaharan\\.nuget\\packages\\system.data.odbc\\8.0.0\\system.data.odbc.8.0.0.nupkg.sha512",
-    "C:\\Users\\Sivaharan\\.nuget\\packages\\system.management\\8.0.0\\system.management.8.0.0.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\system.memory\\4.5.5\\system.memory.4.5.5.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\system.numerics.vectors\\4.5.0\\system.numerics.vectors.4.5.0.nupkg.sha512",
     "C:\\Users\\Sivaharan\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.0.0\\system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
