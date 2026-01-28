@@ -1,17 +1,20 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useLiveStatus, useTrialBalance, useAuditCertificate } from "@/lib/hooks/useLiveStatus";
+import { useLiveStatus, useTrialBalance } from "@/lib/hooks/useLiveStatus";
+import { useQuery } from "@tanstack/react-query";
 import { PizzaTracker } from "@/components/dashboard/PizzaTracker";
 import { ReconciliationShield } from "@/components/dashboard/ReconciliationShield";
 import { AuditCertCard } from "@/components/dashboard/AuditCertCard";
 import { CasewareBundleCard } from "@/components/dashboard/CasewareBundleCard";
 import { ForensicIntegrityPulse } from "@/components/dashboard/ForensicIntegrityPulse";
-import { DiscrepancyDoctor } from "@/components/migrations/DiscrepancyDoctor";
+import { DiscrepancyDoctor, Discrepancy } from "@/components/migrations/DiscrepancyDoctor";
 import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2, Cloud, FileBarChart2 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 // Destination type
 type DestinationType = "qbo" | "caseware";
@@ -21,13 +24,42 @@ export default function MigrationDetailPage() {
     const router = useRouter();
     const id = params?.id as string;
 
-    // Hooks using forced mocks
+    // Real API hooks
     const { data: liveStatus, isLoading: statusLoading } = useLiveStatus(id);
     const { data: trialBalance } = useTrialBalance(id, liveStatus?.status === "completed");
 
-    // Destination - would come from API in production
-    // For now, check if this is a caseware migration based on status or stored preference
-    const [destination] = useState<DestinationType>((liveStatus as any)?.destination || "qbo");
+    // Fetch discrepancies from API
+    const { data: discrepancyData } = useQuery({
+        queryKey: ["discrepancies", id],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/migrations/${id}/discrepancies`, {
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (!response.ok) return { discrepancies: [], total_discrepancy: 0 };
+            return response.json();
+        },
+        enabled: !!id && liveStatus?.status === "completed",
+    });
+
+    // Fetch record count from API
+    const { data: recordCountData } = useQuery({
+        queryKey: ["recordCount", id],
+        queryFn: async () => {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/migrations/${id}/record-count`, {
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (!response.ok) return { record_count: 0 };
+            return response.json();
+        },
+        enabled: !!id,
+    });
+
+    // Destination from API response
+    const destination: DestinationType = (liveStatus as any)?.destination || "qbo";
 
     const [isCancelling, setIsCancelling] = useState(false);
     const [showDiscrepancyDoctor, setShowDiscrepancyDoctor] = useState(true);
@@ -206,19 +238,20 @@ export default function MigrationDetailPage() {
                 Large green ✓ or red ⚠ - THE MOST IMPORTANT DATA POINT
             ═══════════════════════════════════════════════════════════════ */}
             <ReconciliationShield
-                sourceBalance={trialBalance?.source_trial_balance ?? 125847.32}
-                destinationBalance={trialBalance?.destination_trial_balance ?? 125847.32}
+                sourceBalance={trialBalance?.source_trial_balance ?? undefined}
+                destinationBalance={trialBalance?.destination_trial_balance ?? undefined}
                 discrepancy={trialBalance?.discrepancy ?? 0}
-                isBalanced={trialBalance?.is_balanced ?? true}
+                isBalanced={trialBalance?.is_balanced ?? (isCompleted && !discrepancyData?.has_discrepancies)}
                 forensicStatus={
                     (trialBalance?.forensic_status as "VERIFIED" | "PENDING" | "DISCREPANCY_DETECTED" | "NOT_AVAILABLE") ||
                     (isCompleted ? "VERIFIED" : "PENDING")
                 }
-                verificationTimestamp={trialBalance?.verification_timestamp || new Date().toISOString()}
-                sourceHash={trialBalance?.source_hash || "7e2f8a9c3b4d5e6f7a8b9c0d1e2f3a4b..."}
-                destinationHash={trialBalance?.destination_hash || "7e2f8a9c3b4d5e6f7a8b9c0d1e2f3a4b..."}
-                hashMatch={trialBalance?.hash_match ?? true}
+                verificationTimestamp={trialBalance?.verification_timestamp ?? undefined}
+                sourceHash={trialBalance?.source_hash ?? undefined}
+                destinationHash={trialBalance?.destination_hash ?? undefined}
+                hashMatch={trialBalance?.hash_match ?? undefined}
                 migrationId={id}
+                isLoading={!isCompleted && statusLoading}
             />
 
             {/* ═══════════════════════════════════════════════════════════════
@@ -230,7 +263,7 @@ export default function MigrationDetailPage() {
                     migrationId={id}
                     companyName={liveStatus?.company_name || "Company"}
                     isAvailable={isCompleted}
-                    recordCount={12847}
+                    recordCount={recordCountData?.record_count || 0}
                 />
 
                 <AuditCertCard
@@ -256,20 +289,18 @@ export default function MigrationDetailPage() {
                 HIGH PRIORITY #6: DISCREPANCY DOCTOR
                 Interactive drill-down - only shown if there are variances
             ═══════════════════════════════════════════════════════════════ */}
-            {(trialBalance?.discrepancy && trialBalance.discrepancy !== 0 && showDiscrepancyDoctor) ? (
+            {(discrepancyData?.has_discrepancies && showDiscrepancyDoctor) ? (
                 <DiscrepancyDoctor
-                    discrepancies={[
-                        {
-                            account_name: "Accounts Receivable",
-                            account_type: "Asset",
-                            source_balance: 125000.0,
-                            destination_balance: 124580.0,
-                            difference: -420.0,
-                            severity: "critical",
-                            possible_cause: "Invoice #102 missed due to invalid date format",
-                        },
-                    ]}
-                    totalDiscrepancy={trialBalance.discrepancy}
+                    discrepancies={discrepancyData.discrepancies.map((d: any) => ({
+                        account_name: d.account_name,
+                        account_type: d.account_type || "Unknown",
+                        source_balance: d.source_balance,
+                        destination_balance: d.destination_balance,
+                        difference: d.difference,
+                        severity: d.severity || "warning",
+                        possible_cause: d.possible_cause,
+                    }))}
+                    totalDiscrepancy={discrepancyData.total_discrepancy}
                     onDismiss={() => setShowDiscrepancyDoctor(false)}
                     onExportReport={handleExportDiscrepancyReport}
                     onReviewResolve={handleReviewResolve}

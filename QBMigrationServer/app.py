@@ -33,6 +33,7 @@ from api.qbo import qbo_bp
 from api.legal import legal_bp
 from api.extractor import extractor_bp
 from api.session_validation import session_validation_bp
+from api.reports import reports_bp
 import sys
 
 
@@ -512,6 +513,7 @@ def create_app(config_name='development'):
     app.register_blueprint(legal_bp)
     app.register_blueprint(extractor_bp)
     app.register_blueprint(session_validation_bp)
+    app.register_blueprint(reports_bp)
     app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor, session_validation')
     
     # Initialize backup scheduler
