@@ -202,7 +202,6 @@ namespace QBDesktopExtractor
         public async Task<UploadResult> UploadNDJSONBundleAsync(
             string outputDirectory,
             RunManifest manifest,
-            EncryptionManager encryptionManager,
             string sessionId,
             QBCompanyInfo companyInfo,
             CancellationToken cancellationToken = default)

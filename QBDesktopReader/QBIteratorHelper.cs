@@ -1,3 +1,5 @@
+#if USE_QBFC
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -859,3 +861,5 @@ namespace QBDesktopExtractor
         }
     }
 }
+
+#endif // USE_QBFC

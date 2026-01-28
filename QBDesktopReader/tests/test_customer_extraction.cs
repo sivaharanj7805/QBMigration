@@ -1,3 +1,5 @@
+#if USE_QBFC
+
 using System;
 using System.Collections.Generic;
 using QBFC16Lib;
@@ -255,8 +257,10 @@ public class CustomerData
     public string TermsRef { get; set; }
     public string SalesTaxCodeRef { get; set; }
     public string PriceLevelRef { get; set; }
-    
+
     public string Notes { get; set; }
     public bool IsActive { get; set; }
     public string ParentRef { get; set; }
 }
+
+#endif // USE_QBFC
