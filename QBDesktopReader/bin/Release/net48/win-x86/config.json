@@ -1,6 +1,6 @@
 {
   "$comment": "QuickBooks Extractor v4.3 Configuration",
-  "serverUrl": "https://forensicbridge.ca/api",
+  "serverUrl": "https://localhost:5000",
   "incrementalSyncFromDate": null,
   "version": "4.3",
   "schemaVersion": "4.3",
