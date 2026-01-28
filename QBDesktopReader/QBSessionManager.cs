@@ -1,3 +1,5 @@
+#if USE_QBFC
+
 using System;
 using System.Linq;
 using System.Threading;
@@ -691,45 +693,6 @@ namespace QBDesktopExtractor
         }
     }
 
-    /// <summary>
-    /// QuickBooks-specific exception with error code
-    /// </summary>
-    public class QBException : Exception
-    {
-        public int ErrorCode { get; }
-
-        public QBException(string message, string qbMessage, int errorCode, Exception innerException = null)
-            : base($"{message}: {qbMessage}", innerException)
-        {
-            ErrorCode = errorCode;
-        }
-    }
-
-    /// <summary>
-    /// Company information extracted from QuickBooks
-    /// </summary>
-    public class CompanyInfo
-    {
-        public string CompanyName { get; set; }
-        public string LegalCompanyName { get; set; }
-        public string Address { get; set; }
-        public string City { get; set; }
-        public string State { get; set; }
-        public string PostalCode { get; set; }
-        public string Country { get; set; }
-        public string Phone { get; set; }
-        public string Fax { get; set; }
-        public string Email { get; set; }
-        public string CompanyFilePath { get; set; }
-    }
-
-    /// <summary>
-    /// Company info with additional fields
-    /// </summary>
-    public class QBCompanyInfo : CompanyInfo
-    {
-        public string CompanyId { get; set; }
-        public string FiscalYearStartMonth { get; set; }
-        public string TaxForm { get; set; }
-    }
 }
+
+#endif // USE_QBFC
