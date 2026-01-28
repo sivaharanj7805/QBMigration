@@ -144,7 +144,7 @@ namespace QBDesktopExtractor
                     return SessionResult.Invalid(errorResponse?.error ?? "Access denied");
                 }
 
-                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                if (response.StatusCode == (System.Net.HttpStatusCode)429)
                 {
                     return SessionResult.Invalid(
                         "Too many validation attempts. Please wait a few minutes and try again."
