@@ -65,6 +65,37 @@ export default function ReportsPage() {
     const [loading, setLoading] = useState(true);
     const [reports, setReports] = useState<Report[]>([]);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+    const handleDownloadReport = async (reportId: string, reportName: string) => {
+        setDownloadingId(reportId);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/reports/${reportId}/download`, {
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${reportName.replace(/\s+/g, '_')}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } else {
+                alert("Failed to download report");
+            }
+        } catch (error) {
+            console.error("Download error:", error);
+            alert("Failed to connect to server");
+        } finally {
+            setDownloadingId(null);
+        }
+    };
 
     useEffect(() => {
         fetchReports();
@@ -214,12 +245,20 @@ export default function ReportsPage() {
                                     <td>{getStatusBadge(report.status)}</td>
                                     <td>
                                         {report.status === "ready" ? (
-                                            <button className="btn-secondary flex items-center gap-1 text-sm py-1.5">
-                                                <Download className="w-4 h-4" />
-                                                Download
+                                            <button
+                                                className="btn-secondary flex items-center gap-1 text-sm py-1.5"
+                                                onClick={() => handleDownloadReport(report.id, report.name)}
+                                                disabled={downloadingId === report.id}
+                                            >
+                                                {downloadingId === report.id ? (
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                ) : (
+                                                    <Download className="w-4 h-4" />
+                                                )}
+                                                {downloadingId === report.id ? "Downloading..." : "Download"}
                                             </button>
                                         ) : (
-                                            <button className="text-gray-400 cursor-not-allowed flex items-center gap-1 text-sm">
+                                            <button className="text-gray-400 cursor-not-allowed flex items-center gap-1 text-sm" disabled>
                                                 <Clock className="w-4 h-4" />
                                                 Processing
                                             </button>
@@ -300,9 +339,14 @@ export default function ReportsPage() {
                             All reports include Audit_TB.csv, Audit_GL.csv with SHA-256 hashes and 58 Lead Sheet codes.
                             Direct import into Caseware Working Papers supported.
                         </p>
-                        <button className="text-blue-600 text-sm font-medium mt-2 flex items-center gap-1">
+                        <a
+                            href="https://www.caseware.com/resources/working-papers"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 text-sm font-medium mt-2 flex items-center gap-1 hover:underline"
+                        >
                             Learn more <ChevronRight className="w-4 h-4" />
-                        </button>
+                        </a>
                     </div>
                 </div>
             </div>

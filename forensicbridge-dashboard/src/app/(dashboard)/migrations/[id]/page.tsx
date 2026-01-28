@@ -30,6 +30,38 @@ export default function MigrationDetailPage() {
     const [destination] = useState<DestinationType>((liveStatus as any)?.destination || "qbo");
 
     const [isCancelling, setIsCancelling] = useState(false);
+    const [showDiscrepancyDoctor, setShowDiscrepancyDoctor] = useState(true);
+
+    const handleExportDiscrepancyReport = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/migrations/${id}/discrepancy-report`, {
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `Discrepancy_Report_${id}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } else {
+                alert("Failed to export discrepancy report");
+            }
+        } catch (error) {
+            console.error("Export error:", error);
+            alert("Failed to export report. Please try again.");
+        }
+    };
+
+    const handleReviewResolve = () => {
+        // Navigate to reports page where discrepancies can be reviewed
+        router.push('/reports');
+    };
 
     const handleCancelMigration = async () => {
         if (!confirm("Are you sure you want to cancel this migration?")) return;
@@ -224,7 +256,7 @@ export default function MigrationDetailPage() {
                 HIGH PRIORITY #6: DISCREPANCY DOCTOR
                 Interactive drill-down - only shown if there are variances
             ═══════════════════════════════════════════════════════════════ */}
-            {(trialBalance?.discrepancy && trialBalance.discrepancy !== 0) ? (
+            {(trialBalance?.discrepancy && trialBalance.discrepancy !== 0 && showDiscrepancyDoctor) ? (
                 <DiscrepancyDoctor
                     discrepancies={[
                         {
@@ -238,6 +270,9 @@ export default function MigrationDetailPage() {
                         },
                     ]}
                     totalDiscrepancy={trialBalance.discrepancy}
+                    onDismiss={() => setShowDiscrepancyDoctor(false)}
+                    onExportReport={handleExportDiscrepancyReport}
+                    onReviewResolve={handleReviewResolve}
                 />
             ) : isCompleted ? (
                 <div className="card-forensic bg-green-50 border-green-200 p-6">
