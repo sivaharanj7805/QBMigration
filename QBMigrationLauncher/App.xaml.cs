@@ -15,9 +15,14 @@ namespace QBMigrationLauncher
         public static SessionData? CurrentSession { get; set; }
         
         /// <summary>
-        /// Current license status (set after validation)
+        /// Current license status (set after validation) - kept for backwards compatibility
         /// </summary>
         public static LicenseResult? LicenseResult { get; set; }
+
+        /// <summary>
+        /// Current session validation result (Session ID is the license)
+        /// </summary>
+        public static SessionResult? SessionResult { get; set; }
         
         /// <summary>
         /// Application startup - Show login window first
@@ -37,14 +42,16 @@ namespace QBMigrationLauncher
         public static bool IsAuthenticated => CurrentSession != null && !string.IsNullOrEmpty(CurrentSession.Token);
         
         /// <summary>
-        /// Check if license is valid
+        /// Check if session/license is valid (Session ID is the license)
         /// </summary>
-        public static bool HasValidLicense => LicenseResult != null && LicenseResult.Valid && LicenseResult.HasMigrationsRemaining;
-        
+        public static bool HasValidLicense =>
+            (SessionResult != null && SessionResult.Valid && SessionResult.RemainingExtractions > 0) ||
+            (LicenseResult != null && LicenseResult.Valid && LicenseResult.HasMigrationsRemaining);
+
         /// <summary>
-        /// Get remaining migrations
+        /// Get remaining migrations/extractions
         /// </summary>
-        public static int RemainingMigrations => LicenseResult?.RemainingMigrations ?? 0;
+        public static int RemainingMigrations => SessionResult?.RemainingExtractions ?? LicenseResult?.RemainingMigrations ?? 0;
         
         /// <summary>
         /// Logout and return to login window
@@ -53,6 +60,7 @@ namespace QBMigrationLauncher
         {
             CurrentSession = null;
             LicenseResult = null;
+            SessionResult = null;
             
             // Delete session file
             try
