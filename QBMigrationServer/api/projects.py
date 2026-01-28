@@ -5,20 +5,12 @@ Manage migration projects for clients
 
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-import secrets
-import string
 
 from models import db, Project, Migration
+from models.project import generate_session_id
 from api.auth import require_auth
 
 projects_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
-
-
-def generate_session_id() -> str:
-    """Generate a unique session ID for a migration"""
-    timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
-    random_part = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    return f"FB-{timestamp}-{random_part}"
 
 
 @projects_bp.route('', methods=['GET'])

@@ -6,8 +6,11 @@ using QBDesktopExtractor;
 namespace QBMigrationLauncher
 {
     /// <summary>
-    /// License Activation Window - Activates license key on this machine
-    /// Uses LicenseValidator from QBDesktopReader
+    /// Session Activation Window - Activates Session ID on this machine
+    /// Uses SessionValidator from QBDesktopReader
+    ///
+    /// Session ID format: FB-YYYYMMDDHHMMSS-XXXXXXXX
+    /// Example: FB-20260128170624-AXO52A38
     /// </summary>
     public partial class LicenseActivationWindow : Window
     {
@@ -15,63 +18,111 @@ namespace QBMigrationLauncher
         {
             InitializeComponent();
         }
-        
+
         /// <summary>
         /// Handle Activate button click
         /// </summary>
         private async void ActivateButton_Click(object sender, RoutedEventArgs e)
         {
-            var licenseKey = LicenseKeyTextBox.Text?.Trim().ToUpperInvariant();
-            
+            var sessionId = LicenseKeyTextBox.Text?.Trim().ToUpperInvariant();
+
             // Validation
-            if (string.IsNullOrEmpty(licenseKey))
+            if (string.IsNullOrEmpty(sessionId))
             {
-                ShowStatus("Please enter your license key.", false);
+                ShowStatus("Please enter your Session ID.", false);
                 return;
             }
-            
-            // Validate format (FB-XXXX-XXXX-XXXX-XXXX)
-            if (!System.Text.RegularExpressions.Regex.IsMatch(licenseKey, @"^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"))
+
+            // Validate format (FB-YYYYMMDDHHMMSS-XXXXXXXX)
+            if (!IsValidSessionIdFormat(sessionId))
             {
-                ShowStatus("Invalid license key format. Expected: FB-XXXX-XXXX-XXXX-XXXX", false);
+                ShowStatus("Invalid Session ID format.\nExpected: FB-YYYYMMDDHHMMSS-XXXXXXXX\nExample: FB-20260128170624-AXO52A38", false);
                 return;
             }
-            
+
             ShowLoading(true);
-            
+
             try
             {
-                // Activate license using LicenseValidator
-                var result = await LicenseValidator.ActivateAsync(licenseKey);
-                
-                if (result.Valid)
+                // First validate the session
+                var validateResult = await SessionValidator.ValidateAsync(sessionId);
+
+                if (!validateResult.Valid)
                 {
-                    ShowStatus($"✅ License activated successfully!\n{result.GetDisplayStatus()}", true);
-                    
-                    // Store in App for MainWindow to use
-                    App.LicenseResult = result;
-                    
-                    // Wait a moment to show success, then close
-                    await System.Threading.Tasks.Task.Delay(1500);
-                    
-                    this.DialogResult = true;
-                    this.Close();
+                    ShowStatus($"❌ {validateResult.Error}", false);
+                    return;
                 }
-                else
+
+                // If new device, activate it
+                if (validateResult.IsNewDevice)
                 {
-                    ShowStatus($"❌ {result.Error}", false);
+                    var activateResult = await SessionValidator.ActivateAsync(sessionId);
+
+                    if (!activateResult.Valid)
+                    {
+                        ShowStatus($"❌ {activateResult.Error}", false);
+                        return;
+                    }
                 }
+
+                // Build display status
+                var status = $"✅ Session activated successfully!\n\n" +
+                             $"Project: {validateResult.ProjectName}\n" +
+                             $"Client: {validateResult.ClientName}\n" +
+                             $"Tier: {validateResult.TierName}\n" +
+                             $"Remaining Extractions: {validateResult.RemainingExtractions}";
+
+                ShowStatus(status, true);
+
+                // Store session result for MainWindow to use
+                App.SessionResult = validateResult;
+
+                // Wait a moment to show success, then close
+                await System.Threading.Tasks.Task.Delay(1500);
+
+                this.DialogResult = true;
+                this.Close();
             }
             catch (Exception ex)
             {
-                ShowStatus($"Activation failed: {ex.Message}", false);
+                ShowStatus($"Session validation failed: {ex.Message}", false);
             }
             finally
             {
                 ShowLoading(false);
             }
         }
-        
+
+        /// <summary>
+        /// Validate Session ID format: FB-YYYYMMDDHHMMSS-XXXXXXXX
+        /// </summary>
+        private bool IsValidSessionIdFormat(string sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId))
+                return false;
+
+            sessionId = sessionId.Trim().ToUpperInvariant();
+
+            // Must start with FB-
+            if (!sessionId.StartsWith("FB-"))
+                return false;
+
+            // Split into parts
+            var parts = sessionId.Split('-');
+            if (parts.Length != 3)
+                return false;
+
+            // Middle part should be timestamp (14 digits)
+            if (parts[1].Length != 14 || !long.TryParse(parts[1], out _))
+                return false;
+
+            // Last part should be 8 alphanumeric characters
+            if (parts[2].Length != 8)
+                return false;
+
+            return true;
+        }
+
         /// <summary>
         /// Handle Cancel button click
         /// </summary>
@@ -80,7 +131,7 @@ namespace QBMigrationLauncher
             this.DialogResult = false;
             this.Close();
         }
-        
+
         /// <summary>
         /// Handle Purchase link click
         /// </summary>
@@ -99,7 +150,7 @@ namespace QBMigrationLauncher
                 ShowStatus("Unable to open browser. Visit https://forensicbridge.ca/pricing", false);
             }
         }
-        
+
         private void ShowLoading(bool show)
         {
             Dispatcher.Invoke(() =>
@@ -109,13 +160,13 @@ namespace QBMigrationLauncher
                 LicenseKeyTextBox.IsEnabled = !show;
             });
         }
-        
+
         private void ShowStatus(string message, bool success)
         {
             Dispatcher.Invoke(() =>
             {
                 StatusMessage.Text = message;
-                StatusMessage.Foreground = success 
+                StatusMessage.Foreground = success
                     ? new SolidColorBrush(Color.FromRgb(16, 185, 129))  // Green
                     : new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
                 StatusMessage.Visibility = Visibility.Visible;
