@@ -102,11 +102,11 @@ export default function NewProjectPage() {
                             <ol className="space-y-3 text-slate-300">
                                 <li className="flex items-start gap-3">
                                     <span className="flex-shrink-0 w-6 h-6 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center text-sm font-medium">1</span>
-                                    <span>Download the ForensicBridge extractor tool</span>
+                                    <span>Download and extract the ForensicBridge package (.zip)</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="flex-shrink-0 w-6 h-6 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center text-sm font-medium">2</span>
-                                    <span>Run it on the client&apos;s Windows machine with QuickBooks</span>
+                                    <span>Run <code className="text-emerald-400 bg-slate-800 px-1 rounded">QBExtractor.exe</code> on the Windows machine with QuickBooks</span>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <span className="flex-shrink-0 w-6 h-6 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center text-sm font-medium">3</span>
@@ -134,7 +134,7 @@ export default function NewProjectPage() {
                                 ) : (
                                     <>
                                         <Download className="w-5 h-5" />
-                                        Download ForensicBridge Extractor
+                                        Download ForensicBridge Package
                                     </>
                                 )}
                             </a>
@@ -144,9 +144,10 @@ export default function NewProjectPage() {
                                 <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm">
                                     <p className="font-medium mb-2">Download Instructions:</p>
                                     <ol className="list-decimal list-inside space-y-1">
-                                        <li>Run the downloaded file on the Windows machine</li>
-                                        <li>If it&apos;s a .bat file, it will download and install the full extractor</li>
-                                        <li>Follow the on-screen instructions to complete installation</li>
+                                        <li>Extract the downloaded .zip file to a folder</li>
+                                        <li>Run <code className="bg-slate-800 px-1 rounded">QBExtractor.exe</code> on the Windows machine</li>
+                                        <li>Enter the Session ID when prompted</li>
+                                        <li>Follow the on-screen instructions to complete extraction</li>
                                     </ol>
                                 </div>
                             )}

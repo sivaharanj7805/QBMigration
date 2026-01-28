@@ -11,6 +11,8 @@ extractor/
 ├── ForensicBridge_Install.bat    # Bootstrap installer (users download this)
 ├── ForensicBridge_Bootstrap.ps1  # PowerShell alternative (optional)
 ├── QBExtractor.exe               # Main executable (optional - can be cached from GitHub)
+├── QBExtractor-deploy.zip        # Full deployment package with all DLLs
+├── zip_metadata.json             # Zip hash/size for verification
 ├── cache/                        # Auto-populated cache directory
 │   ├── QBExtractor.exe          # Cached executable from GitHub
 │   └── metadata.json            # Cache metadata (hash, date, source)
@@ -113,6 +115,117 @@ Set `EXTRACTOR_PATH` to point to the executable:
 export EXTRACTOR_PATH=/opt/forensicbridge/extractor/QBExtractor.exe
 ```
 
+### Option 4: Deploy Zip Package to Ubuntu EC2
+
+The zip package includes QBExtractor.exe plus all required DLLs. This is recommended for users who don't have .NET runtime installed.
+
+#### Quick Deploy (Copy and Hash)
+
+```bash
+# 1. SSH into your EC2 instance
+ssh -i your-key.pem ubuntu@your-ec2-ip
+
+# 2. Create the extractor directory
+sudo mkdir -p /var/www/forensicbridge/extractor
+
+# 3. Copy the zip file (from local machine)
+scp -i your-key.pem QBExtractor-deploy.zip ubuntu@your-ec2-ip:/tmp/
+
+# 4. Move to deployment location
+sudo mv /tmp/QBExtractor-deploy.zip /var/www/forensicbridge/extractor/
+
+# 5. Generate and save the hash metadata
+cd /var/www/forensicbridge/extractor
+SHA256=$(sha256sum QBExtractor-deploy.zip | cut -d' ' -f1)
+SIZE=$(stat -c%s QBExtractor-deploy.zip)
+sudo tee zip_metadata.json << EOF
+{
+  "sha256": "$SHA256",
+  "size": $SIZE,
+  "filename": "QBExtractor-deploy.zip",
+  "generated_at": "$(date -Iseconds)",
+  "version": "4.4.0"
+}
+EOF
+
+# 6. Set permissions
+sudo chown -R www-data:www-data /var/www/forensicbridge/extractor
+sudo chmod 644 /var/www/forensicbridge/extractor/*
+
+# 7. Verify deployment
+curl https://your-api-domain/api/extractor/zip/info
+```
+
+#### Alternative: Use App Static Directory
+
+```bash
+# Copy to the Flask static directory instead
+sudo cp QBExtractor-deploy.zip /path/to/QBMigrationServer/static/extractor/
+
+# Regenerate hash via API
+curl -X POST https://your-api-domain/api/extractor/zip/regenerate-hash
+```
+
+#### Zip Search Locations
+
+The API checks these paths for the zip file (in order):
+
+1. `EXTRACTOR_ZIP_PATH` environment variable (if set)
+2. `/var/www/forensicbridge/extractor/QBExtractor-deploy.zip`
+3. `/opt/forensicbridge/extractor/QBExtractor-deploy.zip`
+4. `static/extractor/QBExtractor-deploy.zip`
+5. `static/QBExtractor-deploy.zip`
+
+## Zip Package Verification
+
+Clients can verify the downloaded zip hasn't been tampered with:
+
+### Get Expected Hash (Before Download)
+
+```bash
+curl https://your-api-domain/api/extractor/zip/info
+# Response:
+# {
+#   "available": true,
+#   "sha256": "728140ebeddc98b4b5154c105fc917a0a943db786e342ca8f5d4ff530d5b8ed3",
+#   "size": 1175316,
+#   "download_url": "/api/extractor/download-zip"
+# }
+```
+
+### Download and Verify (Client Side)
+
+```bash
+# Download the zip
+curl -O https://your-api-domain/api/extractor/download-zip
+
+# Compute local hash
+LOCAL_HASH=$(sha256sum QBExtractor-deploy.zip | cut -d' ' -f1)
+
+# Verify with server
+curl -X POST https://your-api-domain/api/extractor/zip/verify \
+  -H "Content-Type: application/json" \
+  -d "{\"sha256\": \"$LOCAL_HASH\"}"
+
+# Response if valid:
+# {"valid": true, "message": "Hash verification successful"}
+```
+
+### PowerShell Verification (Windows)
+
+```powershell
+# Download
+Invoke-WebRequest -Uri "https://your-api-domain/api/extractor/download-zip" -OutFile "QBExtractor-deploy.zip"
+
+# Compute hash
+$hash = (Get-FileHash -Path "QBExtractor-deploy.zip" -Algorithm SHA256).Hash.ToLower()
+
+# Verify
+$body = @{sha256 = $hash} | ConvertTo-Json
+$result = Invoke-RestMethod -Uri "https://your-api-domain/api/extractor/zip/verify" -Method POST -Body $body -ContentType "application/json"
+Write-Host "Valid: $($result.valid)"
+```
+
 ## Server Search Order
 
 The API checks these locations in order:
@@ -129,6 +242,10 @@ The API checks these locations in order:
 |----------|--------|-------------|
 | `/api/extractor/download` | GET | Smart download (exe or bootstrap) |
 | `/api/extractor/download-exe` | GET | Direct exe download |
+| `/api/extractor/download-zip` | GET | Download full deployment package (zip) |
+| `/api/extractor/zip/info` | GET | Get zip info + SHA256 hash for verification |
+| `/api/extractor/zip/verify` | POST | Verify downloaded zip by hash |
+| `/api/extractor/zip/regenerate-hash` | POST | Regenerate hash after updating zip |
 | `/api/extractor/bootstrap` | GET | Download bootstrap .bat |
 | `/api/extractor/info` | GET | Availability info |
 | `/api/extractor/status` | GET | Full status of all sources |
