@@ -1,3 +1,9 @@
+// Conditionally compiled - only when USE_QBFC is defined (QBFC SDK installed)
+// The Intuit QBFC SDK is no longer available for download (deprecated 2024).
+// Use QODBC as the primary backend instead.
+// To build with QBFC support: dotnet build /p:UseQBFC=true
+#if USE_QBFC
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -7,40 +13,6 @@ using QBFC16Lib;
 
 namespace QBDesktopExtractor
 {
-    /// <summary>
-    /// Extraction run summary for audit trail
-    /// </summary>
-    public class ExtractionRunSummary
-    {
-        public string SessionId { get; set; }
-        public DateTime StartedAt { get; set; }
-        public DateTime? CompletedAt { get; set; }
-        public TimeSpan Duration => (CompletedAt ?? DateTime.Now) - StartedAt;
-        public int TotalEntitiesAttempted { get; set; }
-        public int TotalEntitiesSucceeded { get; set; }
-        public int TotalEntitiesFailed { get; set; }
-        public int TotalRecordsExtracted { get; set; }
-        public List<EntityExtractionResult> EntityResults { get; set; } = new List<EntityExtractionResult>();
-        public List<string> Warnings { get; set; } = new List<string>();
-        public List<string> Errors { get; set; } = new List<string>();
-        public string ConfigHash { get; set; }
-        public bool IsIncremental { get; set; }
-        public DateTime? IncrementalFromDate { get; set; }
-    }
-
-    /// <summary>
-    /// Result of a single entity extraction
-    /// </summary>
-    public class EntityExtractionResult
-    {
-        public string EntityName { get; set; }
-        public bool Success { get; set; }
-        public int RecordCount { get; set; }
-        public TimeSpan Duration { get; set; }
-        public string ErrorMessage { get; set; }
-        public bool Skipped { get; set; }
-    }
-
     /// <summary>
     /// Main QuickBooks data extraction engine
     /// v4.3: Added entity-level failure isolation, logger, and run summary
@@ -3700,3 +3672,12 @@ namespace QBDesktopExtractor
                 return activity;
             }
             catch (Exception ex)
+            {
+                Console.WriteLine($"  ℹ Company activity not available: {ex.Message}");
+                return new QBCompanyActivity();
+            }
+        }
+    }
+}
+
+#endif // USE_QBFC

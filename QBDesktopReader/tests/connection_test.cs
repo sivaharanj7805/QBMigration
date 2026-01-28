@@ -1,3 +1,5 @@
+#if USE_QBFC
+
 using System;
 using QBFC16Lib;
 
@@ -83,3 +85,5 @@ class SimpleTest
         Console.ReadLine();
     }
 }
+
+#endif // USE_QBFC

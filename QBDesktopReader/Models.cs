@@ -669,6 +669,7 @@ namespace QBDesktopExtractor
         public string VendorTaxIdent { get; set; }
         public bool? IsVendorEligibleFor1099 { get; set; }
         public decimal? Balance { get; set; }
+        public string AccountNumber { get; set; }
         public string BillingRateRefListID { get; set; }
         public string BillingRateRefFullName { get; set; }
         public string ParentRefListID { get; set; }
@@ -694,21 +695,29 @@ namespace QBDesktopExtractor
         [JsonProperty("listId")] public string ListID { get; set; }
         [JsonProperty("name")] public string Name { get; set; }
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
+        [JsonProperty("salutation")] public string Salutation { get; set; }
         [JsonProperty("firstName")] public string FirstName { get; set; }
         [JsonProperty("middleName")] public string MiddleName { get; set; }
         [JsonProperty("lastName")] public string LastName { get; set; }
         [JsonProperty("ssn")] public string SSN { get; set; }  // Sensitive - redact in output
         [JsonProperty("phone")] public string Phone { get; set; }
+        [JsonProperty("altPhone")] public string AltPhone { get; set; }
+        [JsonProperty("fax")] public string Fax { get; set; }
         [JsonProperty("mobile")] public string Mobile { get; set; }
         [JsonProperty("email")] public string Email { get; set; }
         [JsonProperty("employeeAddressAddr1")] public string EmployeeAddressAddr1 { get; set; }
+        [JsonProperty("employeeAddressAddr2")] public string EmployeeAddressAddr2 { get; set; }
         [JsonProperty("employeeAddressCity")] public string EmployeeAddressCity { get; set; }
         [JsonProperty("employeeAddressState")] public string EmployeeAddressState { get; set; }
         [JsonProperty("employeeAddressPostalCode")] public string EmployeeAddressPostalCode { get; set; }
+        [JsonProperty("employeeAddressCountry")] public string EmployeeAddressCountry { get; set; }
+        [JsonProperty("employeeType")] public string EmployeeType { get; set; }
         [JsonProperty("hiredDate")] public DateTime? HiredDate { get; set; }
         [JsonProperty("releasedDate")] public DateTime? ReleasedDate { get; set; }
         [JsonProperty("birthDate")] public DateTime? BirthDate { get; set; }
         [JsonProperty("gender")] public string Gender { get; set; }
+        [JsonProperty("accountNumber")] public string AccountNumber { get; set; }
+        [JsonProperty("notes")] public string Notes { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("editSequence")] public string EditSequence { get; set; }
@@ -761,6 +770,7 @@ namespace QBDesktopExtractor
         [JsonProperty("purchaseCost")] public decimal? PurchaseCost { get; set; }
         [JsonProperty("cogsAccountRefListId")] public string COGSAccountRefListID { get; set; }
         [JsonProperty("cogsAccountRefFullName")] public string COGSAccountRefFullName { get; set; }
+        [JsonProperty("expenseAccountRefFullName")] public string ExpenseAccountRefFullName { get; set; }
         [JsonProperty("assetAccountRefListId")] public string AssetAccountRefListID { get; set; }
         [JsonProperty("assetAccountRefFullName")] public string AssetAccountRefFullName { get; set; }
         [JsonProperty("quantityOnHand")] public decimal? QuantityOnHand { get; set; }
@@ -785,9 +795,11 @@ namespace QBDesktopExtractor
         [JsonProperty("fullName")] public string FullName { get; set; }
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
         [JsonProperty("parentRefListId")] public string ParentRefListID { get; set; }
+        [JsonProperty("parentRefFullName")] public string ParentRefFullName { get; set; }
         [JsonProperty("sublevel")] public int? Sublevel { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
     }
 
     public class QBPaymentMethod
@@ -824,6 +836,8 @@ namespace QBDesktopExtractor
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
         [JsonProperty("isTaxable")] public bool? IsTaxable { get; set; }
         [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("desc")] public string Desc { get; set; }
+        [JsonProperty("taxRate")] public decimal? TaxRate { get; set; }
     }
 
     public class QBCustomerType
@@ -861,6 +875,7 @@ namespace QBDesktopExtractor
         [JsonProperty("currencyCode")] public string CurrencyCode { get; set; }
         [JsonProperty("currencyFormat")] public string CurrencyFormat { get; set; }
         [JsonProperty("exchangeRate")] public decimal? ExchangeRate { get; set; }
+        [JsonProperty("isUserDefinedCurrency")] public bool? IsUserDefinedCurrency { get; set; }
     }
 
     public class QBCustomerMsg
@@ -884,15 +899,27 @@ namespace QBDesktopExtractor
         [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
         [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
         [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("classRefFullName")] public string ClassRefFullName { get; set; }
         [JsonProperty("arAccountRefListId")] public string ARAccountRefListID { get; set; }
+        [JsonProperty("arAccountRefFullName")] public string ARAccountRefFullName { get; set; }
         [JsonProperty("termsRefListId")] public string TermsRefListID { get; set; }
+        [JsonProperty("termsRefFullName")] public string TermsRefFullName { get; set; }
+        [JsonProperty("shipDate")] public DateTime? ShipDate { get; set; }
         [JsonProperty("subtotal")] public decimal? Subtotal { get; set; }
         [JsonProperty("salesTaxTotal")] public decimal? SalesTaxTotal { get; set; }
         [JsonProperty("appliedAmount")] public decimal? AppliedAmount { get; set; }
         [JsonProperty("balanceRemaining")] public decimal? BalanceRemaining { get; set; }
         [JsonProperty("isPaid")] public bool? IsPaid { get; set; }
+        [JsonProperty("isFinanceCharge")] public bool? IsFinanceCharge { get; set; }
+        [JsonProperty("isToBePrinted")] public bool? IsToBePrinted { get; set; }
+        [JsonProperty("isToBeEmailed")] public bool? IsToBeEmailed { get; set; }
+        [JsonProperty("poNumber")] public string PONumber { get; set; }
+        [JsonProperty("salesRepRefFullName")] public string SalesRepRefFullName { get; set; }
+        [JsonProperty("shipMethodRefFullName")] public string ShipMethodRefFullName { get; set; }
+        [JsonProperty("fob")] public string FOB { get; set; }
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("customerMsgRefListId")] public string CustomerMsgRefListID { get; set; }
+        [JsonProperty("customerMsgRefFullName")] public string CustomerMsgRefFullName { get; set; }
         [JsonProperty("isPending")] public bool? IsPending { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
@@ -1487,5 +1514,89 @@ namespace QBDesktopExtractor
         [JsonProperty("isFullyApplied")] public bool? IsFullyApplied { get; set; }
         [JsonProperty("discountAmount")] public decimal? DiscountAmount { get; set; }
         [JsonProperty("originalAmount")] public decimal? OriginalAmount { get; set; }
+    }
+
+    // =================================================================
+    // EXTRACTION TRACKING - Shared across all backends
+    // =================================================================
+
+    /// <summary>
+    /// Extraction run summary for audit trail
+    /// </summary>
+    public class ExtractionRunSummary
+    {
+        public string SessionId { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public TimeSpan Duration => (CompletedAt ?? DateTime.Now) - StartedAt;
+        public int TotalEntitiesAttempted { get; set; }
+        public int TotalEntitiesSucceeded { get; set; }
+        public int TotalEntitiesFailed { get; set; }
+        public int TotalRecordsExtracted { get; set; }
+        public List<EntityExtractionResult> EntityResults { get; set; } = new List<EntityExtractionResult>();
+        public List<string> Warnings { get; set; } = new List<string>();
+        public List<string> Errors { get; set; } = new List<string>();
+        public string ConfigHash { get; set; }
+        public bool IsIncremental { get; set; }
+        public DateTime? IncrementalFromDate { get; set; }
+    }
+
+    /// <summary>
+    /// Result of a single entity extraction
+    /// </summary>
+    public class EntityExtractionResult
+    {
+        public string EntityName { get; set; }
+        public bool Success { get; set; }
+        public int RecordCount { get; set; }
+        public TimeSpan Duration { get; set; }
+        public string ErrorMessage { get; set; }
+        public bool Skipped { get; set; }
+    }
+
+    // =================================================================
+    // COMPANY INFO - Shared across all backends
+    // =================================================================
+
+    /// <summary>
+    /// Company information extracted from QuickBooks
+    /// </summary>
+    public class CompanyInfo
+    {
+        public string CompanyName { get; set; }
+        public string LegalCompanyName { get; set; }
+        public string Address { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string PostalCode { get; set; }
+        public string Country { get; set; }
+        public string Phone { get; set; }
+        public string Fax { get; set; }
+        public string Email { get; set; }
+        public string CompanyFilePath { get; set; }
+    }
+
+    /// <summary>
+    /// Company info with additional fields
+    /// </summary>
+    public class QBCompanyInfo : CompanyInfo
+    {
+        public string CompanyId { get; set; }
+        public string FiscalYearStartMonth { get; set; }
+        public string TaxForm { get; set; }
+    }
+
+    /// <summary>
+    /// QuickBooks-specific exception with error code
+    /// </summary>
+    public class QBException : Exception
+    {
+        public int ErrorCode { get; }
+
+        public QBException(string message, string qbMessage, int errorCode, Exception innerException = null)
+            : base($"{message}: {qbMessage}", innerException)
+        {
+            ErrorCode = errorCode;
+        }
     }
 }

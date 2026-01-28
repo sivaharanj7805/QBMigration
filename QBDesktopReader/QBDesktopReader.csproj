@@ -61,10 +61,16 @@
     </COMReference>
   </ItemGroup>
 
+  <!-- Framework references for .NET Framework 4.8 -->
+  <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
   <!-- NuGet packages -->
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="JsonSchema.Net" Version="7.0.0" />
+    <PackageReference Include="JsonPointer.Net" Version="5.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
