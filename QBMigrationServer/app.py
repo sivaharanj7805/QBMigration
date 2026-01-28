@@ -175,6 +175,12 @@ def auto_migrate_database(app):
     Auto-migrate database schema on startup.
     Adds any missing columns to ensure code and database are in sync.
     """
+    # Skip for SQLite (used in testing) - tables are created fresh via db.create_all()
+    db_url = str(app.config.get('SQLALCHEMY_DATABASE_URI', ''))
+    if 'sqlite' in db_url:
+        app.logger.info('Skipping schema migration for SQLite database')
+        return
+
     try:
         with db.engine.connect() as conn:
             # Add all potentially missing columns to users table
@@ -310,54 +316,57 @@ def create_app(config_name='development'):
             "This is required for session security and JWT tokens."
         )
 
-    # FIX #49: Validate AWS region and AMI consistency
-    aws_region = app.config.get('AWS_REGION', 'ca-central-1')
-    ami_id = app.config.get('AWS_EC2_AMI_ID', '')
+    # FIX #49: Validate AWS region and AMI consistency (skip for testing)
+    if config_name != 'testing':
+        aws_region = app.config.get('AWS_REGION', 'ca-central-1')
+        ami_id = app.config.get('AWS_EC2_AMI_ID', '')
 
-    # Mapping of regions to known AMI prefixes for validation
-    REGION_AMI_PREFIXES = {
-        'us-east-1': 'ami-',
-        'us-west-2': 'ami-',
-        'ca-central-1': 'ami-',
-        'eu-west-1': 'ami-',
-        'eu-central-1': 'ami-',
-        'ap-southeast-1': 'ami-',
-        'ap-northeast-1': 'ami-'
-    }
+        # Mapping of regions to known AMI prefixes for validation
+        REGION_AMI_PREFIXES = {
+            'us-east-1': 'ami-',
+            'us-west-2': 'ami-',
+            'ca-central-1': 'ami-',
+            'eu-west-1': 'ami-',
+            'eu-central-1': 'ami-',
+            'ap-southeast-1': 'ami-',
+            'ap-northeast-1': 'ami-'
+        }
 
-    # Validate region is supported
-    if aws_region not in REGION_AMI_PREFIXES:
-        logger.warning(
-            f"AWS region '{aws_region}' is not in the pre-validated list. "
-            f"Ensure your AMI ID is valid for this region."
-        )
+        # Validate region is supported
+        if aws_region not in REGION_AMI_PREFIXES:
+            logger.warning(
+                f"AWS region '{aws_region}' is not in the pre-validated list. "
+                f"Ensure your AMI ID is valid for this region."
+            )
 
-    # CRITICAL: Hardcoded AMI from config.py default is for US region
-    HARDCODED_US_AMI = 'ami-0c55b159cbfafe1f0'
-    if ami_id == HARDCODED_US_AMI and aws_region != 'us-east-1':
-        raise ValueError(
-            f"CRITICAL: AMI ID '{ami_id}' is a US-East-1 AMI, but AWS_REGION is '{aws_region}'. "
-            f"This creates a data sovereignty violation risk. "
-            f"You must set AWS_EC2_AMI_ID environment variable to an AMI valid for region '{aws_region}'. "
-            f"Find region-specific AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
-        )
+        # CRITICAL: Hardcoded AMI from config.py default is for US region
+        HARDCODED_US_AMI = 'ami-0c55b159cbfafe1f0'
+        if ami_id == HARDCODED_US_AMI and aws_region != 'us-east-1':
+            raise ValueError(
+                f"CRITICAL: AMI ID '{ami_id}' is a US-East-1 AMI, but AWS_REGION is '{aws_region}'. "
+                f"This creates a data sovereignty violation risk. "
+                f"You must set AWS_EC2_AMI_ID environment variable to an AMI valid for region '{aws_region}'. "
+                f"Find region-specific AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+            )
 
-    # Require explicit AMI configuration in production
-    if not ami_id:
-        raise ValueError(
-            "CRITICAL: AWS_EC2_AMI_ID must be explicitly configured. "
-            f"Set an AMI ID valid for region '{aws_region}'. "
-            f"Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
-        )
+        # Require explicit AMI configuration in production
+        if not ami_id:
+            raise ValueError(
+                "CRITICAL: AWS_EC2_AMI_ID must be explicitly configured. "
+                f"Set an AMI ID valid for region '{aws_region}'. "
+                f"Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/"
+            )
 
-    # Validate AMI format
-    if not ami_id.startswith('ami-') or len(ami_id) < 12:
-        raise ValueError(
-            f"CRITICAL: Invalid AMI ID format: '{ami_id}'. "
-            f"AMI IDs must start with 'ami-' and be at least 12 characters."
-        )
+        # Validate AMI format
+        if not ami_id.startswith('ami-') or len(ami_id) < 12:
+            raise ValueError(
+                f"CRITICAL: Invalid AMI ID format: '{ami_id}'. "
+                f"AMI IDs must start with 'ami-' and be at least 12 characters."
+            )
 
-    logger.info(f"AWS configuration validated: Region={aws_region}, AMI={ami_id[:12]}...")
+        logger.info(f"AWS configuration validated: Region={aws_region}, AMI={ami_id[:12]}...")
+    else:
+        logger.info("AWS validation skipped for testing environment")
 
     @app.before_request
     def check_content_length():
