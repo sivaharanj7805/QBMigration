@@ -19,14 +19,26 @@ socketio = None
 def init_socketio(app, secret_key):
     """Initialize SocketIO with the Flask app"""
     global socketio
+
+    # Use threading for testing, eventlet for production
+    if app.config.get('TESTING'):
+        async_mode = 'threading'
+    else:
+        # Try eventlet first, fall back to threading
+        try:
+            import eventlet
+            async_mode = 'eventlet'
+        except ImportError:
+            async_mode = 'threading'
+
     socketio = SocketIO(
         app,
         cors_allowed_origins="*",
-        async_mode='eventlet',
-        logger=True,
-        engineio_logger=True
+        async_mode=async_mode,
+        logger=not app.config.get('TESTING'),
+        engineio_logger=not app.config.get('TESTING')
     )
-    
+
     register_handlers(socketio, secret_key)
     return socketio
 
