@@ -3,7 +3,7 @@
 import { AlertTriangle, XCircle, HelpCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 
-interface Discrepancy {
+export interface Discrepancy {
     account_name: string;
     account_type: string;
     source_balance: number;

@@ -104,7 +104,11 @@ export default function ReportsPage() {
     const fetchReports = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/reports`, { credentials: 'include' });
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/reports`, {
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
             if (response.ok) {
                 const data = await response.json();
                 setReports(data.reports || []);
@@ -289,16 +293,21 @@ export default function ReportsPage() {
                                         onClick={async () => {
                                             setShowGenerateModal(false);
                                             try {
+                                                const token = localStorage.getItem('token');
                                                 const response = await fetch(`${API_URL}/api/reports/generate`, {
                                                     method: 'POST',
                                                     credentials: 'include',
-                                                    headers: { 'Content-Type': 'application/json' },
+                                                    headers: {
+                                                        'Content-Type': 'application/json',
+                                                        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                                                    },
                                                     body: JSON.stringify({ type: type.type }),
                                                 });
                                                 if (response.ok) {
                                                     fetchReports();
                                                 } else {
-                                                    alert("Failed to generate report");
+                                                    const error = await response.json();
+                                                    alert(error.error || "Failed to generate report");
                                                 }
                                             } catch (error) {
                                                 console.error("Generate report error:", error);
