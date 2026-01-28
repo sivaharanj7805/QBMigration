@@ -305,6 +305,9 @@ namespace QBDesktopExtractor
         
         [JsonProperty("editSequence")]
         public string EditSequence { get; set; }
+
+        [JsonProperty("integrityHash")]
+        public string IntegrityHash { get; set; }
     }
 
     // =================================================================
@@ -538,6 +541,9 @@ namespace QBDesktopExtractor
         [JsonProperty("editSequence")]
         public string EditSequence { get; set; }
 
+        [JsonProperty("integrityHash")]
+        public string IntegrityHash { get; set; }
+
         // For backwards compatibility with BillAddress/ShipAddress objects
         [JsonIgnore]
         public QBAddress BillAddress
@@ -678,7 +684,8 @@ namespace QBDesktopExtractor
         public DateTime? TimeCreated { get; set; }
         public DateTime? TimeModified { get; set; }
         public string EditSequence { get; set; }
-        
+        public string IntegrityHash { get; set; }
+
         [JsonIgnore]
         public QBAddress VendorAddress
         {
@@ -721,6 +728,7 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("integrityHash")] public string IntegrityHash { get; set; }
     }
 
     public class QBLead
@@ -783,6 +791,8 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("integrityHash")] public string IntegrityHash { get; set; }
+        [JsonIgnore] public string Description { get => SalesDescription; set => SalesDescription = value; }
     }
 
     // =================================================================
@@ -808,6 +818,7 @@ namespace QBDesktopExtractor
         [JsonProperty("name")] public string Name { get; set; }
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
         [JsonProperty("paymentMethodType")] public string PaymentMethodType { get; set; }
+        [JsonIgnore] public string Type { get => PaymentMethodType; set => PaymentMethodType = value; }
     }
 
     public class QBTerms
@@ -926,6 +937,8 @@ namespace QBDesktopExtractor
         [JsonProperty("editSequence")] public string EditSequence { get; set; }
         [JsonProperty("lines")] public List<QBInvoiceLine> Lines { get; set; } = new List<QBInvoiceLine>();
         [JsonProperty("linkedTxns")] public List<QBLinkedTxn> LinkedTxns { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
+        [JsonIgnore] public string CustomerMsgRef { get => CustomerMsgRefFullName; set => CustomerMsgRefFullName = value; }
     }
 
     /// <summary>
@@ -1011,6 +1024,7 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("lines")] public List<QBPurchaseOrderLine> Lines { get; set; } = new List<QBPurchaseOrderLine>();
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBPurchaseOrderLine
@@ -1040,6 +1054,7 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("lines")] public List<QBSalesOrderLine> Lines { get; set; } = new List<QBSalesOrderLine>();
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBSalesOrderLine
@@ -1068,7 +1083,9 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
         [JsonProperty("lines")] public List<QBBillLine> Lines { get; set; } = new List<QBBillLine>();
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBBillLine
@@ -1096,6 +1113,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBReceivePayment
@@ -1113,6 +1131,8 @@ namespace QBDesktopExtractor
         [JsonProperty("depositToAccountRefListId")] public string DepositToAccountRefListID { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBCreditMemo
@@ -1129,6 +1149,7 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("lines")] public List<QBCreditMemoLine> Lines { get; set; } = new List<QBCreditMemoLine>();
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBCreditMemoLine
@@ -1152,6 +1173,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBEstimate
@@ -1166,6 +1188,7 @@ namespace QBDesktopExtractor
         [JsonProperty("isActive")] public bool? IsActive { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBJournalEntry
@@ -1179,6 +1202,7 @@ namespace QBDesktopExtractor
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
         [JsonProperty("lines")] public List<QBJournalEntryLine> Lines { get; set; } = new List<QBJournalEntryLine>();
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBJournalEntryLine
@@ -1209,6 +1233,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBCreditCardCharge
@@ -1259,6 +1284,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBInventoryAdjustment
@@ -1307,6 +1333,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBInventoryTransfer
@@ -1333,6 +1360,7 @@ namespace QBDesktopExtractor
         [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonIgnore] public string IntegrityHash { get => Sha256IntegrityHash; set => Sha256IntegrityHash = value; }
     }
 
     public class QBARRefundCreditCard
@@ -1584,6 +1612,13 @@ namespace QBDesktopExtractor
         public string CompanyId { get; set; }
         public string FiscalYearStartMonth { get; set; }
         public string TaxForm { get; set; }
+        public string EIN { get; set; }
+        [JsonIgnore] public string CompanyFile { get => CompanyFilePath; set => CompanyFilePath = value; }
+        [JsonIgnore] public int FirstMonthFiscalYear
+        {
+            get => int.TryParse(FiscalYearStartMonth, out var m) ? m : 1;
+            set => FiscalYearStartMonth = value.ToString();
+        }
     }
 
     /// <summary>
