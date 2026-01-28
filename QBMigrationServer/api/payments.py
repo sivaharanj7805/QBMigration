@@ -223,11 +223,18 @@ def handle_successful_payment(session):
             # Mark as paid and available
             credit.mark_paid(payment_intent_id)
 
-            # Update user's subscription tier if they don't have one
+            # Update user's subscription tier and sync migration counts
             user = User.query.get(credit.user_id)
-            if user and not user.subscription_tier:
-                user.subscription_tier = credit.tier_type
-                user.tier_purchased_at = datetime.utcnow()
+            if user:
+                # Always update tier to reflect most recent purchase
+                if not user.subscription_tier:
+                    user.subscription_tier = credit.tier_type
+                    user.tier_purchased_at = datetime.utcnow()
+
+                # CRITICAL FIX: Sync User.migrations_purchased with MigrationCredit count
+                # This ensures backwards compatibility with code that reads from User model
+                # The MigrationCredit table is the source of truth, but we keep User in sync
+                user.migrations_purchased = (user.migrations_purchased or 0) + 1
 
             db.session.commit()  # Commit both changes atomically
 
