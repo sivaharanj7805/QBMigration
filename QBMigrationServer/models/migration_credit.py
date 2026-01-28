@@ -155,10 +155,18 @@ class MigrationCredit(db.Model):
     
     @classmethod
     def get_available_for_user(cls, user_id):
-        """Get all available credits for a user"""
+        """
+        Get all available credits for a user.
+
+        CRITICAL: Must check BOTH status='available' AND payment_status='paid'
+        to ensure we only return credits that are:
+        1. Paid via Stripe (payment_status='paid')
+        2. Not yet used for a migration (status='available')
+        """
         return cls.query.filter_by(
             user_id=user_id,
-            status='available'
+            status='available',
+            payment_status='paid'
         ).all()
     
     @classmethod
