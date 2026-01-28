@@ -8,10 +8,6 @@
     "serverUrl"
   ],
   "properties": {
-    "$comment": {
-      "type": "string",
-      "description": "Optional comment field"
-    },
     "serverUrl": {
       "type": "string",
       "format": "uri",

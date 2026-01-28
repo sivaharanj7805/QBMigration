@@ -1,5 +1,4 @@
 {
-  "$comment": "QuickBooks Extractor v4.3 Configuration",
   "serverUrl": "https://forensicbridge.ca/api",
   "incrementalSyncFromDate": null,
   "version": "4.3",
