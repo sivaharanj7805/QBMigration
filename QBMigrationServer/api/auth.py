@@ -414,12 +414,49 @@ def login():
 @require_auth
 def get_current_user():
     """Get current user info including tier and migration balance"""
+    from models.migration_credit import MigrationCredit
+
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
-    
+
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
-    
+
+    # AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them
+    # This fixes existing users who selected tiers before the MigrationCredit fix
+    try:
+        legacy_purchased = getattr(user, 'migrations_purchased', None) or 0
+        legacy_used = getattr(user, 'migrations_used', None) or 0
+        legacy_available = max(0, legacy_purchased - legacy_used)
+
+        actual_available = MigrationCredit.query.filter_by(
+            user_id=user_id, status='available', payment_status='paid'
+        ).count()
+
+        # If legacy shows credits but MigrationCredit table doesn't, sync them
+        if legacy_available > actual_available:
+            tier = user.subscription_tier or 'starter'
+            credit_config = MigrationCredit.TIER_CONFIG.get(tier, MigrationCredit.TIER_CONFIG['starter'])
+
+            for i in range(legacy_available - actual_available):
+                credit = MigrationCredit(
+                    user_id=user_id,
+                    tier_type=tier,
+                    transaction_limit=credit_config.get('transaction_limit', 5000),
+                    price_cents=0,
+                    stripe_checkout_session_id=f'auto-sync-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+                    payment_status='paid',
+                    status='available'
+                )
+                credit.paid_at = datetime.datetime.utcnow()
+                db.session.add(credit)
+
+            db.session.commit()
+            logger.info(f"Auto-synced {legacy_available - actual_available} credits for user {user_id}")
+    except Exception as e:
+        logger.warning(f"Auto-sync credits failed for user {user_id}: {e}")
+        # Continue anyway - don't block the /me endpoint
+
     # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
     # If tier info can't be retrieved, user should know something is wrong
     try:
