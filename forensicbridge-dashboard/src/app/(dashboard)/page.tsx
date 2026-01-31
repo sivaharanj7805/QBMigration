@@ -194,10 +194,10 @@ export default function DashboardHome() {
                 setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file. Files with multiple extensions are not allowed.");
                 return;
             }
-            // FIX: Add file size validation (max 2GB for QuickBooks files)
-            const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+            // FIX: Add file size validation (max 5GB for large QuickBooks files)
+            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
             if (file.size > MAX_FILE_SIZE) {
-                setUploadError("File too large. Maximum file size is 2GB.");
+                setUploadError("File too large. Maximum file size is 5GB.");
                 return;
             }
             if (file.size === 0) {
@@ -216,10 +216,10 @@ export default function DashboardHome() {
                 setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file.");
                 return;
             }
-            // FIX: Add file size validation (max 2GB for QuickBooks files)
-            const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+            // FIX: Add file size validation (max 5GB for large QuickBooks files)
+            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
             if (file.size > MAX_FILE_SIZE) {
-                setUploadError("File too large. Maximum file size is 2GB.");
+                setUploadError("File too large. Maximum file size is 5GB.");
                 return;
             }
             if (file.size === 0) {
