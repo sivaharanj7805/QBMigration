@@ -2,6 +2,7 @@ import logging
 from flask import current_app
 from flask_mail import Mail, Message
 from datetime import datetime
+from markupsafe import escape as html_escape
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +117,16 @@ def send_new_device_alert(email, ip_address):
     """Send new device login alert"""
     try:
         subject = "New device detected on your QB Migration account"
-        
+
+        # FIX MED-05: Escape user-controllable data in HTML
+        safe_ip = str(html_escape(ip_address or 'Unknown'))
+
         body = f"""
 Security Alert: New Device Login
 
 We detected a login to your QB Migration account from a new device.
 
-IP Address: {ip_address}
+IP Address: {safe_ip}
 Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
 
 If this was you, you can safely ignore this email.
@@ -135,14 +139,14 @@ If this wasn't you, please:
 Best regards,
 QB Migration Security Team
 """
-        
+
         html = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <h2 style="color: #dc2626;">Security Alert: New Device Login</h2>
     <p>We detected a login to your QB Migration account from a new device.</p>
     <div style="background-color: #f3f4f6; padding: 15px; border-radius: 4px; margin: 20px 0;">
-        <p style="margin: 5px 0;"><strong>IP Address:</strong> {ip_address}</p>
+        <p style="margin: 5px 0;"><strong>IP Address:</strong> {safe_ip}</p>
         <p style="margin: 5px 0;"><strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
     </div>
     <p><strong>If this was you,</strong> you can safely ignore this email.</p>

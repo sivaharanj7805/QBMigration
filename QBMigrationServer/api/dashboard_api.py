@@ -17,9 +17,21 @@ from sqlalchemy import func, extract
 import logging
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from io import BytesIO
 import sys
+
+
+def is_valid_uuid(value):
+    """
+    Validate UUID format to prevent path traversal.
+    FIX: Added UUID validation for all migration_id parameters.
+    """
+    if not value:
+        return False
+    uuid_pattern = r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'
+    return bool(re.match(uuid_pattern, value))
 
 # FIX #33: Import locale-aware lead sheet mapper for Caseware fallback
 # CRIT-06 FIX: Use environment variable or relative path instead of hardcoded path
@@ -523,12 +535,19 @@ def download_audit_certificate(migration_id):
     Download PDF audit certificate for completed migration.
     Generates certificate on-demand using PremiumMigrationVerifier.
     """
+    # FIX: Validate migration_id format to prevent path traversal
+    if not is_valid_uuid(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
             user_id=current_user.id
         ).first()
-        
+
         if not migration:
             return jsonify({
                 'success': False,
@@ -909,18 +928,25 @@ def export_caseware_bundle(migration_id):
 def download_caseware_bundle(migration_id):
     """
     Download the generated Caseware Audit Bundle (.zip).
-    
+
     Returns a zip file containing:
     - Audit_TB.csv
     - Audit_GL.csv
     - Audit_Mapping.cvw
     """
+    # FIX: Validate migration_id format to prevent path traversal
+    if not is_valid_uuid(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
             user_id=current_user.id
         ).first()
-        
+
         if not migration:
             return jsonify({
                 'success': False,
@@ -938,10 +964,23 @@ def download_caseware_bundle(migration_id):
                 'success': False,
                 'error': 'Bundle file not found. Please regenerate.'
             }), 404
-        
+
+        # FIX: Validate path is within allowed directories (prevent serving arbitrary files)
+        bundle_path = os.path.realpath(migration.caseware_bundle_path)
+        allowed_dirs = [
+            os.path.realpath(current_app.root_path),
+            os.path.realpath('/tmp'),
+        ]
+        if not any(bundle_path.startswith(d + os.sep) or bundle_path.startswith(d) for d in allowed_dirs):
+            logger.warning(f"Attempted to serve file outside allowed dirs: {bundle_path}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid bundle path'
+            }), 400
+
         # Return the zip file
         return send_file(
-            migration.caseware_bundle_path,
+            bundle_path,
             mimetype='application/zip',
             as_attachment=True,
             download_name=f'{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip'

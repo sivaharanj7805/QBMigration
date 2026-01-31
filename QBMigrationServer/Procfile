@@ -1,0 +1,11 @@
+# Production deployment commands
+# Used by Heroku, Dokku, and as reference for EC2/ECS deployment
+
+# Web server - main application
+web: gunicorn wsgi:application --config gunicorn.conf.py
+
+# Database migrations (run before starting web)
+release: flask db upgrade
+
+# Background worker (if using Celery in the future)
+# worker: celery -A celery_app worker --loglevel=info

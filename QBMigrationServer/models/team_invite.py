@@ -41,8 +41,19 @@ class TeamInvite(db.Model):
     accepted_user = db.relationship('User', foreign_keys=[accepted_user_id], backref='received_invites')
     
     @classmethod
-    def create_invite(cls, owner_user_id, email, role='member', expiry_days=7):
-        """Create a new team invite"""
+    def create_invite(cls, owner_user_id, email, role='member', expiry_days=7, auto_commit=True):
+        """
+        Create a new team invite.
+
+        FIX HIGH-06: Added auto_commit parameter to allow caller to manage transaction.
+
+        Args:
+            owner_user_id: ID of the user creating the invite
+            email: Email address to invite
+            role: Role for the invited user (member, admin)
+            expiry_days: Days until the invite expires
+            auto_commit: If True, commits immediately. If False, caller manages transaction.
+        """
         invite = cls(
             owner_user_id=owner_user_id,
             email=email.lower().strip(),
@@ -52,7 +63,14 @@ class TeamInvite(db.Model):
             expires_at=datetime.utcnow() + timedelta(days=expiry_days)
         )
         db.session.add(invite)
-        db.session.commit()
+
+        if auto_commit:
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                raise
+
         return invite
     
     @classmethod
