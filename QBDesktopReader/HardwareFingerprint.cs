@@ -128,12 +128,16 @@ namespace QBDesktopExtractor
         {
             using (var searcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor"))
             {
+                // SECURITY FIX: Properly dispose ManagementObject instances to prevent WMI resource leaks
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    var processorId = obj["ProcessorId"]?.ToString();
-                    if (!string.IsNullOrEmpty(processorId))
+                    using (obj)
                     {
-                        return processorId;
+                        var processorId = obj["ProcessorId"]?.ToString();
+                        if (!string.IsNullOrEmpty(processorId))
+                        {
+                            return processorId;
+                        }
                     }
                 }
             }
@@ -147,12 +151,16 @@ namespace QBDesktopExtractor
         {
             using (var searcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_DiskDrive WHERE Index = 0"))
             {
+                // SECURITY FIX: Properly dispose ManagementObject instances to prevent WMI resource leaks
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    var serial = obj["SerialNumber"]?.ToString()?.Trim();
-                    if (!string.IsNullOrEmpty(serial))
+                    using (obj)
                     {
-                        return serial;
+                        var serial = obj["SerialNumber"]?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(serial))
+                        {
+                            return serial;
+                        }
                     }
                 }
             }

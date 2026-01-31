@@ -74,12 +74,10 @@ export function Sidebar() {
 
     const handleLogout = async () => {
         try {
-            await fetch(`${API_URL}/api/auth/logout`, {
+            // SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage token
+            const { authFetch } = await import('@/lib/auth');
+            await authFetch(`${API_URL}/api/auth/logout`, {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                }
             });
         } catch (error) {
             // FIX: Only log in development mode

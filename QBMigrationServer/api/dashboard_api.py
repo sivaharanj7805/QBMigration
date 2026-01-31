@@ -758,8 +758,13 @@ def export_caseware_bundle(migration_id):
             import base64
 
             # Generate encryption key from app secret (deterministic for same migration)
-            app_secret = current_app.config.get('BACKUP_ENCRYPTION_KEY', 'default_key')
-            migration_salt = migration_id.encode()
+            # SECURITY FIX: Fail if no encryption key configured - never use default
+            app_secret = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+            if not app_secret:
+                return jsonify({'success': False, 'error': 'Encryption not configured'}), 500
+            # SECURITY FIX: Use random salt instead of predictable migration_id
+            import secrets
+            migration_salt = secrets.token_bytes(32)
             from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
             from cryptography.hazmat.primitives import hashes
             from cryptography.hazmat.backends import default_backend
