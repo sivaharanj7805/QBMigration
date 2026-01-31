@@ -22,11 +22,35 @@ namespace QBMigrationLauncher.Services
 
         public ActiveArchivalService(string archiveDirectory)
         {
-            _archiveDirectory = archiveDirectory;
+            _archiveDirectory = Path.GetFullPath(archiveDirectory);
             _indexPath = Path.Combine(_archiveDirectory, "archive_index.json");
-            
+
             Directory.CreateDirectory(_archiveDirectory);
             _index = LoadOrCreateIndex();
+        }
+
+        /// <summary>
+        /// FIX #3: Validate that a path is safely within the archive directory (prevent path traversal).
+        /// </summary>
+        private string ValidateAndNormalizePath(string subPath, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(subPath))
+                throw new ArgumentException($"{paramName} cannot be empty", paramName);
+
+            // Remove any path traversal attempts
+            var normalizedSubPath = subPath.Replace("..", "").Replace("~", "");
+
+            // Build full path and normalize it
+            var fullPath = Path.GetFullPath(Path.Combine(_archiveDirectory, normalizedSubPath));
+
+            // Ensure the resulting path is still within our archive directory
+            if (!fullPath.StartsWith(_archiveDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException(
+                    $"Access denied: path '{subPath}' would escape the archive directory");
+            }
+
+            return fullPath;
         }
 
         /// <summary>
@@ -34,8 +58,12 @@ namespace QBMigrationLauncher.Services
         /// </summary>
         public async Task<ArchiveEntry> ArchiveCompanyDataAsync(string companyName, string extractedDataPath)
         {
-            var archiveId = $"ARC-{DateTime.Now:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}";
-            var archiveFolder = Path.Combine(_archiveDirectory, archiveId);
+            // FIX #3: Generate a safe archive ID (alphanumeric only)
+            // FIX: Use UtcNow for consistent timestamps across timezones
+            var archiveId = $"ARC-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}";
+
+            // FIX #3: Validate the archive folder path stays within archive directory
+            var archiveFolder = ValidateAndNormalizePath(archiveId, nameof(archiveId));
             Directory.CreateDirectory(archiveFolder);
 
             LogMessage?.Invoke(this, $"[ARCHIVE] Creating archive: {archiveId}");
@@ -46,7 +74,7 @@ namespace QBMigrationLauncher.Services
                 CompanyName = companyName,
                 SourcePath = extractedDataPath,
                 ArchivePath = archiveFolder,
-                CreatedAt = DateTime.Now,
+                CreatedAt = DateTime.UtcNow,
                 Status = ArchiveStatus.Active
             };
 
@@ -77,6 +105,7 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Search archived transactions.
+        /// FIX: Added error handling for file I/O and JSON deserialization.
         /// </summary>
         public async Task<List<ArchivedTransaction>> SearchTransactionsAsync(TransactionSearchCriteria criteria)
         {
@@ -84,7 +113,7 @@ namespace QBMigrationLauncher.Services
 
             foreach (var entry in _index.Entries.Where(e => e.Status == ArchiveStatus.Active))
             {
-                if (!string.IsNullOrEmpty(criteria.CompanyName) && 
+                if (!string.IsNullOrEmpty(criteria.CompanyName) &&
                     !entry.CompanyName.Contains(criteria.CompanyName, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -93,33 +122,46 @@ namespace QBMigrationLauncher.Services
                 var txnIndexPath = Path.Combine(entry.ArchivePath, "transactions_index.json");
                 if (!File.Exists(txnIndexPath)) continue;
 
-                var json = await File.ReadAllTextAsync(txnIndexPath);
-                var transactions = JsonSerializer.Deserialize<List<ArchivedTransaction>>(json) ?? new List<ArchivedTransaction>();
+                try
+                {
+                    var json = await File.ReadAllTextAsync(txnIndexPath);
+                    var transactions = JsonSerializer.Deserialize<List<ArchivedTransaction>>(json) ?? new List<ArchivedTransaction>();
 
-                // Apply filters
-                var filtered = transactions.AsEnumerable();
+                    // Apply filters
+                    var filtered = transactions.AsEnumerable();
 
-                if (criteria.DateFrom.HasValue)
-                    filtered = filtered.Where(t => t.Date >= criteria.DateFrom.Value);
+                    if (criteria.DateFrom.HasValue)
+                        filtered = filtered.Where(t => t.Date >= criteria.DateFrom.Value);
 
-                if (criteria.DateTo.HasValue)
-                    filtered = filtered.Where(t => t.Date <= criteria.DateTo.Value);
+                    if (criteria.DateTo.HasValue)
+                        filtered = filtered.Where(t => t.Date <= criteria.DateTo.Value);
 
-                if (!string.IsNullOrEmpty(criteria.TransactionType))
-                    filtered = filtered.Where(t => t.Type.Equals(criteria.TransactionType, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(criteria.TransactionType))
+                        filtered = filtered.Where(t => t.Type.Equals(criteria.TransactionType, StringComparison.OrdinalIgnoreCase));
 
-                if (criteria.MinAmount.HasValue)
-                    filtered = filtered.Where(t => t.Amount >= criteria.MinAmount.Value);
+                    if (criteria.MinAmount.HasValue)
+                        filtered = filtered.Where(t => t.Amount >= criteria.MinAmount.Value);
 
-                if (criteria.MaxAmount.HasValue)
-                    filtered = filtered.Where(t => t.Amount <= criteria.MaxAmount.Value);
+                    if (criteria.MaxAmount.HasValue)
+                        filtered = filtered.Where(t => t.Amount <= criteria.MaxAmount.Value);
 
-                if (!string.IsNullOrEmpty(criteria.SearchText))
-                    filtered = filtered.Where(t => 
-                        t.Memo?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true ||
-                        t.EntityName?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true);
+                    if (!string.IsNullOrEmpty(criteria.SearchText))
+                        filtered = filtered.Where(t =>
+                            t.Memo?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true ||
+                            t.EntityName?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true);
 
-                results.AddRange(filtered);
+                    results.AddRange(filtered);
+                }
+                catch (IOException ex)
+                {
+                    // Log and skip this archive if file can't be read
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Could not read archive {entry.ArchiveId}: {ex.Message}");
+                }
+                catch (JsonException ex)
+                {
+                    // Log and skip this archive if JSON is malformed
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Malformed index in archive {entry.ArchiveId}: {ex.Message}");
+                }
             }
 
             return results.OrderByDescending(t => t.Date).Take(criteria.MaxResults).ToList();
@@ -162,7 +204,7 @@ namespace QBMigrationLauncher.Services
             if (entry != null)
             {
                 entry.Status = ArchiveStatus.MarkedForDeletion;
-                entry.DeleteScheduledAt = DateTime.Now.AddDays(30); // 30-day grace period
+                entry.DeleteScheduledAt = DateTime.UtcNow.AddDays(30); // 30-day grace period
                 await SaveIndexAsync();
                 LogMessage?.Invoke(this, $"[DELETE] Archive {archiveId} marked for deletion on {entry.DeleteScheduledAt:yyyy-MM-dd}");
             }
@@ -176,7 +218,7 @@ namespace QBMigrationLauncher.Services
             var auditLogPath = Path.Combine(_archiveDirectory, "audit_log.ndjson");
             var logEntry = new AuditLogEntry
             {
-                Timestamp = DateTime.Now,
+                Timestamp = DateTime.UtcNow,
                 ArchiveId = archiveId,
                 UserId = userId,
                 Action = action,
@@ -237,9 +279,13 @@ namespace QBMigrationLauncher.Services
 
                         transactions.Add(txn);
                     }
-                    catch
+                    catch (JsonException)
                     {
-                        // Skip malformed lines
+                        // Skip malformed JSON lines - this is expected for corrupted data
+                    }
+                    catch (FormatException)
+                    {
+                        // Skip lines with invalid date/number formats
                     }
                 }
             }
@@ -307,7 +353,7 @@ namespace QBMigrationLauncher.Services
     public class ArchiveIndex
     {
         public List<ArchiveEntry> Entries { get; set; } = new List<ArchiveEntry>();
-        public DateTime LastUpdated { get; set; } = DateTime.Now;
+        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 
     public class ArchiveEntry

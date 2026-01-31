@@ -20,6 +20,29 @@ namespace QBMigrationLauncher.Services
         }
 
         /// <summary>
+        /// FIX: Safely write file with error handling for disk full, permission denied, etc.
+        /// </summary>
+        private void SafeWriteFile(string filePath, string content)
+        {
+            try
+            {
+                File.WriteAllText(filePath, content, Encoding.UTF8);
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to write file '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Check disk space and file permissions.", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Permission denied writing '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Run as administrator or choose a different output directory.", ex);
+            }
+        }
+
+        /// <summary>
         /// Generates a comprehensive variance report comparing source and destination.
         /// </summary>
         public string GenerateVarianceReport(VarianceReportData data)
@@ -119,7 +142,7 @@ namespace QBMigrationLauncher.Services
         
         <div class='footer'>
             <p>This report was generated automatically after migration verification.</p>
-            <p>Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}</p>
+            <p>Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
         </div>
     </div>
 </body>
@@ -127,8 +150,8 @@ namespace QBMigrationLauncher.Services
 
             var fileName = $"VarianceReport_{data.MigrationId}.html";
             var filePath = Path.Combine(_outputDirectory, fileName);
-            File.WriteAllText(filePath, html, Encoding.UTF8);
-            
+            SafeWriteFile(filePath, html);  // FIX: Use safe write with error handling
+
             return filePath;
         }
 
@@ -143,6 +166,9 @@ namespace QBMigrationLauncher.Services
             return "<span class='status-failed'>✗ ATTENTION REQUIRED: Significant variance detected. Manual review needed.</span>";
         }
 
+        /// <summary>
+        /// FIX #6: Escape HTML including single quotes (used in attribute values).
+        /// </summary>
         private string EscapeHtml(string? input)
         {
             if (string.IsNullOrEmpty(input)) return "";
@@ -150,7 +176,8 @@ namespace QBMigrationLauncher.Services
                 .Replace("&", "&amp;")
                 .Replace("<", "&lt;")
                 .Replace(">", "&gt;")
-                .Replace("\"", "&quot;");
+                .Replace("\"", "&quot;")
+                .Replace("'", "&#39;");  // FIX #6: Escape single quotes for attribute contexts
         }
     }
 

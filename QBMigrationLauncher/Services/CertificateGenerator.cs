@@ -19,6 +19,29 @@ namespace QBMigrationLauncher.Services
         }
 
         /// <summary>
+        /// FIX: Safely write file with error handling for disk full, permission denied, etc.
+        /// </summary>
+        private void SafeWriteFile(string filePath, string content)
+        {
+            try
+            {
+                File.WriteAllText(filePath, content, Encoding.UTF8);
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to write file '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Check disk space and file permissions.", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Permission denied writing '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Run as administrator or choose a different output directory.", ex);
+            }
+        }
+
+        /// <summary>
         /// Generates a Migration Certificate after successful migration.
         /// </summary>
         public string GenerateMigrationCertificate(MigrationCertificateData data)
@@ -89,7 +112,7 @@ namespace QBMigrationLauncher.Services
         
         <div class='footer'>
             <p>This certificate is generated automatically and serves as official documentation for auditing purposes.</p>
-            <p>Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss UTC}</p>
+            <p>Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
         </div>
     </div>
 </body>
@@ -97,8 +120,8 @@ namespace QBMigrationLauncher.Services
 
             var fileName = $"MigrationCertificate_{data.MigrationId}.html";
             var filePath = Path.Combine(_outputDirectory, fileName);
-            File.WriteAllText(filePath, html, Encoding.UTF8);
-            
+            SafeWriteFile(filePath, html);  // FIX: Use safe write with error handling
+
             return filePath;
         }
 
@@ -168,13 +191,16 @@ namespace QBMigrationLauncher.Services
 </body>
 </html>";
 
-            var fileName = $"HealthCheckReport_{DateTime.Now:yyyyMMdd_HHmmss}.html";
+            var fileName = $"HealthCheckReport_{DateTime.UtcNow:yyyyMMdd_HHmmss}.html";
             var filePath = Path.Combine(_outputDirectory, fileName);
-            File.WriteAllText(filePath, html, Encoding.UTF8);
-            
+            SafeWriteFile(filePath, html);  // FIX: Use safe write with error handling
+
             return filePath;
         }
 
+        /// <summary>
+        /// FIX #6: Escape HTML including single quotes (used in attribute values).
+        /// </summary>
         private string EscapeHtml(string? input)
         {
             if (string.IsNullOrEmpty(input)) return "";
@@ -182,7 +208,8 @@ namespace QBMigrationLauncher.Services
                 .Replace("&", "&amp;")
                 .Replace("<", "&lt;")
                 .Replace(">", "&gt;")
-                .Replace("\"", "&quot;");
+                .Replace("\"", "&quot;")
+                .Replace("'", "&#39;");  // FIX #6: Escape single quotes for attribute contexts
         }
     }
 

@@ -11,7 +11,10 @@ using QBMigrationLauncher.Services;
 
 namespace QBMigrationLauncher.ViewModels
 {
-    public partial class BulkMigrationViewModel : ObservableObject
+    /// <summary>
+    /// FIX: Implement IDisposable to properly unsubscribe from event handlers and prevent memory leaks
+    /// </summary>
+    public partial class BulkMigrationViewModel : ObservableObject, IDisposable
     {
         private readonly BulkMigrationManager _manager;
 
@@ -40,51 +43,71 @@ namespace QBMigrationLauncher.ViewModels
         {
             _manager = new BulkMigrationManager();
 
-            _manager.LogMessage += (s, msg) =>
-            {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    LogOutput += msg + Environment.NewLine;
-                });
-            };
+            // FIX: Use named event handlers so they can be unsubscribed in Dispose()
+            _manager.LogMessage += OnLogMessage;
+            _manager.JobStarted += OnJobStarted;
+            _manager.JobCompleted += OnJobCompleted;
+            _manager.JobFailed += OnJobFailed;
+            _manager.QueueCompleted += OnQueueCompleted;
+        }
 
-            _manager.JobStarted += (s, job) =>
-            {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    CurrentJobName = job.FileName;
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+        // FIX: Named event handlers for proper unsubscription
+        private void OnLogMessage(object? sender, string msg)
+        {
+            SafeDispatch(() => LogOutput += msg + Environment.NewLine);
+        }
 
-            _manager.JobCompleted += (s, job) =>
+        private void OnJobStarted(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+                CurrentJobName = job.FileName;
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
 
-            _manager.JobFailed += (s, job) =>
+        private void OnJobCompleted(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
 
-            _manager.QueueCompleted += (s, e) =>
+        private void OnJobFailed(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    IsProcessing = false;
-                    CurrentJobName = "";
-                    LogOutput += Environment.NewLine + _manager.GenerateSummaryReport();
-                });
-            };
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
+
+        private void OnQueueCompleted(object? sender, EventArgs e)
+        {
+            SafeDispatch(() =>
+            {
+                IsProcessing = false;
+                CurrentJobName = "";
+                LogOutput += Environment.NewLine + _manager.GenerateSummaryReport();
+            });
+        }
+
+        /// <summary>
+        /// FIX #15 & #46: Safely dispatch to UI thread with null check and non-blocking call.
+        /// </summary>
+        private void SafeDispatch(Action action)
+        {
+            var app = App.Current;
+            if (app == null) return; // Application shutting down
+
+            var dispatcher = app.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+
+            // Use BeginInvoke (async) instead of Invoke to prevent deadlocks
+            dispatcher.BeginInvoke(action);
         }
 
         [RelayCommand]
@@ -101,8 +124,20 @@ namespace QBMigrationLauncher.ViewModels
             {
                 foreach (var file in dialog.FileNames)
                 {
-                    var job = _manager.EnqueueFile(file);
-                    AllJobs.Add(new JobViewModel(job));
+                    try
+                    {
+                        // FIX #33: EnqueueFile now validates file exists
+                        var job = _manager.EnqueueFile(file);
+                        AllJobs.Add(new JobViewModel(job));
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        LogOutput += $"[ERROR] File not found: {ex.FileName}\n";
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        LogOutput += $"[ERROR] Invalid file: {ex.Message}\n";
+                    }
                 }
                 UpdateCounts();
             }
@@ -127,7 +162,8 @@ namespace QBMigrationLauncher.ViewModels
         [RelayCommand]
         private void ClearQueue()
         {
-            _manager.ClearQueue();
+            // FIX #29: Use ClearAll to also clear completed jobs history
+            _manager.ClearAll();
             AllJobs.Clear();
             UpdateCounts();
         }
@@ -146,6 +182,18 @@ namespace QBMigrationLauncher.ViewModels
             QueuedCount = _manager.QueuedCount;
             CompletedCount = _manager.CompletedCount;
             FailedCount = _manager.FailedCount;
+        }
+
+        /// <summary>
+        /// FIX: Dispose pattern to unsubscribe from events and prevent memory leaks
+        /// </summary>
+        public void Dispose()
+        {
+            _manager.LogMessage -= OnLogMessage;
+            _manager.JobStarted -= OnJobStarted;
+            _manager.JobCompleted -= OnJobCompleted;
+            _manager.JobFailed -= OnJobFailed;
+            _manager.QueueCompleted -= OnQueueCompleted;
         }
     }
 
