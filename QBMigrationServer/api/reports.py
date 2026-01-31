@@ -6,21 +6,37 @@ Provides API endpoints for:
 2. Generating new reports from migrations
 3. Downloading report PDFs
 4. Discrepancy reports
+
+FIX: Added rate limiting and path traversal protection
 """
 
 from flask import Blueprint, request, jsonify, current_app, send_file
 from flask_login import login_required, current_user
 from models.database import db
 from models.migration import Migration
+from extensions import limiter
 import logging
 import json
 import os
+import re
 from datetime import datetime
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
 reports_bp = Blueprint('reports', __name__)
+
+
+def is_valid_migration_id(migration_id):
+    """
+    Validate migration ID format to prevent path traversal.
+    Migration IDs should be UUIDs (36 chars with hyphens).
+    """
+    if not migration_id:
+        return False
+    # UUID format: 8-4-4-4-12 hex chars with hyphens
+    uuid_pattern = r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'
+    return bool(re.match(uuid_pattern, migration_id))
 
 
 # In-memory report storage (in production, use database model)
@@ -33,6 +49,7 @@ def get_report_storage_dir():
 
 
 @reports_bp.route('/api/reports', methods=['GET'])
+@limiter.limit("30 per minute")
 @login_required
 def list_reports():
     """
@@ -116,6 +133,7 @@ def list_reports():
 
 
 @reports_bp.route('/api/reports/generate', methods=['POST'])
+@limiter.limit("10 per minute")  # Rate limit report generation (CPU intensive)
 @login_required
 def generate_report():
     """
@@ -191,6 +209,7 @@ def generate_report():
 
 
 @reports_bp.route('/api/reports/<report_id>/download', methods=['GET'])
+@limiter.limit("20 per minute")
 @login_required
 def download_report(report_id):
     """Download a generated report PDF."""
@@ -204,6 +223,21 @@ def download_report(report_id):
             }), 400
 
         migration_id, report_type = parts
+
+        # FIX: Validate migration_id format to prevent path traversal
+        if not is_valid_migration_id(migration_id):
+            return jsonify({
+                'success': False,
+                'error': 'Invalid migration ID format'
+            }), 400
+
+        # FIX: Validate report_type to prevent path traversal
+        allowed_types = {'variance', 'health', 'discrepancy', 'certificate'}
+        if report_type not in allowed_types:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid report type. Allowed: {", ".join(allowed_types)}'
+            }), 400
 
         # Verify user owns this migration
         migration = Migration.query.filter_by(
@@ -246,6 +280,7 @@ def download_report(report_id):
 
 
 @reports_bp.route('/api/migrations/<migration_id>/discrepancies', methods=['GET'])
+@limiter.limit("30 per minute")
 @login_required
 def get_discrepancies(migration_id):
     """
@@ -316,6 +351,7 @@ def get_discrepancies(migration_id):
 
 
 @reports_bp.route('/api/migrations/<migration_id>/discrepancy-report', methods=['GET'])
+@limiter.limit("10 per minute")  # Rate limit (may generate PDF)
 @login_required
 def download_discrepancy_report(migration_id):
     """Download discrepancy report PDF for a migration."""
@@ -354,6 +390,7 @@ def download_discrepancy_report(migration_id):
 
 
 @reports_bp.route('/api/migrations/<migration_id>/record-count', methods=['GET'])
+@limiter.limit("60 per minute")
 @login_required
 def get_record_count(migration_id):
     """Get the record count for a migration."""
