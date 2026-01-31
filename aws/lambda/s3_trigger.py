@@ -76,8 +76,7 @@ def trigger_migration_processing(session_id: str, bucket: str, key: str):
         import urllib.request
 
         if not api_key:
-            print("ERROR: INTERNAL_API_KEY not configured - cannot call internal API securely")
-            return
+            raise ValueError("INTERNAL_API_KEY not configured - cannot call internal API securely")
 
         req_data = json.dumps({
             'session_id': session_id,

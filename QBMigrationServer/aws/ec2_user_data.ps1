@@ -12,17 +12,17 @@ $ErrorActionPreference = "Stop"
 # ============================================================================
 # CONFIGURATION (populated by app.py when instance created)
 # ============================================================================
-$MigrationId = "{{MIGRATION_ID}}"
-$S3Bucket = "{{S3_BUCKET}}"
-$S3Key = "{{S3_KEY}}"
-$ServerUrl = "{{SERVER_URL}}"
-$WebhookSignature = "{{WEBHOOK_SIGNATURE}}"
-$Region = "{{AWS_REGION}}"
+$MigrationId = '{{MIGRATION_ID}}'
+$S3Bucket = '{{S3_BUCKET}}'
+$S3Key = '{{S3_KEY}}'
+$ServerUrl = '{{SERVER_URL}}'
+$WebhookSignature = '{{WEBHOOK_SIGNATURE}}'
+$Region = '{{AWS_REGION}}'
 
 # QBO Credentials (passed as environment variables)
-$QBOClientId = "{{QBO_CLIENT_ID}}"
-$QBOClientSecret = "{{QBO_CLIENT_SECRET}}"
-$QBORefreshToken = "{{QBO_REFRESH_TOKEN}}"
+$QBOClientId = '{{QBO_CLIENT_ID}}'
+$QBOClientSecret = '{{QBO_CLIENT_SECRET}}'
+$QBORefreshToken = '{{QBO_REFRESH_TOKEN}}'
 
 # ============================================================================
 # DIRECTORIES

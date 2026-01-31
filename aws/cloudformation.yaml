@@ -466,6 +466,8 @@ Resources:
       # FIX AWS-04: Enable encryption in transit and at rest
       TransitEncryptionEnabled: true
       AtRestEncryptionEnabled: true
+      # FIX: Add AuthToken for Redis authentication (required when TransitEncryptionEnabled=true)
+      AuthToken: !Sub '{{resolve:secretsmanager:forensicbridge/${Environment}/redis:SecretString:auth_token}}'
       AutomaticFailoverEnabled: false
       SnapshotRetentionLimit: 7
       SnapshotWindow: '03:00-05:00'
@@ -516,7 +518,7 @@ Resources:
                   - kms:Encrypt
                   - kms:Decrypt
                   - kms:GenerateDataKey
-                Resource: '*'
+                Resource: !GetAtt MigrationEncryptionKey.Arn
                 Condition:
                   StringEquals:
                     'kms:ViaService': !Sub 's3.${AWS::Region}.amazonaws.com'

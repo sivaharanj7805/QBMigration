@@ -66,19 +66,32 @@ namespace QBDesktopExtractor
                     if (EventLog.SourceExists(EventLogSource))
                     {
                         _useEventLog = true;
+                        Debug.WriteLine($"[Logger] Event log source '{EventLogSource}' found and enabled.");
+                    }
+                    else
+                    {
+                        // FIX: Add Debug.WriteLine to help diagnose event log issues
+                        Debug.WriteLine($"[Logger] Event log source '{EventLogSource}' not found. " +
+                            "Event logging will be disabled. To enable, run as administrator to create the source.");
                     }
                     // Note: Don't try to create source - requires admin privileges
                 }
             }
-            catch (System.Security.SecurityException)
+            catch (System.Security.SecurityException ex)
             {
                 // EventLog access may fail on non-Windows or without permissions
                 _useEventLog = false;
+                // FIX: Add Debug.WriteLine for event log initialization failures
+                Debug.WriteLine($"[Logger] Event log initialization failed (SecurityException): {ex.Message}. " +
+                    "This may occur on non-Windows platforms or without sufficient permissions.");
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException ex)
             {
                 // EventLog not available on this platform
                 _useEventLog = false;
+                // FIX: Add Debug.WriteLine for event log initialization failures
+                Debug.WriteLine($"[Logger] Event log initialization failed (InvalidOperationException): {ex.Message}. " +
+                    "Event logging is not available on this platform.");
             }
         }
         

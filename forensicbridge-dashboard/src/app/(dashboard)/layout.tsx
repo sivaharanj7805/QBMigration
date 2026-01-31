@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { MigrationBalanceBanner } from "@/components/MigrationBalanceBanner";
@@ -145,6 +145,9 @@ export default function DashboardLayout({
     const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
     const [pendingKey, setPendingKey] = useState<string | null>(null);
 
+    // FIX: Use ref to track keyboard shortcut timeout for proper cleanup
+    const keyboardTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
     // Keyboard shortcut handler
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         // Don't trigger shortcuts when typing in inputs
@@ -193,15 +196,25 @@ export default function DashboardLayout({
         // Start two-key sequence
         if (e.key === 'g') {
             setPendingKey('g');
+            // FIX: Clear any existing timeout before setting a new one
+            if (keyboardTimeoutRef.current) {
+                clearTimeout(keyboardTimeoutRef.current);
+            }
             // Clear pending key after 1 second if no follow-up
-            setTimeout(() => setPendingKey(null), 1000);
+            keyboardTimeoutRef.current = setTimeout(() => setPendingKey(null), 1000);
         }
     }, [pendingKey, router]);
 
     // Set up keyboard shortcut listener
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            // FIX: Clean up the keyboard shortcut timeout on unmount
+            if (keyboardTimeoutRef.current) {
+                clearTimeout(keyboardTimeoutRef.current);
+            }
+        };
     }, [handleKeyDown]);
 
     useEffect(() => {
@@ -233,36 +246,49 @@ export default function DashboardLayout({
         };
 
         checkAuth();
-        checkSystemHealth();
     }, [router]);
 
-    // Check system health status with timeout
-    const checkSystemHealth = async () => {
+    // FIX: Separate useEffect for health check with proper AbortController cleanup
+    useEffect(() => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        try {
-            const response = await fetch(`${API_URL}/health`, {
-                method: 'GET',
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
+        const checkSystemHealth = async () => {
+            try {
+                const response = await fetch(`${API_URL}/health`, {
+                    method: 'GET',
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
 
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'healthy') {
-                    setSystemStatus("operational");
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'healthy') {
+                        setSystemStatus("operational");
+                    } else {
+                        setSystemStatus("degraded");
+                    }
                 } else {
-                    setSystemStatus("degraded");
+                    setSystemStatus("down");
                 }
-            } else {
+            } catch (error) {
+                clearTimeout(timeoutId);
+                // Don't update state if the request was aborted (component unmounted)
+                if (error instanceof Error && error.name === 'AbortError') {
+                    return;
+                }
                 setSystemStatus("down");
             }
-        } catch {
+        };
+
+        checkSystemHealth();
+
+        // FIX: Return cleanup function to abort the request on unmount
+        return () => {
             clearTimeout(timeoutId);
-            setSystemStatus("down");
-        }
-    };
+            controller.abort();
+        };
+    }, []);
 
     // Logout handler - calls backend and clears local storage
     const handleLogout = async () => {

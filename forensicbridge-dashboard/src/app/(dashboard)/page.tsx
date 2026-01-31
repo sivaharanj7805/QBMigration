@@ -298,6 +298,11 @@ export default function DashboardHome() {
     };
 
     const handleFileUpload = async (file: File) => {
+        // FIX: Guard against double uploads - prevent concurrent upload requests
+        if (uploadStatus === "uploading" || uploadStatus === "processing") {
+            return;
+        }
+
         setUploadedFile(file);
         setUploadStatus("uploading");
         setUploadError(null);
@@ -320,8 +325,17 @@ export default function DashboardHome() {
                     fetchDashboardData();
                 }, 2000);
             } else {
-                const errorData = await response.json();
-                setUploadError(errorData.error || "Upload failed");
+                // SECURITY FIX: Wrap response.json() in try/catch for non-OK responses
+                // The response body may not be valid JSON
+                let errorMessage = "Upload failed";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorMessage;
+                } catch {
+                    // Response body was not valid JSON, use default error message
+                    errorMessage = `Upload failed with status ${response.status}`;
+                }
+                setUploadError(errorMessage);
                 setUploadStatus("error");
             }
         } catch {

@@ -406,8 +406,17 @@ def create_app(config_name='development'):
         auto_migrate_database(app)
     
     # SECURITY FIX: Enable CORS with origins from environment variable
-    allowed_origins_env = os.getenv('ALLOWED_ORIGINS',
-                                    'http://localhost:3000,http://localhost:5000').split(',')
+    # FIX: In production, require explicit ALLOWED_ORIGINS - no localhost defaults
+    if os.getenv('FLASK_ENV', 'development') == 'production':
+        allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '').split(',')
+        if not allowed_origins_env or allowed_origins_env == ['']:
+            raise ValueError(
+                "CRITICAL: ALLOWED_ORIGINS must be set in production environment. "
+                "Example: ALLOWED_ORIGINS=https://app.forensicbridge.io,https://www.forensicbridge.io"
+            )
+    else:
+        allowed_origins_env = os.getenv('ALLOWED_ORIGINS',
+                                        'http://localhost:3000,http://localhost:5000').split(',')
     allowed_origins = []
 
     # FIX: Automatically add both www and non-www variants for each origin

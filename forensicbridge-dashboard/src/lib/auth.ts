@@ -25,15 +25,46 @@ export interface AuthState {
 
 // CSRF token storage (in-memory only, fetched from server)
 let csrfToken: string | null = null;
+let csrfTokenExpiry: number | null = null;
+
+// CSRF token validity duration (15 minutes in milliseconds)
+const CSRF_TOKEN_VALIDITY_MS = 15 * 60 * 1000;
+// Refresh token 2 minutes before expiry
+const CSRF_REFRESH_BUFFER_MS = 2 * 60 * 1000;
+
+// Track if a refresh is in progress to prevent concurrent refreshes
+let csrfRefreshInProgress = false;
+
+/**
+ * SECURITY: Check if CSRF token is expired or expiring soon
+ */
+function isCsrfTokenExpired(): boolean {
+    if (!csrfToken || !csrfTokenExpiry) return true;
+    // Consider expired if within the refresh buffer
+    return Date.now() >= (csrfTokenExpiry - CSRF_REFRESH_BUFFER_MS);
+}
 
 /**
  * SECURITY: Fetch CSRF token from server
  * Server should provide this via a dedicated endpoint or in response headers
+ * Now includes expiration tracking and auto-refresh support
  */
-export async function fetchCsrfToken(): Promise<string | null> {
-    if (csrfToken) return csrfToken;
+export async function fetchCsrfToken(forceRefresh: boolean = false): Promise<string | null> {
+    // Return cached token if valid and not forcing refresh
+    if (!forceRefresh && csrfToken && !isCsrfTokenExpired()) {
+        return csrfToken;
+    }
 
+    // Prevent concurrent refresh requests
+    if (csrfRefreshInProgress) {
+        // Wait for ongoing refresh to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return csrfToken;
+    }
+
+    csrfRefreshInProgress = true;
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
     try {
         const response = await fetch(`${API_URL}/api/auth/csrf-token`, {
             method: 'GET',
@@ -42,6 +73,9 @@ export async function fetchCsrfToken(): Promise<string | null> {
         if (response.ok) {
             const data = await response.json();
             csrfToken = data.csrf_token || data.csrfToken || null;
+            // Set expiry time - use server-provided expiry or default
+            const serverExpiry = data.expires_in ? Date.now() + (data.expires_in * 1000) : null;
+            csrfTokenExpiry = serverExpiry || (Date.now() + CSRF_TOKEN_VALIDITY_MS);
             return csrfToken;
         }
     } catch {
@@ -49,8 +83,21 @@ export async function fetchCsrfToken(): Promise<string | null> {
         if (process.env.NODE_ENV === 'development') {
             console.warn('[Auth] CSRF token endpoint not available');
         }
+    } finally {
+        csrfRefreshInProgress = false;
     }
     return null;
+}
+
+/**
+ * SECURITY: Auto-refresh CSRF token if expired
+ * Call this before making mutation requests
+ */
+export async function ensureValidCsrfToken(): Promise<string | null> {
+    if (isCsrfTokenExpired()) {
+        return fetchCsrfToken(true);
+    }
+    return csrfToken;
 }
 
 /**
@@ -65,6 +112,8 @@ export function getCsrfToken(): string | null {
  */
 export function setCsrfToken(token: string | null): void {
     csrfToken = token;
+    // Set expiry when token is set
+    csrfTokenExpiry = token ? Date.now() + CSRF_TOKEN_VALIDITY_MS : null;
 }
 
 /**
@@ -117,6 +166,7 @@ export function clearAuth(): void {
     localStorage.removeItem('user');
     localStorage.removeItem('isLoggedIn');
     csrfToken = null;
+    csrfTokenExpiry = null;
 }
 
 /**

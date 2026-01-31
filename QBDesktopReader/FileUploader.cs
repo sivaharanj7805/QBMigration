@@ -185,7 +185,8 @@ namespace QBDesktopExtractor
                     if (!string.IsNullOrEmpty(serverPublicKeyXml))
                     {
                         // Encrypt the AES key with server's RSA public key
-                        using (var rsa = new RSACryptoServiceProvider())
+                        // FIX: Use RSA.Create() instead of deprecated RSACryptoServiceProvider
+                        using (var rsa = RSA.Create())
                         {
                             rsa.FromXmlString(serverPublicKeyXml);
                             byte[] aesKeyBytes = Convert.FromBase64String(encryptionResult.KeyBase64);
