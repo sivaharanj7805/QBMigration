@@ -424,6 +424,7 @@ def get_current_user():
 
     # AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them
     # This fixes existing users who selected tiers before the MigrationCredit fix
+    # HIGH-01 FIX: Wrap in proper transaction with rollback on failure
     try:
         legacy_purchased = getattr(user, 'migrations_purchased', None) or 0
         legacy_used = getattr(user, 'migrations_used', None) or 0
@@ -438,21 +439,27 @@ def get_current_user():
             tier = user.subscription_tier or 'starter'
             credit_config = MigrationCredit.TIER_CONFIG.get(tier, MigrationCredit.TIER_CONFIG['starter'])
 
-            for i in range(legacy_available - actual_available):
-                credit = MigrationCredit(
-                    user_id=user_id,
-                    tier_type=tier,
-                    transaction_limit=credit_config.get('transaction_limit', 5000),
-                    price_cents=0,
-                    stripe_checkout_session_id=f'auto-sync-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
-                    payment_status='paid',
-                    status='available'
-                )
-                credit.paid_at = datetime.datetime.utcnow()
-                db.session.add(credit)
+            # HIGH-01 FIX: Use nested transaction (savepoint) for atomic operation
+            db.session.begin_nested()
+            try:
+                for i in range(legacy_available - actual_available):
+                    credit = MigrationCredit(
+                        user_id=user_id,
+                        tier_type=tier,
+                        transaction_limit=credit_config.get('transaction_limit', 5000),
+                        price_cents=0,
+                        stripe_checkout_session_id=f'auto-sync-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+                        payment_status='paid',
+                        status='available'
+                    )
+                    credit.paid_at = datetime.datetime.utcnow()
+                    db.session.add(credit)
 
-            db.session.commit()
-            logger.info(f"Auto-synced {legacy_available - actual_available} credits for user {user_id}")
+                db.session.commit()  # Commit the savepoint
+                logger.info(f"Auto-synced {legacy_available - actual_available} credits for user {user_id}")
+            except Exception as inner_e:
+                db.session.rollback()  # Rollback the savepoint
+                logger.warning(f"Auto-sync credits rollback for user {user_id}: {inner_e}")
     except Exception as e:
         logger.warning(f"Auto-sync credits failed for user {user_id}: {e}")
         # Continue anyway - don't block the /me endpoint

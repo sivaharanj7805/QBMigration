@@ -77,55 +77,69 @@ def create_project():
     if not name or not client_name:
         return jsonify({'error': 'Project name and client name are required'}), 400
 
-    # Find an available credit for this user
-    if credit_id:
-        # Use specific credit if provided
-        credit = MigrationCredit.query.filter_by(
-            id=credit_id,
-            user_id=user_id,
-            status='available'
-        ).first()
-        if not credit:
-            return jsonify({
-                'error': 'Specified credit not found or not available',
-                'purchase_required': True,
-                'purchase_url': 'https://forensicbridge.ca/pricing'
-            }), 403
-    else:
-        # Find any available credit (prefer smaller tiers first)
-        available_credits = MigrationCredit.get_available_for_user(user_id)
-        if not available_credits:
-            return jsonify({
-                'error': 'No migration credits available. Please purchase a migration package first.',
-                'purchase_required': True,
-                'purchase_url': 'https://forensicbridge.ca/pricing'
-            }), 403
-        credit = available_credits[0]
-
-    # Generate unique session ID
-    session_id = generate_session_id()
-
-    # Create project with tier information from the credit
-    project = Project(
-        user_id=user_id,
-        name=name,
-        client_name=client_name,
-        client_email=client_email,
-        notes=notes,
-        session_id=session_id,
-        migration_credit_id=credit.id,
-        tier_type=credit.tier_type,
-        transaction_limit=credit.transaction_limit,
-        transactions_used=0,
-        status='active'  # Active because it's paid
-    )
-
+    # CRIT-01 FIX: Use database-level locking to prevent race conditions
+    # Wrap the entire credit selection and consumption in a transaction with SELECT FOR UPDATE
     try:
-        # Mark the credit as used for this project
+        # Start a nested transaction (savepoint) for atomic credit consumption
+        db.session.begin_nested()
+
+        # Find an available credit for this user WITH ROW-LEVEL LOCK
+        if credit_id:
+            # Use specific credit if provided (with lock)
+            credit = MigrationCredit.query.filter_by(
+                id=credit_id,
+                user_id=user_id,
+                status='available',
+                payment_status='paid'
+            ).with_for_update(skip_locked=True).first()
+
+            if not credit:
+                db.session.rollback()
+                return jsonify({
+                    'error': 'Specified credit not found, not available, or currently in use',
+                    'purchase_required': True,
+                    'purchase_url': 'https://forensicbridge.ca/pricing'
+                }), 403
+        else:
+            # CRIT-01 FIX: Use find_best_credit with lock_for_update=True
+            # This ensures atomic credit allocation across concurrent requests
+            credit = MigrationCredit.find_best_credit(
+                user_id=user_id,
+                transaction_count=0,  # Project creation doesn't specify transaction count
+                lock_for_update=True
+            )
+
+            if not credit:
+                db.session.rollback()
+                return jsonify({
+                    'error': 'No migration credits available. Please purchase a migration package first.',
+                    'purchase_required': True,
+                    'purchase_url': 'https://forensicbridge.ca/pricing'
+                }), 403
+
+        # Generate unique session ID
+        session_id = generate_session_id()
+
+        # Create project with tier information from the credit
+        project = Project(
+            user_id=user_id,
+            name=name,
+            client_name=client_name,
+            client_email=client_email,
+            notes=notes,
+            session_id=session_id,
+            migration_credit_id=credit.id,
+            tier_type=credit.tier_type,
+            transaction_limit=credit.transaction_limit,
+            transactions_used=0,
+            status='active'  # Active because it's paid
+        )
+
+        # Mark the credit as used for this project (within the locked transaction)
         credit.status = 'used'
         credit.used_at = datetime.utcnow()
 
-        # CRITICAL FIX: Sync User.migrations_used with MigrationCredit status
+        # Sync User.migrations_used with MigrationCredit status
         # This ensures backwards compatibility with code that reads from User model
         from models.user import User
         user = User.query.get(user_id)
@@ -133,10 +147,13 @@ def create_project():
             user.migrations_used = (user.migrations_used or 0) + 1
 
         db.session.add(project)
-        db.session.commit()
+        db.session.commit()  # Commits the savepoint AND releases the lock
+
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': 'Failed to create project'}), 500
+        import logging
+        logging.getLogger(__name__).error(f"Project creation failed: {e}")
+        return jsonify({'error': 'Failed to create project. Please try again.'}), 500
 
     return jsonify({
         'success': True,
