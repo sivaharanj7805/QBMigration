@@ -188,17 +188,25 @@ class PremiumQBOClient:
 
         with self.db_lock:
             # FIX #81: check_same_thread=False for multi-threading
-            # AUDIT FIX: Add timeout to handle concurrent access better
+            # AUDIT FIX: Use config constants instead of magic numbers
+            try:
+                from config import SQLITE_TIMEOUT_SECONDS, SQLITE_BUSY_TIMEOUT_MS
+                timeout = SQLITE_TIMEOUT_SECONDS
+                busy_timeout = SQLITE_BUSY_TIMEOUT_MS
+            except ImportError:
+                timeout = 30.0
+                busy_timeout = 30000
+
             conn = sqlite3.connect(
                 str(self.db_path),
                 check_same_thread=False,
-                timeout=30.0  # Wait up to 30 seconds for lock
+                timeout=timeout
             )
             cursor = conn.cursor()
 
             # AUDIT FIX: Enable WAL mode for better concurrent read/write
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
+            cursor.execute(f"PRAGMA busy_timeout={busy_timeout}")
             
             # Create entities table
             cursor.execute('''
@@ -886,8 +894,13 @@ class PremiumQBOClient:
             "failed": [],
             "total": len(entities)
         }
-        
-        batch_size = 30
+
+        # AUDIT FIX: Use config constant instead of hardcoded value
+        try:
+            from config import BATCH_SIZE
+            batch_size = BATCH_SIZE
+        except ImportError:
+            batch_size = 30  # QBO maximum if config unavailable
         batches = []
         
         for i in range(0, len(entities), batch_size):
@@ -979,9 +992,13 @@ class PremiumQBOClient:
         
         if not entities:
             return results
-        
-        # Optimal batch size (Intuit maximum)
-        batch_size = 30
+
+        # AUDIT FIX: Use config constant instead of hardcoded value
+        try:
+            from config import BATCH_SIZE
+            batch_size = BATCH_SIZE
+        except ImportError:
+            batch_size = 30  # QBO maximum if config unavailable
         
         # Calculate optimal workers based on rate limits
         # 40 requests/min = 0.67 requests/second per worker
