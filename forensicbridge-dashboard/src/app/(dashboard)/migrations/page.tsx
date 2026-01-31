@@ -19,6 +19,18 @@ import {
     RefreshCw,
 } from "lucide-react";
 
+// MED-36 to MED-40 FIX: Add proper type definitions instead of using 'any'
+interface Migration {
+    migration_id: string;
+    company_name: string;
+    qb_file_name?: string;
+    records_processed?: number;
+    created_at: string;
+    status: string;
+    progress_percent?: number;
+    integrity_verified?: boolean;
+}
+
 export default function MigrationsPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
@@ -74,7 +86,8 @@ export default function MigrationsPage() {
 
     const migrations = data?.migrations || [];
 
-    const filteredMigrations = migrations.filter((m: any) => {
+    // MED-36 FIX: Use proper typed filter
+    const filteredMigrations = migrations.filter((m: Migration) => {
         const matchesSearch = (m.company_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
             (m.migration_id || "").toLowerCase().includes(searchTerm.toLowerCase());
         const matchesStatus = statusFilter === "all" || m.status === statusFilter;
@@ -100,9 +113,10 @@ export default function MigrationsPage() {
         }
     };
 
-    const completedCount = migrations.filter((m: any) => m.status === "completed").length;
-    const processingCount = migrations.filter((m: any) => m.status === "processing" || m.status === "in_progress").length;
-    const failedCount = migrations.filter((m: any) => m.status === "failed").length;
+    // MED-36 FIX: Use proper typed filters
+    const completedCount = migrations.filter((m: Migration) => m.status === "completed").length;
+    const processingCount = migrations.filter((m: Migration) => m.status === "processing" || m.status === "in_progress").length;
+    const failedCount = migrations.filter((m: Migration) => m.status === "failed").length;
 
     if (isLoading) {
         return (
@@ -207,7 +221,7 @@ export default function MigrationsPage() {
                         </tr>
                     </thead>
                     <tbody>
-                        {filteredMigrations.map((migration: any) => (
+                        {filteredMigrations.map((migration: Migration) => (
                             <tr key={migration.migration_id}>
                                 <td>
                                     <code className="text-[var(--bridge-blue)] text-sm">{migration.migration_id}</code>

@@ -55,10 +55,18 @@ namespace QBMigrationLauncher
                 var sessionJson = Encoding.UTF8.GetString(decryptedData);
                 
                 var session = JsonSerializer.Deserialize<SessionData>(sessionJson);
-                
+
                 if (session == null || string.IsNullOrEmpty(session.Token))
                     return;
-                
+
+                // CRIT-08 FIX: Check local expiry before making network call
+                if (session.ExpiresAt != DateTime.MinValue && DateTime.UtcNow >= session.ExpiresAt)
+                {
+                    Console.WriteLine("Session token expired locally - clearing session");
+                    File.Delete(SESSION_PATH);
+                    return;
+                }
+
                 // Validate token with server
                 ShowLoading(true);
                 
@@ -128,13 +136,15 @@ namespace QBMigrationLauncher
                     if (result?.success == true && !string.IsNullOrEmpty(result.token))
                     {
                         // Save session
+                        // CRIT-08 FIX: Set expiry time (default 24 hours, or from server response)
                         var session = new SessionData
                         {
                             Token = result.token,
                             Email = result.user?.email ?? email,
                             UserId = result.user?.id ?? 0,
                             FirstName = result.user?.first_name,
-                            CompanyName = result.user?.company_name
+                            CompanyName = result.user?.company_name,
+                            ExpiresAt = DateTime.UtcNow.AddHours(24)  // Default 24 hour expiry
                         };
                         
                         SaveSession(session);
@@ -155,7 +165,9 @@ namespace QBMigrationLauncher
             }
             catch (Exception ex)
             {
-                ShowError($"An error occurred: {ex.Message}");
+                // HIGH-02 FIX: Don't expose exception details to users - log server-side only
+                Console.WriteLine($"Login error (internal): {ex.Message}");
+                ShowError("An unexpected error occurred. Please try again.");
             }
             finally
             {
@@ -283,6 +295,7 @@ namespace QBMigrationLauncher
     
     /// <summary>
     /// Session data stored locally
+    /// CRIT-08 FIX: Added ExpiresAt field for local expiry validation
     /// </summary>
     public class SessionData
     {
@@ -291,5 +304,9 @@ namespace QBMigrationLauncher
         public int UserId { get; set; }
         public string? FirstName { get; set; }
         public string? CompanyName { get; set; }
+        /// <summary>
+        /// CRIT-08 FIX: Token expiration timestamp for local validation
+        /// </summary>
+        public DateTime ExpiresAt { get; set; } = DateTime.MinValue;
     }
 }

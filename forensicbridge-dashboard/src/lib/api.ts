@@ -98,6 +98,12 @@ class ApiClient {
 
     /**
      * Get the current token, falling back to localStorage if not set
+     *
+     * HIGH-26 SECURITY NOTE: localStorage tokens are vulnerable to XSS attacks.
+     * For production, consider:
+     * - Using httpOnly cookies (requires server-side changes)
+     * - Implementing token refresh with short-lived access tokens
+     * - Adding Content Security Policy headers to mitigate XSS
      */
     private getToken(): string | null {
         if (this.token) return this.token;
@@ -105,6 +111,13 @@ class ApiClient {
             return localStorage.getItem('token');
         }
         return null;
+    }
+
+    /**
+     * HIGH-25 FIX: Generate a unique request ID for correlation
+     */
+    private generateRequestId(): string {
+        return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
 
     private async request<T>(
@@ -115,8 +128,12 @@ class ApiClient {
         const url = `${this.baseUrl}${endpoint}`;
         const token = this.getToken();
 
+        // HIGH-25 FIX: Add request ID for correlation and debugging
+        const requestId = this.generateRequestId();
+
         const headers: HeadersInit = {
             "Content-Type": "application/json",
+            "X-Request-ID": requestId,
             ...(token && { Authorization: `Bearer ${token}` }),
             ...options.headers,
         };
