@@ -13,20 +13,21 @@
             <TextBlock Text="Enter your ForensicBridge license key to activate this machine." 
                        FontSize="13" Foreground="#94A3B8" TextWrapping="Wrap" Margin="0,0,0,25"/>
             
-            <!-- License Key Input -->
-            <TextBlock Text="License Key" FontSize="13" Foreground="#94A3B8" Margin="0,0,0,8"/>
-            <TextBox x:Name="LicenseKeyTextBox" Height="45" FontSize="14" 
+            <!-- Session ID Input -->
+            <!-- FIX #20 & #52: Corrected terminology and MaxLength to match actual format -->
+            <TextBlock Text="Session ID" FontSize="13" Foreground="#94A3B8" Margin="0,0,0,8"/>
+            <TextBox x:Name="LicenseKeyTextBox" Height="45" FontSize="14"
                      Padding="12,10" Background="#334155" Foreground="White"
                      BorderBrush="#475569" BorderThickness="1"
-                     CharacterCasing="Upper" MaxLength="23">
+                     CharacterCasing="Upper" MaxLength="26">
                 <TextBox.Resources>
                     <Style TargetType="Border">
                         <Setter Property="CornerRadius" Value="6"/>
                     </Style>
                 </TextBox.Resources>
             </TextBox>
-            <TextBlock Text="Format: FB-XXXX-XXXX-XXXX-XXXX" FontSize="11" 
-                       Foreground="#64748B" Margin="0,5,0,0"/>
+            <TextBlock Text="Format: FB-YYYYMMDDHHMMSS-XXXXXXXX (e.g., FB-20260128170624-AXO52A38)" FontSize="11"
+                       Foreground="#64748B" Margin="0,5,0,0" TextWrapping="Wrap"/>
             
             <!-- Error/Success Message -->
             <TextBlock x:Name="StatusMessage" Text="" FontSize="13" 

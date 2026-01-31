@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Security.Cryptography;
@@ -18,6 +19,11 @@ namespace QBMigrationLauncher
         private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         private static readonly string API_BASE_URL;
         private static readonly string SESSION_PATH;
+
+        // FIX #31: Basic email validation pattern
+        private static readonly Regex EmailPattern = new Regex(
+            @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
         
         static LoginWindow()
         {
@@ -110,7 +116,14 @@ namespace QBMigrationLauncher
                 ShowError("Please enter your email address.");
                 return;
             }
-            
+
+            // FIX #31: Validate email format before API call
+            if (!EmailPattern.IsMatch(email))
+            {
+                ShowError("Please enter a valid email address.");
+                return;
+            }
+
             if (string.IsNullOrEmpty(password))
             {
                 ShowError("Please enter your password.");
@@ -192,8 +205,9 @@ namespace QBMigrationLauncher
         
         /// <summary>
         /// Handle Register link click
+        /// FIX #18: Updated to use RoutedEventArgs for keyboard-accessible Hyperlink
         /// </summary>
-        private void RegisterLink_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        private void RegisterLink_Click(object sender, RoutedEventArgs e)
         {
             // Open registration in browser
             try
@@ -204,8 +218,10 @@ namespace QBMigrationLauncher
                     UseShellExecute = true
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                // FIX #8: Log actual exception for debugging
+                System.Diagnostics.Debug.WriteLine($"[WARN] Could not open browser: {ex.Message}");
                 ShowError("Unable to open browser. Please visit https://app.forensicbridge.ca/register");
             }
         }

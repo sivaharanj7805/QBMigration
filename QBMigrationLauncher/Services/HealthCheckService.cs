@@ -89,15 +89,29 @@ namespace QBMigrationLauncher.Services
                     var balance = obj.Value<decimal?>("Balance") ?? 0m;
                     var accountType = obj.Value<string>("AccountType") ?? "";
 
-                    // Asset and Expense accounts are debit-normal
-                    if (accountType.Contains("Asset") || accountType.Contains("Expense") ||
-                        accountType.Contains("CostOfGoodsSold") || accountType.Contains("OtherExpense"))
+                    // FIX #42: Properly calculate trial balance without destroying sign information
+                    // Debit-normal accounts: Assets, Expenses, CostOfGoodsSold
+                    // Credit-normal accounts: Liabilities, Equity, Income/Revenue
+                    bool isDebitNormal = accountType.Contains("Asset") ||
+                                         accountType.Contains("Expense") ||
+                                         accountType.Contains("CostOfGoodsSold") ||
+                                         accountType.Contains("OtherExpense");
+
+                    if (isDebitNormal)
                     {
-                        totalDebits += Math.Abs(balance);
+                        // Positive balance = debit, negative balance = credit (contra)
+                        if (balance >= 0)
+                            totalDebits += balance;
+                        else
+                            totalCredits += Math.Abs(balance);
                     }
                     else
                     {
-                        totalCredits += Math.Abs(balance);
+                        // Credit-normal account: positive balance = credit, negative balance = debit (contra)
+                        if (balance >= 0)
+                            totalCredits += balance;
+                        else
+                            totalDebits += Math.Abs(balance);
                     }
                 }
 

@@ -22,11 +22,35 @@ namespace QBMigrationLauncher.Services
 
         public ActiveArchivalService(string archiveDirectory)
         {
-            _archiveDirectory = archiveDirectory;
+            _archiveDirectory = Path.GetFullPath(archiveDirectory);
             _indexPath = Path.Combine(_archiveDirectory, "archive_index.json");
-            
+
             Directory.CreateDirectory(_archiveDirectory);
             _index = LoadOrCreateIndex();
+        }
+
+        /// <summary>
+        /// FIX #3: Validate that a path is safely within the archive directory (prevent path traversal).
+        /// </summary>
+        private string ValidateAndNormalizePath(string subPath, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(subPath))
+                throw new ArgumentException($"{paramName} cannot be empty", paramName);
+
+            // Remove any path traversal attempts
+            var normalizedSubPath = subPath.Replace("..", "").Replace("~", "");
+
+            // Build full path and normalize it
+            var fullPath = Path.GetFullPath(Path.Combine(_archiveDirectory, normalizedSubPath));
+
+            // Ensure the resulting path is still within our archive directory
+            if (!fullPath.StartsWith(_archiveDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnauthorizedAccessException(
+                    $"Access denied: path '{subPath}' would escape the archive directory");
+            }
+
+            return fullPath;
         }
 
         /// <summary>
@@ -34,8 +58,11 @@ namespace QBMigrationLauncher.Services
         /// </summary>
         public async Task<ArchiveEntry> ArchiveCompanyDataAsync(string companyName, string extractedDataPath)
         {
+            // FIX #3: Generate a safe archive ID (alphanumeric only)
             var archiveId = $"ARC-{DateTime.Now:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}";
-            var archiveFolder = Path.Combine(_archiveDirectory, archiveId);
+
+            // FIX #3: Validate the archive folder path stays within archive directory
+            var archiveFolder = ValidateAndNormalizePath(archiveId, nameof(archiveId));
             Directory.CreateDirectory(archiveFolder);
 
             LogMessage?.Invoke(this, $"[ARCHIVE] Creating archive: {archiveId}");

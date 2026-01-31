@@ -113,13 +113,20 @@
                 <DropShadowEffect BlurRadius="10" ShadowDepth="2" Direction="270" Color="#E0E0E0" Opacity="0.5"/>
             </Border.Effect>
             <StackPanel>
+                <!-- FIX #19: Progress bar with visible percentage text -->
                 <Grid Margin="0,0,0,10">
-                    <TextBlock Text="{Binding ProgressPercentage, StringFormat={}{0}%}" FontWeight="Bold" Foreground="White" 
-                               HorizontalAlignment="Left" VerticalAlignment="Bottom" Panel.ZIndex="1" Margin="5,0,0,25"/>
                     <!-- Custom Progress Bar -->
-                     <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="30" Foreground="#3B82F6" Background="#EEEEEE" BorderThickness="0"/>
+                    <ProgressBar Value="{Binding ProgressPercentage}" Maximum="100" Height="30"
+                                 Foreground="#3B82F6" Background="#EEEEEE" BorderThickness="0"/>
+                    <!-- Centered percentage text with contrasting outline effect for visibility -->
+                    <TextBlock Text="{Binding ProgressPercentage, StringFormat={}{0}%}" FontWeight="Bold" FontSize="14"
+                               Foreground="#0F172A" HorizontalAlignment="Center" VerticalAlignment="Center" Panel.ZIndex="1">
+                        <TextBlock.Effect>
+                            <DropShadowEffect Color="White" ShadowDepth="0" BlurRadius="3"/>
+                        </TextBlock.Effect>
+                    </TextBlock>
                 </Grid>
-                
+
                 <TextBlock Text="{Binding CurrentStatusMessage}" FontSize="14" Foreground="#555555"/>
             </StackPanel>
         </Border>

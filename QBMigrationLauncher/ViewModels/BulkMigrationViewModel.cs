@@ -40,17 +40,15 @@ namespace QBMigrationLauncher.ViewModels
         {
             _manager = new BulkMigrationManager();
 
+            // FIX #15 & #46: Use BeginInvoke (non-blocking) and check for null App.Current
             _manager.LogMessage += (s, msg) =>
             {
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    LogOutput += msg + Environment.NewLine;
-                });
+                SafeDispatch(() => LogOutput += msg + Environment.NewLine);
             };
 
             _manager.JobStarted += (s, job) =>
             {
-                App.Current.Dispatcher.Invoke(() =>
+                SafeDispatch(() =>
                 {
                     CurrentJobName = job.FileName;
                     UpdateJobInList(job);
@@ -60,7 +58,7 @@ namespace QBMigrationLauncher.ViewModels
 
             _manager.JobCompleted += (s, job) =>
             {
-                App.Current.Dispatcher.Invoke(() =>
+                SafeDispatch(() =>
                 {
                     UpdateJobInList(job);
                     UpdateCounts();
@@ -69,7 +67,7 @@ namespace QBMigrationLauncher.ViewModels
 
             _manager.JobFailed += (s, job) =>
             {
-                App.Current.Dispatcher.Invoke(() =>
+                SafeDispatch(() =>
                 {
                     UpdateJobInList(job);
                     UpdateCounts();
@@ -78,13 +76,28 @@ namespace QBMigrationLauncher.ViewModels
 
             _manager.QueueCompleted += (s, e) =>
             {
-                App.Current.Dispatcher.Invoke(() =>
+                SafeDispatch(() =>
                 {
                     IsProcessing = false;
                     CurrentJobName = "";
                     LogOutput += Environment.NewLine + _manager.GenerateSummaryReport();
                 });
             };
+        }
+
+        /// <summary>
+        /// FIX #15 & #46: Safely dispatch to UI thread with null check and non-blocking call.
+        /// </summary>
+        private void SafeDispatch(Action action)
+        {
+            var app = App.Current;
+            if (app == null) return; // Application shutting down
+
+            var dispatcher = app.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+
+            // Use BeginInvoke (async) instead of Invoke to prevent deadlocks
+            dispatcher.BeginInvoke(action);
         }
 
         [RelayCommand]
@@ -101,8 +114,20 @@ namespace QBMigrationLauncher.ViewModels
             {
                 foreach (var file in dialog.FileNames)
                 {
-                    var job = _manager.EnqueueFile(file);
-                    AllJobs.Add(new JobViewModel(job));
+                    try
+                    {
+                        // FIX #33: EnqueueFile now validates file exists
+                        var job = _manager.EnqueueFile(file);
+                        AllJobs.Add(new JobViewModel(job));
+                    }
+                    catch (FileNotFoundException ex)
+                    {
+                        LogOutput += $"[ERROR] File not found: {ex.FileName}\n";
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        LogOutput += $"[ERROR] Invalid file: {ex.Message}\n";
+                    }
                 }
                 UpdateCounts();
             }
@@ -127,7 +152,8 @@ namespace QBMigrationLauncher.ViewModels
         [RelayCommand]
         private void ClearQueue()
         {
-            _manager.ClearQueue();
+            // FIX #29: Use ClearAll to also clear completed jobs history
+            _manager.ClearAll();
             AllJobs.Clear();
             UpdateCounts();
         }

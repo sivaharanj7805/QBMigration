@@ -175,6 +175,9 @@ namespace QBMigrationLauncher.Services
             return filePath;
         }
 
+        /// <summary>
+        /// FIX #6: Escape HTML including single quotes (used in attribute values).
+        /// </summary>
         private string EscapeHtml(string? input)
         {
             if (string.IsNullOrEmpty(input)) return "";
@@ -182,7 +185,8 @@ namespace QBMigrationLauncher.Services
                 .Replace("&", "&amp;")
                 .Replace("<", "&lt;")
                 .Replace(">", "&gt;")
-                .Replace("\"", "&quot;");
+                .Replace("\"", "&quot;")
+                .Replace("'", "&#39;");  // FIX #6: Escape single quotes for attribute contexts
         }
     }
 

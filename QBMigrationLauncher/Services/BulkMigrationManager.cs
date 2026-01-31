@@ -19,6 +19,7 @@ namespace QBMigrationLauncher.Services
         private readonly ExtractorRunner _runner;
         private readonly LogParser _parser;
         private readonly object _lock = new object();
+        private readonly string _outputDirectory;
         private bool _isProcessing;
         private CancellationTokenSource? _cts;
 
@@ -28,18 +29,58 @@ namespace QBMigrationLauncher.Services
         public event EventHandler? QueueCompleted;
         public event EventHandler<string>? LogMessage;
 
-        public int QueuedCount => _jobQueue.Count;
-        public int CompletedCount => _completedJobs.Count(j => j.Status == JobStatus.Completed);
-        public int FailedCount => _completedJobs.Count(j => j.Status == JobStatus.Failed);
+        // FIX #13: Thread-safe count accessors
+        public int QueuedCount
+        {
+            get
+            {
+                lock (_lock) { return _jobQueue.Count; }
+            }
+        }
+
+        public int CompletedCount
+        {
+            get
+            {
+                lock (_lock) { return _completedJobs.Count(j => j.Status == JobStatus.Completed); }
+            }
+        }
+
+        public int FailedCount
+        {
+            get
+            {
+                lock (_lock) { return _completedJobs.Count(j => j.Status == JobStatus.Failed); }
+            }
+        }
+
         public bool IsProcessing => _isProcessing;
         public MigrationJob? CurrentJob { get; private set; }
 
-        public ReadOnlyCollection<MigrationJob> CompletedJobs => _completedJobs.AsReadOnly();
+        public ReadOnlyCollection<MigrationJob> CompletedJobs
+        {
+            get
+            {
+                lock (_lock) { return _completedJobs.ToList().AsReadOnly(); }
+            }
+        }
 
-        public BulkMigrationManager()
+        public BulkMigrationManager() : this(null)
+        {
+        }
+
+        public BulkMigrationManager(string? outputDirectory)
         {
             _parser = new LogParser();
             _runner = new ExtractorRunner(_parser);
+
+            // FIX #2: Set up output directory for extraction results
+            _outputDirectory = outputDirectory ?? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "QBMigration",
+                "BulkOutput"
+            );
+            Directory.CreateDirectory(_outputDirectory);
         }
 
         /// <summary>
@@ -47,10 +88,21 @@ namespace QBMigrationLauncher.Services
         /// </summary>
         public MigrationJob EnqueueFile(string filePath)
         {
+            // FIX #33: Validate file exists before queueing
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                throw new ArgumentException("File path cannot be empty", nameof(filePath));
+            }
+
+            if (!File.Exists(filePath))
+            {
+                throw new FileNotFoundException($"QuickBooks file not found: {filePath}", filePath);
+            }
+
             var job = new MigrationJob
             {
                 Id = Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper(),
-                FilePath = filePath,
+                FilePath = Path.GetFullPath(filePath), // Store full path
                 FileName = Path.GetFileName(filePath),
                 Status = JobStatus.Queued,
                 QueuedAt = DateTime.Now
@@ -134,6 +186,31 @@ namespace QBMigrationLauncher.Services
             LogMessage?.Invoke(this, "[CLEAR] Queue cleared.");
         }
 
+        /// <summary>
+        /// FIX #29: Clear completed jobs history.
+        /// </summary>
+        public void ClearHistory()
+        {
+            lock (_lock)
+            {
+                _completedJobs.Clear();
+            }
+            LogMessage?.Invoke(this, "[CLEAR] Job history cleared.");
+        }
+
+        /// <summary>
+        /// FIX #29: Clear everything (queue and history).
+        /// </summary>
+        public void ClearAll()
+        {
+            lock (_lock)
+            {
+                _jobQueue.Clear();
+                _completedJobs.Clear();
+            }
+            LogMessage?.Invoke(this, "[CLEAR] Queue and history cleared.");
+        }
+
         private async Task ProcessJobAsync(MigrationJob job)
         {
             CurrentJob = job;
@@ -145,12 +222,26 @@ namespace QBMigrationLauncher.Services
 
             try
             {
-                // Run the actual extraction
-                await _runner.RunExtractionAsync(job.FilePath);
+                // FIX #33: Re-validate file exists before processing
+                if (!File.Exists(job.FilePath))
+                {
+                    throw new FileNotFoundException(
+                        $"File no longer exists at: {job.FilePath}. It may have been moved or deleted.",
+                        job.FilePath);
+                }
+
+                // FIX #2: Pass all 3 required parameters to RunExtractionAsync
+                // Use job ID as session code, create job-specific output directory
+                var jobOutputDir = Path.Combine(_outputDirectory, $"Job_{job.Id}_{DateTime.Now:yyyyMMdd_HHmmss}");
+                Directory.CreateDirectory(jobOutputDir);
+
+                await _runner.RunExtractionAsync(job.FilePath, job.Id, jobOutputDir);
 
                 job.Status = JobStatus.Completed;
                 job.CompletedAt = DateTime.Now;
+                job.OutputDirectory = jobOutputDir; // Store where results went
                 LogMessage?.Invoke(this, $"[SUCCESS] Completed: {job.FileName} in {job.Duration?.TotalMinutes:F1} minutes");
+                LogMessage?.Invoke(this, $"[SUCCESS] Output saved to: {jobOutputDir}");
                 JobCompleted?.Invoke(this, job);
             }
             catch (Exception ex)
@@ -210,10 +301,14 @@ namespace QBMigrationLauncher.Services
         public DateTime? StartedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
         public string? ErrorMessage { get; set; }
+        /// <summary>
+        /// Directory where extraction output was saved (set on completion).
+        /// </summary>
+        public string? OutputDirectory { get; set; }
 
-        public TimeSpan? Duration => 
-            StartedAt.HasValue && CompletedAt.HasValue 
-                ? CompletedAt.Value - StartedAt.Value 
+        public TimeSpan? Duration =>
+            StartedAt.HasValue && CompletedAt.HasValue
+                ? CompletedAt.Value - StartedAt.Value
                 : null;
     }
 

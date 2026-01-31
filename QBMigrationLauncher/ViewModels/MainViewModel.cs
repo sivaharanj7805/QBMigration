@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -20,6 +21,9 @@ namespace QBMigrationLauncher.ViewModels
         private readonly CertificateGenerator _certificateGenerator;
         private readonly VarianceReportService _varianceReportService;
         private readonly string _outputDirectory;
+
+        // FIX #27 & #28: Store full paths for detected files
+        private readonly Dictionary<string, string> _detectedFilePaths = new Dictionary<string, string>();
 
         [ObservableProperty]
         private string _connectionStatusText = "Searching for QuickBooks...";
@@ -104,6 +108,8 @@ namespace QBMigrationLauncher.ViewModels
             var companyFile = QuickBooksDetector.GetOpenCompanyFile();
             if (!string.IsNullOrEmpty(companyFile))
             {
+                // FIX #45: Store full path, not just filename
+                _detectedFilePaths[Path.GetFileName(companyFile)] = companyFile;
                 DetectedFiles.Add(Path.GetFileName(companyFile));
                 SelectedFile = DetectedFiles[0];
             }
@@ -310,7 +316,8 @@ namespace QBMigrationLauncher.ViewModels
 
         private void OnProgressChanged(object? sender, ProgressEventArgs e)
         {
-            App.Current.Dispatcher.Invoke(() =>
+            // FIX #15: Use BeginInvoke (non-blocking) and check for null App.Current
+            SafeDispatch(() =>
             {
                 ProgressPercentage = e.Percentage;
                 CurrentStatusMessage = e.StatusMessage;
@@ -319,14 +326,32 @@ namespace QBMigrationLauncher.ViewModels
 
         private void OnLogReceived(object? sender, string log)
         {
-            App.Current.Dispatcher.Invoke(() =>
+            // FIX #15: Use BeginInvoke (non-blocking) and check for null App.Current
+            SafeDispatch(() =>
             {
                 LogOutput += log + Environment.NewLine;
             });
         }
 
         /// <summary>
+        /// FIX #15: Safely dispatch to UI thread with null check and non-blocking call.
+        /// </summary>
+        private void SafeDispatch(Action action)
+        {
+            var app = App.Current;
+            if (app == null) return; // Application shutting down
+
+            var dispatcher = app.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+
+            // Use BeginInvoke (async) instead of Invoke to prevent deadlocks
+            dispatcher.BeginInvoke(action);
+        }
+
+        /// <summary>
         /// Compute SHA-256 hash of a file for the migration certificate.
+        /// FIX #27 & #28: Properly resolve full path from detected files.
+        /// FIX #39: Use streaming to avoid large file memory pressure.
         /// </summary>
         private string ComputeFileHash(string? filePath)
         {
@@ -335,8 +360,16 @@ namespace QBMigrationLauncher.ViewModels
 
             try
             {
-                // Resolve to full path - check if it's a filename from DetectedFiles
-                var fullPath = Path.IsPathRooted(filePath) ? filePath : null;
+                // FIX #27 & #28: Resolve to full path - check _detectedFilePaths dictionary
+                string? fullPath = null;
+                if (Path.IsPathRooted(filePath))
+                {
+                    fullPath = filePath;
+                }
+                else if (_detectedFilePaths.TryGetValue(filePath, out var detectedPath))
+                {
+                    fullPath = detectedPath;
+                }
 
                 // Try to find extracted output files to hash
                 var extractedDir = Path.Combine(_outputDirectory, "extracted");
@@ -347,15 +380,20 @@ namespace QBMigrationLauncher.ViewModels
                     if (manifestFiles.Length > 0)
                     {
                         using var sha256 = System.Security.Cryptography.SHA256.Create();
-                        using var combinedStream = new MemoryStream();
+
+                        // FIX #39: Stream files instead of loading all into memory
                         foreach (var file in manifestFiles.OrderBy(f => f))
                         {
-                            var fileBytes = File.ReadAllBytes(file);
-                            combinedStream.Write(fileBytes, 0, fileBytes.Length);
+                            using var fileStream = File.OpenRead(file);
+                            byte[] buffer = new byte[8192];
+                            int bytesRead;
+                            while ((bytesRead = fileStream.Read(buffer, 0, buffer.Length)) > 0)
+                            {
+                                sha256.TransformBlock(buffer, 0, bytesRead, buffer, 0);
+                            }
                         }
-                        combinedStream.Position = 0;
-                        var hashBytes = sha256.ComputeHash(combinedStream);
-                        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                        return BitConverter.ToString(sha256.Hash!).Replace("-", "").ToLowerInvariant();
                     }
                 }
 
@@ -376,6 +414,16 @@ namespace QBMigrationLauncher.ViewModels
                 LogOutput += $"[WARN] Could not compute file hash: {ex.Message}\n";
                 return "HASH_ERROR";
             }
+        }
+
+        /// <summary>
+        /// FIX #27: Get full path for a selected file.
+        /// </summary>
+        private string? GetFullFilePath(string? fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return null;
+            if (Path.IsPathRooted(fileName)) return fileName;
+            return _detectedFilePaths.TryGetValue(fileName, out var fullPath) ? fullPath : null;
         }
     }
 }
