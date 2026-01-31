@@ -218,7 +218,22 @@ namespace QBDesktopExtractor
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
             var content = await response.Content.ReadAsStringAsync();
-            return JObject.Parse(content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(LogLevel.Error, "Failed to get presigned URL: {0} - {1}", response.StatusCode, content);
+                return null;
+            }
+
+            try
+            {
+                return JObject.Parse(content);
+            }
+            catch (JsonReaderException ex)
+            {
+                _logger?.Log(LogLevel.Error, "Invalid JSON response from presigned URL endpoint: {0}", ex.Message);
+                return null;
+            }
         }
 
         private async Task<JObject> InitMultipartUploadAsync(string sessionId, string fileName, long fileSize)
@@ -235,7 +250,22 @@ namespace QBDesktopExtractor
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
             var content = await response.Content.ReadAsStringAsync();
-            return JObject.Parse(content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(LogLevel.Error, "Failed to init multipart upload: {0} - {1}", response.StatusCode, content);
+                throw new Exception($"Failed to initialize multipart upload: {response.StatusCode}");
+            }
+
+            try
+            {
+                return JObject.Parse(content);
+            }
+            catch (JsonReaderException ex)
+            {
+                _logger?.Log(LogLevel.Error, "Invalid JSON response from multipart init: {0}", ex.Message);
+                throw new Exception($"Invalid server response during multipart init: {ex.Message}");
+            }
         }
 
         private async Task<JObject> GetPartUploadUrlAsync(string uploadId, int partNumber, string s3Key)
@@ -252,7 +282,22 @@ namespace QBDesktopExtractor
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
             var content = await response.Content.ReadAsStringAsync();
-            return JObject.Parse(content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(LogLevel.Error, "Failed to get part URL for part {0}: {1} - {2}", partNumber, response.StatusCode, content);
+                throw new Exception($"Failed to get upload URL for part {partNumber}: {response.StatusCode}");
+            }
+
+            try
+            {
+                return JObject.Parse(content);
+            }
+            catch (JsonReaderException ex)
+            {
+                _logger?.Log(LogLevel.Error, "Invalid JSON response from part-url endpoint: {0}", ex.Message);
+                throw new Exception($"Invalid server response during part URL request: {ex.Message}");
+            }
         }
 
         private async Task CompleteMultipartUploadAsync(string uploadId, string s3Key, JArray parts, string migrationId)
@@ -265,9 +310,16 @@ namespace QBDesktopExtractor
                 ["migration_id"] = migrationId
             };
 
-            await _httpClient.PostAsync(
+            var response = await _httpClient.PostAsync(
                 $"{_serverUrl}/api/upload/multipart/complete",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger?.Log(LogLevel.Error, "Failed to complete multipart upload: {0} - {1}", response.StatusCode, content);
+                throw new Exception($"Failed to complete multipart upload: {response.StatusCode}");
+            }
         }
 
         private async Task CompleteUploadAsync(string migrationId, string hash)
@@ -278,9 +330,16 @@ namespace QBDesktopExtractor
                 ["sha256_hash"] = hash
             };
 
-            await _httpClient.PostAsync(
+            var response = await _httpClient.PostAsync(
                 $"{_serverUrl}/api/upload/complete",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger?.Log(LogLevel.Warning, "Failed to notify server of upload completion: {0} - {1}", response.StatusCode, content);
+                // Don't throw - file is already uploaded to S3, this is just notification
+            }
         }
 
         private static async Task<string> CalculateHashAsync(string filePath, CancellationToken cancellationToken)

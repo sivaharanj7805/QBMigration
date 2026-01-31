@@ -183,9 +183,10 @@ namespace QBDesktopExtractor
                 
                 return baseDir;
             }
-            catch
+            catch (Exception ex)
             {
-                // Fall back to system temp
+                // Fall back to system temp - log the error for diagnostic purposes
+                _logger?.Log(LogLevel.Warning, "Could not create secure temp directory: {0}. Falling back to system temp.", ex.Message);
                 return Path.GetTempPath();
             }
         }
@@ -208,10 +209,18 @@ namespace QBDesktopExtractor
                             SecureDeleteFile(file);
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // Log individual file cleanup errors at debug level (non-critical)
+                        _logger?.Log(LogLevel.Debug, "Could not clean up temp file {0}: {1}", file, ex.Message);
+                    }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Log directory enumeration errors (non-critical, cleanup is best-effort)
+                _logger?.Log(LogLevel.Debug, "Could not enumerate temp directory for cleanup: {0}", ex.Message);
+            }
         }
 
         /// <summary>
@@ -456,9 +465,16 @@ namespace QBDesktopExtractor
             catch (Exception ex)
             {
                 _logger?.Log(LogLevel.Warning, "Could not delete temp file: {0}", ex.Message);
-                
+
                 // Try simple delete as fallback
-                try { File.Delete(filePath); } catch { }
+                try
+                {
+                    File.Delete(filePath);
+                }
+                catch (Exception fallbackEx)
+                {
+                    _logger?.Log(LogLevel.Debug, "Fallback delete also failed for {0}: {1}", filePath, fallbackEx.Message);
+                }
             }
         }
 
