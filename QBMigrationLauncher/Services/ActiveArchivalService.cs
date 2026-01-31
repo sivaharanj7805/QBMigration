@@ -59,7 +59,8 @@ namespace QBMigrationLauncher.Services
         public async Task<ArchiveEntry> ArchiveCompanyDataAsync(string companyName, string extractedDataPath)
         {
             // FIX #3: Generate a safe archive ID (alphanumeric only)
-            var archiveId = $"ARC-{DateTime.Now:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}";
+            // FIX: Use UtcNow for consistent timestamps across timezones
+            var archiveId = $"ARC-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper()}";
 
             // FIX #3: Validate the archive folder path stays within archive directory
             var archiveFolder = ValidateAndNormalizePath(archiveId, nameof(archiveId));
@@ -73,7 +74,7 @@ namespace QBMigrationLauncher.Services
                 CompanyName = companyName,
                 SourcePath = extractedDataPath,
                 ArchivePath = archiveFolder,
-                CreatedAt = DateTime.Now,
+                CreatedAt = DateTime.UtcNow,
                 Status = ArchiveStatus.Active
             };
 
@@ -203,7 +204,7 @@ namespace QBMigrationLauncher.Services
             if (entry != null)
             {
                 entry.Status = ArchiveStatus.MarkedForDeletion;
-                entry.DeleteScheduledAt = DateTime.Now.AddDays(30); // 30-day grace period
+                entry.DeleteScheduledAt = DateTime.UtcNow.AddDays(30); // 30-day grace period
                 await SaveIndexAsync();
                 LogMessage?.Invoke(this, $"[DELETE] Archive {archiveId} marked for deletion on {entry.DeleteScheduledAt:yyyy-MM-dd}");
             }
@@ -217,7 +218,7 @@ namespace QBMigrationLauncher.Services
             var auditLogPath = Path.Combine(_archiveDirectory, "audit_log.ndjson");
             var logEntry = new AuditLogEntry
             {
-                Timestamp = DateTime.Now,
+                Timestamp = DateTime.UtcNow,
                 ArchiveId = archiveId,
                 UserId = userId,
                 Action = action,
@@ -278,9 +279,13 @@ namespace QBMigrationLauncher.Services
 
                         transactions.Add(txn);
                     }
-                    catch
+                    catch (JsonException)
                     {
-                        // Skip malformed lines
+                        // Skip malformed JSON lines - this is expected for corrupted data
+                    }
+                    catch (FormatException)
+                    {
+                        // Skip lines with invalid date/number formats
                     }
                 }
             }
@@ -348,7 +353,7 @@ namespace QBMigrationLauncher.Services
     public class ArchiveIndex
     {
         public List<ArchiveEntry> Entries { get; set; } = new List<ArchiveEntry>();
-        public DateTime LastUpdated { get; set; } = DateTime.Now;
+        public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 
     public class ArchiveEntry

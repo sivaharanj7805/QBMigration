@@ -17,7 +17,7 @@ namespace QBMigrationLauncher.Services
         {
             var result = new HealthCheckResult
             {
-                CheckedAt = DateTime.Now,
+                CheckedAt = DateTime.UtcNow,
                 OverallStatus = HealthStatus.Ready
             };
 

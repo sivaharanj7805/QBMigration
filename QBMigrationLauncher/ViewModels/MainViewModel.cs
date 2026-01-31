@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -23,7 +25,12 @@ namespace QBMigrationLauncher.ViewModels
         private readonly string _outputDirectory;
 
         // FIX #27 & #28: Store full paths for detected files
-        private readonly Dictionary<string, string> _detectedFilePaths = new Dictionary<string, string>();
+        // FIX: Use ConcurrentDictionary for thread safety during async operations
+        private readonly ConcurrentDictionary<string, string> _detectedFilePaths = new ConcurrentDictionary<string, string>();
+
+        // FIX: Limit log output to prevent unbounded memory growth
+        private readonly StringBuilder _logBuilder = new StringBuilder();
+        private const int MaxLogLength = 500000; // ~500KB max log size
 
         [ObservableProperty]
         private string _connectionStatusText = "Searching for QuickBooks...";
@@ -274,13 +281,16 @@ namespace QBMigrationLauncher.ViewModels
                 var sourceHash = ComputeFileHash(SelectedFile);
 
                 // Generate Migration Certificate
+                // FIX: Handle empty string from Path.GetFileName (it returns "" not null for empty input)
+                var fileName = Path.GetFileName(SelectedFile ?? "");
+                var displayName = string.IsNullOrEmpty(fileName) ? "Unknown" : fileName;
+
                 var certData = new MigrationCertificateData
                 {
-                    // FIX: Use Path.GetFileName to show just filename, not full path in certificate
-                    CompanyName = Path.GetFileName(SelectedFile ?? "") ?? "Unknown",
+                    CompanyName = displayName,
                     MigrationId = migrationId, // FIX WPF-01: Use the already-generated ID
                     MigrationDate = DateTime.UtcNow, // FIX: Use UtcNow for consistency
-                    SourceFileName = Path.GetFileName(SelectedFile ?? "") ?? "Unknown",
+                    SourceFileName = displayName,
                     RealmId = "PENDING_QBO_VERIFICATION", // Clearer status message
                     SourceHash = sourceHash,
                     TrialBalanceDesktop = 0, // Will be populated from extraction results
@@ -330,7 +340,23 @@ namespace QBMigrationLauncher.ViewModels
             // FIX #15: Use BeginInvoke (non-blocking) and check for null App.Current
             SafeDispatch(() =>
             {
-                LogOutput += log + Environment.NewLine;
+                // FIX: Use StringBuilder with max length to prevent memory leak
+                _logBuilder.AppendLine(log);
+
+                // Trim if exceeding max length (keep most recent logs)
+                if (_logBuilder.Length > MaxLogLength)
+                {
+                    var excess = _logBuilder.Length - MaxLogLength;
+                    _logBuilder.Remove(0, excess);
+                    // Find next newline to avoid cutting mid-line
+                    var nextNewline = _logBuilder.ToString().IndexOf('\n');
+                    if (nextNewline > 0)
+                    {
+                        _logBuilder.Remove(0, nextNewline + 1);
+                    }
+                }
+
+                LogOutput = _logBuilder.ToString();
             });
         }
 
