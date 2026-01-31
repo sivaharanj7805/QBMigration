@@ -185,7 +185,9 @@ namespace QBDesktopExtractor
 
             foreach (var kvp in _entityFiles)
             {
-                try { kvp.Value.Stream?.Dispose(); } catch { }
+                try { kvp.Value.Stream?.Dispose(); }
+                catch (ObjectDisposedException) { /* Already disposed - safe to ignore */ }
+                catch (IOException) { /* IO errors during dispose are non-critical */ }
             }
             _entityFiles.Clear();
         }

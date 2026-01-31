@@ -187,7 +187,8 @@ namespace QBDesktopExtractor
                         }
                     }
                 }
-                catch { }
+                catch (System.Security.SecurityException) { /* Registry access denied - continue */ }
+                catch (UnauthorizedAccessException) { /* Registry access denied - continue */ }
 
                 // Method 2: Check 32-bit ODBC drivers (for 32-bit apps)
                 if (!found)
@@ -212,7 +213,8 @@ namespace QBDesktopExtractor
                             }
                         }
                     }
-                    catch { }
+                    catch (System.Security.SecurityException) { /* Registry access denied - continue */ }
+                    catch (UnauthorizedAccessException) { /* Registry access denied - continue */ }
                 }
 
                 if (found)

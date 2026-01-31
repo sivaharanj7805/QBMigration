@@ -521,7 +521,11 @@ namespace QBDesktopExtractor
                         "Low RAM ({0}GB available). Recommend 4GB+ for large companies.", availableGB);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Memory check is non-critical - log and continue
+                _logger?.Log(LogLevel.Debug, "Memory check skipped: {0}", ex.Message);
+            }
         }
 
         private static int CountTotalRecords(QBExtractedData data)
