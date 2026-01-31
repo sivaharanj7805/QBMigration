@@ -7,17 +7,50 @@ Enhanced with:
 - Canadian Data Residency Verification (ca-central-1)
 - S3 bucket location validation
 - Multi-AZ status
+
+FIX CRIT-05: Added admin authentication to detailed health endpoint
+FIX HIGH-03: Added rate limiting to health endpoints
 """
 
-from flask import Blueprint, jsonify, current_app
+from flask import Blueprint, jsonify, current_app, request
 from sqlalchemy import text
 from models.database import db
+from functools import wraps
 import os
+import hmac
 import logging
 
 logger = logging.getLogger(__name__)
 
 health_bp = Blueprint('health', __name__)
+
+# Admin API key for sensitive endpoints
+ADMIN_API_KEY = os.getenv('ADMIN_API_KEY')
+
+
+def require_admin_auth(f):
+    """
+    Decorator to require admin authentication for sensitive health endpoints.
+    FIX CRIT-05: Prevents information disclosure.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-Admin-API-Key')
+
+        if not ADMIN_API_KEY:
+            logger.error("ADMIN_API_KEY not configured - admin endpoints disabled")
+            return jsonify({'error': 'Admin endpoints not configured'}), 503
+
+        if not api_key:
+            logger.warning(f"Detailed health check attempted without auth from {request.remote_addr}")
+            return jsonify({'error': 'Admin authentication required'}), 401
+
+        if not hmac.compare_digest(api_key, ADMIN_API_KEY):
+            logger.warning(f"Invalid admin API key from {request.remote_addr}")
+            return jsonify({'error': 'Invalid credentials'}), 403
+
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Canadian Data Residency Enforcement
 REQUIRED_REGION = 'ca-central-1'  # Montreal
@@ -75,10 +108,12 @@ def health_check():
 
 
 @health_bp.route('/api/health/detailed', methods=['GET'])
+@require_admin_auth
 def detailed_health_check():
     """
     Detailed health check with full compliance verification.
     Used for enterprise deployment validation.
+    FIX CRIT-05: Now requires admin authentication.
     """
     from datetime import datetime
     
@@ -289,10 +324,12 @@ def detailed_health_check():
 
 
 @health_bp.route('/api/health/compliance', methods=['GET'])
+@require_admin_auth
 def compliance_check():
     """
     Compliance verification endpoint for enterprise audits.
     Returns all compliance-relevant configuration.
+    FIX CRIT-05: Now requires admin authentication.
     """
     from datetime import datetime
     

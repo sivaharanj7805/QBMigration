@@ -33,14 +33,27 @@ class EncryptionManager:
 
         if os.path.exists(private_key_path):
             try:
-                # CRIT-05 FIX: Load private key with password
+                # FIX CRIT-04: Load private key password from secure sources only
                 key_password = os.environ.get('RSA_KEY_PASSWORD')
+
                 if not key_password:
-                    # Try to read from password file
+                    # Try AWS Secrets Manager
+                    try:
+                        from utils.secrets_manager import get_secret
+                        key_password = get_secret('rsa_key_password')
+                    except Exception:
+                        pass
+
+                # Legacy support: Try to read from password file (will be removed in future)
+                if not key_password:
                     password_path = os.path.join(key_dir, '.key_password')
                     if os.path.exists(password_path):
                         with open(password_path, 'r') as pf:
                             key_password = pf.read().strip()
+                        logger.warning(
+                            "SECURITY: Reading RSA key password from file is deprecated. "
+                            "Please set RSA_KEY_PASSWORD environment variable or use Secrets Manager."
+                        )
 
                 with open(private_key_path, 'rb') as f:
                     self._private_key = serialization.load_pem_private_key(
@@ -63,18 +76,31 @@ class EncryptionManager:
         )
         self._public_key = self._private_key.public_key()
 
-        # CRIT-05 FIX: Save private key with password encryption
+        # FIX CRIT-04: Improved RSA key password handling
+        # Priority: 1) Environment variable, 2) AWS Secrets Manager, 3) Generate and warn
         key_password = os.environ.get('RSA_KEY_PASSWORD')
+
         if not key_password:
-            # Generate a strong password and store it securely
+            # Try AWS Secrets Manager
+            try:
+                from utils.secrets_manager import get_secret
+                key_password = get_secret('rsa_key_password')
+            except Exception:
+                pass
+
+        if not key_password:
+            # Generate a strong password - but NEVER store in file system
             import secrets as sec
             key_password = sec.token_urlsafe(32)
-            logger.warning(f"RSA_KEY_PASSWORD not set. Generated password - store this securely!")
-            # Write password to a separate protected file
-            password_path = os.path.join(key_dir, '.key_password')
-            with open(password_path, 'w') as pf:
-                pf.write(key_password)
-            os.chmod(password_path, 0o600)
+            logger.critical(
+                "SECURITY WARNING: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
+                "A temporary password was generated for this session. "
+                "For production, set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
+                "Keys generated in this session will NOT be recoverable without the password!"
+            )
+            # FIX CRIT-04: Do NOT write password to file - output to stderr for operator to capture
+            import sys
+            print(f"\n[CRITICAL] Generated RSA key password (save this securely): {key_password}\n", file=sys.stderr)
 
         with open(private_key_path, 'wb') as f:
             f.write(self._private_key.private_bytes(

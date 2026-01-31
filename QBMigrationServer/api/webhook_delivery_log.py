@@ -8,17 +8,72 @@ Features:
 - Persistent delivery log in database
 - Dashboard API endpoints
 - Delivery analytics
+
+FIX HIGH-01: Added authentication to all webhook log endpoints
 """
 
 from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
 from models.database import db
 from datetime import datetime, timedelta
+from functools import wraps
 import logging
+import hmac
+import os
 from typing import Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
 webhook_logs_bp = Blueprint('webhook_logs', __name__, url_prefix='/api/webhook-logs')
+
+# Admin API key for admin-only endpoints
+ADMIN_API_KEY = os.getenv('ADMIN_API_KEY')
+
+
+def require_auth_or_admin(f):
+    """
+    Decorator that requires either:
+    1. Valid user session (for per-migration logs)
+    2. Admin API key (for system-wide logs and stats)
+    FIX HIGH-01: Prevents unauthorized access to webhook logs.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check for admin API key
+        admin_key = request.headers.get('X-Admin-API-Key')
+        if admin_key and ADMIN_API_KEY and hmac.compare_digest(admin_key, ADMIN_API_KEY):
+            return f(*args, **kwargs)
+
+        # Check for valid user session
+        if current_user and current_user.is_authenticated:
+            return f(*args, **kwargs)
+
+        logger.warning(f"Unauthorized webhook log access attempt from {request.remote_addr}")
+        return jsonify({'error': 'Authentication required'}), 401
+    return decorated_function
+
+
+def require_admin_only(f):
+    """
+    Decorator that requires admin API key only.
+    For system-wide stats and recent logs.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        admin_key = request.headers.get('X-Admin-API-Key')
+
+        if not ADMIN_API_KEY:
+            return jsonify({'error': 'Admin API key not configured'}), 503
+
+        if not admin_key:
+            return jsonify({'error': 'Admin authentication required'}), 401
+
+        if not hmac.compare_digest(admin_key, ADMIN_API_KEY):
+            logger.warning(f"Invalid admin key for webhook logs from {request.remote_addr}")
+            return jsonify({'error': 'Invalid credentials'}), 403
+
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 # =============================================================================
@@ -222,10 +277,12 @@ class WebhookLogger:
 # =============================================================================
 
 @webhook_logs_bp.route('/migration/<migration_id>', methods=['GET'])
+@require_auth_or_admin
 def get_migration_logs(migration_id):
     """
     Get webhook delivery logs for a specific migration.
     Shows users exactly when the server acknowledged status updates.
+    FIX HIGH-01: Requires authentication.
     """
     limit = request.args.get('limit', 50, type=int)
     logs = WebhookLogger.get_logs_for_migration(migration_id, limit)
@@ -238,9 +295,11 @@ def get_migration_logs(migration_id):
 
 
 @webhook_logs_bp.route('/recent', methods=['GET'])
+@require_admin_only
 def get_recent():
     """
     Get recent webhook deliveries across all migrations.
+    FIX HIGH-01: Admin only - contains system-wide data.
     """
     hours = request.args.get('hours', 24, type=int)
     limit = request.args.get('limit', 100, type=int)
@@ -254,9 +313,11 @@ def get_recent():
 
 
 @webhook_logs_bp.route('/stats', methods=['GET'])
+@require_admin_only
 def get_stats():
     """
     Get webhook delivery statistics for monitoring.
+    FIX HIGH-01: Admin only - contains system metrics.
     """
     hours = request.args.get('hours', 24, type=int)
     stats = WebhookLogger.get_delivery_stats(hours)
@@ -265,10 +326,12 @@ def get_stats():
 
 
 @webhook_logs_bp.route('/health', methods=['GET'])
+@require_admin_only
 def webhook_health():
     """
     Webhook system health check.
     Returns success rate and any concerning patterns.
+    FIX HIGH-01: Admin only - contains system health data.
     """
     stats = WebhookLogger.get_delivery_stats(hours=1)
     

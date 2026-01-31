@@ -537,6 +537,11 @@ def list_licenses():
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 50, type=int)
+
+        # FIX UX-03: Validate pagination limits to prevent DoS
+        per_page = min(max(per_page, 1), 100)  # Clamp between 1 and 100
+        page = max(page, 1)  # Ensure page is at least 1
+
         tier = request.args.get('tier')
         active_only = request.args.get('active_only', 'true').lower() == 'true'
         
