@@ -847,7 +847,54 @@ class QBDataTransformer:
         if qbo_id is None:
             logger.debug(f"No mapping found for {entity_type} ID: {qbd_id}")
         return qbo_id
-    
+
+    def map_id_required(
+        self,
+        entity_type: str,
+        qbd_id: Any,
+        entity_name: str,
+        parent_entity_type: str,
+        parent_entity_name: str
+    ) -> Tuple[Optional[str], bool]:
+        """
+        CRITICAL FIX: Map QB Desktop ID to QB Online ID with validation.
+
+        Unlike map_id(), this method tracks unmapped required references
+        and adds them to the manual review list.
+
+        Args:
+            entity_type: Type of referenced entity (e.g., 'customers', 'vendors')
+            qbd_id: QB Desktop ID to map
+            entity_name: Name of the referenced entity (for logging)
+            parent_entity_type: Type of entity containing this reference
+            parent_entity_name: Name/ID of entity containing this reference
+
+        Returns:
+            Tuple of (qbo_id or None, is_valid)
+            - If valid: (qbo_id, True)
+            - If missing: (None, False) - entity added to manual review
+        """
+        if not qbd_id:
+            # No reference provided - this is valid for optional refs
+            return (None, True)
+
+        qbo_id = self.id_mapping[entity_type].get(str(qbd_id))
+
+        if qbo_id is None:
+            # CRITICAL: Required reference is missing - add to manual review
+            logger.warning(
+                f"Missing required {entity_type} reference '{qbd_id}' "
+                f"for {parent_entity_type} '{parent_entity_name}'"
+            )
+            self.add_manual_review(
+                entity_type=parent_entity_type,
+                name=str(parent_entity_name),
+                reason=f"Missing {entity_type} reference: {entity_name} (QBD ID: {qbd_id})"
+            )
+            return (None, False)
+
+        return (qbo_id, True)
+
     def store_mapping(self, entity_type: str, qbd_id: Any, qbo_id: str) -> None:
         """Store ID mapping."""
         if qbd_id and qbo_id:
@@ -873,10 +920,28 @@ class QBDataTransformer:
     def transform_account(self, qbd: Dict) -> Dict:
         """Transform Account."""
         account_type = qbd.get('AccountType', '').lower()
-        qbo_type_info = self.account_mapping.get(account_type, ('Expense', None))
-        
+        account_name = qbd.get('Name', 'Unknown Account')
+
+        # CRITICAL FIX: Don't silently default unknown types to 'Expense'
+        qbo_type_info = self.account_mapping.get(account_type)
+
+        if qbo_type_info is None:
+            # Unknown account type - add to manual review
+            logger.warning(
+                f"Unknown account type '{account_type}' for account '{account_name}' "
+                f"- defaulting to 'Other Current Assets' for safety"
+            )
+            self.add_manual_review(
+                entity_type='Account',
+                name=account_name,
+                reason=f"Unknown account type: '{qbd.get('AccountType', '')}' - verify classification"
+            )
+            # Default to 'Other Current Assets' which is safer than 'Expense'
+            # (Expense would affect P&L incorrectly for balance sheet accounts)
+            qbo_type_info = ('Other Current Assets', None)
+
         qbo = {
-            'Name': self.sanitize_name(qbd.get('Name', 'Account')),
+            'Name': self.sanitize_name(account_name),
             'AccountType': qbo_type_info[0],
             'Active': qbd.get('IsActive', True)
         }
@@ -975,79 +1040,133 @@ class QBDataTransformer:
         
         return qbo
     
-    def transform_bill(self, qbd: Dict) -> Dict:
+    def transform_bill(self, qbd: Dict) -> Optional[Dict]:
         """Transform Bill."""
+        doc_number = qbd.get('RefNumber', 'Unknown')
+
+        # CRITICAL FIX: Validate required VendorRef
+        vendor_id, vendor_valid = self.map_id_required(
+            entity_type='vendors',
+            qbd_id=qbd.get('VendorRef'),
+            entity_name=f"Vendor for Bill {doc_number}",
+            parent_entity_type='Bill',
+            parent_entity_name=doc_number
+        )
+
+        if not vendor_valid:
+            # Cannot create Bill without valid VendorRef - skip
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'VendorRef': {'value': vendor_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-        
+
         if qbd.get('DueDate'):
             qbo['DueDate'] = self.format_date(qbd['DueDate'])
-        
+
         if qbd.get('RefNumber'):
             qbo['DocNumber'] = qbd['RefNumber']
-        
+
         for line in qbd.get('ExpenseLines', []):
-            qbo['Line'].append({
-                'DetailType': 'AccountBasedExpenseLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'AccountBasedExpenseLineDetail': {
-                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-                }
-            })
-        
+            account_id = self.map_id('accounts', line.get('AccountRef'))
+            if account_id:  # Only add lines with valid account refs
+                qbo['Line'].append({
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'AccountBasedExpenseLineDetail': {
+                        'AccountRef': {'value': account_id}
+                    }
+                })
+
         return qbo
     
-    def transform_billpayment(self, qbd: Dict) -> Dict:
+    def transform_billpayment(self, qbd: Dict) -> Optional[Dict]:
         """Transform BillPayment."""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required VendorRef
+        vendor_id, vendor_valid = self.map_id_required(
+            entity_type='vendors',
+            qbd_id=qbd.get('VendorRef'),
+            entity_name=f"Vendor for BillPayment",
+            parent_entity_type='BillPayment',
+            parent_entity_name=f"BillPayment {txn_date}"
+        )
+
+        if not vendor_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'VendorRef': {'value': vendor_id},
             'TotalAmt': self.to_decimal(qbd.get('TotalAmount', 0)),
             'Line': []
         }
-        
+
         if qbd.get('TxnDate'):
             qbo['TxnDate'] = self.format_date(qbd['TxnDate'])
-        
+
         if qbd.get('PayType') == 'Check':
             qbo['PayType'] = 'Check'
             if qbd.get('BankAccountRef'):
-                qbo['CheckPayment'] = {
-                    'BankAccountRef': {'value': self.map_id('accounts', qbd['BankAccountRef'])}
-                }
-        
+                bank_id = self.map_id('accounts', qbd['BankAccountRef'])
+                if bank_id:
+                    qbo['CheckPayment'] = {
+                        'BankAccountRef': {'value': bank_id}
+                    }
+
         for applied in qbd.get('AppliedToBills', []):
-            qbo['Line'].append({
-                'Amount': self.to_decimal(applied.get('Amount', 0)),
-                'LinkedTxn': [{
-                    'TxnId': self.map_id('bills', applied.get('BillRef')),
-                    'TxnType': 'Bill'
-                }]
-            })
-        
+            bill_id = self.map_id('bills', applied.get('BillRef'))
+            if bill_id:  # Only add lines with valid bill refs
+                qbo['Line'].append({
+                    'Amount': self.to_decimal(applied.get('Amount', 0)),
+                    'LinkedTxn': [{
+                        'TxnId': bill_id,
+                        'TxnType': 'Bill'
+                    }]
+                })
+
         return qbo
     
-    def transform_creditmemo(self, qbd: Dict) -> Dict:
+    def transform_creditmemo(self, qbd: Dict) -> Optional[Dict]:
         """Transform CreditMemo."""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for CreditMemo",
+            parent_entity_type='CreditMemo',
+            parent_entity_name=f"CreditMemo {txn_date}"
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-        
+
         for line in qbd.get('CreditMemoLines', []):
-            qbo['Line'].append({
-                'DetailType': 'SalesItemLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'SalesItemLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', 1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
-                }
-            })
-        
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
         return qbo
     
     def transform_companycurrency(self, qbd: Dict) -> Dict:
@@ -1101,69 +1220,106 @@ class QBDataTransformer:
 
     # BATCH 2 METHODS (10 entities)
 
-    def transform_estimate(self, qbd: Dict) -> Dict:
+    def transform_estimate(self, qbd: Dict) -> Optional[Dict]:
         """Transform Estimate."""
+        doc_number = qbd.get('RefNumber', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for Estimate",
+            parent_entity_type='Estimate',
+            parent_entity_name=doc_number
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('RefNumber'):
             qbo['DocNumber'] = qbd['RefNumber']
-    
+
         for line in qbd.get('EstimateLines', []):
-            qbo['Line'].append({
-                'DetailType': 'SalesItemLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'SalesItemLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', 1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
-                }
-            })
-    
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
         return qbo
 
 
-    def transform_invoice(self, qbd: Dict) -> Dict:
+    def transform_invoice(self, qbd: Dict) -> Optional[Dict]:
         """Transform Invoice - CRITICAL METHOD."""
+        doc_number = qbd.get('RefNumber', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for Invoice",
+            parent_entity_type='Invoice',
+            parent_entity_name=doc_number
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('RefNumber'):
             qbo['DocNumber'] = qbd['RefNumber']
-    
+
         if qbd.get('DueDate'):
             qbo['DueDate'] = self.format_date(qbd['DueDate'])
-    
+
         if qbd.get('TermRef'):
-            qbo['SalesTermRef'] = {'value': self.map_id('terms', qbd['TermRef'])}
-    
+            term_id = self.map_id('terms', qbd['TermRef'])
+            if term_id:
+                qbo['SalesTermRef'] = {'value': term_id}
+
         if qbd.get('Memo'):
             qbo['PrivateNote'] = qbd['Memo'][:4000]
-    
+
         # Transform lines
         for line in qbd.get('InvoiceLines', []):
-            qbo_line = {
-                'DetailType': 'SalesItemLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'SalesItemLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', 1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0)),
-                    'TaxCodeRef': {'value': self.map_id('tax_codes', line.get('TaxCodeRef')) or 'NON'}
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                tax_code = self.map_id('tax_codes', line.get('TaxCodeRef')) or 'NON'
+                qbo_line = {
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0)),
+                        'TaxCodeRef': {'value': tax_code}
+                    }
                 }
-            }
-        
-            if line.get('Description'):
-                qbo_line['Description'] = line['Description'][:4000]
-        
-            qbo['Line'].append(qbo_line)
-    
+
+                if line.get('Description'):
+                    qbo_line['Description'] = line['Description'][:4000]
+
+                qbo['Line'].append(qbo_line)
+
         return qbo
 
 
@@ -1505,34 +1661,55 @@ class QBDataTransformer:
 
     # BATCH 3 METHODS (5 entities)
 
-    def transform_payment(self, qbd: Dict) -> Dict:
+    def transform_payment(self, qbd: Dict) -> Optional[Dict]:
         """Transform Payment (ReceivePayment) - CRITICAL!"""
+        ref_number = qbd.get('RefNumber', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for Payment",
+            parent_entity_type='Payment',
+            parent_entity_name=ref_number
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TotalAmt': self.to_decimal(qbd.get('TotalAmount', 0)),
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('RefNumber'):
             qbo['PaymentRefNum'] = qbd['RefNumber']
-    
+
         if qbd.get('PaymentMethodRef'):
-            qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
-    
+            pm_id = self.map_id('payment_methods', qbd['PaymentMethodRef'])
+            if pm_id:
+                qbo['PaymentMethodRef'] = {'value': pm_id}
+
         if qbd.get('DepositToAccountRef'):
-            qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
-    
+            acct_id = self.map_id('accounts', qbd['DepositToAccountRef'])
+            if acct_id:
+                qbo['DepositToAccountRef'] = {'value': acct_id}
+
         # Transform applied transactions
         for applied in qbd.get('AppliedToInvoices', []):
-            qbo['Line'].append({
-                'Amount': self.to_decimal(applied.get('Amount', 0)),
-                'LinkedTxn': [{
-                    'TxnId': self.map_id('invoices', applied.get('InvoiceRef')),
-                    'TxnType': 'Invoice'
-                }]
-            })
-    
+            inv_id = self.map_id('invoices', applied.get('InvoiceRef'))
+            if inv_id:  # Only add lines with valid invoice refs
+                qbo['Line'].append({
+                    'Amount': self.to_decimal(applied.get('Amount', 0)),
+                    'LinkedTxn': [{
+                        'TxnId': inv_id,
+                        'TxnType': 'Invoice'
+                    }]
+                })
+
         return qbo
 
 
@@ -1565,28 +1742,45 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_purchaseorder(self, qbd: Dict) -> Dict:
+    def transform_purchaseorder(self, qbd: Dict) -> Optional[Dict]:
         """Transform PurchaseOrder."""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required VendorRef
+        vendor_id, vendor_valid = self.map_id_required(
+            entity_type='vendors',
+            qbd_id=qbd.get('VendorRef'),
+            entity_name=f"Vendor for PurchaseOrder",
+            parent_entity_type='PurchaseOrder',
+            parent_entity_name=f"PO {txn_date}"
+        )
+
+        if not vendor_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'VendorRef': {'value': vendor_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('DueDate'):
             qbo['DueDate'] = self.format_date(qbd['DueDate'])
-    
+
         for line in qbd.get('POLines', []):
-            qbo['Line'].append({
-                'DetailType': 'ItemBasedExpenseLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'ItemBasedExpenseLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', 1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
-                }
-            })
-    
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                qbo['Line'].append({
+                    'DetailType': 'ItemBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'ItemBasedExpenseLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
         return qbo
 
 
@@ -1604,56 +1798,98 @@ class QBDataTransformer:
         }
 
 
-    def transform_refundreceipt(self, qbd: Dict) -> Dict:
+    def transform_refundreceipt(self, qbd: Dict) -> Optional[Dict]:
         """Transform RefundReceipt."""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for RefundReceipt",
+            parent_entity_type='RefundReceipt',
+            parent_entity_name=f"Refund {txn_date}"
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
-            'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
             'Line': []
         }
-    
+
+        # DepositToAccountRef is required for RefundReceipt
+        acct_id = self.map_id('accounts', qbd.get('DepositToAccountRef'))
+        if acct_id:
+            qbo['DepositToAccountRef'] = {'value': acct_id}
+
         for line in qbd.get('RefundLines', []):
-            qbo['Line'].append({
-                'DetailType': 'SalesItemLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),  # Usually negative
-                'SalesItemLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', -1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
-                }
-            })
-    
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),  # Usually negative
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', -1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
         return qbo
 
 
     # BATCH 4 METHODS (6 entities)
 
-    def transform_salesreceipt(self, qbd: Dict) -> Dict:
+    def transform_salesreceipt(self, qbd: Dict) -> Optional[Dict]:
         """Transform SalesReceipt - CRITICAL for cash sales!"""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required CustomerRef
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for SalesReceipt",
+            parent_entity_type='SalesReceipt',
+            parent_entity_name=f"Receipt {txn_date}"
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'CustomerRef': {'value': self.map_id('customers', qbd.get('CustomerRef'))},
+            'CustomerRef': {'value': customer_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('PaymentMethodRef'):
-            qbo['PaymentMethodRef'] = {'value': self.map_id('payment_methods', qbd['PaymentMethodRef'])}
-    
+            pm_id = self.map_id('payment_methods', qbd['PaymentMethodRef'])
+            if pm_id:
+                qbo['PaymentMethodRef'] = {'value': pm_id}
+
         if qbd.get('DepositToAccountRef'):
-            qbo['DepositToAccountRef'] = {'value': self.map_id('accounts', qbd['DepositToAccountRef'])}
-    
+            acct_id = self.map_id('accounts', qbd['DepositToAccountRef'])
+            if acct_id:
+                qbo['DepositToAccountRef'] = {'value': acct_id}
+
         for line in qbd.get('SalesReceiptLines', []):
-            qbo['Line'].append({
-                'DetailType': 'SalesItemLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'SalesItemLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
-                    'Qty': self.to_decimal(line.get('Quantity', 1)),
-                    'UnitPrice': self.to_decimal(line.get('Rate', 0))
-                }
-            })
-    
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:  # Only add lines with valid item refs
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
         return qbo
 
 
@@ -1803,26 +2039,45 @@ class QBDataTransformer:
 
     # BATCH 5 METHOD (1 entity)
 
-    def transform_vendorcredit(self, qbd: Dict) -> Dict:
+    def transform_vendorcredit(self, qbd: Dict) -> Optional[Dict]:
         """Transform VendorCredit."""
+        txn_date = qbd.get('TxnDate', 'Unknown')
+
+        # CRITICAL FIX: Validate required VendorRef
+        vendor_id, vendor_valid = self.map_id_required(
+            entity_type='vendors',
+            qbd_id=qbd.get('VendorRef'),
+            entity_name=f"Vendor for VendorCredit",
+            parent_entity_type='VendorCredit',
+            parent_entity_name=f"Credit {txn_date}"
+        )
+
+        if not vendor_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'VendorRef': {'value': vendor_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
         if qbd.get('APAccountRef'):
-            qbo['APAccountRef'] = {'value': self.map_id('accounts', qbd['APAccountRef'])}
-    
+            ap_id = self.map_id('accounts', qbd['APAccountRef'])
+            if ap_id:
+                qbo['APAccountRef'] = {'value': ap_id}
+
         for line in qbd.get('ExpenseLines', []):
-            qbo['Line'].append({
-                'DetailType': 'AccountBasedExpenseLineDetail',
-                'Amount': self.to_decimal(line.get('Amount', 0)),
-                'AccountBasedExpenseLineDetail': {
-                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-                }
-            })
-    
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if acct_id:  # Only add lines with valid account refs
+                qbo['Line'].append({
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'AccountBasedExpenseLineDetail': {
+                        'AccountRef': {'value': acct_id}
+                    }
+                })
+
         return qbo
     
     # ========================================================================
