@@ -52,7 +52,7 @@ export default function UploadPage() {
         }
     }, []);
 
-    const processFile = (file: File) => {
+    const processFile = async (file: File) => {
         const uploadedFile: UploadedFile = {
             name: file.name,
             size: file.size,
@@ -62,14 +62,46 @@ export default function UploadPage() {
 
         setFiles(prev => [...prev, uploadedFile]);
 
-        // Simulate validation
-        setTimeout(() => {
+        // HIGH-13 FIX: Call actual validation API instead of simulating
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/upload/validate`, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setFiles(prev => prev.map(f =>
+                    f.name === file.name
+                        ? {
+                            ...f,
+                            status: "ready",
+                            records: data.record_count || data.records || 0
+                        }
+                        : f
+                ));
+            } else {
+                const errorData = await response.json().catch(() => ({ error: 'Validation failed' }));
+                setFiles(prev => prev.map(f =>
+                    f.name === file.name
+                        ? { ...f, status: "error", error: errorData.error || 'Validation failed' }
+                        : f
+                ));
+            }
+        } catch (error) {
+            console.error('File validation error:', error);
             setFiles(prev => prev.map(f =>
                 f.name === file.name
-                    ? { ...f, status: "ready", records: Math.floor(Math.random() * 50000) + 5000 }
+                    ? { ...f, status: "error", error: 'Failed to connect to validation server' }
                     : f
             ));
-        }, 1500);
+        }
     };
 
     const handleDrop = useCallback((e: React.DragEvent) => {

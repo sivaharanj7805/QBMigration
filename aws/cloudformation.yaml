@@ -527,11 +527,17 @@ Resources:
       Roles:
         - !Ref EC2Role
 
+  # MED-16 FIX: Use SSM Parameter for region-agnostic AMI lookup
+  LatestUbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t3.small
-      ImageId: ami-0c7217cdde317cfec  # Ubuntu 22.04 LTS us-east-1
+      # MED-16 FIX: Use SSM parameter instead of hardcoded us-east-1 AMI
+      ImageId: !Ref LatestUbuntuAmi
       SubnetId: !Ref PublicSubnet1
       SecurityGroupIds:
         - !Ref EC2SecurityGroup
@@ -556,7 +562,7 @@ Resources:
           cat > /opt/forensicbridge/.env <<EOF
           FLASK_ENV=production
           DATABASE_URL=postgresql://forensicbridge:${DBPassword}@${Database.Endpoint.Address}:5432/forensicbridge
-          REDIS_URL=redis://${RedisCluster.RedisEndpoint.Address}:6379
+          REDIS_URL=redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379
           AWS_S3_BUCKET=${MigrationBucket}
           SECRETS_MANAGER_NAME=forensicbridge/production
           EOF

@@ -172,13 +172,14 @@ def stripe_webhook():
             payload, sig_header, webhook_secret
         )
     except ValueError as e:
-        # CRITICAL FIX: Return 200 to prevent Stripe retries
+        # CRIT-03 FIX: Return 400 for invalid payloads (malformed JSON)
         logger.error(f"Invalid payload: {str(e)}")
-        return jsonify({'received': True, 'error': 'Invalid payload'}), 200
+        return jsonify({'error': 'Invalid payload'}), 400
     except stripe.error.SignatureVerificationError as e:
-        # CRITICAL FIX: Return 200 to prevent Stripe retries
-        logger.error(f"Invalid signature: {str(e)}")
-        return jsonify({'received': True, 'error': 'Invalid signature'}), 200
+        # CRIT-03 FIX: Return 400 for invalid signatures to reject forged webhooks
+        # Stripe will NOT retry on 4xx errors, which is correct for security violations
+        logger.error(f"SECURITY: Invalid Stripe signature from {request.remote_addr}")
+        return jsonify({'error': 'Invalid signature'}), 400
     
     # Handle the event
     if event['type'] == 'checkout.session.completed':

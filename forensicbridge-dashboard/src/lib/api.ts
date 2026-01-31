@@ -45,14 +45,47 @@ interface ApiResponse<T> {
 // FIX FE-04: Default request timeout (30 seconds)
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// HIGH-09 FIX: Default retry configuration
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_MS = 1000;
+
 class ApiClient {
     private baseUrl: string;
     private token: string | null = null;
     private timeout: number;
+    private maxRetries: number;
+    private retryDelayMs: number;
 
-    constructor(baseUrl: string, timeout: number = DEFAULT_TIMEOUT_MS) {
+    constructor(
+        baseUrl: string,
+        timeout: number = DEFAULT_TIMEOUT_MS,
+        maxRetries: number = DEFAULT_MAX_RETRIES,
+        retryDelayMs: number = DEFAULT_RETRY_DELAY_MS
+    ) {
         this.baseUrl = baseUrl;
         this.timeout = timeout;
+        this.maxRetries = maxRetries;
+        this.retryDelayMs = retryDelayMs;
+    }
+
+    /**
+     * HIGH-09 FIX: Exponential backoff delay
+     */
+    private async delay(attempt: number): Promise<void> {
+        const delayMs = this.retryDelayMs * Math.pow(2, attempt);
+        return new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
+    /**
+     * HIGH-09 FIX: Check if error is retryable
+     */
+    private isRetryableError(status: number, error?: Error): boolean {
+        // Retry on network errors
+        if (error && (error.name === 'TypeError' || error.message.includes('Network'))) {
+            return true;
+        }
+        // Retry on 5xx server errors and 429 rate limiting
+        return status >= 500 || status === 429;
     }
 
     setToken(token: string | null) {
@@ -88,67 +121,96 @@ class ApiClient {
             ...options.headers,
         };
 
-        // FIX FE-04: Add request timeout using AbortController
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+        // HIGH-09 FIX: Retry loop with exponential backoff
+        let lastError: Error | null = null;
+        let lastStatus = 0;
 
-        try {
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                credentials: "include",
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
+        for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+            // FIX FE-04: Add request timeout using AbortController
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-            // SECURITY FIX: Parse and validate JSON with schema
-            const rawData = await response.json();
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers,
+                    credentials: "include",
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                lastStatus = response.status;
 
-            if (!response.ok) {
-                return {
-                    success: false,
-                    error: rawData.error || `HTTP ${response.status}`,
-                };
-            }
+                // SECURITY FIX: Parse and validate JSON with schema
+                const rawData = await response.json();
 
-            // SECURITY: Validate response data with Zod schema if provided
-            if (schema) {
-                try {
-                    const validatedData = schema.parse(rawData);
-                    return {
-                        success: true,
-                        data: validatedData,
-                    };
-                } catch (validationError) {
-                    console.error('Schema validation failed:', validationError);
+                if (!response.ok) {
+                    // HIGH-09 FIX: Check if error is retryable
+                    if (this.isRetryableError(response.status) && attempt < this.maxRetries) {
+                        console.warn(`[API] Retryable error ${response.status} on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}`);
+                        await this.delay(attempt);
+                        continue;
+                    }
+
                     return {
                         success: false,
-                        error: 'Invalid API response format. This may indicate a security issue.',
+                        error: rawData.error || `HTTP ${response.status}`,
                     };
                 }
-            }
 
-            // Fallback: return unvalidated data (backwards compatibility)
-            return {
-                success: true,
-                data: rawData as T,
-            };
-        } catch (error) {
-            clearTimeout(timeoutId);
+                // SECURITY: Validate response data with Zod schema if provided
+                if (schema) {
+                    try {
+                        const validatedData = schema.parse(rawData);
+                        return {
+                            success: true,
+                            data: validatedData,
+                        };
+                    } catch (validationError) {
+                        console.error('Schema validation failed:', validationError);
+                        return {
+                            success: false,
+                            error: 'Invalid API response format. This may indicate a security issue.',
+                        };
+                    }
+                }
 
-            // FIX FE-04: Specific error message for timeout
-            if (error instanceof Error && error.name === 'AbortError') {
+                // Fallback: return unvalidated data (backwards compatibility)
+                return {
+                    success: true,
+                    data: rawData as T,
+                };
+            } catch (error) {
+                clearTimeout(timeoutId);
+                lastError = error instanceof Error ? error : new Error(String(error));
+
+                // FIX FE-04: Specific error message for timeout
+                if (lastError.name === 'AbortError') {
+                    // Don't retry timeouts
+                    return {
+                        success: false,
+                        error: `Request timed out after ${this.timeout / 1000} seconds`,
+                    };
+                }
+
+                // HIGH-09 FIX: Retry on network errors
+                if (this.isRetryableError(0, lastError) && attempt < this.maxRetries) {
+                    console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}: ${lastError.message}`);
+                    await this.delay(attempt);
+                    continue;
+                }
+
                 return {
                     success: false,
-                    error: `Request timed out after ${this.timeout / 1000} seconds`,
+                    error: lastError.message || "Network error",
                 };
             }
-
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : "Network error",
-            };
         }
+
+        // Should not reach here, but handle gracefully
+        return {
+            success: false,
+            error: lastError?.message || `Request failed after ${this.maxRetries + 1} attempts`,
+        };
     }
 
     // ==========================================
