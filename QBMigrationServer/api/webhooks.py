@@ -28,8 +28,9 @@ def verify_webhook_signature(migration_id, signature, timestamp):
         webhook_secret = current_app.config.get('WEBHOOK_SECRET')
         
         if not webhook_secret:
-            logger.warning("WEBHOOK_SECRET not configured, skipping verification")
-            return True, None
+            # CRIT-04 FIX: Fail-closed when webhook secret is not configured
+            logger.error("WEBHOOK_SECRET not configured - rejecting webhook")
+            return False, "Webhook secret not configured. Set WEBHOOK_SECRET environment variable."
         
         # Parse timestamp
         try:

@@ -71,8 +71,14 @@ class OAuthManager:
                 from encryption import EncryptionManager
                 self.encryption_manager = EncryptionManager
             except ImportError:
-                # Fallback: no encryption (not recommended for production)
-                print("⚠️  WARNING: EncryptionManager not available. Tokens will be stored in plaintext!")
+                # HIGH-10 FIX: Fail in production mode instead of storing tokens in plaintext
+                import os
+                if os.getenv('FLASK_ENV', 'development') == 'production':
+                    raise ImportError(
+                        "EncryptionManager not available. Tokens cannot be stored securely. "
+                        "Install the encryption module or set FLASK_ENV=development for testing."
+                    )
+                print("⚠️  WARNING: EncryptionManager not available. Tokens will be stored in plaintext (dev only)!")
                 self.encryption_manager = None
         else:
             self.encryption_manager = encryption_manager
@@ -162,10 +168,19 @@ class OAuthManager:
                 print(f"⚠️  Azure Key Vault failed: {e}")
                 print("   Falling back to derived key")
         
-        # Fallback: Derive from client_secret (not ideal but better than nothing)
-        print("⚠️  Using fallback key derivation (not recommended for production)")
+        # HIGH-11 FIX: Fail in production mode - key derivation from client_secret is insecure
+        flask_env = os.getenv('FLASK_ENV', 'development')
+        if flask_env == 'production':
+            raise RuntimeError(
+                "CRITICAL: No KMS configured for token encryption in production mode. "
+                "Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption. "
+                "Key derivation from client_secret is not secure for production use."
+            )
+
+        # Fallback: Derive from client_secret (development only)
+        print("⚠️  Using fallback key derivation (DEVELOPMENT ONLY)")
         print("   Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption")
-        
+
         return self.encryption_manager.derive_key_from_password(
             self.client_secret,
             iterations=100000
@@ -437,11 +452,12 @@ class OAuthManager:
                 return True
                 
         except requests.exceptions.RequestException as e:
-            if fail_on_missing:
-                raise Exception(f"Scope verification failed: {e}")
-                
-            print(f"  ⚠️  Scope verification failed: {e}")
-            return True  # Assume OK if check fails
+            # CRIT-01 FIX: Fail-closed on scope verification errors
+            # Security policy: Cannot proceed without confirming OAuth scopes
+            raise Exception(
+                f"OAuth scope verification failed: {e}. "
+                f"Cannot proceed without confirming permissions."
+            )
     
     # ========================================================================
     # TOKEN REVOCATION

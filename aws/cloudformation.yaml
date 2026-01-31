@@ -549,25 +549,51 @@ Resources:
             VolumeType: gp3
             Encrypted: true
       UserData:
+        # CRIT-10 FIX: Retrieve secrets from Secrets Manager at runtime instead of embedding in UserData
         Fn::Base64: !Sub |
           #!/bin/bash
           apt-get update
-          apt-get install -y python3.11 python3-pip redis-tools postgresql-client nginx
-          pip3 install flask celery gunicorn redis psycopg2-binary
-          
+          apt-get install -y python3.11 python3-pip redis-tools postgresql-client nginx awscli jq
+          pip3 install flask celery gunicorn redis psycopg2-binary boto3
+
           # Create app directory
           mkdir -p /opt/forensicbridge
-          
-          # Set environment variables
+
+          # CRIT-10 FIX: Create startup script that retrieves secrets from Secrets Manager
+          cat > /opt/forensicbridge/load_secrets.sh <<'SCRIPT'
+          #!/bin/bash
+          # Retrieve database password from Secrets Manager at runtime
+          SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id forensicbridge/production --query SecretString --output text --region ${AWS::Region})
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to retrieve secrets from Secrets Manager"
+            exit 1
+          fi
+
+          DB_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.database_password')
+
+          # Set environment variables (never write password to disk)
+          export FLASK_ENV=production
+          export DATABASE_URL="postgresql://forensicbridge:$DB_PASSWORD@${Database.Endpoint.Address}:5432/forensicbridge"
+          export REDIS_URL="redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
+          export AWS_S3_BUCKET="${MigrationBucket}"
+          export SECRETS_MANAGER_NAME="forensicbridge/production"
+
+          # Start application with secrets in environment
+          exec "$@"
+          SCRIPT
+
+          chmod +x /opt/forensicbridge/load_secrets.sh
+
+          # Create env file with non-sensitive config only
           cat > /opt/forensicbridge/.env <<EOF
           FLASK_ENV=production
-          DATABASE_URL=postgresql://forensicbridge:${DBPassword}@${Database.Endpoint.Address}:5432/forensicbridge
           REDIS_URL=redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379
           AWS_S3_BUCKET=${MigrationBucket}
           SECRETS_MANAGER_NAME=forensicbridge/production
+          AWS_REGION=${AWS::Region}
           EOF
-          
-          echo "ForensicBridge server ready for deployment"
+
+          echo "ForensicBridge server ready for deployment (secrets loaded at runtime)"
       Tags:
         - Key: Name
           Value: !Sub forensicbridge-${Environment}-server

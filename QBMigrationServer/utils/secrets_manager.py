@@ -184,22 +184,23 @@ def validate_required_secrets(required_keys: list) -> Dict[str, bool]:
     return result
 
 
-# Production secrets template for AWS Secrets Manager
+# CRIT-06 FIX: Production secrets template with obviously fake placeholders
+# These placeholders are clearly marked as fake to prevent accidental use
 SECRETS_TEMPLATE = """
 {
-    "flask_secret_key": "YOUR_256_BIT_SECRET_KEY",
-    "database_url": "postgresql://user:password@host:5432/database",
-    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "flask_secret_key": "<REPLACE_WITH_256_BIT_SECRET_KEY>",
+    "database_url": "<REPLACE_WITH_DATABASE_URL>",
+    "aws_access_key_id": "<REPLACE_WITH_AWS_ACCESS_KEY>",
+    "aws_secret_access_key": "<REPLACE_WITH_AWS_SECRET_KEY>",
     "aws_region": "ca-central-1",
-    "aws_s3_bucket": "forensicbridge-prod-migrations",
-    "qbo_client_id": "YOUR_QBO_CLIENT_ID",
-    "qbo_client_secret": "YOUR_QBO_CLIENT_SECRET",
-    "qbo_refresh_token": "YOUR_QBO_REFRESH_TOKEN",
-    "qbo_realm_id": "YOUR_COMPANY_ID",
-    "webhook_secret": "YOUR_WEBHOOK_SECRET",
-    "backup_encryption_key": "YOUR_BACKUP_KEY",
-    "encryption_password": "YOUR_ENCRYPTION_PASSWORD"
+    "aws_s3_bucket": "<REPLACE_WITH_S3_BUCKET_NAME>",
+    "qbo_client_id": "<REPLACE_WITH_QBO_CLIENT_ID>",
+    "qbo_client_secret": "<REPLACE_WITH_QBO_CLIENT_SECRET>",
+    "qbo_refresh_token": "<REPLACE_WITH_QBO_REFRESH_TOKEN>",
+    "qbo_realm_id": "<REPLACE_WITH_QBO_REALM_ID>",
+    "webhook_secret": "<REPLACE_WITH_WEBHOOK_SECRET>",
+    "backup_encryption_key": "<REPLACE_WITH_BACKUP_KEY>",
+    "encryption_password": "<REPLACE_WITH_ENCRYPTION_PASSWORD>"
 }
 """
 
