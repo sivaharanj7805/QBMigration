@@ -3,32 +3,75 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
-    <PlatformTarget>x86</PlatformTarget>
-    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
-    <LangVersion>9.0</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <!-- P2 fix: Changed from x86 to AnyCPU for better x64 support -->
+    <Prefer32Bit>false</Prefer32Bit>
+    <!-- P1 fix: Use appropriate C# version for .NET Framework 4.8 -->
+    <LangVersion>8.0</LangVersion>
 
     <!-- Application settings -->
     <AssemblyName>ForensicBridge</AssemblyName>
     <RootNamespace>ForensicBridgeInstaller</RootNamespace>
     <Version>2.0.0</Version>
+    <FileVersion>2.0.0.0</FileVersion>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <Description>ForensicBridge QuickBooks Desktop Migration Launcher</Description>
     <Company>ForensicBridge Inc.</Company>
     <Product>ForensicBridge</Product>
+    <Copyright>Copyright © ForensicBridge Inc. 2024-2026</Copyright>
 
     <!-- Windows Forms -->
     <UseWindowsForms>true</UseWindowsForms>
 
-    <!-- Enable nullable types -->
-    <Nullable>enable</Nullable>
+    <!-- P3 fix: Nullable disabled for .NET Framework compatibility -->
+    <Nullable>disable</Nullable>
 
     <!-- Application icon -->
     <ApplicationIcon Condition="Exists('icon.ico')">icon.ico</ApplicationIcon>
+
+    <!-- DPI awareness settings -->
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+
+    <!-- Publish settings for self-contained deployment -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <IncludeAllContentForSelfExtract>false</IncludeAllContentForSelfExtract>
+
+    <!-- Enable deterministic builds for reproducibility -->
+    <Deterministic>true</Deterministic>
+
+    <!-- P7 note: Code signing should be done during CI/CD pipeline -->
+    <!-- <SignAssembly>true</SignAssembly> -->
+    <!-- <AssemblyOriginatorKeyFile>ForensicBridge.snk</AssemblyOriginatorKeyFile> -->
+  </PropertyGroup>
+
+  <!-- Debug configuration -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DebugType>full</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <Optimize>false</Optimize>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Release configuration -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
 
   <!-- NuGet packages -->
+  <!-- P5, P6 fix: Use versions compatible with .NET Framework 4.8 -->
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- P6 fix: Use System.Management version compatible with .NET Framework -->
+    <PackageReference Include="System.Management" Version="6.0.2" />
+  </ItemGroup>
+
+  <!-- Framework references for Windows Forms -->
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
   </ItemGroup>
 
   <!-- Copy config files to output -->
@@ -37,5 +80,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <!-- P4 fix: Warn if icon is missing during build -->
+  <Target Name="CheckIcon" BeforeTargets="Build">
+    <Warning Condition="!Exists('icon.ico')" Text="Application icon (icon.ico) is missing. The application will build without a custom icon." />
+  </Target>
 
 </Project>
