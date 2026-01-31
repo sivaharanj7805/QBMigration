@@ -329,9 +329,9 @@ namespace QBDesktopExtractor
                     return Math.Round(parsed, 2, MidpointRounding.AwayFromZero);
                 }
             }
-            catch (Exception ex)
+            catch (FormatException)
             {
-                Console.WriteLine($"⚠ Warning: Could not parse decimal value '{qbValue}': {ex.Message}");
+                // Invalid format - return null as this is expected for certain QB values
             }
 
             return null;
@@ -357,7 +357,10 @@ namespace QBDesktopExtractor
                     return Math.Round(parsed, decimalPlaces, MidpointRounding.AwayFromZero);
                 }
             }
-            catch { }
+            catch (FormatException)
+            {
+                // Invalid format - expected for certain QB values
+            }
 
             return null;
         }
@@ -375,8 +378,9 @@ namespace QBDesktopExtractor
                 string value = qbValue.ToString();
                 return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
             }
-            catch
+            catch (NullReferenceException)
             {
+                // QB value accessor threw - return null
                 return null;
             }
         }
@@ -398,7 +402,10 @@ namespace QBDesktopExtractor
                 if (DateTime.TryParse(valueStr, out DateTime parsed))
                     return parsed;
             }
-            catch { }
+            catch (NullReferenceException)
+            {
+                // QB value accessor threw - return null
+            }
 
             return null;
         }
@@ -422,7 +429,10 @@ namespace QBDesktopExtractor
                 if (valueStr == "false" || valueStr == "0" || valueStr == "no")
                     return false;
             }
-            catch { }
+            catch (NullReferenceException)
+            {
+                // QB value accessor threw - return null
+            }
 
             return null;
         }

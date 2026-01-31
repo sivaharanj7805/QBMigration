@@ -416,7 +416,10 @@ namespace QBDesktopExtractor
                 {
                     await AbortUploadAsync(uploadId, cancellationToken);
                 }
-                catch { }
+                catch (HttpRequestException)
+                {
+                    // Abort failed due to network - continue with re-throw
+                }
                 throw;
             }
         }
@@ -655,9 +658,13 @@ namespace QBDesktopExtractor
 
                 await _httpClient.PostAsync($"{_serverUrl}/api/upload/abort", content, cancellationToken);
             }
-            catch
+            catch (HttpRequestException)
             {
-                // Best effort
+                // Network failure during abort - best effort
+            }
+            catch (TaskCanceledException)
+            {
+                // Request cancelled - best effort
             }
         }
 

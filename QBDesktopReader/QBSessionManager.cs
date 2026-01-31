@@ -323,13 +323,13 @@ namespace QBDesktopExtractor
             {
                 if (_isSessionOpen)
                 {
-                    try { _qbfcSessionManager.EndSession(); } catch { }
+                    try { _qbfcSessionManager.EndSession(); } catch (System.Runtime.InteropServices.COMException) { /* Expected during cleanup */ }
                     _isSessionOpen = false;
                 }
 
                 if (_isConnected)
                 {
-                    try { _qbfcSessionManager.CloseConnection(); } catch { }
+                    try { _qbfcSessionManager.CloseConnection(); } catch (System.Runtime.InteropServices.COMException) { /* Expected during cleanup */ }
                     _isConnected = false;
                 }
             }
