@@ -127,12 +127,26 @@ export function CasewareBundleCard({
                 </div>
             </div>
 
-            {/* Error Display */}
+            {/* FIX: Enhanced error display with dismiss button and better visibility */}
             {error && (
-                <div className="px-6 py-3 bg-red-50 border-t border-red-200">
-                    <div className="flex items-center gap-2 text-red-700">
-                        <AlertCircle className="w-4 h-4" />
-                        <span className="text-sm">{error}</span>
+                <div className="px-6 py-4 bg-red-50 border-t-2 border-red-300">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2 text-red-700">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <p className="font-medium text-sm">Download Failed</p>
+                                <p className="text-sm text-red-600">{error}</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setError(null)}
+                            className="text-red-400 hover:text-red-600 transition-colors p-1"
+                            aria-label="Dismiss error"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
                     </div>
                 </div>
             )}

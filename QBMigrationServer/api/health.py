@@ -327,6 +327,96 @@ def detailed_health_check():
         }
         health_status['status'] = 'unhealthy'
 
+    # FIX: Circuit Breaker Status for health check
+    try:
+        # Check if any circuit breakers are open
+        circuit_breaker_status = {
+            'status': 'pass',
+            'breakers': {}
+        }
+
+        # Get circuit breaker states from config or global state
+        # Common circuit breakers: database, s3, qbo_api
+        breakers = current_app.config.get('CIRCUIT_BREAKERS', {})
+
+        for breaker_name, breaker_state in breakers.items():
+            is_open = breaker_state.get('is_open', False)
+            failure_count = breaker_state.get('failure_count', 0)
+            last_failure = breaker_state.get('last_failure_time')
+            reset_timeout = breaker_state.get('reset_timeout_seconds', 60)
+
+            circuit_breaker_status['breakers'][breaker_name] = {
+                'state': 'open' if is_open else 'closed',
+                'failure_count': failure_count,
+                'last_failure': last_failure,
+                'reset_timeout_seconds': reset_timeout
+            }
+
+            if is_open:
+                circuit_breaker_status['status'] = 'warn'
+
+        # Add circuit breaker summary
+        open_breakers = sum(1 for b in circuit_breaker_status['breakers'].values() if b['state'] == 'open')
+        circuit_breaker_status['open_count'] = open_breakers
+        circuit_breaker_status['total_count'] = len(circuit_breaker_status['breakers'])
+
+        if open_breakers > 0:
+            health_status['status'] = 'degraded'
+            circuit_breaker_status['message'] = f'{open_breakers} circuit breaker(s) open'
+
+        health_status['checks']['circuit_breakers'] = circuit_breaker_status
+
+    except Exception as e:
+        health_status['checks']['circuit_breakers'] = {
+            'status': 'unknown',
+            'message': f'Could not check circuit breakers: {str(e)}'
+        }
+
+    # FIX: Database Pool Status (SQLAlchemy connection pool)
+    try:
+        from sqlalchemy import pool as sa_pool
+        engine = db.engine
+
+        if hasattr(engine, 'pool'):
+            pool = engine.pool
+            pool_status = {
+                'status': 'pass',
+                'size': pool.size() if hasattr(pool, 'size') else 'unknown',
+                'checked_in': pool.checkedin() if hasattr(pool, 'checkedin') else 'unknown',
+                'checked_out': pool.checkedout() if hasattr(pool, 'checkedout') else 'unknown',
+                'overflow': pool.overflow() if hasattr(pool, 'overflow') else 'unknown',
+                'invalid': pool.invalidatedcount() if hasattr(pool, 'invalidatedcount') else 'unknown'
+            }
+
+            # Calculate pool health
+            if hasattr(pool, 'size') and hasattr(pool, 'checkedout'):
+                checked_out = pool.checkedout()
+                max_size = pool.size() + (pool.overflow() if hasattr(pool, 'overflow') else 0)
+                if max_size > 0:
+                    usage_pct = (checked_out / max_size) * 100
+                    pool_status['usage_percent'] = round(usage_pct, 1)
+
+                    if usage_pct >= 80:
+                        pool_status['status'] = 'warn'
+                        pool_status['message'] = 'Pool usage high'
+                    if usage_pct >= 95:
+                        pool_status['status'] = 'critical'
+                        pool_status['message'] = 'Pool nearly exhausted'
+                        health_status['status'] = 'degraded'
+
+            health_status['checks']['sqlalchemy_pool'] = pool_status
+        else:
+            health_status['checks']['sqlalchemy_pool'] = {
+                'status': 'info',
+                'message': 'No connection pool (NullPool or direct connection)'
+            }
+
+    except Exception as e:
+        health_status['checks']['sqlalchemy_pool'] = {
+            'status': 'unknown',
+            'message': f'Could not check SQLAlchemy pool: {str(e)}'
+        }
+
     status_code = 200 if health_status['status'] in ('healthy', 'degraded') else 503
     return jsonify(health_status), status_code
 

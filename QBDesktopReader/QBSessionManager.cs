@@ -255,10 +255,17 @@ namespace QBDesktopExtractor
 
                 try
                 {
+                    // FIX HIGH-08: Add null check for _qbfcSessionManager
+                    if (_qbfcSessionManager == null)
+                    {
+                        throw new InvalidOperationException(
+                            "QBFC Session Manager is null. The COM object may not have been created properly.");
+                    }
+
                     if (!_isConnected)
                     {
-                        _qbfcSessionManager.OpenConnection2("", 
-                            "QuickBooks Desktop Extractor v4.3", 
+                        _qbfcSessionManager.OpenConnection2("",
+                            "QuickBooks Desktop Extractor v4.3",
                             ENConnectionType.ctLocalQBD);
                         _isConnected = true;
                     }

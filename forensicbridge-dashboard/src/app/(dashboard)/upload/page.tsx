@@ -8,14 +8,17 @@ import {
     AlertCircle,
     X,
     HardDrive,
-    ArrowRight,
     Shield,
     Clock,
     Cloud,
     FileBarChart2,
     Building2
 } from "lucide-react";
+import { authFetch } from "@/lib/auth";
+import { sanitize } from "@/lib/sanitize";
+import { useLoadingGuard } from "@/lib/hooks/useSecurityHooks";
 
+// Types
 interface UploadedFile {
     name: string;
     size: number;
@@ -27,22 +30,144 @@ interface UploadedFile {
 
 type DestinationType = "qbo" | "caseware" | null;
 
-const supportedFormats = [
+// Constants
+const SUPPORTED_FORMATS = [
     { ext: ".QBW", name: "QuickBooks Company File", description: "Primary data file (recommended)" },
     { ext: ".QBB", name: "QuickBooks Backup", description: "Backup file format" },
     { ext: ".QBM", name: "QuickBooks Portable", description: "Smaller portable file" },
 ];
 
-// API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
+
+/**
+ * Validate QuickBooks file extension
+ * SECURITY: Prevents double-extension attacks
+ */
+function isValidQBFile(fileName: string): { valid: boolean; error?: string } {
+    const normalizedName = fileName.trim().toLowerCase();
+    const validExtensions = ['.qbw', '.qbb', '.qbm'];
+
+    // Check for valid extension
+    const hasValidExtension = validExtensions.some(ext => normalizedName.endsWith(ext));
+    if (!hasValidExtension) {
+        return { valid: false, error: 'Invalid file type. Please upload a .QBW, .QBB, or .QBM file.' };
+    }
+
+    // Reject files with multiple extensions (common attack vector)
+    const extensionCount = (normalizedName.match(/\.[a-z0-9]+/g) || []).length;
+    if (extensionCount > 1) {
+        return { valid: false, error: 'Files with multiple extensions are not allowed for security reasons.' };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Format file size for display
+ */
+function formatSize(bytes: number): string {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+/**
+ * File Status Badge Component
+ */
+function FileStatusBadge({ status, error }: { status: string; error?: string }) {
+    switch (status) {
+        case "validating":
+            return (
+                <span className="badge badge-warning flex items-center gap-1">
+                    <Clock className="w-3 h-3 animate-spin" />
+                    Validating
+                </span>
+            );
+        case "ready":
+            return (
+                <span className="badge badge-success flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Ready
+                </span>
+            );
+        case "error":
+            return (
+                <span className="badge badge-error flex items-center gap-1" title={error}>
+                    <AlertCircle className="w-3 h-3" />
+                    Error
+                </span>
+            );
+        default:
+            return null;
+    }
+}
+
+/**
+ * Destination Card Component
+ */
+function DestinationCard({
+    type,
+    title,
+    description,
+    tags,
+    selected,
+    onSelect,
+    color,
+    icon: Icon,
+}: {
+    type: DestinationType;
+    title: string;
+    description: string;
+    tags: { label: string; color: string }[];
+    selected: boolean;
+    onSelect: () => void;
+    color: string;
+    icon: React.ComponentType<{ className?: string }>;
+}) {
+    const borderColor = selected ? `border-${color}-500` : 'border-gray-200';
+    const bgColor = selected ? `bg-${color}-50` : '';
+    const ringColor = selected ? `ring-2 ring-${color}-200` : '';
+    const iconBgColor = selected ? `bg-${color}-500` : `bg-${color}-100`;
+    const iconTextColor = selected ? 'text-white' : `text-${color}-600`;
+
+    return (
+        <button
+            onClick={onSelect}
+            className={`p-6 rounded-xl border-2 text-left transition-all ${borderColor} ${bgColor} ${ringColor} hover:border-${color}-300 hover:bg-gray-50`}
+        >
+            <div className="flex items-start gap-4">
+                <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${iconBgColor}`}>
+                    <Icon className={`w-7 h-7 ${iconTextColor}`} />
+                </div>
+                <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 text-lg">{title}</h3>
+                    <p className="text-sm text-gray-600 mt-1">{description}</p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                        {tags.map((tag) => (
+                            <span key={tag.label} className={`text-xs ${tag.color} px-2 py-1 rounded`}>
+                                {tag.label}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+                {selected && (
+                    <CheckCircle2 className={`w-6 h-6 text-${color}-500`} />
+                )}
+            </div>
+        </button>
+    );
+}
 
 export default function UploadPage() {
     const [isDragActive, setIsDragActive] = useState(false);
     const [files, setFiles] = useState<UploadedFile[]>([]);
-    const [isProcessing, setIsProcessing] = useState(false);
     const [destination, setDestination] = useState<DestinationType>(null);
-    // FIX: Add error state instead of using alert()
     const [migrationError, setMigrationError] = useState<string | null>(null);
+
+    // Loading guard to prevent double-clicks
+    const { isLoading: isProcessing, execute } = useLoadingGuard();
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -55,8 +180,35 @@ export default function UploadPage() {
     }, []);
 
     const processFile = async (file: File) => {
+        // Validate file
+        const validation = isValidQBFile(file.name);
+        if (!validation.valid) {
+            const uploadedFile: UploadedFile = {
+                name: sanitize.filename(file.name),
+                size: file.size,
+                type: file.name.split('.').pop()?.toUpperCase() || "UNKNOWN",
+                status: "error",
+                error: validation.error,
+            };
+            setFiles(prev => [...prev, uploadedFile]);
+            return;
+        }
+
+        // Check file size
+        if (file.size > MAX_FILE_SIZE) {
+            const uploadedFile: UploadedFile = {
+                name: sanitize.filename(file.name),
+                size: file.size,
+                type: file.name.split('.').pop()?.toUpperCase() || "UNKNOWN",
+                status: "error",
+                error: "File too large. Maximum size is 5GB.",
+            };
+            setFiles(prev => [...prev, uploadedFile]);
+            return;
+        }
+
         const uploadedFile: UploadedFile = {
-            name: file.name,
+            name: sanitize.filename(file.name),
             size: file.size,
             type: file.name.split('.').pop()?.toUpperCase() || "UNKNOWN",
             status: "validating"
@@ -64,45 +216,35 @@ export default function UploadPage() {
 
         setFiles(prev => [...prev, uploadedFile]);
 
-        // HIGH-13 FIX: Call actual validation API instead of simulating
+        // Validate with server
         try {
             const formData = new FormData();
             formData.append('file', file);
 
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/upload/validate`, {
+            const response = await authFetch(`${API_URL}/api/upload/validate`, {
                 method: 'POST',
                 body: formData,
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                headers: {}, // Don't set Content-Type for FormData
             });
 
             if (response.ok) {
                 const data = await response.json();
                 setFiles(prev => prev.map(f =>
-                    f.name === file.name
-                        ? {
-                            ...f,
-                            status: "ready",
-                            records: data.record_count || data.records || 0
-                        }
+                    f.name === uploadedFile.name
+                        ? { ...f, status: "ready", records: data.record_count || data.records || 0 }
                         : f
                 ));
             } else {
                 const errorData = await response.json().catch(() => ({ error: 'Validation failed' }));
                 setFiles(prev => prev.map(f =>
-                    f.name === file.name
+                    f.name === uploadedFile.name
                         ? { ...f, status: "error", error: errorData.error || 'Validation failed' }
                         : f
                 ));
             }
-        } catch (error) {
-            // FIX: Only log in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error('File validation error:', error);
-            }
+        } catch {
             setFiles(prev => prev.map(f =>
-                f.name === file.name
+                f.name === uploadedFile.name
                     ? { ...f, status: "error", error: 'Failed to connect to validation server' }
                     : f
             ));
@@ -127,31 +269,20 @@ export default function UploadPage() {
         setFiles(prev => prev.filter(f => f.name !== name));
     };
 
-    const formatSize = (bytes: number) => {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-    };
-
     const readyFiles = files.filter(f => f.status === "ready");
 
     const handleStartMigration = async () => {
         if (!destination || readyFiles.length === 0) return;
 
-        setIsProcessing(true);
         setMigrationError(null);
-        try {
-            const formData = new FormData();
-            formData.append('destination', destination);
-            readyFiles.forEach(f => {
-                formData.append('file_names', f.name);
-            });
 
-            const response = await fetch(`${API_URL}/api/migrations`, {
+        const result = await execute(async () => {
+            const response = await authFetch(`${API_URL}/api/migrations`, {
                 method: 'POST',
-                body: JSON.stringify({ destination, files: readyFiles.map(f => f.name) }),
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
+                body: JSON.stringify({
+                    destination,
+                    files: readyFiles.map(f => f.name)
+                }),
             });
 
             if (response.ok) {
@@ -160,25 +291,21 @@ export default function UploadPage() {
                 if (migrationId) {
                     window.location.href = `/migrations/${migrationId}`;
                 }
+                return { success: true };
             } else {
-                // FIX: Use error state instead of alert
                 const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-                setMigrationError(errorData.error || "Failed to start migration. Please try again.");
+                return { success: false, error: errorData.error || "Failed to start migration" };
             }
-        } catch (error) {
-            // FIX: Only log in development
-            if (process.env.NODE_ENV === 'development') {
-                console.error("Migration start error:", error);
-            }
-            setMigrationError("Failed to connect to server. Please check your connection and try again.");
-        } finally {
-            setIsProcessing(false);
+        });
+
+        if (result && !result.success) {
+            setMigrationError(result.error || "Failed to start migration. Please try again.");
         }
     };
 
     return (
         <div className="space-y-6">
-            {/* FIX: Error toast for migration errors */}
+            {/* Error toast for migration errors */}
             {migrationError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-red-700">
@@ -213,14 +340,16 @@ export default function UploadPage() {
                     {/* QuickBooks Online Option */}
                     <button
                         onClick={() => setDestination("qbo")}
-                        className={`p-6 rounded-xl border-2 text-left transition-all ${destination === "qbo"
+                        className={`p-6 rounded-xl border-2 text-left transition-all ${
+                            destination === "qbo"
                                 ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
                                 : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                            }`}
+                        }`}
                     >
                         <div className="flex items-start gap-4">
-                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${destination === "qbo" ? "bg-blue-500" : "bg-blue-100"
-                                }`}>
+                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${
+                                destination === "qbo" ? "bg-blue-500" : "bg-blue-100"
+                            }`}>
                                 <Cloud className={`w-7 h-7 ${destination === "qbo" ? "text-white" : "text-blue-600"}`} />
                             </div>
                             <div className="flex-1">
@@ -242,14 +371,16 @@ export default function UploadPage() {
                     {/* Caseware Option */}
                     <button
                         onClick={() => setDestination("caseware")}
-                        className={`p-6 rounded-xl border-2 text-left transition-all ${destination === "caseware"
+                        className={`p-6 rounded-xl border-2 text-left transition-all ${
+                            destination === "caseware"
                                 ? "border-purple-500 bg-purple-50 ring-2 ring-purple-200"
                                 : "border-gray-200 hover:border-purple-300 hover:bg-gray-50"
-                            }`}
+                        }`}
                     >
                         <div className="flex items-start gap-4">
-                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${destination === "caseware" ? "bg-purple-500" : "bg-purple-100"
-                                }`}>
+                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${
+                                destination === "caseware" ? "bg-purple-500" : "bg-purple-100"
+                            }`}>
                                 <FileBarChart2 className={`w-7 h-7 ${destination === "caseware" ? "text-white" : "text-purple-600"}`} />
                             </div>
                             <div className="flex-1">
@@ -269,10 +400,10 @@ export default function UploadPage() {
                     </button>
                 </div>
 
-                {/* Caseware Details (shown when selected) */}
+                {/* Caseware Details */}
                 {destination === "caseware" && (
                     <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                        <h4 className="font-medium text-purple-900 mb-2">📦 Caseware Audit Bundle Includes:</h4>
+                        <h4 className="font-medium text-purple-900 mb-2">Caseware Audit Bundle Includes:</h4>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                             <div className="flex items-center gap-2 text-purple-700">
                                 <CheckCircle2 className="w-4 h-4" />
@@ -297,8 +428,9 @@ export default function UploadPage() {
             {/* STEP 2: Upload Files */}
             <div className={`card-forensic p-6 transition-opacity ${!destination ? "opacity-50 pointer-events-none" : ""}`}>
                 <div className="flex items-center gap-3 mb-6">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${destination ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
-                        }`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
+                        destination ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"
+                    }`}>
                         2
                     </div>
                     <h2 className="text-lg font-semibold text-gray-900">Upload QuickBooks Desktop File</h2>
@@ -318,7 +450,7 @@ export default function UploadPage() {
                     <p className="text-lg font-medium text-gray-700 mb-1">
                         Drag & Drop your QuickBooks file here
                     </p>
-                    <p className="text-sm text-gray-400 mb-4">Supports .QBW, .QBB, .QBM</p>
+                    <p className="text-sm text-gray-400 mb-4">Supports .QBW, .QBB, .QBM (max 5GB)</p>
                     <label className="btn-primary cursor-pointer">
                         Select File
                         <input
@@ -349,35 +481,21 @@ export default function UploadPage() {
                                     <div>
                                         <p className="font-medium text-gray-900">{file.name}</p>
                                         <p className="text-sm text-gray-500">
-                                            {formatSize(file.size)} • {file.type}
-                                            {file.records && ` • ${file.records.toLocaleString()} records`}
+                                            {formatSize(file.size)} {file.type}
+                                            {file.records && ` - ${file.records.toLocaleString()} records`}
                                         </p>
+                                        {file.error && (
+                                            <p className="text-xs text-red-500 mt-1">{file.error}</p>
+                                        )}
                                     </div>
                                 </div>
 
                                 <div className="flex items-center gap-4">
-                                    {file.status === "validating" && (
-                                        <span className="badge badge-warning flex items-center gap-1">
-                                            <Clock className="w-3 h-3 animate-spin" />
-                                            Validating
-                                        </span>
-                                    )}
-                                    {file.status === "ready" && (
-                                        <span className="badge badge-success flex items-center gap-1">
-                                            <CheckCircle2 className="w-3 h-3" />
-                                            Ready
-                                        </span>
-                                    )}
-                                    {file.status === "error" && (
-                                        <span className="badge badge-error flex items-center gap-1">
-                                            <AlertCircle className="w-3 h-3" />
-                                            Error
-                                        </span>
-                                    )}
-
+                                    <FileStatusBadge status={file.status} error={file.error} />
                                     <button
                                         onClick={() => removeFile(file.name)}
                                         className="p-1.5 hover:bg-gray-100 rounded"
+                                        aria-label={`Remove ${file.name}`}
                                     >
                                         <X className="w-4 h-4 text-gray-400" />
                                     </button>
@@ -401,8 +519,9 @@ export default function UploadPage() {
                             <button
                                 onClick={handleStartMigration}
                                 disabled={isProcessing}
-                                className={`btn-primary flex items-center gap-2 ${destination === "caseware" ? "!bg-purple-600 hover:!bg-purple-700" : ""
-                                    }`}
+                                className={`btn-primary flex items-center gap-2 ${
+                                    destination === "caseware" ? "!bg-purple-600 hover:!bg-purple-700" : ""
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
                                 {isProcessing ? (
                                     <>
@@ -454,8 +573,9 @@ export default function UploadPage() {
                         <p className="text-xs text-gray-500">Server decrypts, verifies hashes, transforms data</p>
                     </div>
                     <div className="text-center p-4 bg-gray-50 rounded-lg">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2 ${destination === "caseware" ? "bg-purple-100" : "bg-amber-100"
-                            }`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2 ${
+                            destination === "caseware" ? "bg-purple-100" : "bg-amber-100"
+                        }`}>
                             <span className={`font-bold ${destination === "caseware" ? "text-purple-600" : "text-amber-600"}`}>4</span>
                         </div>
                         <p className="font-medium text-sm">

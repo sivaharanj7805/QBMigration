@@ -11,7 +11,7 @@ import datetime
 import re
 import hmac
 import hashlib
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable, Any
 import logging
 
 from models.database import db
@@ -79,33 +79,42 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
-def require_auth(f):
-    """Decorator to require authentication for an endpoint (supports both JWT and session)"""
+def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator to require authentication for an endpoint (supports both JWT and session)
+
+    Args:
+        f: The function to decorate
+
+    Returns:
+        The decorated function that requires authentication
+    """
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> Tuple[Any, int]:
         # Check for JWT token in Authorization header
         auth_header = request.headers.get('Authorization')
-        
+
         if auth_header:
             try:
                 # Expect "Bearer <token>"
                 parts = auth_header.split()
                 if len(parts) != 2 or parts[0].lower() != 'bearer':
                     return jsonify({'success': False, 'error': 'Invalid authorization format'}), 401
-                
+
                 token = parts[1]
                 payload = decode_token(token)
-                
+
                 if not payload:
                     return jsonify({'success': False, 'error': 'Invalid or expired token'}), 401
-                
+
                 # Add user info to request
                 request.current_user = payload
                 return f(*args, **kwargs)
-                
+
             except Exception as e:
+                # FIX: Log specific exception type before returning generic error
+                logger.warning(f"Authentication failed with {type(e).__name__}: {str(e)}")
                 return jsonify({'success': False, 'error': 'Authentication failed'}), 401
-        
+
         # Check for session-based auth
         if 'user_id' in session:
             request.current_user = {
@@ -113,7 +122,7 @@ def require_auth(f):
                 'email': session.get('email', '')
             }
             return f(*args, **kwargs)
-        
+
         return jsonify({'success': False, 'error': 'No authorization provided'}), 401
     return decorated
 
@@ -838,45 +847,57 @@ def get_captcha_configuration():
 def check_captcha_requirement():
     """
     Check if CAPTCHA is required for a specific email.
-    
+
     FIX #38: Allow frontend to check CAPTCHA requirement before submitting credentials.
-    
+    HIGH FIX: Email enumeration prevention - never reveal if user exists.
+
     Request:
     {
         "email": "user@example.com"
     }
-    
+
     Response:
     {
         "captcha_required": false,
-        "failed_attempts": 0,
         "threshold": 3
     }
     """
+    import time
+    start_time = time.time()
+
     data = request.get_json()
-    
+
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
+
     email = data.get('email', '').strip().lower()
-    
+
     if not email:
         return jsonify({'success': False, 'error': 'Email required'}), 400
-    
+
     # Look up user
     user = User.query.filter_by(email=email).first()
-    
+
     # Get failed attempts (0 if user doesn't exist)
     failed_attempts = user.failed_login_attempts if user else 0
-    
+
     # Check if CAPTCHA is required
     captcha_required = is_captcha_required(email, failed_attempts)
-    
+
+    # HIGH FIX: Ensure constant response timing to prevent email enumeration
+    # Response should take the same time regardless of whether user exists
+    elapsed = time.time() - start_time
+    min_response_time = 0.1  # 100ms minimum response time
+    if elapsed < min_response_time:
+        time.sleep(min_response_time - elapsed)
+
+    # HIGH FIX: Do NOT return failed_attempts - this reveals if user exists
+    # Attackers could enumerate emails by checking which ones have > 0 attempts
     return jsonify({
         'success': True,
         'captcha_required': captcha_required,
-        'failed_attempts': failed_attempts,
         'threshold': 3  # CAPTCHA required after 3 failed attempts
+        # NOTE: failed_attempts intentionally removed to prevent email enumeration
     })
 
 

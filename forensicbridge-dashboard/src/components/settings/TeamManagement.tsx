@@ -137,7 +137,14 @@ export function TeamManagement() {
             )}
 
             {/* Team Members List */}
-            <div className="space-y-3">
+            <div className="space-y-3" role="list" aria-label="Team members">
+                {teamMembers.length === 0 ? (
+                    <div className="p-8 text-center text-gray-500" role="status">
+                        <Users className="w-12 h-12 mx-auto text-gray-300 mb-3" aria-hidden="true" />
+                        <p className="text-lg font-medium text-gray-600">No team members yet</p>
+                        <p className="text-sm">Invite team members to collaborate on migrations</p>
+                    </div>
+                ) : null}
                 {teamMembers.map((member) => (
                     <div
                         key={member.id}

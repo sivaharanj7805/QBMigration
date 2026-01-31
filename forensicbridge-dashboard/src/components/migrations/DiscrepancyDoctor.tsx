@@ -120,7 +120,7 @@ export function DiscrepancyDoctor({
 
                 {discrepancies.map((discrepancy, index) => (
                     <div
-                        key={index}
+                        key={`${discrepancy.account_name}-${discrepancy.account_type}-${index}`}
                         className={`rounded-lg border ${getSeverityClass(discrepancy.severity)}`}
                     >
                         {/* Row Header */}

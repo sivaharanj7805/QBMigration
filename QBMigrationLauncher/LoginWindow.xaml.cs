@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Security.Cryptography;
@@ -16,26 +19,58 @@ namespace QBMigrationLauncher
     /// </summary>
     public partial class LoginWindow : Window
     {
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // FIX #11: Configure HttpClient with connection pooling and proper lifetime
+        private static readonly HttpClient _httpClient;
         private static readonly string API_BASE_URL;
         private static readonly string SESSION_PATH;
 
-        // FIX #31: Basic email validation pattern
+        // FIX MEDIUM: Improved email validation pattern with additional checks
+        // - Must have valid local part (no consecutive dots, no leading/trailing dots)
+        // - Domain must have valid TLD (2-63 characters)
+        // - Overall length validation (max 254 characters per RFC 5321)
         private static readonly Regex EmailPattern = new Regex(
-            @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+            @"^(?!.*\.\.)(?!\.)[a-zA-Z0-9._%+-]{1,64}(?<!\.)@[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,63}$",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // FIX MEDIUM: UI loading timeout to prevent indefinite waiting
+        // FIX LOW: Use constant from centralized location
+        private static readonly TimeSpan LoadingTimeout = Constants.Timeouts.UiLoading;
+        private CancellationTokenSource? _loadingTimeoutCts;
+
+        // FIX #16: Rate limiting state
+        // FIX LOW: Use constants from centralized location
+        private int _failedLoginAttempts = 0;
+        private DateTime _lastFailedAttempt = DateTime.MinValue;
+        private static readonly int MaxFailedAttempts = Constants.Auth.MaxFailedAttempts;
+        private static readonly TimeSpan LockoutDuration = Constants.Auth.LockoutDuration;
         
         static LoginWindow()
         {
-            API_BASE_URL = Environment.GetEnvironmentVariable("FORENSICBRIDGE_API_URL") 
-                           ?? "https://api.forensicbridge.ca";
-            
+            // FIX LOW: Use constant for default API URL
+            API_BASE_URL = Environment.GetEnvironmentVariable("FORENSICBRIDGE_API_URL")
+                           ?? Constants.Urls.DefaultApiBaseUrl;
+
             var appDataPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "ForensicBridge"
             );
             Directory.CreateDirectory(appDataPath);
             SESSION_PATH = Path.Combine(appDataPath, "session.dat");
+
+            // FIX #11: Configure HttpClient with connection pooling to prevent socket exhaustion
+            var handler = new SocketsHttpHandler
+            {
+                // Connection pooling settings
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                MaxConnectionsPerServer = 10,
+                // Enable keep-alive
+                EnableMultipleHttp2Connections = true
+            };
+            _httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(30)
+            };
         }
         
         public LoginWindow()
@@ -115,50 +150,89 @@ namespace QBMigrationLauncher
         
         /// <summary>
         /// Handle Sign In button click
+        /// FIX #6: Clear password from memory after use
+        /// FIX #7: Map server errors to generic messages
+        /// FIX #16: Add client-side rate limiting
         /// </summary>
         private async void SignInButton_Click(object sender, RoutedEventArgs e)
         {
             var email = EmailTextBox.Text?.Trim();
             var password = PasswordBox.Password;
-            
-            // Validation
-            if (string.IsNullOrEmpty(email))
-            {
-                ShowError("Please enter your email address.");
-                return;
-            }
 
-            // FIX #31: Validate email format before API call
-            if (!EmailPattern.IsMatch(email))
-            {
-                ShowError("Please enter a valid email address.");
-                return;
-            }
-
-            if (string.IsNullOrEmpty(password))
-            {
-                ShowError("Please enter your password.");
-                return;
-            }
-            
-            ShowLoading(true);
-            HideError();
-            
             try
             {
+                // FIX #16: Check rate limiting before proceeding
+                if (IsRateLimited())
+                {
+                    var remainingTime = LockoutDuration - (DateTime.UtcNow - _lastFailedAttempt);
+                    ShowError($"Too many failed attempts. Please try again in {Math.Ceiling(remainingTime.TotalMinutes)} minutes.");
+                    return;
+                }
+
+                // Validation
+                if (string.IsNullOrEmpty(email))
+                {
+                    ShowError("Please enter your email address.");
+                    return;
+                }
+
+                // FIX MEDIUM: Improved email validation with length check
+                // FIX LOW: Use constant for max email length
+                if (email.Length > Constants.Auth.MaxEmailLength)
+                {
+                    ShowError("Email address is too long (max 254 characters).");
+                    return;
+                }
+
+                // FIX #31: Validate email format before API call
+                if (!EmailPattern.IsMatch(email))
+                {
+                    ShowError("Please enter a valid email address.");
+                    return;
+                }
+
+                // FIX MEDIUM: Additional validation - check for common typos in domain
+                var emailDomain = email.Substring(email.LastIndexOf('@') + 1).ToLowerInvariant();
+                var commonTypos = new Dictionary<string, string>
+                {
+                    { "gmial.com", "gmail.com" },
+                    { "gmal.com", "gmail.com" },
+                    { "gamil.com", "gmail.com" },
+                    { "outlok.com", "outlook.com" },
+                    { "hotmal.com", "hotmail.com" },
+                    { "yahooo.com", "yahoo.com" }
+                };
+                if (commonTypos.ContainsKey(emailDomain))
+                {
+                    ShowError($"Did you mean {email.Replace(emailDomain, commonTypos[emailDomain])}?");
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(password))
+                {
+                    ShowError("Please enter your password.");
+                    return;
+                }
+
+                ShowLoading(true);
+                HideError();
+
                 var loginData = new { email, password };
                 var json = JsonSerializer.Serialize(loginData);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
-                
+
                 var response = await _httpClient.PostAsync($"{API_BASE_URL}/api/auth/login", content);
                 var responseBody = await response.Content.ReadAsStringAsync();
-                
+
                 if (response.IsSuccessStatusCode)
                 {
                     var result = JsonSerializer.Deserialize<LoginResponse>(responseBody);
-                    
+
                     if (result?.success == true && !string.IsNullOrEmpty(result.token))
                     {
+                        // FIX #16: Reset rate limiting on successful login
+                        _failedLoginAttempts = 0;
+
                         // Save session
                         // CRIT-08 FIX: Set expiry time (default 24 hours, or from server response)
                         var session = new SessionData
@@ -170,33 +244,107 @@ namespace QBMigrationLauncher
                             CompanyName = result.user?.company_name,
                             ExpiresAt = DateTime.UtcNow.AddHours(24)  // Default 24 hour expiry
                         };
-                        
+
                         SaveSession(session);
                         App.CurrentSession = session;
-                        
+
                         OpenMainWindow();
                         return;
                     }
                 }
-                
-                // Parse error
+
+                // FIX #16: Increment failed attempts counter
+                _failedLoginAttempts++;
+                _lastFailedAttempt = DateTime.UtcNow;
+
+                // FIX #7: Map server errors to generic messages - don't expose details
                 var errorResult = JsonSerializer.Deserialize<ErrorResponse>(responseBody);
-                ShowError(errorResult?.error ?? "Login failed. Please check your credentials.");
+                var serverError = errorResult?.error ?? "";
+
+                // Log the actual error for debugging (server-side only in production)
+                Console.WriteLine($"Login failed: {serverError}");
+
+                // FIX #7: Show generic error to user, don't leak server internals
+                ShowError(MapServerErrorToUserMessage(serverError));
             }
             catch (HttpRequestException)
             {
                 ShowError("Unable to connect to server. Please check your internet connection.");
             }
+            catch (TaskCanceledException)
+            {
+                ShowError("Request timed out. Please try again.");
+            }
             catch (Exception ex)
             {
-                // HIGH-02 FIX: Don't expose exception details to users - log server-side only
+                // FIX #7: Don't expose exception details to users - log internally only
                 Console.WriteLine($"Login error (internal): {ex.Message}");
                 ShowError("An unexpected error occurred. Please try again.");
             }
             finally
             {
+                // FIX #6: Clear password from memory immediately after use
+                PasswordBox.Clear();
                 ShowLoading(false);
             }
+        }
+
+        /// <summary>
+        /// FIX #16: Check if user is currently rate limited
+        /// </summary>
+        private bool IsRateLimited()
+        {
+            if (_failedLoginAttempts < MaxFailedAttempts)
+                return false;
+
+            // Check if lockout period has expired
+            if (DateTime.UtcNow - _lastFailedAttempt > LockoutDuration)
+            {
+                // Reset rate limiting
+                _failedLoginAttempts = 0;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// FIX #7: Map server error messages to user-friendly generic messages
+        /// </summary>
+        private static string MapServerErrorToUserMessage(string serverError)
+        {
+            // Map known error types to generic messages
+            if (string.IsNullOrEmpty(serverError))
+                return "Login failed. Please check your credentials.";
+
+            var lowerError = serverError.ToLowerInvariant();
+
+            if (lowerError.Contains("invalid") || lowerError.Contains("incorrect") ||
+                lowerError.Contains("wrong") || lowerError.Contains("password") ||
+                lowerError.Contains("email") || lowerError.Contains("credentials"))
+            {
+                return "Invalid email or password. Please try again.";
+            }
+
+            if (lowerError.Contains("locked") || lowerError.Contains("disabled") ||
+                lowerError.Contains("suspended"))
+            {
+                return "Your account has been locked. Please contact support.";
+            }
+
+            if (lowerError.Contains("expired"))
+            {
+                return "Your session has expired. Please log in again.";
+            }
+
+            if (lowerError.Contains("rate") || lowerError.Contains("limit") ||
+                lowerError.Contains("too many"))
+            {
+                return "Too many login attempts. Please wait a few minutes.";
+            }
+
+            // Default generic message
+            return "Login failed. Please try again.";
         }
         
         /// <summary>
@@ -274,6 +422,44 @@ namespace QBMigrationLauncher
                 EmailTextBox.IsEnabled = !show;
                 PasswordBox.IsEnabled = !show;
             });
+
+            // FIX MEDIUM: Add UI loading timeout to prevent indefinite waiting
+            if (show)
+            {
+                // Cancel any existing timeout
+                _loadingTimeoutCts?.Cancel();
+                _loadingTimeoutCts = new CancellationTokenSource();
+
+                // Start timeout task
+                var timeoutToken = _loadingTimeoutCts.Token;
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(LoadingTimeout, timeoutToken);
+
+                        // Timeout reached - hide loading and show error
+                        if (!timeoutToken.IsCancellationRequested)
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                ShowLoading(false);
+                                ShowError("Request timed out. Please try again.");
+                            });
+                        }
+                    }
+                    catch (TaskCanceledException)
+                    {
+                        // Timeout was cancelled - this is expected when loading completes normally
+                    }
+                }, timeoutToken);
+            }
+            else
+            {
+                // Loading complete - cancel the timeout
+                _loadingTimeoutCts?.Cancel();
+                _loadingTimeoutCts = null;
+            }
         }
         
         private void ShowError(string message)
@@ -335,5 +521,95 @@ namespace QBMigrationLauncher
         /// CRIT-08 FIX: Token expiration timestamp for local validation
         /// </summary>
         public DateTime ExpiresAt { get; set; } = DateTime.MinValue;
+
+        /// <summary>
+        /// FIX #8: Check if the session is expired locally
+        /// </summary>
+        public bool IsExpired => ExpiresAt != DateTime.MinValue && DateTime.UtcNow >= ExpiresAt;
+
+        /// <summary>
+        /// FIX #8: Check if the session is valid (has token and not expired)
+        /// </summary>
+        public bool IsValid => !string.IsNullOrEmpty(Token) && !IsExpired;
+    }
+
+    /// <summary>
+    /// FIX #8: Helper class for making authenticated API calls with session expiry enforcement
+    /// </summary>
+    public static class AuthenticatedHttpClient
+    {
+        private static readonly HttpClient _client;
+        private static readonly string _apiBaseUrl;
+
+        static AuthenticatedHttpClient()
+        {
+            _apiBaseUrl = Environment.GetEnvironmentVariable("FORENSICBRIDGE_API_URL")
+                          ?? "https://api.forensicbridge.ca";
+
+            var handler = new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                MaxConnectionsPerServer = 10
+            };
+            _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+        }
+
+        /// <summary>
+        /// FIX #8: Check session expiry on every API call
+        /// Throws SessionExpiredException if session is expired
+        /// </summary>
+        public static async Task<HttpResponseMessage> SendAuthenticatedAsync(
+            HttpRequestMessage request,
+            SessionData? session)
+        {
+            // FIX #8: Always check session expiry before making API call
+            if (session == null || !session.IsValid)
+            {
+                throw new SessionExpiredException("Session is expired or invalid. Please log in again.");
+            }
+
+            // Add authorization header
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", session.Token);
+
+            var response = await _client.SendAsync(request);
+
+            // FIX #8: Check for 401 Unauthorized which indicates server-side session expiry
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                throw new SessionExpiredException("Session has expired. Please log in again.");
+            }
+
+            return response;
+        }
+
+        /// <summary>
+        /// FIX #8: Convenience method for GET requests
+        /// </summary>
+        public static async Task<HttpResponseMessage> GetAsync(string endpoint, SessionData? session)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{_apiBaseUrl}{endpoint}");
+            return await SendAuthenticatedAsync(request, session);
+        }
+
+        /// <summary>
+        /// FIX #8: Convenience method for POST requests
+        /// </summary>
+        public static async Task<HttpResponseMessage> PostAsync(string endpoint, HttpContent content, SessionData? session)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}{endpoint}")
+            {
+                Content = content
+            };
+            return await SendAuthenticatedAsync(request, session);
+        }
+    }
+
+    /// <summary>
+    /// FIX #8: Exception thrown when session is expired
+    /// </summary>
+    public class SessionExpiredException : Exception
+    {
+        public SessionExpiredException(string message) : base(message) { }
     }
 }

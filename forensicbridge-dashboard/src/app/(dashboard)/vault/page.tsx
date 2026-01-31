@@ -208,23 +208,25 @@ export default function VaultPage() {
 
             {/* Search */}
             <div className="card-forensic p-4">
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4" role="search">
                     <div className="flex-1 relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
                         <input
-                            type="text"
+                            type="search"
                             placeholder="Search archived companies, transactions, dates..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="input pl-10"
+                            aria-label="Search archived companies"
+                            maxLength={MAX_SEARCH_LENGTH}
                         />
                     </div>
-                    <button className="btn-secondary flex items-center gap-2">
-                        <Filter className="w-4 h-4" />
+                    <button className="btn-secondary flex items-center gap-2" aria-label="Open filters">
+                        <Filter className="w-4 h-4" aria-hidden="true" />
                         Filters
                     </button>
-                    <button className="btn-secondary flex items-center gap-2">
-                        <Calendar className="w-4 h-4" />
+                    <button className="btn-secondary flex items-center gap-2" aria-label="Select date range">
+                        <Calendar className="w-4 h-4" aria-hidden="true" />
                         Date Range
                     </button>
                 </div>
@@ -242,10 +244,16 @@ export default function VaultPage() {
                         Loading archives...
                     </div>
                 ) : filteredArchives.length === 0 ? (
-                    <div className="p-8 text-center text-gray-500">
-                        <Archive className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-                        <p className="text-lg font-medium text-gray-600">No archived companies yet</p>
-                        <p className="text-sm">Completed migrations will appear here after 7 days</p>
+                    <div className="p-8 text-center text-gray-500" role="status" aria-live="polite">
+                        <Archive className="w-12 h-12 mx-auto text-gray-300 mb-3" aria-hidden="true" />
+                        <p className="text-lg font-medium text-gray-600">
+                            {searchTerm ? "No archived companies match your search" : "No archived companies yet"}
+                        </p>
+                        <p className="text-sm">
+                            {searchTerm
+                                ? `No results found for "${searchTerm}". Try a different search term.`
+                                : "Completed migrations will appear here after 7 days"}
+                        </p>
                     </div>
                 ) : (
                     <div className="divide-y divide-gray-100">

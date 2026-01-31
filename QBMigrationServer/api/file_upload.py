@@ -9,6 +9,7 @@ import os
 import tempfile
 import json
 from datetime import datetime
+from pathlib import Path
 
 from api.auth import require_auth
 from models import db, Migration
@@ -50,39 +51,49 @@ def upload_qb_export():
         }), 400
     
     # Save file temporarily
-    # FIX HIGH-02: Add path traversal protection
+    # HIGH FIX: Path traversal protection using pathlib.Path.resolve() with relative_to()
+    # This is more robust than string prefix matching
     filename = secure_filename(file.filename)
     if not filename or filename == '':
         return jsonify({'error': 'Invalid filename'}), 400
 
+    # FIX: Wrap entire function in try/finally to ensure temp_dir cleanup
     temp_dir = tempfile.mkdtemp()
-    file_path = os.path.join(temp_dir, filename)
+    temp_dir_path = Path(temp_dir).resolve()
+    file_path = None  # Initialize for cleanup tracking
 
-    # Validate that the final path is within temp_dir (prevent path traversal)
-    real_temp_dir = os.path.realpath(temp_dir)
-    real_file_path = os.path.realpath(file_path)
-    if not real_file_path.startswith(real_temp_dir + os.sep):
-        os.rmdir(temp_dir)
-        return jsonify({'error': 'Invalid file path'}), 400
-
-    file.save(file_path)
-    
-    # Get file size
-    file_size = os.path.getsize(file_path)
-    
     try:
+        file_path = temp_dir_path / filename
+
+        # Validate that the resolved path is within temp_dir (prevent path traversal)
+        # Using relative_to() raises ValueError if file_path is not under temp_dir_path
+        try:
+            resolved_file_path = file_path.resolve()
+            # This will raise ValueError if resolved_file_path is not relative to temp_dir_path
+            resolved_file_path.relative_to(temp_dir_path)
+        except ValueError:
+            # Path traversal attempt detected
+            return jsonify({'error': 'Invalid file path'}), 400
+
+        # Convert back to string for compatibility with existing code
+        file_path = str(resolved_file_path)
+        file.save(file_path)
+
+        # Get file size
+        file_size = os.path.getsize(file_path)
+
         # Parse the file
         from services.iif_parser import QuickBooksExportParser
-        
+
         parser = QuickBooksExportParser()
         parsed_data = parser.parse(file_path)
-        
+
         # Create or update migration record
         migration = Migration.query.filter_by(
-            session_id=session_id, 
+            session_id=session_id,
             user_id=user_id
         ).first()
-        
+
         if not migration:
             migration = Migration(
                 user_id=user_id,
@@ -91,16 +102,12 @@ def upload_qb_export():
                 ip_address=request.remote_addr
             )
             db.session.add(migration)
-        
+
         migration.data_size_bytes = file_size
         migration.status = 'parsed'
-        
+
         db.session.commit()
-        
-        # Clean up temp file
-        os.remove(file_path)
-        os.rmdir(temp_dir)
-        
+
         return jsonify({
             'success': True,
             'migration_id': migration.migration_id,
@@ -109,12 +116,18 @@ def upload_qb_export():
             'summary': parsed_data.get('summary', {}),
             'message': f'File parsed successfully. Found {sum(parsed_data.get("summary", {}).values())} records.'
         })
-        
+
     except Exception as e:
-        # FIX MED-01: Improved temp file cleanup with shutil.rmtree for non-empty dirs
+        # FIX #34: Sanitize error message for security
+        from utils.error_sanitizer import sanitize_error_message
+        sanitized_error = sanitize_error_message(e, context='upload')
+        return jsonify({'error': sanitized_error}), 500
+
+    finally:
+        # FIX: Guaranteed cleanup of temp directory regardless of success or failure
         import shutil
         try:
-            if os.path.exists(file_path):
+            if file_path and os.path.exists(file_path):
                 os.remove(file_path)
         except OSError:
             pass  # File already removed or inaccessible
@@ -124,11 +137,6 @@ def upload_qb_export():
                 shutil.rmtree(temp_dir, ignore_errors=True)
         except OSError:
             pass  # Directory already removed or inaccessible
-
-        # FIX #34: Sanitize error message for security
-        from utils.error_sanitizer import sanitize_error_message
-        sanitized_error = sanitize_error_message(e, context='upload')
-        return jsonify({'error': sanitized_error}), 500
 
 
 @file_upload_bp.route('/supported-exports', methods=['GET'])

@@ -37,12 +37,35 @@ import re
 import html
 import logging
 from typing import Dict, List, Set, Optional, Tuple, Any
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation, getcontext, localcontext, Context
 from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 import threading
+
+# MEDIUM FIX: Set proper decimal context for QB rounding
+# QuickBooks uses specific rounding rules that we must match exactly
+# to prevent penny discrepancies in financial data
+
+# Configure global decimal context for QB precision
+# - prec=28: High precision for intermediate calculations
+# - rounding=ROUND_HALF_UP: QB's standard rounding (0.5 rounds to 1)
+# This matches QB's GAAP-compliant rounding behavior
+QB_DECIMAL_CONTEXT = Context(
+    prec=28,                    # 28 significant digits (standard for financial)
+    rounding=ROUND_HALF_UP,     # QuickBooks standard rounding
+    Emin=-999999,               # Minimum exponent
+    Emax=999999,                # Maximum exponent
+    capitals=1,                 # Use 'E' for exponent
+    clamp=0,                    # Don't clamp exponents
+    flags=[],                   # Clear flags
+    traps=[InvalidOperation]    # Trap only invalid operations
+)
+
+# Set as default context
+getcontext().prec = 28
+getcontext().rounding = ROUND_HALF_UP
 
 # FIX #13: Don't override global logging configuration
 # Let the application configure logging instead
@@ -785,12 +808,31 @@ class QBDataTransformer:
         logger.warning(f"Could not parse date: {date_value}")
         return None  # Caller should check for None and handle appropriately
     
-    def to_decimal(self, value: Any) -> Decimal:
-        """Convert to Decimal with 2 decimal places."""
+    def to_decimal(self, value: Any, precision: int = 2) -> Decimal:
+        """
+        Convert to Decimal with proper QB rounding context.
+
+        MEDIUM FIX: Uses QB_DECIMAL_CONTEXT for proper financial rounding.
+
+        Args:
+            value: Value to convert (string, int, float, or Decimal)
+            precision: Decimal places (default 2 for currency, 4 for rates)
+
+        Returns:
+            Decimal with proper rounding
+        """
         if value is None or value == '':
             return Decimal('0')
         try:
-            return Decimal(str(value)).quantize(Decimal('0.01'), ROUND_HALF_UP)
+            # Use localcontext for thread-safe decimal operations
+            with localcontext(QB_DECIMAL_CONTEXT):
+                # Create the quantize string based on precision
+                quantize_str = '0.' + '0' * precision if precision > 0 else '1'
+                result = Decimal(str(value)).quantize(
+                    Decimal(quantize_str),
+                    rounding=ROUND_HALF_UP
+                )
+                return result
         except (ValueError, InvalidOperation, TypeError, ArithmeticError) as e:
             # FIX #1: Specific exceptions instead of bare except
             logger.warning(f"Could not convert '{value}' to Decimal: {e}")

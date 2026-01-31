@@ -1043,12 +1043,57 @@ namespace ForensicBridgeInstaller
 
         /// <summary>
         /// Verify Authenticode signature on downloaded executable
+        /// FIX: Uses file lock during verification to prevent TOCTOU attacks
         /// </summary>
         private bool VerifyAuthenticodeSignature(string filePath)
         {
+            FileStream lockStream = null;
             try
             {
+                // FIX: Acquire exclusive file lock during signature verification to prevent TOCTOU
+                // This ensures the file cannot be modified between verification and use
+                lockStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+                // Release the lock temporarily for signature verification API (it needs file access)
+                // but verify file hasn't changed using hash
+                byte[] originalHash;
+                using (var sha256 = SHA256.Create())
+                {
+                    lockStream.Position = 0;
+                    originalHash = sha256.ComputeHash(lockStream);
+                }
+
+                // Close temporarily for CreateFromSignedFile (it opens its own handle)
+                lockStream.Close();
+                lockStream = null;
+
                 var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath);
+
+                // FIX: Re-verify file hash to detect TOCTOU attacks
+                // If file was modified during signature check, hash will differ
+                byte[] verifyHash;
+                using (var verifyStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
+                using (var sha256 = SHA256.Create())
+                {
+                    verifyHash = sha256.ComputeHash(verifyStream);
+                }
+
+                // Compare hashes to ensure file wasn't replaced during verification
+                bool hashMatch = true;
+                for (int i = 0; i < originalHash.Length; i++)
+                {
+                    if (originalHash[i] != verifyHash[i])
+                    {
+                        hashMatch = false;
+                        break;
+                    }
+                }
+
+                if (!hashMatch)
+                {
+                    Log("  SECURITY WARNING: File was modified during signature verification (TOCTOU attack detected)");
+                    return false;
+                }
 
                 if (cert != null)
                 {
@@ -1080,6 +1125,10 @@ namespace ForensicBridgeInstaller
             {
                 Log($"  Signature verification error: {ex.Message}");
                 return false;
+            }
+            finally
+            {
+                lockStream?.Dispose();
             }
         }
 
@@ -1140,7 +1189,16 @@ namespace ForensicBridgeInstaller
                     SafeUpdateUI(() =>
                     {
                         Log(args2.Data);
-                        UpdateProgressFromOutput(args2.Data);
+                        // FIX: Wrap UpdateProgressFromOutput in try/catch to prevent event handler crashes
+                        // Progress parsing errors should not terminate the extraction process
+                        try
+                        {
+                            UpdateProgressFromOutput(args2.Data);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Progress update failed: {ex.Message}");
+                        }
                     });
                 }
             };

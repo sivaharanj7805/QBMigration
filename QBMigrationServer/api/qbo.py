@@ -123,16 +123,19 @@ def qbo_callback():
             return jsonify({'error': 'Token exchange failed'}), 400
         
         tokens = response.json()
-        
-        # Store tokens securely
-        current_user.qbo_access_token = tokens.get('access_token')
-        current_user.qbo_refresh_token = tokens.get('refresh_token')
-        current_user.qbo_realm_id = realm_id
-        current_user.qbo_connected_at = datetime.utcnow()
-        
+
         # Calculate token expiration
         expires_in = tokens.get('expires_in', 3600)
-        current_user.qbo_token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+
+        # CRITICAL FIX: Store tokens securely using encrypted setter
+        # Direct assignment bypasses encryption - must use set_qbo_tokens() method
+        current_user.set_qbo_tokens(
+            access_token=tokens.get('access_token'),
+            refresh_token=tokens.get('refresh_token'),
+            realm_id=realm_id,
+            expires_at=token_expires_at
+        )
         
         db.session.commit()
         
@@ -277,14 +280,19 @@ def refresh_qbo_token():
             }), 400
         
         tokens = response.json()
-        
-        # Update tokens
-        current_user.qbo_access_token = tokens.get('access_token')
-        if tokens.get('refresh_token'):
-            current_user.qbo_refresh_token = tokens.get('refresh_token')
-        
+
+        # Calculate token expiration
         expires_in = tokens.get('expires_in', 3600)
-        current_user.qbo_token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+
+        # CRITICAL FIX: Update tokens using encrypted setter
+        # Direct assignment bypasses encryption - must use set_qbo_tokens() method
+        current_user.set_qbo_tokens(
+            access_token=tokens.get('access_token'),
+            refresh_token=tokens.get('refresh_token') or current_user.get_qbo_refresh_token(),
+            realm_id=current_user.qbo_realm_id,
+            expires_at=token_expires_at
+        )
         
         db.session.commit()
         

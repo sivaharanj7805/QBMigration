@@ -26,14 +26,57 @@ namespace QBDesktopExtractor
 
         public NDJSONWriter(string outputDirectory, string sessionId, IRedactingLogger logger = null)
         {
-            _outputDirectory = outputDirectory ?? throw new ArgumentNullException(nameof(outputDirectory));
+            if (string.IsNullOrWhiteSpace(outputDirectory))
+                throw new ArgumentNullException(nameof(outputDirectory));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentNullException(nameof(sessionId));
+
+            _outputDirectory = outputDirectory;
             _logger = logger;
             _entityFiles = new Dictionary<string, EntityFileInfo>();
 
-            // Create output directory
-            if (!Directory.Exists(_outputDirectory))
+            // FIX MEDIUM: Validate directory and permissions upfront with proper error handling
+            // Use try-catch instead of Directory.Exists (TOCTOU race condition)
+            try
             {
+                // Attempt to create directory - this will succeed if it already exists
                 Directory.CreateDirectory(_outputDirectory);
+
+                // FIX MEDIUM: Validate write permissions by attempting to create a test file
+                string testFile = Path.Combine(_outputDirectory, $".permission_test_{Guid.NewGuid():N}");
+                try
+                {
+                    using (var fs = new FileStream(testFile, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        fs.WriteByte(0);
+                    }
+                    File.Delete(testFile);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    throw new UnauthorizedAccessException(
+                        $"No write permission for output directory: {_outputDirectory}", ex);
+                }
+                catch (IOException ex) when (ex.Message.Contains("disk space") || ex.Message.Contains("full"))
+                {
+                    throw new IOException(
+                        $"Insufficient disk space in output directory: {_outputDirectory}", ex);
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new UnauthorizedAccessException(
+                    $"Cannot access or create output directory: {_outputDirectory}", ex);
+            }
+            catch (PathTooLongException ex)
+            {
+                throw new ArgumentException(
+                    $"Output directory path is too long: {_outputDirectory}", nameof(outputDirectory), ex);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                throw new DirectoryNotFoundException(
+                    $"Parent directory does not exist for: {_outputDirectory}", ex);
             }
 
             // Initialize manifest
@@ -178,18 +221,46 @@ namespace QBDesktopExtractor
             return info;
         }
 
+        /// <summary>
+        /// FIX HIGH-13: Implement proper IDisposable pattern with finalizer safety
+        /// </summary>
         public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
         {
             if (_disposed) return;
             _disposed = true;
 
-            foreach (var kvp in _entityFiles)
+            if (disposing)
             {
-                try { kvp.Value.Stream?.Dispose(); }
-                catch (ObjectDisposedException) { /* Already disposed - safe to ignore */ }
-                catch (IOException) { /* IO errors during dispose are non-critical */ }
+                // Dispose managed resources
+                foreach (var kvp in _entityFiles)
+                {
+                    try
+                    {
+                        // Flush before dispose to ensure data is written
+                        kvp.Value.Stream?.Flush();
+                        kvp.Value.Stream?.Dispose();
+                    }
+                    catch (ObjectDisposedException) { /* Already disposed - safe to ignore */ }
+                    catch (IOException ex)
+                    {
+                        // Log IO errors during dispose - data may be lost
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[NDJSONWriter] Warning: IO error during dispose for {kvp.Key}: {ex.Message}");
+                    }
+                }
+                _entityFiles.Clear();
             }
-            _entityFiles.Clear();
+        }
+
+        ~NDJSONWriter()
+        {
+            Dispose(false);
         }
 
         private class EntityFileInfo

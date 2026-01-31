@@ -11,8 +11,11 @@ import { ForensicIntegrityPulse } from "@/components/dashboard/ForensicIntegrity
 import { DiscrepancyDoctor, Discrepancy } from "@/components/migrations/DiscrepancyDoctor";
 import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2, Cloud, FileBarChart2 } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { authFetch } from "@/lib/auth";
+import { sanitize } from "@/lib/sanitize";
+import { useLoadingGuard } from "@/lib/hooks/useSecurityHooks";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -65,13 +68,12 @@ export default function MigrationDetailPage() {
     const { data: trialBalance } = useTrialBalance(id, liveStatus?.status === "completed");
 
     // Fetch discrepancies from API
+    // SECURITY: Using authFetch instead of localStorage.getItem('token')
     const { data: discrepancyData } = useQuery({
         queryKey: ["discrepancies", id],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/migrations/${id}/discrepancies`, {
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        queryFn: async ({ signal }) => {
+            const response = await authFetch(`${API_URL}/api/migrations/${id}/discrepancies`, {
+                signal,
             });
             if (!response.ok) return { discrepancies: [], total_discrepancy: 0 };
             return response.json();
@@ -80,13 +82,12 @@ export default function MigrationDetailPage() {
     });
 
     // Fetch record count from API
+    // SECURITY: Using authFetch instead of localStorage.getItem('token')
     const { data: recordCountData } = useQuery({
         queryKey: ["recordCount", id],
-        queryFn: async () => {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/migrations/${id}/record-count`, {
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        queryFn: async ({ signal }) => {
+            const response = await authFetch(`${API_URL}/api/migrations/${id}/record-count`, {
+                signal,
             });
             if (!response.ok) return { record_count: 0 };
             return response.json();
@@ -130,16 +131,13 @@ export default function MigrationDetailPage() {
     }, [certificateError]);
 
     // FIX: Improved error messages with specific details
+    // SECURITY: Using authFetch instead of localStorage.getItem('token')
     const handleExportDiscrepancyReport = async () => {
         // FIX: Prevent concurrent requests
         if (isExportingReport) return;
         setIsExportingReport(true);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/migrations/${id}/discrepancy-report`, {
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
+            const response = await authFetch(`${API_URL}/api/migrations/${id}/discrepancy-report`);
             if (response.ok) {
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -363,7 +361,7 @@ export default function MigrationDetailPage() {
                         <div className="flex items-center gap-3">
                             {getStatusIcon()}
                             <h1 className="text-2xl font-bold text-gray-900">
-                                {liveStatus?.company_name || "Migration Details"}
+                                {sanitize.text(liveStatus?.company_name || "Migration Details")}
                             </h1>
                             {getDestinationBadge()}
                         </div>
