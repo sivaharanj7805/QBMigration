@@ -77,9 +77,18 @@ export default function VaultPage() {
         }
     };
 
-    const filteredArchives = archivedCompanies.filter(a =>
-        a.companyName.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // FIX: Add search term sanitization and length limits
+    const MAX_SEARCH_LENGTH = 100;
+    const sanitizedSearchTerm = searchTerm
+        .slice(0, MAX_SEARCH_LENGTH) // Limit length
+        .trim()
+        .toLowerCase();
+
+    const filteredArchives = archivedCompanies.filter(a => {
+        // Guard against missing companyName
+        const companyName = a.companyName || '';
+        return companyName.toLowerCase().includes(sanitizedSearchTerm);
+    });
 
     const formatRecords = (count: number): string => {
         if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
