@@ -211,15 +211,15 @@ namespace QBDesktopExtractor
                     }
                     catch (Exception ex)
                     {
-                        // Log individual file cleanup errors at debug level (non-critical)
-                        _logger?.Log(LogLevel.Debug, "Could not clean up temp file {0}: {1}", file, ex.Message);
+                        // FIX HIGH-12: Log file cleanup errors at Warning level - data may remain on disk
+                        _logger?.Log(LogLevel.Warning, "Could not clean up temp file {0}: {1}", file, ex.Message);
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Log directory enumeration errors (non-critical, cleanup is best-effort)
-                _logger?.Log(LogLevel.Debug, "Could not enumerate temp directory for cleanup: {0}", ex.Message);
+                // FIX HIGH-12: Log directory enumeration errors at Warning level for visibility
+                _logger?.Log(LogLevel.Warning, "Could not enumerate temp directory for cleanup: {0}", ex.Message);
             }
         }
 

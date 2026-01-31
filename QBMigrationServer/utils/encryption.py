@@ -89,18 +89,34 @@ class EncryptionManager:
                 pass
 
         if not key_password:
-            # Generate a strong password - but NEVER store in file system
+            # CRITICAL FIX: In production, do NOT generate a password - fail instead
+            # Generating a password and printing it is a security risk
+            is_production = os.environ.get('FLASK_ENV', 'development') == 'production'
+
+            if is_production:
+                # In production, FAIL if no password is configured
+                # This forces proper secrets management
+                raise RuntimeError(
+                    "CRITICAL SECURITY ERROR: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
+                    "Cannot generate RSA keys in production without a configured password. "
+                    "Please set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager."
+                )
+
+            # In development only: Generate a temporary password
             import secrets as sec
             key_password = sec.token_urlsafe(32)
             logger.critical(
                 "SECURITY WARNING: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
-                "A temporary password was generated for this session. "
+                "A temporary password was generated for this development session. "
                 "For production, set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
                 "Keys generated in this session will NOT be recoverable without the password!"
             )
-            # FIX CRIT-04: Do NOT write password to file - output to stderr for operator to capture
-            import sys
-            print(f"\n[CRITICAL] Generated RSA key password (save this securely): {key_password}\n", file=sys.stderr)
+            # CRITICAL FIX: NEVER print password to stderr - this is a security risk
+            # Instead, log the password location hint (without the actual password)
+            logger.warning(
+                "Development mode: RSA key password was generated but NOT printed to logs. "
+                "Restart the application after setting RSA_KEY_PASSWORD for persistent keys."
+            )
 
         with open(private_key_path, 'wb') as f:
             f.write(self._private_key.private_bytes(

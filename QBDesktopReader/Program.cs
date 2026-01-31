@@ -132,7 +132,8 @@ namespace QBDesktopExtractor
             finally
             {
                 // ALWAYS pause so the user can read output when running interactively
-                if (!noPause && !quiet)
+                // FIX CRIT-02: Check Console.IsInputRedirected before ReadKey
+                if (!noPause && !quiet && !Console.IsInputRedirected)
                 {
                     try
                     {
@@ -230,6 +231,13 @@ namespace QBDesktopExtractor
                 // Prompt for session ID if not provided
                 if (string.IsNullOrWhiteSpace(sessionCode))
                 {
+                    // FIX CRIT-02: Check Console.IsInputRedirected before ReadLine
+                    if (Console.IsInputRedirected)
+                    {
+                        _logger.Log(LogLevel.Error, "No Session ID provided and stdin is redirected");
+                        return ExitCode.LicenseInvalid;
+                    }
+
                     Console.WriteLine();
                     Console.WriteLine("╔══════════════════════════════════════════════════════════════════╗");
                     Console.WriteLine("║  SESSION ID REQUIRED                                              ║");
@@ -630,7 +638,9 @@ namespace QBDesktopExtractor
             using (var sha256 = System.Security.Cryptography.SHA256.Create())
             {
                 byte[] hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(value));
-                return Convert.ToBase64String(hash).Substring(0, 16);
+                string base64Hash = Convert.ToBase64String(hash);
+                // FIX CRIT-01: Bounds checking to prevent substring buffer overflow
+                return base64Hash.Substring(0, Math.Min(16, base64Hash.Length));
             }
         }
 

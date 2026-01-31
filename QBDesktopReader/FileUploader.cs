@@ -33,8 +33,11 @@ namespace QBDesktopExtractor
         private readonly HttpClient _httpClient;
         private readonly ExtractionConfig _config;
         private readonly IRedactingLogger _logger;
-        private readonly object _randomLock = new object();
-        private readonly Random _random = new Random();
+        // FIX HIGH-10: Thread-safe Random using ThreadLocal pattern
+        // This avoids lock contention when multiple threads need random numbers
+        private static readonly ThreadLocal<Random> _threadLocalRandom = new ThreadLocal<Random>(() =>
+            new Random(Interlocked.Increment(ref _randomSeed) ^ Environment.TickCount));
+        private static int _randomSeed = Environment.TickCount;
         private bool _disposed;
 
         public FileUploader(ExtractionConfig config, IRedactingLogger logger = null)
@@ -86,13 +89,27 @@ namespace QBDesktopExtractor
                 throw new ArgumentException("Session ID is required", nameof(sessionId));
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
-            if (!File.Exists(encryptedFilePath))
-                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
 
             _logger?.Log(LogLevel.Info, "Uploading file (direct)...");
 
+            // FIX MEDIUM: TOCTOU race - use try-catch with FileStream instead of File.Exists check
+            // File.Exists check followed by File.Open creates a race window where the file could be deleted
+            FileStream fileStream;
+            try
+            {
+                fileStream = new FileStream(encryptedFilePath, FileMode.Open, FileAccess.Read);
+            }
+            catch (FileNotFoundException)
+            {
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                throw new FileNotFoundException("Encrypted file directory not found", encryptedFilePath);
+            }
+
             using (var content = new MultipartFormDataContent())
-            using (var fileStream = new FileStream(encryptedFilePath, FileMode.Open, FileAccess.Read))
+            using (fileStream)
             {
                 // Add file as binary (no base64)
                 var fileContent = new StreamContent(fileStream);
@@ -381,10 +398,24 @@ namespace QBDesktopExtractor
                 throw new ArgumentException("Session ID is required", nameof(sessionId));
             if (data == null)
                 throw new ArgumentNullException(nameof(data));
-            if (!File.Exists(encryptedFilePath))
-                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
 
-            var fileInfo = new FileInfo(encryptedFilePath);
+            // FIX MEDIUM: TOCTOU race - get file info which will throw if file doesn't exist
+            // This combines existence check and file info retrieval atomically
+            FileInfo fileInfo;
+            try
+            {
+                fileInfo = new FileInfo(encryptedFilePath);
+                // FileInfo.Length access triggers the existence check
+                _ = fileInfo.Length;
+            }
+            catch (FileNotFoundException)
+            {
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                throw new FileNotFoundException("Encrypted file directory not found", encryptedFilePath);
+            }
             long fileSize = fileInfo.Length;
             int chunkSize = _config.Advanced.ChunkSizeKB * 1024;
             int totalChunks = (int)Math.Ceiling((double)fileSize / chunkSize);
@@ -418,6 +449,9 @@ namespace QBDesktopExtractor
 
                         chunkIndex++;
 
+                        // FIX MEDIUM: chunkIndex is already 1-based after increment (starts at 0, incremented to 1 after first chunk)
+                        // Progress display should show consistent 1-based chunk numbers
+                        // Report every 10 chunks or on the last chunk
                         if (chunkIndex % 10 == 0 || chunkIndex == totalChunks)
                         {
                             double percent = (double)chunkIndex / totalChunks * 100.0;
@@ -503,7 +537,8 @@ namespace QBDesktopExtractor
                     // Check if server already has chunk (resume support)
                     if (await ServerHasChunkAsync(uploadId, chunkIndex, cancellationToken))
                     {
-                        _logger?.Log(LogLevel.Debug, "Chunk {0} already uploaded, skipping", chunkIndex);
+                        // FIX MEDIUM: Use 1-based indexing in user-facing log messages
+                        _logger?.Log(LogLevel.Debug, "Chunk {0} already uploaded, skipping", chunkIndex + 1);
                         return;
                     }
 
@@ -525,14 +560,16 @@ namespace QBDesktopExtractor
 
                     if (attempts > maxAttempts)
                     {
+                        // FIX MEDIUM: Use 1-based indexing in user-facing log messages
                         _logger?.Log(LogLevel.Error, "Chunk {0} failed after {1} attempts: {2}",
-                            chunkIndex, attempts, ex.Message);
+                            chunkIndex + 1, attempts, ex.Message);
                         throw;
                     }
 
                     int delayMs = CalculateRetryDelay(attempts);
+                    // FIX MEDIUM: Use 1-based indexing in user-facing log messages
                     _logger?.Log(LogLevel.Warning, "Chunk {0} failed, retry {1}/{2} in {3}ms",
-                        chunkIndex, attempts, maxAttempts, delayMs);
+                        chunkIndex + 1, attempts, maxAttempts, delayMs);
 
                     await Task.Delay(delayMs, cancellationToken);
                 }
@@ -541,6 +578,7 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Upload chunk using multipart form data (no base64)
+        /// FIX HIGH-15: Add per-request timeout with CancellationTokenSource
         /// </summary>
         private async Task UploadChunkMultipartAsync(
             string uploadId,
@@ -551,36 +589,51 @@ namespace QBDesktopExtractor
             int totalChunks,
             CancellationToken cancellationToken)
         {
-            using (var content = new MultipartFormDataContent())
+            // Per-request timeout (default 2 minutes per chunk, configurable)
+            int chunkTimeoutSeconds = _config.Advanced?.ChunkUploadTimeoutSeconds ?? 120;
+            using (var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(chunkTimeoutSeconds)))
+            using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token))
             {
-                // Add chunk data as binary
-                var chunkData = new byte[dataLength];
-                Buffer.BlockCopy(data, 0, chunkData, 0, dataLength);
-
-                var chunkContent = new ByteArrayContent(chunkData);
-                chunkContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
-                content.Add(chunkContent, "chunk", $"chunk_{chunkIndex}.bin");
-
-                // Add metadata
-                content.Add(new StringContent(uploadId), "upload_id");
-                content.Add(new StringContent(chunkIndex.ToString()), "chunk_index");
-                content.Add(new StringContent(totalChunks.ToString()), "total_chunks");
-                content.Add(new StringContent(chunkHash), "chunk_hash");
-
-                var response = await _httpClient.PostAsync(
-                    $"{_serverUrl}/api/upload/chunk",
-                    content,
-                    cancellationToken);
-
-                await ValidateResponseAsync(response, $"Upload chunk {chunkIndex}");
-
-                // Validate server echoed the hash
-                var responseJson = await response.Content.ReadAsStringAsync();
-                var result = JsonConvert.DeserializeObject<ChunkUploadResponse>(responseJson);
-
-                if (result?.ReceivedHash != null && result.ReceivedHash != chunkHash)
+                try
                 {
-                    throw new Exception($"Chunk {chunkIndex} hash mismatch: sent {chunkHash}, received {result.ReceivedHash}");
+                    using (var content = new MultipartFormDataContent())
+                    {
+                        // Add chunk data as binary
+                        var chunkData = new byte[dataLength];
+                        Buffer.BlockCopy(data, 0, chunkData, 0, dataLength);
+
+                        var chunkContent = new ByteArrayContent(chunkData);
+                        chunkContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                        content.Add(chunkContent, "chunk", $"chunk_{chunkIndex}.bin");
+
+                        // Add metadata
+                        content.Add(new StringContent(uploadId), "upload_id");
+                        content.Add(new StringContent(chunkIndex.ToString()), "chunk_index");
+                        content.Add(new StringContent(totalChunks.ToString()), "total_chunks");
+                        content.Add(new StringContent(chunkHash), "chunk_hash");
+
+                        var response = await _httpClient.PostAsync(
+                            $"{_serverUrl}/api/upload/chunk",
+                            content,
+                            linkedCts.Token);
+
+                        await ValidateResponseAsync(response, $"Upload chunk {chunkIndex}");
+
+                        // Validate server echoed the hash
+                        var responseJson = await response.Content.ReadAsStringAsync();
+                        var result = JsonConvert.DeserializeObject<ChunkUploadResponse>(responseJson);
+
+                        if (result?.ReceivedHash != null && result.ReceivedHash != chunkHash)
+                        {
+                            // FIX MEDIUM: Use 1-based indexing in user-facing error messages
+                            throw new Exception($"Chunk {chunkIndex + 1} hash mismatch: sent {chunkHash}, received {result.ReceivedHash}");
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    // FIX MEDIUM: Use 1-based indexing in user-facing error messages
+                    throw new TimeoutException($"Chunk {chunkIndex + 1} upload timed out after {chunkTimeoutSeconds} seconds");
                 }
             }
         }
@@ -606,14 +659,16 @@ namespace QBDesktopExtractor
                 }
 
                 // FIX CS-06: Log non-success response instead of silent false
+                // FIX MEDIUM: Use 1-based indexing in user-facing log messages
                 _logger?.Log(LogLevel.Debug, "Chunk exists check returned HTTP {0} for chunk {1}",
-                    (int)response.StatusCode, chunkIndex);
+                    (int)response.StatusCode, chunkIndex + 1);
             }
             catch (Exception ex)
             {
                 // FIX CS-06: Log error instead of silent suppression
+                // FIX MEDIUM: Use 1-based indexing in user-facing log messages
                 _logger?.Log(LogLevel.Debug, "Chunk exists check failed for chunk {0}: {1}",
-                    chunkIndex, ex.Message);
+                    chunkIndex + 1, ex.Message);
             }
 
             return false;
@@ -723,28 +778,46 @@ namespace QBDesktopExtractor
             int maxDelay = _config.Advanced.RetryMaxDelayMs;
             int jitterPercent = _config.Advanced.RetryJitterPercent;
 
-            int delayMs = baseDelay;
+            // FIX CRIT-06: Enhanced overflow protection for exponential backoff
+            // Ensure baseDelay is positive and reasonable
+            baseDelay = Math.Max(100, Math.Min(baseDelay, 60000)); // 100ms - 60s
+            maxDelay = Math.Max(baseDelay, Math.Min(maxDelay, 300000)); // Cap at 5 minutes
+
+            long delayMs = baseDelay;
 
             if (_config.Advanced.EnableExponentialBackoff)
             {
-                // Overflow protection: cap exponent to prevent int overflow
-                int safeExponent = Math.Min(attempt - 1, 30);
-                long delayLong = (long)baseDelay * (1L << safeExponent);
-                delayMs = (int)Math.Min(delayLong, int.MaxValue);
+                // Overflow protection: cap exponent to prevent overflow
+                // For baseDelay=100 and exponent=20, result is ~104M which fits in int
+                // For baseDelay=1000 and exponent=20, result is ~1B which could overflow
+                int safeExponent = Math.Min(attempt - 1, 20);
+
+                // Use checked arithmetic and catch overflow
+                try
+                {
+                    checked
+                    {
+                        delayMs = (long)baseDelay * (1L << safeExponent);
+                    }
+                }
+                catch (OverflowException)
+                {
+                    delayMs = maxDelay;
+                }
             }
 
-            // Cap at max delay
-            delayMs = Math.Min(delayMs, maxDelay);
+            // Cap at max delay (using long comparison to avoid issues)
+            delayMs = Math.Min(delayMs, (long)maxDelay);
+
+            // Ensure result fits in int
+            int delayInt = (int)Math.Min(delayMs, int.MaxValue);
 
             // Always add jitter (prevents thundering herd)
-            int jitterRange = (int)(delayMs * jitterPercent / 100.0);
-            int jitter;
-            lock (_randomLock)
-            {
-                jitter = _random.Next(-jitterRange, jitterRange);
-            }
+            // FIX HIGH-10: Use ThreadLocal Random for thread-safety without lock contention
+            int jitterRange = (int)Math.Min((long)delayInt * jitterPercent / 100L, int.MaxValue / 2);
+            int jitter = jitterRange > 0 ? _threadLocalRandom.Value.Next(-jitterRange, jitterRange) : 0;
 
-            return Math.Max(100, delayMs + jitter);
+            return Math.Max(100, delayInt + jitter);
         }
 
         public void Dispose()

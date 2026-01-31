@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
+import { setAuthState, setCsrfToken } from '@/lib/auth';
+import { sanitize } from '@/lib/sanitize';
 
 // API configuration - must be set in environment
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -21,11 +23,15 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
+            // SECURITY: Using credentials: 'include' for httpOnly cookie support
             const response = await fetch(`${API_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({
+                    email: sanitize.text(email),
+                    password
+                }),
             });
 
             const data = await response.json();
@@ -34,9 +40,15 @@ export default function LoginPage() {
                 throw new Error(data.error || 'Login failed');
             }
 
-            // Store token
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
+            // SECURITY: Store only user info, not token (token is in httpOnly cookie)
+            if (data.user) {
+                setAuthState(data.user, data.csrf_token);
+            }
+
+            // If server sends CSRF token, store it
+            if (data.csrf_token) {
+                setCsrfToken(data.csrf_token);
+            }
 
             // Redirect to dashboard
             router.push('/');
@@ -88,7 +100,6 @@ export default function LoginPage() {
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
-                        {/* FIX: Added name and autoComplete attributes for accessibility */}
                         <div>
                             <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-2">
                                 Email Address
@@ -121,7 +132,7 @@ export default function LoginPage() {
                                 required
                                 aria-required="true"
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-                                placeholder="••••••••"
+                                placeholder="Enter your password"
                             />
                         </div>
 

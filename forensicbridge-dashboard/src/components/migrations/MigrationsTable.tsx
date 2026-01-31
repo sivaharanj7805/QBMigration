@@ -16,6 +16,7 @@ import {
     ChevronUp,
     ChevronDown,
 } from "lucide-react";
+import { sanitize } from "@/lib/sanitize";
 
 interface Migration {
     id: number;
@@ -301,9 +302,9 @@ export function MigrationsTable({
                                         href={`/migrations/${migration.migration_id}`}
                                         className="font-medium text-gray-900 hover:text-[var(--bridge-blue)]"
                                     >
-                                        {migration.company_name}
+                                        {sanitize.text(migration.company_name)}
                                     </Link>
-                                    <p className="text-xs text-gray-500">{migration.qb_file_name}</p>
+                                    <p className="text-xs text-gray-500">{sanitize.text(migration.qb_file_name)}</p>
                                 </td>
                                 <td className="tabular-nums">{formatFileSize(migration.file_size)}</td>
                                 <td className="text-gray-500">{formatTimeAgo(migration.created_at)}</td>

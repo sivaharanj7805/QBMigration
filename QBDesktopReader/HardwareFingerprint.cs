@@ -20,7 +20,8 @@ namespace QBDesktopExtractor
     public static class HardwareFingerprint
     {
         // Cache the fingerprint to avoid expensive WMI calls
-        private static string _cachedFingerprint;
+        // FIX CRIT-05: Add volatile keyword for proper double-check locking pattern
+        private static volatile string _cachedFingerprint;
         private static readonly object _cacheLock = new object();
 
         // VM adapter indicators (case-insensitive)

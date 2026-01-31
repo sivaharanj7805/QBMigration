@@ -3,6 +3,12 @@
  *
  * Handles all communication with the QBMigrationServer backend.
  * Uses Zod for runtime schema validation to prevent XSS and type errors.
+ *
+ * SECURITY FEATURES:
+ * - Uses httpOnly cookies via credentials: 'include'
+ * - Includes CSRF token in all mutation requests
+ * - AbortController with timeouts for all requests
+ * - Retry with exponential backoff for transient failures
  */
 
 import { z } from 'zod';
@@ -16,20 +22,18 @@ import {
     UploadSessionSchema,
     UploadCompleteSchema,
 } from './schemas';
+import { getCsrfToken, setCsrfToken } from './auth';
 
 // FIX FE-01: Production-safe API URL configuration
-// In production, NEXT_PUBLIC_API_URL must be set - fallback only for development
 const API_BASE_URL = (() => {
     const envUrl = process.env.NEXT_PUBLIC_API_URL;
     if (envUrl) return envUrl;
 
-    // Only allow localhost fallback in development
     if (process.env.NODE_ENV === 'development') {
         console.warn('[API] NEXT_PUBLIC_API_URL not set - using localhost (development only)');
         return "http://localhost:5000";
     }
 
-    // In production without env var, throw clear error
     throw new Error(
         'NEXT_PUBLIC_API_URL environment variable is required in production. ' +
         'Set it to your API server URL.'
@@ -42,16 +46,16 @@ interface ApiResponse<T> {
     error?: string;
 }
 
-// FIX FE-04: Default request timeout (30 seconds)
-const DEFAULT_TIMEOUT_MS = 30000;
+// Timeout constants
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
+const DOWNLOAD_TIMEOUT_MS = 300000; // 5 minutes for file downloads
 
-// HIGH-09 FIX: Default retry configuration
+// Retry configuration
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1000;
 
 class ApiClient {
     private baseUrl: string;
-    private token: string | null = null;
     private timeout: number;
     private maxRetries: number;
     private retryDelayMs: number;
@@ -69,7 +73,7 @@ class ApiClient {
     }
 
     /**
-     * HIGH-09 FIX: Exponential backoff delay
+     * Exponential backoff delay
      */
     private async delay(attempt: number): Promise<void> {
         const delayMs = this.retryDelayMs * Math.pow(2, attempt);
@@ -77,93 +81,86 @@ class ApiClient {
     }
 
     /**
-     * HIGH-09 FIX: Check if error is retryable
+     * Check if error is retryable
      */
     private isRetryableError(status: number, error?: Error): boolean {
-        // Retry on network errors
         if (error && (error.name === 'TypeError' || error.message.includes('Network'))) {
             return true;
         }
-        // Retry on 5xx server errors and 429 rate limiting
         return status >= 500 || status === 429;
     }
 
-    setToken(token: string | null) {
-        this.token = token;
-    }
-
-    clearToken() {
-        this.token = null;
-    }
-
     /**
-     * Get the current token, falling back to localStorage if not set
-     *
-     * HIGH-26 SECURITY NOTE: localStorage tokens are vulnerable to XSS attacks.
-     * For production, consider:
-     * - Using httpOnly cookies (requires server-side changes)
-     * - Implementing token refresh with short-lived access tokens
-     * - Adding Content Security Policy headers to mitigate XSS
-     */
-    private getToken(): string | null {
-        if (this.token) return this.token;
-        if (typeof window !== 'undefined') {
-            return localStorage.getItem('token');
-        }
-        return null;
-    }
-
-    /**
-     * HIGH-25 FIX: Generate a unique request ID for correlation
+     * Generate a unique request ID for correlation
      */
     private generateRequestId(): string {
         return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     }
 
+    /**
+     * Core request method with CSRF, timeout, and retry support
+     */
     private async request<T>(
         endpoint: string,
         options: RequestInit = {},
-        schema?: z.ZodSchema<T>
+        schema?: z.ZodSchema<T>,
+        customTimeout?: number,
+        signal?: AbortSignal
     ): Promise<ApiResponse<T>> {
         const url = `${this.baseUrl}${endpoint}`;
-        const token = this.getToken();
-
-        // HIGH-25 FIX: Add request ID for correlation and debugging
         const requestId = this.generateRequestId();
+        const method = (options.method || 'GET').toUpperCase();
 
         const headers: HeadersInit = {
             "Content-Type": "application/json",
             "X-Request-ID": requestId,
-            ...(token && { Authorization: `Bearer ${token}` }),
             ...options.headers,
         };
 
-        // HIGH-09 FIX: Retry loop with exponential backoff
+        // SECURITY: Add CSRF token for mutation requests
+        const csrfToken = getCsrfToken();
+        if (method !== 'GET' && method !== 'HEAD' && csrfToken) {
+            (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+        }
+
         let lastError: Error | null = null;
         let lastStatus = 0;
 
         for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-            // FIX FE-04: Add request timeout using AbortController
+            // Create AbortController for timeout
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+            const timeoutMs = customTimeout || this.timeout;
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            // Support external abort signal
+            if (signal) {
+                if (signal.aborted) {
+                    clearTimeout(timeoutId);
+                    return { success: false, error: 'Request cancelled' };
+                }
+                signal.addEventListener('abort', () => controller.abort());
+            }
 
             try {
                 const response = await fetch(url, {
                     ...options,
                     headers,
-                    credentials: "include",
+                    credentials: "include", // SECURITY: Send httpOnly cookies
                     signal: controller.signal,
                 });
                 clearTimeout(timeoutId);
                 lastStatus = response.status;
 
-                // SECURITY FIX: Parse and validate JSON with schema
+                // Extract CSRF token from response header if provided
+                const newCsrfToken = response.headers.get('X-CSRF-Token');
+                if (newCsrfToken) {
+                    setCsrfToken(newCsrfToken);
+                }
+
                 const rawData = await response.json();
 
                 if (!response.ok) {
-                    // HIGH-09 FIX: Check if error is retryable
                     if (this.isRetryableError(response.status) && attempt < this.maxRetries) {
-                        // FIX: Only log in development mode
                         if (process.env.NODE_ENV === 'development') {
                             console.warn(`[API] Retryable error ${response.status} on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}`);
                         }
@@ -181,12 +178,8 @@ class ApiClient {
                 if (schema) {
                     try {
                         const validatedData = schema.parse(rawData);
-                        return {
-                            success: true,
-                            data: validatedData,
-                        };
+                        return { success: true, data: validatedData };
                     } catch (validationError) {
-                        // FIX: Only log in development mode
                         if (process.env.NODE_ENV === 'development') {
                             console.error('Schema validation failed:', validationError);
                         }
@@ -197,27 +190,19 @@ class ApiClient {
                     }
                 }
 
-                // Fallback: return unvalidated data (backwards compatibility)
-                return {
-                    success: true,
-                    data: rawData as T,
-                };
+                return { success: true, data: rawData as T };
             } catch (error) {
                 clearTimeout(timeoutId);
                 lastError = error instanceof Error ? error : new Error(String(error));
 
-                // FIX FE-04: Specific error message for timeout
                 if (lastError.name === 'AbortError') {
-                    // Don't retry timeouts
                     return {
                         success: false,
-                        error: `Request timed out after ${this.timeout / 1000} seconds`,
+                        error: `Request timed out after ${(customTimeout || this.timeout) / 1000} seconds`,
                     };
                 }
 
-                // HIGH-09 FIX: Retry on network errors
                 if (this.isRetryableError(0, lastError) && attempt < this.maxRetries) {
-                    // FIX: Only log in development mode
                     if (process.env.NODE_ENV === 'development') {
                         console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}: ${lastError.message}`);
                     }
@@ -232,26 +217,86 @@ class ApiClient {
             }
         }
 
-        // Should not reach here, but handle gracefully
         return {
             success: false,
             error: lastError?.message || `Request failed after ${this.maxRetries + 1} attempts`,
         };
     }
 
+    /**
+     * Download a file with timeout and abort support
+     * SECURITY FIX: Added timeout to prevent hung downloads
+     */
+    private async downloadFile(
+        endpoint: string,
+        signal?: AbortSignal,
+        timeout: number = DOWNLOAD_TIMEOUT_MS
+    ): Promise<Blob | null> {
+        const url = `${this.baseUrl}${endpoint}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+        // Support external abort signal
+        if (signal) {
+            if (signal.aborted) {
+                clearTimeout(timeoutId);
+                return null;
+            }
+            signal.addEventListener('abort', () => controller.abort());
+        }
+
+        const csrfToken = getCsrfToken();
+        const headers: HeadersInit = {};
+        if (csrfToken) {
+            headers['X-CSRF-Token'] = csrfToken;
+        }
+
+        try {
+            const response = await fetch(url, {
+                credentials: "include",
+                headers,
+                signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                if (process.env.NODE_ENV === 'development') {
+                    console.error(`Download failed: HTTP ${response.status}`);
+                }
+                return null;
+            }
+
+            return await response.blob();
+        } catch (error) {
+            clearTimeout(timeoutId);
+
+            if (error instanceof Error && error.name === 'AbortError') {
+                if (process.env.NODE_ENV === 'development') {
+                    console.error(`Download timed out after ${timeout / 1000} seconds`);
+                }
+            } else if (process.env.NODE_ENV === 'development') {
+                console.error("Download error:", error);
+            }
+
+            return null;
+        }
+    }
+
     // ==========================================
     // Dashboard Endpoints
     // ==========================================
 
-    async getDashboardOverview() {
+    async getDashboardOverview(signal?: AbortSignal) {
         return this.request(
             "/api/dashboard/overview",
             {},
-            DashboardOverviewSchema
+            DashboardOverviewSchema,
+            undefined,
+            signal
         );
     }
 
-    async getRecentActivity() {
+    async getRecentActivity(signal?: AbortSignal) {
         return this.request<{
             activities: Array<{
                 timestamp: string;
@@ -260,14 +305,14 @@ class ApiClient {
                 migration_id: string;
                 icon: string;
             }>;
-        }>("/api/dashboard/recent-activity");
+        }>("/api/dashboard/recent-activity", {}, undefined, undefined, signal);
     }
 
     // ==========================================
     // Migration Endpoints
     // ==========================================
 
-    async getMigrationStats() {
+    async getMigrationStats(signal?: AbortSignal) {
         return this.request<{
             stats: {
                 migrations_this_month: number;
@@ -275,10 +320,10 @@ class ApiClient {
                 avg_duration: string;
                 success_rate: string;
             };
-        }>("/api/migrations/stats");
+        }>("/api/migrations/stats", {}, undefined, undefined, signal);
     }
 
-    async getMigrations() {
+    async getMigrations(page: number = 1, perPage: number = 20, signal?: AbortSignal) {
         return this.request<{
             migrations: Array<{
                 id: number;
@@ -292,10 +337,13 @@ class ApiClient {
                 s3_uri: string;
             }>;
             count: number;
-        }>("/api/migrations");
+            page: number;
+            per_page: number;
+            total_pages: number;
+        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, undefined, undefined, signal);
     }
 
-    async getMigration(migrationId: string) {
+    async getMigration(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             migration: {
                 id: number;
@@ -307,10 +355,10 @@ class ApiClient {
                 completed_at: string | null;
                 [key: string]: unknown;
             };
-        }>(`/api/migrations/${migrationId}`);
+        }>(`/api/migrations/${migrationId}`, {}, undefined, undefined, signal);
     }
 
-    async getLiveStatus(migrationId: string) {
+    async getLiveStatus(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             migration_id: string;
             phase: string;
@@ -333,10 +381,10 @@ class ApiClient {
             completed_at?: string;
             duration_seconds?: number;
             error?: string;
-        }>(`/api/migrations/${migrationId}/live-status`);
+        }>(`/api/migrations/${migrationId}/live-status`, {}, undefined, undefined, signal);
     }
 
-    async getBulkStatus(migrationIds?: string[]) {
+    async getBulkStatus(migrationIds?: string[], signal?: AbortSignal) {
         return this.request<{
             migrations: Record<string, {
                 id: number;
@@ -354,10 +402,10 @@ class ApiClient {
         }>("/api/migrations/bulk-status", {
             method: "POST",
             body: JSON.stringify({ migration_ids: migrationIds || [] }),
-        });
+        }, undefined, undefined, signal);
     }
 
-    async getMigrationStatus(migrationId: string) {
+    async getMigrationStatus(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             migration_id: string;
             status: string;
@@ -365,14 +413,14 @@ class ApiClient {
             created_at: string;
             current_step?: string;
             completed_at?: string;
-        }>(`/api/migrations/${migrationId}/status`);
+        }>(`/api/migrations/${migrationId}/status`, {}, undefined, undefined, signal);
     }
 
     async startMigration(migrationId: string, qboCredentials: {
         client_id: string;
         client_secret: string;
         refresh_token: string;
-    }) {
+    }, signal?: AbortSignal) {
         return this.request<{
             migration_id: string;
             instance_id: string;
@@ -381,29 +429,29 @@ class ApiClient {
         }>(`/api/migrations/${migrationId}/start`, {
             method: "POST",
             body: JSON.stringify({ qbo_credentials: qboCredentials }),
-        });
+        }, undefined, undefined, signal);
     }
 
-    async cancelMigration(migrationId: string) {
+    async cancelMigration(migrationId: string, signal?: AbortSignal) {
         return this.request<{ message: string }>(`/api/migrations/${migrationId}/cancel`, {
             method: "POST",
-        });
+        }, undefined, undefined, signal);
     }
 
-    async retryMigration(migrationId: string) {
+    async retryMigration(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             message: string;
             migration_id: string;
         }>(`/api/migrations/${migrationId}/retry`, {
             method: "POST",
-        });
+        }, undefined, undefined, signal);
     }
 
     // ==========================================
     // Verification Endpoints
     // ==========================================
 
-    async getTrialBalance(migrationId: string) {
+    async getTrialBalance(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             source_trial_balance: number | null;
             destination_trial_balance: number | null;
@@ -414,64 +462,44 @@ class ApiClient {
             source_hash?: string;
             destination_hash?: string;
             hash_match?: boolean;
-        }>(`/api/migrations/${migrationId}/trial-balance`);
+        }>(`/api/migrations/${migrationId}/trial-balance`, {}, undefined, undefined, signal);
     }
 
-    async downloadAuditCertificate(migrationId: string): Promise<Blob | null> {
-        const url = `${this.baseUrl}/api/migrations/${migrationId}/audit-certificate`;
-        const token = this.getToken();
-
-        try {
-            const response = await fetch(url, {
-                credentials: "include",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-            });
-
-            if (!response.ok) {
-                // FIX: Only log in development mode
-                if (process.env.NODE_ENV === 'development') {
-                    console.error("Failed to download certificate");
-                }
-                return null;
-            }
-
-            return await response.blob();
-        } catch (error) {
-            // FIX: Only log in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error("Download error:", error);
-            }
-            return null;
-        }
+    /**
+     * Download audit certificate with timeout
+     * SECURITY FIX: Added timeout to prevent hung downloads
+     */
+    async downloadAuditCertificate(migrationId: string, signal?: AbortSignal): Promise<Blob | null> {
+        return this.downloadFile(`/api/migrations/${migrationId}/audit-certificate`, signal);
     }
 
-    async getAuditCertificatePreview(migrationId: string) {
+    async getAuditCertificatePreview(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             available: boolean;
             migration_id: string;
             company_name: string;
             completed_at: string | null;
             download_url: string;
-        }>(`/api/migrations/${migrationId}/audit-certificate/preview`);
+        }>(`/api/migrations/${migrationId}/audit-certificate/preview`, {}, undefined, undefined, signal);
     }
 
     // ==========================================
     // Health Check
     // ==========================================
 
-    async getHealth() {
+    async getHealth(signal?: AbortSignal) {
         return this.request<{
             status: string;
             timestamp: string;
             checks: Record<string, string>;
-        }>("/health");
+        }>("/health", {}, undefined, 5000, signal);
     }
 
     // ==========================================
     // Caseware Export Mode
     // ==========================================
 
-    async exportCasewareBundle(migrationId: string) {
+    async exportCasewareBundle(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             success: boolean;
             message: string;
@@ -481,49 +509,35 @@ class ApiClient {
             download_url: string;
         }>(`/api/migrations/${migrationId}/export-caseware`, {
             method: "POST",
-        });
+        }, undefined, 60000, signal); // 60 second timeout for export
     }
 
-    async downloadCasewareBundle(migrationId: string): Promise<Blob> {
-        const url = `${this.baseUrl}/api/migrations/${migrationId}/caseware-bundle`;
-        const token = this.getToken();
+    /**
+     * Download Caseware bundle with extended timeout
+     * SECURITY FIX: Added timeout to prevent hung downloads
+     */
+    async downloadCasewareBundle(migrationId: string, signal?: AbortSignal): Promise<Blob> {
+        const blob = await this.downloadFile(
+            `/api/migrations/${migrationId}/caseware-bundle`,
+            signal,
+            DOWNLOAD_TIMEOUT_MS
+        );
 
-        try {
-            const response = await fetch(url, {
-                credentials: "include",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-            });
-
-            if (!response.ok) {
-                // Try to extract error from response
-                let errorMsg = `HTTP ${response.status}: Download failed`;
-                try {
-                    const errorData = await response.json();
-                    errorMsg = errorData.error || errorMsg;
-                } catch {
-                    // Not JSON, use default
-                }
-                throw new Error(errorMsg);
-            }
-
-            return await response.blob();
-        } catch (error) {
-            // FIX: Only log in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error("Download error:", error);
-            }
-            throw error;
+        if (!blob) {
+            throw new Error('Download failed or timed out');
         }
+
+        return blob;
     }
 
-    async getCasewareStatus(migrationId: string) {
+    async getCasewareStatus(migrationId: string, signal?: AbortSignal) {
         return this.request<{
             migration_id: string;
             destination: "qbo" | "caseware";
             caseware_bundle_ready: boolean;
             download_url: string | null;
             can_generate: boolean;
-        }>(`/api/migrations/${migrationId}/caseware-status`);
+        }>(`/api/migrations/${migrationId}/caseware-status`, {}, undefined, undefined, signal);
     }
 }
 

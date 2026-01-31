@@ -9,6 +9,7 @@ import os
 import tempfile
 import json
 from datetime import datetime
+from pathlib import Path
 
 from api.auth import require_auth
 from models import db, Migration
@@ -50,21 +51,30 @@ def upload_qb_export():
         }), 400
     
     # Save file temporarily
-    # FIX HIGH-02: Add path traversal protection
+    # HIGH FIX: Path traversal protection using pathlib.Path.resolve() with relative_to()
+    # This is more robust than string prefix matching
     filename = secure_filename(file.filename)
     if not filename or filename == '':
         return jsonify({'error': 'Invalid filename'}), 400
 
     temp_dir = tempfile.mkdtemp()
-    file_path = os.path.join(temp_dir, filename)
+    temp_dir_path = Path(temp_dir).resolve()
+    file_path = temp_dir_path / filename
 
-    # Validate that the final path is within temp_dir (prevent path traversal)
-    real_temp_dir = os.path.realpath(temp_dir)
-    real_file_path = os.path.realpath(file_path)
-    if not real_file_path.startswith(real_temp_dir + os.sep):
-        os.rmdir(temp_dir)
+    # Validate that the resolved path is within temp_dir (prevent path traversal)
+    # Using relative_to() raises ValueError if file_path is not under temp_dir_path
+    try:
+        resolved_file_path = file_path.resolve()
+        # This will raise ValueError if resolved_file_path is not relative to temp_dir_path
+        resolved_file_path.relative_to(temp_dir_path)
+    except ValueError:
+        # Path traversal attempt detected
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
         return jsonify({'error': 'Invalid file path'}), 400
 
+    # Convert back to string for compatibility with existing code
+    file_path = str(resolved_file_path)
     file.save(file_path)
     
     # Get file size
