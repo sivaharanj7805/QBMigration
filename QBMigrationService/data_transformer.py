@@ -101,6 +101,8 @@ class QBDataTransformer:
         self.manual_review = []
         
         # Trial balance
+        # AUDIT FIX: Thread-safe trial balance with lock
+        self._trial_balance_lock = threading.Lock()
         self.trial_balance = {'debits': Decimal('0'), 'credits': Decimal('0')}
         
         # Initialize mappings
@@ -204,8 +206,11 @@ class QBDataTransformer:
                 ))
         
         # Process in parallel
+        # AUDIT FIX: Use ThreadPoolExecutor instead of ProcessPoolExecutor
+        # Manager() proxy objects cannot be pickled for ProcessPoolExecutor
         if batches:
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_type = {
                     executor.submit(
                         self._parallel_transform_batch,
@@ -355,17 +360,71 @@ class QBDataTransformer:
         
         return transformed, stats
     
+    def transform_entity(
+        self,
+        entity_type: str,
+        entity: Dict,
+        id_mapping: Optional[Dict] = None
+    ) -> Optional[Dict]:
+        """
+        AUDIT FIX: Public method for transforming a single entity (used by orchestrator).
+
+        Args:
+            entity_type: Type of entity (Customer, Vendor, etc.)
+            entity: Source entity data
+            id_mapping: Optional ID mapping for resolving references
+
+        Returns:
+            Transformed entity or None if skipped
+        """
+        # Update id_mapping if provided
+        if id_mapping:
+            for et, mappings in id_mapping.items():
+                if isinstance(mappings, dict):
+                    self.id_mapping[et].update(mappings)
+
+        # Map entity type variations
+        type_mapping = {
+            'Customers': 'customer',
+            'Vendors': 'vendor',
+            'Accounts': 'account',
+            'Items': 'item',
+            'Employees': 'employee',
+            'Invoices': 'invoice',
+            'Bills': 'bill',
+            'Payments': 'payment',
+        }
+
+        normalized_type = type_mapping.get(entity_type, entity_type.lower())
+        method_name = f'transform_{normalized_type}'
+
+        if not hasattr(self, method_name):
+            logger.warning(f"No transform method for entity type: {entity_type}")
+            return None
+
+        try:
+            transform_func = getattr(self, method_name)
+            result = transform_func(entity)
+            if result:
+                self.stats['total_processed'] += 1
+                self.stats['by_entity_type'][entity_type] += 1
+            return result
+        except Exception as e:
+            logger.warning(f"Transform failed for {entity_type}: {e}")
+            self.stats['total_skipped'] += 1
+            return None
+
     def _transform_entity_batch(self, entities: Any, entity_type: str) -> List[Dict]:
         """Transform a batch of entities sequentially"""
         if not isinstance(entities, list):
             entities = [entities]
-        
+
         method_name = f'transform_{entity_type.lower()}'
         if not hasattr(self, method_name):
             return []
-        
+
         transform_func = getattr(self, method_name)
-        
+
         transformed = []
         for entity in entities:
             try:

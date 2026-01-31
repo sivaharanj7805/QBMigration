@@ -49,8 +49,15 @@ class IIFParser:
         }
     
     def parse_file(self, file_path: str) -> Dict[str, Any]:
-        """Parse an IIF file and return structured data"""
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        """Parse an IIF file and return structured data
+        AUDIT FIX: Added basic path validation
+        """
+        # Basic path security check
+        real_path = os.path.realpath(file_path)
+        if '..' in file_path or not os.path.isfile(real_path):
+            raise ValueError(f"Invalid file path: {file_path}")
+
+        with open(real_path, 'r', encoding='utf-8', errors='replace') as f:
             return self.parse_content(f.read())
     
     def parse_content(self, content: str) -> Dict[str, Any]:
@@ -58,8 +65,8 @@ class IIFParser:
         lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
         self.stats['total_lines'] = len(lines)
         
-        current_type = None
-        
+        # AUDIT FIX: Removed unused current_type variable
+
         for line_num, line in enumerate(lines, 1):
             if not line.strip():
                 self.stats['skipped_lines'] += 1
@@ -73,7 +80,6 @@ class IIFParser:
                 if record_type.startswith('!'):
                     header_type = record_type[1:]  # Remove the !
                     self.headers[header_type] = fields[1:]
-                    current_type = header_type
                     
                 # Data line
                 elif record_type in self.RECORD_TYPES:

@@ -299,10 +299,11 @@ class MigrationOrchestrator:
         for record in source_data:
             try:
                 # Transform to QBO format
-                transformed = transformer.transform_single(
+                # AUDIT FIX: Use the correct transform method
+                transformed = transformer.transform_entity(
                     entity_name,
                     record,
-                    reference_maps=existing_maps
+                    id_mapping=existing_maps
                 )
 
                 if transformed:

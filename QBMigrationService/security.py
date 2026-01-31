@@ -48,9 +48,12 @@ class SecurityManager:
     
     @staticmethod
     def verify_2fa_code(secret, code):
-        """Verify 2FA TOTP code"""
+        """Verify 2FA TOTP code
+        AUDIT FIX: Increased valid_window to handle mobile device clock drift
+        """
         totp = pyotp.TOTP(secret)
-        return totp.verify(code, valid_window=1)
+        # valid_window=2 allows ±60 seconds to handle clock drift
+        return totp.verify(code, valid_window=2)
     
     @staticmethod
     def generate_api_signature(payload, secret):
@@ -125,33 +128,37 @@ class SecurityManager:
 
         # Fallback: In-memory rate limiting (DEVELOPMENT ONLY - single instance)
         import os
+        import threading
         if os.getenv('FLASK_ENV', 'development') == 'production':
             # CRIT-12 FIX: Never use in-memory fallback in production
             print("CRITICAL: In-memory rate limiting not allowed in production")
             return False
 
+        # AUDIT FIX: Thread-safe rate limit store initialization and access
         if not hasattr(SecurityManager, '_rate_limit_store'):
             SecurityManager._rate_limit_store = {}
+            SecurityManager._rate_limit_lock = threading.Lock()
 
         now = datetime.now()
         window_start = now - timedelta(minutes=window_minutes)
 
-        if user_id not in SecurityManager._rate_limit_store:
-            SecurityManager._rate_limit_store[user_id] = []
+        with SecurityManager._rate_limit_lock:
+            if user_id not in SecurityManager._rate_limit_store:
+                SecurityManager._rate_limit_store[user_id] = []
 
-        # Clean old requests
-        SecurityManager._rate_limit_store[user_id] = [
-            req_time for req_time in SecurityManager._rate_limit_store[user_id]
-            if req_time > window_start
-        ]
+            # Clean old requests
+            SecurityManager._rate_limit_store[user_id] = [
+                req_time for req_time in SecurityManager._rate_limit_store[user_id]
+                if req_time > window_start
+            ]
 
-        # Check limit
-        if len(SecurityManager._rate_limit_store[user_id]) >= max_requests:
-            return False
+            # Check limit
+            if len(SecurityManager._rate_limit_store[user_id]) >= max_requests:
+                return False
 
-        # Add this request
-        SecurityManager._rate_limit_store[user_id].append(now)
-        return True
+            # Add this request
+            SecurityManager._rate_limit_store[user_id].append(now)
+            return True
     
     # ========================================================================
     # PRE-MIGRATION SCAN
@@ -426,9 +433,13 @@ class SecurityManager:
             SecurityError: If verification cannot be completed
         """
         import requests
-        
-        # Introspect token to get scopes
-        url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/introspect"
+        # AUDIT FIX: Import introspect URL from config for consistency
+        try:
+            from config import OAUTH_INTROSPECT_URL
+            url = OAUTH_INTROSPECT_URL
+        except ImportError:
+            # Fallback if config not available
+            url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/introspect"
         
         headers = {
             "Accept": "application/json",
