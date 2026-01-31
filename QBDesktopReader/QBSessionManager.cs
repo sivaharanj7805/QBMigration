@@ -654,7 +654,11 @@ namespace QBDesktopExtractor
                     snapshot.CompanyNameHash = Convert.ToBase64String(hash).Substring(0, 16);
                 }
             }
-            catch
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                snapshot.CompanyNameHash = "unavailable";
+            }
+            catch (ArgumentNullException)
             {
                 snapshot.CompanyNameHash = "unavailable";
             }

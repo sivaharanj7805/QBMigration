@@ -78,6 +78,17 @@ namespace QBDesktopExtractor
             QBExtractedData data,
             CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(encryptedFilePath))
+                throw new ArgumentException("Encrypted file path is required", nameof(encryptedFilePath));
+            if (encryptionResult == null)
+                throw new ArgumentNullException(nameof(encryptionResult));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentException("Session ID is required", nameof(sessionId));
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (!File.Exists(encryptedFilePath))
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+
             _logger?.Log(LogLevel.Info, "Uploading file (direct)...");
 
             using (var content = new MultipartFormDataContent())
@@ -362,6 +373,17 @@ namespace QBDesktopExtractor
             QBExtractedData data,
             CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(encryptedFilePath))
+                throw new ArgumentException("Encrypted file path is required", nameof(encryptedFilePath));
+            if (encryptionResult == null)
+                throw new ArgumentNullException(nameof(encryptionResult));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentException("Session ID is required", nameof(sessionId));
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (!File.Exists(encryptedFilePath))
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+
             var fileInfo = new FileInfo(encryptedFilePath);
             long fileSize = fileInfo.Length;
             int chunkSize = _config.Advanced.ChunkSizeKB * 1024;

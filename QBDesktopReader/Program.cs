@@ -126,7 +126,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine($"  Cause: {ex.InnerException.Message}");
                     }
                 }
-                catch { /* Don't let error reporting crash */ }
+                catch (Exception) { /* Don't let error reporting crash */ }
                 exitCode = ExitCode.UnknownError;
             }
             finally
@@ -140,7 +140,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine("Press any key to exit...");
                         Console.ReadKey(true);
                     }
-                    catch
+                    catch (InvalidOperationException)
                     {
                         // ReadKey throws if stdin is redirected; ignore
                     }

@@ -233,9 +233,14 @@ namespace QBDesktopExtractor
             CancellationToken cancellationToken = default,
             IProgress<PipelineProgress> progress = null)
         {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentException("Session ID is required", nameof(sessionId));
+
             // Note: True streaming would require changes to extractor to yield records
             // This version minimizes memory during encrypt/upload but serializes full object
-            
+
             return await ProcessWithTempFileAsync(data, sessionId, cancellationToken, progress);
         }
 
