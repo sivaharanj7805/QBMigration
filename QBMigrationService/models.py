@@ -15,7 +15,7 @@ Version: 3.1.0
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime
 from enum import Enum

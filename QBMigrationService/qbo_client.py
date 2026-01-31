@@ -420,14 +420,17 @@ class PremiumQBOClient:
                     WHERE status = 'created'
                 ''')
             
-            total = cursor.fetchone()[0]
-            
+            # AUDIT FIX: Handle None from fetchone() on empty tables
+            result = cursor.fetchone()
+            total = result[0] if result else 0
+
             # Get last update time
             cursor.execute('SELECT MAX(created_at) FROM migrated_entities')
-            last_updated = cursor.fetchone()[0]
-            
+            result = cursor.fetchone()
+            last_updated = result[0] if result else None
+
             conn.close()
-            
+
             return {
                 "total_entities": total,
                 "entity_counts": counts,
