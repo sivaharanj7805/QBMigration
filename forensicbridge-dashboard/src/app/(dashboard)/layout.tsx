@@ -39,7 +39,7 @@ function KeyboardShortcutsModal({ isOpen, onClose }: { isOpen: boolean; onClose:
         >
             <div
                 className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl"
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
