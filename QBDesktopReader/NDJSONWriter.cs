@@ -57,6 +57,7 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Write a batch of records for an entity type
+        /// Note: Content hash is computed at finalization, not per-batch
         /// </summary>
         public async Task WriteEntityBatchAsync<T>(string entityName, IEnumerable<T> records, CancellationToken ct = default)
         {
@@ -66,25 +67,18 @@ namespace QBDesktopExtractor
             var fileInfo = GetOrCreateEntityFile(entityName);
             int count = 0;
 
-            using (var hasher = SHA256.Create())
+            foreach (var record in records)
             {
-                foreach (var record in records)
-                {
-                    ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested();
 
-                    string json = JsonConvert.SerializeObject(record, _jsonSettings);
-                    byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
+                string json = JsonConvert.SerializeObject(record, _jsonSettings);
+                byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
 
-                    await fileInfo.Stream.WriteAsync(bytes, 0, bytes.Length, ct);
-                    hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
+                await fileInfo.Stream.WriteAsync(bytes, 0, bytes.Length, ct);
 
-                    fileInfo.RecordCount++;
-                    fileInfo.BytesWritten += bytes.Length;
-                    count++;
-                }
-
-                hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-                fileInfo.ContentHash = Convert.ToBase64String(hasher.Hash);
+                fileInfo.RecordCount++;
+                fileInfo.BytesWritten += bytes.Length;
+                count++;
             }
 
             _logger?.Log(LogLevel.Debug, "Wrote {0} {1} records", count, entityName);
@@ -203,8 +197,7 @@ namespace QBDesktopExtractor
             public FileStream Stream { get; set; }
             public int RecordCount { get; set; }
             public long BytesWritten { get; set; }
-            public string ContentHash { get; set; }
-            public string FileHash { get; set; }
+            public string FileHash { get; set; }  // Computed at finalization
             public int Warnings { get; set; }
             public int Errors { get; set; }
         }

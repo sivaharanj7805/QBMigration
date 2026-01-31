@@ -51,25 +51,23 @@ namespace QBDesktopExtractor
             _isProduction = !Debugger.IsAttached && 
                            Environment.GetEnvironmentVariable("FORENSICBRIDGE_ENV") == "production";
             
-            // Try to use Windows Event Log for services
+            // Try to use Windows Event Log for services (Windows only)
             _useEventLog = false;
             try
             {
-                if (true /* .NET Framework 4.8 is Windows-only */ && _isProduction)
+                // Only enable event logging in production
+                if (_isProduction)
                 {
-                    if (!EventLog.SourceExists(EventLogSource))
-                    {
-                        // Skip event log if we can't create source (requires admin)
-                        _useEventLog = false;
-                    }
-                    else
+                    if (EventLog.SourceExists(EventLogSource))
                     {
                         _useEventLog = true;
                     }
+                    // Note: Don't try to create source - requires admin privileges
                 }
             }
             catch
             {
+                // EventLog access may fail on non-Windows or without permissions
                 _useEventLog = false;
             }
         }
@@ -203,23 +201,42 @@ namespace QBDesktopExtractor
                     if (fileInfo.Length > MaxLogFileSize)
                     {
                         var archivePath = Path.Combine(
-                            _logDirectory, 
+                            _logDirectory,
                             $"forensicbridge_{DateTime.UtcNow:yyyyMMdd_HHmmss}.log"
                         );
-                        File.Move(_logFilePath, archivePath);
+                        try
+                        {
+                            File.Move(_logFilePath, archivePath);
+                        }
+                        catch
+                        {
+                            // Log rotation failed - continue writing to current file
+                        }
                     }
                 }
-                
+
                 var json = JsonSerializer.Serialize(entry, new JsonSerializerOptions
                 {
                     WriteIndented = false
                 });
-                
-                File.AppendAllText(_logFilePath, json + Environment.NewLine, Encoding.UTF8);
+
+                // Use FileStream with proper sharing to allow concurrent reads
+                // and to ensure atomic writes with exclusive lock
+                var logLine = Encoding.UTF8.GetBytes(json + Environment.NewLine);
+                using (var fs = new FileStream(
+                    _logFilePath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.Read,    // Allow other processes to read while we write
+                    bufferSize: 4096,
+                    FileOptions.None))
+                {
+                    fs.Write(logLine, 0, logLine.Length);
+                }
             }
             catch
             {
-                // Swallow file write errors
+                // Swallow file write errors - can't let logging crash the app
             }
         }
         
@@ -227,9 +244,6 @@ namespace QBDesktopExtractor
         {
             try
             {
-                if (!true /* .NET Framework 4.8 is Windows-only */)
-                    return;
-                
                 var entryType = level switch
                 {
                     LogLevel.Warn => EventLogEntryType.Warning,
@@ -237,24 +251,25 @@ namespace QBDesktopExtractor
                     LogLevel.Fatal => EventLogEntryType.Error,
                     _ => EventLogEntryType.Information
                 };
-                
+
                 var fullMessage = $"[{component}] {message}";
                 if (exception != null)
                 {
                     fullMessage += $"\n\nException:\n{exception}";
                 }
-                
-                // Truncate to event log max size
-                if (fullMessage.Length > 32000)
+
+                // Truncate to event log max size (Windows limit is 32766 chars)
+                const int MaxEventLogSize = 32000;
+                if (fullMessage.Length > MaxEventLogSize)
                 {
-                    fullMessage = fullMessage.Substring(0, 32000) + "...[truncated]";
+                    fullMessage = fullMessage.Substring(0, MaxEventLogSize) + "...[truncated]";
                 }
-                
+
                 EventLog.WriteEntry(EventLogSource, fullMessage, entryType);
             }
             catch
             {
-                // Swallow event log errors
+                // Swallow event log errors - can't let logging crash the app
             }
         }
         

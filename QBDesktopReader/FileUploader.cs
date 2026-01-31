@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -170,13 +171,28 @@ namespace QBDesktopExtractor
             }
             catch (Exception ex)
             {
-                _logger?.Log(LogLevel.Warning, "Could not encrypt key with RSA (server may not support it): {0}", ex.Message);
+                _logger?.Log(LogLevel.Warning, "Could not encrypt key with RSA: {0}", ex.Message);
             }
 
-            // Fallback: If RSA encryption failed, use TLS-protected plain key (with warning)
+            // Handle RSA encryption failure
             if (!isKeyEncrypted)
             {
-                _logger?.Log(LogLevel.Warning, "SECURITY WARNING: Sending key without RSA encryption (TLS-only protection)");
+                // Check if fallback is allowed via config
+                bool allowFallback = _config.Advanced?.AllowKeyEncryptionFallback ?? false;
+
+                if (!allowFallback)
+                {
+                    throw new SecurityException(
+                        "RSA key encryption failed and fallback is not allowed. " +
+                        "The server may not support RSA key encryption, or there was a configuration error. " +
+                        "Set 'allowKeyEncryptionFallback: true' in config to allow TLS-only protection (not recommended).");
+                }
+
+                _logger?.Log(LogLevel.Warning,
+                    "SECURITY WARNING: RSA key encryption unavailable. " +
+                    "Proceeding with TLS-only protection as allowKeyEncryptionFallback is enabled. " +
+                    "This provides less security than the intended RSA+TLS double encryption.");
+
                 keyToSend = encryptionResult.KeyBase64;
             }
 
@@ -682,7 +698,10 @@ namespace QBDesktopExtractor
 
             if (_config.Advanced.EnableExponentialBackoff)
             {
-                delayMs = baseDelay * (int)Math.Pow(2, attempt - 1);
+                // Overflow protection: cap exponent to prevent int overflow
+                int safeExponent = Math.Min(attempt - 1, 30);
+                long delayLong = (long)baseDelay * (1L << safeExponent);
+                delayMs = (int)Math.Min(delayLong, int.MaxValue);
             }
 
             // Cap at max delay

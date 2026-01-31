@@ -86,10 +86,21 @@ namespace QBDesktopExtractor
             @"(session[_-]?id|session[_-]?ticket|qb[_-]?session)\s*[=:]\s*[^\s,;""']+",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        // SSN pattern
+        // SSN pattern - more restrictive to reduce false positives
+        // Matches:
+        // - Standard SSN format: XXX-XX-XXXX
+        // - Context-based: "SSN: 123456789" or "Social Security: 123-45-6789"
+        // Does NOT match:
+        // - Phone numbers like "555 12 3456" (different grouping)
+        // - Random 9-digit numbers without context
         private static readonly Regex SsnRegex = new Regex(
-            @"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b",
-            RegexOptions.Compiled);
+            @"(?:" +
+            @"(?:SSN|Social\s*Security(?:\s*(?:Number|No\.?|#))?)\s*[=:#]?\s*" + // Contextual prefix
+            @"(\d{3}[-\s]?\d{2}[-\s]?\d{4}|\d{9})" +  // SSN with or without separators
+            @"|" +
+            @"\b\d{3}-\d{2}-\d{4}\b" +  // Only match XXX-XX-XXXX format without context (most distinctive)
+            @")",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         // Credit card patterns (basic)
         private static readonly Regex CreditCardRegex = new Regex(

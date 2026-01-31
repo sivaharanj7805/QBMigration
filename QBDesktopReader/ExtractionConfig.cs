@@ -319,18 +319,35 @@ namespace QBDesktopExtractor
             // =============================================================
             // OUTPUT RESULTS
             // =============================================================
-            
-            // Print warnings
-            foreach (var warning in warnings)
-            {
-                Console.WriteLine($"⚠ Config warning: {warning}");
-            }
+
+            // Store warnings for caller to access
+            ValidationWarnings = warnings.ToArray();
 
             // Throw if errors
             if (errors.Count > 0)
             {
                 throw new ConfigurationException(
                     "Configuration validation failed:\n  - " + string.Join("\n  - ", errors));
+            }
+        }
+
+        /// <summary>
+        /// Validation warnings from the last Validate() call
+        /// </summary>
+        [JsonIgnore]
+        public string[] ValidationWarnings { get; private set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Validate configuration and log warnings using provided logger
+        /// </summary>
+        public void Validate(IRedactingLogger logger)
+        {
+            Validate();
+
+            // Log any warnings
+            foreach (var warning in ValidationWarnings)
+            {
+                logger?.Log(LogLevel.Warning, "Config warning: {0}", warning);
             }
         }
 
@@ -431,6 +448,16 @@ namespace QBDesktopExtractor
         // Security relaxation (dev only)
         [JsonProperty("allowInsecureHttpForLocalhost")]
         public bool AllowInsecureHttpForLocalhost { get; set; } = true;
+
+        // RSA key encryption fallback control
+        // When false (default), upload fails if RSA key encryption is unavailable
+        // When true, falls back to TLS-only protection with a warning
+        [JsonProperty("allowKeyEncryptionFallback")]
+        public bool AllowKeyEncryptionFallback { get; set; } = false;
+
+        // Upload timeout in minutes (default 10, max 30)
+        [JsonProperty("uploadTimeoutMinutes")]
+        public int UploadTimeoutMinutes { get; set; } = 10;
 
         // QBXML version control
         [JsonProperty("maxQBXMLVersion")]
