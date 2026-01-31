@@ -745,7 +745,35 @@ def create_app(config_name='development'):
         if not app.config.get('DEBUG'):
             # SECURITY FIX: Add preload directive for HSTS preload list submission
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
-            response.headers['Content-Security-Policy'] = "default-src 'self'"
+
+            # HIGH-26 FIX: Comprehensive CSP headers for XSS prevention
+            # Production-ready CSP that balances security with SPA functionality
+            csp_directives = [
+                "default-src 'self'",
+                # Scripts: Allow self and specific trusted CDNs, no unsafe-inline/eval
+                "script-src 'self' https://js.stripe.com https://cdn.jsdelivr.net",
+                # Styles: Allow self and inline styles (needed for styled-components/emotion)
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+                # Images: Allow self, data URIs (for inline images), and blob (for canvas)
+                "img-src 'self' data: blob: https://*.stripe.com",
+                # Fonts: Allow self and Google Fonts
+                "font-src 'self' https://fonts.gstatic.com",
+                # Connect (XHR/fetch): Allow self, Stripe, and WebSocket
+                "connect-src 'self' https://api.stripe.com wss://*.forensicbridge.io wss://*.forensicbridge.ca",
+                # Frames: Only allow Stripe checkout iframe
+                "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+                # Prevent embedding in frames (clickjacking protection)
+                "frame-ancestors 'self'",
+                # Form actions restricted to self
+                "form-action 'self'",
+                # Base URI restricted to self (prevents base tag injection)
+                "base-uri 'self'",
+                # Block all plugins (Flash, Java, etc.)
+                "object-src 'none'",
+                # Upgrade HTTP requests to HTTPS
+                "upgrade-insecure-requests",
+            ]
+            response.headers['Content-Security-Policy'] = "; ".join(csp_directives)
 
         return response
     
