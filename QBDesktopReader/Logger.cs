@@ -39,7 +39,12 @@ namespace QBDesktopExtractor
             {
                 Directory.CreateDirectory(_logDirectory);
             }
-            catch
+            catch (IOException)
+            {
+                // Fallback to temp directory
+                _logDirectory = Path.GetTempPath();
+            }
+            catch (UnauthorizedAccessException)
             {
                 // Fallback to temp directory
                 _logDirectory = Path.GetTempPath();
@@ -65,9 +70,14 @@ namespace QBDesktopExtractor
                     // Note: Don't try to create source - requires admin privileges
                 }
             }
-            catch
+            catch (System.Security.SecurityException)
             {
                 // EventLog access may fail on non-Windows or without permissions
+                _useEventLog = false;
+            }
+            catch (InvalidOperationException)
+            {
+                // EventLog not available on this platform
                 _useEventLog = false;
             }
         }
@@ -145,7 +155,7 @@ namespace QBDesktopExtractor
                         WriteToEventLog(level, component, message, exception);
                     }
                 }
-                catch
+                catch (Exception)
                 {
                     // Swallow logging errors - never let logging crash the app
                 }
@@ -208,7 +218,7 @@ namespace QBDesktopExtractor
                         {
                             File.Move(_logFilePath, archivePath);
                         }
-                        catch
+                        catch (IOException)
                         {
                             // Log rotation failed - continue writing to current file
                         }
@@ -234,9 +244,13 @@ namespace QBDesktopExtractor
                     fs.Write(logLine, 0, logLine.Length);
                 }
             }
-            catch
+            catch (IOException)
             {
                 // Swallow file write errors - can't let logging crash the app
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // No write permission - can't let logging crash the app
             }
         }
         
@@ -267,9 +281,13 @@ namespace QBDesktopExtractor
 
                 EventLog.WriteEntry(EventLogSource, fullMessage, entryType);
             }
-            catch
+            catch (System.Security.SecurityException)
             {
                 // Swallow event log errors - can't let logging crash the app
+            }
+            catch (InvalidOperationException)
+            {
+                // EventLog not available - can't let logging crash the app
             }
         }
         

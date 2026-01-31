@@ -221,11 +221,15 @@ namespace QBDesktopExtractor
                     }
                 }
             }
-            catch
+            catch (System.Security.SecurityException)
             {
                 // Registry access may fail
             }
-            
+            catch (UnauthorizedAccessException)
+            {
+                // Registry access denied
+            }
+
             return "WIN_FALLBACK";
         }
         

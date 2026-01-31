@@ -3211,7 +3211,8 @@ namespace QBDesktopExtractor
                             preferences.IsUsingMultiCurrency = pref.MultiCurrencyPreferences.IsMultiCurrencyOn?.GetValue() ?? false;
                         }
                     }
-                    catch { /* Multi-currency not in all QB versions */ }
+                    catch (System.Runtime.InteropServices.COMException) { /* Multi-currency not in all QB versions */ }
+                    catch (NullReferenceException) { /* Property not available */ }
                 }
                 
                 Console.WriteLine($"    Extracted Preferences");
@@ -3581,9 +3582,13 @@ namespace QBDesktopExtractor
                                         }
                                     }
                                 }
-                                catch
+                                catch (FormatException)
                                 {
                                     // Skip malformed rows
+                                }
+                                catch (ArgumentOutOfRangeException)
+                                {
+                                    // Skip rows with missing columns
                                 }
                             }
                             // Parse TotalRow for verification
@@ -3608,9 +3613,13 @@ namespace QBDesktopExtractor
                                         }
                                     }
                                 }
-                                catch
+                                catch (FormatException)
                                 {
                                     // Skip malformed totals
+                                }
+                                catch (ArgumentOutOfRangeException)
+                                {
+                                    // Skip totals with missing columns
                                 }
                             }
                         }
