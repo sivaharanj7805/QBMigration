@@ -104,13 +104,16 @@ export default function RegisterPage() {
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {/* FIX: Added name attributes to all inputs for accessibility and form automation */}
                         <div>
                             <label htmlFor="name" className="block text-sm font-medium text-slate-300 mb-2">
                                 Full Name
                             </label>
                             <input
                                 id="name"
+                                name="name"
                                 type="text"
+                                autoComplete="name"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 required
@@ -125,7 +128,9 @@ export default function RegisterPage() {
                             </label>
                             <input
                                 id="email"
+                                name="email"
                                 type="email"
+                                autoComplete="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
@@ -140,7 +145,9 @@ export default function RegisterPage() {
                             </label>
                             <input
                                 id="company"
+                                name="company"
                                 type="text"
+                                autoComplete="organization"
                                 value={company}
                                 onChange={(e) => setCompany(e.target.value)}
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
@@ -154,7 +161,9 @@ export default function RegisterPage() {
                             </label>
                             <input
                                 id="password"
+                                name="password"
                                 type="password"
+                                autoComplete="new-password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 required
@@ -169,7 +178,9 @@ export default function RegisterPage() {
                             </label>
                             <input
                                 id="confirmPassword"
+                                name="confirmPassword"
                                 type="password"
+                                autoComplete="new-password"
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                 required

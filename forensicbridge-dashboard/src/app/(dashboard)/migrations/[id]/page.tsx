@@ -19,6 +19,42 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 // Destination type
 type DestinationType = "qbo" | "caseware";
 
+// FIX: Define proper types for API responses instead of using 'any'
+interface LiveStatusResponse {
+    migration_id: string;
+    phase: string;
+    phase_number: number;
+    percentage: number;
+    current_entity: string | null;
+    status_message: string;
+    status: string;
+    alerts: string[];
+    integrity_verified: boolean;
+    phases: Array<{
+        name: string;
+        status: "pending" | "in_progress" | "completed";
+        percentage: number;
+        description: string;
+    }>;
+    company_name: string;
+    started_at: string;
+    elapsed_seconds: number;
+    completed_at?: string;
+    duration_seconds?: number;
+    error?: string;
+    destination?: DestinationType;
+}
+
+interface ApiDiscrepancy {
+    account_name: string;
+    account_type?: string;
+    source_balance: number;
+    destination_balance: number;
+    difference: number;
+    severity?: "critical" | "warning" | "info";
+    possible_cause?: string;
+}
+
 export default function MigrationDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -58,13 +94,20 @@ export default function MigrationDetailPage() {
         enabled: !!id,
     });
 
-    // Destination from API response
-    const destination: DestinationType = (liveStatus as any)?.destination || "qbo";
+    // FIX: Remove 'any' cast - use typed response
+    // The liveStatus is typed from useLiveStatus hook, destination is optional
+    const destination: DestinationType = (liveStatus as LiveStatusResponse | undefined)?.destination || "qbo";
 
     const [isCancelling, setIsCancelling] = useState(false);
     const [showDiscrepancyDoctor, setShowDiscrepancyDoctor] = useState(true);
+    // FIX: Add state for concurrent request throttling
+    const [isExportingReport, setIsExportingReport] = useState(false);
 
+    // FIX: Improved error messages with specific details
     const handleExportDiscrepancyReport = async () => {
+        // FIX: Prevent concurrent requests
+        if (isExportingReport) return;
+        setIsExportingReport(true);
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/migrations/${id}/discrepancy-report`, {
@@ -82,11 +125,39 @@ export default function MigrationDetailPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             } else {
-                alert("Failed to export discrepancy report");
+                // FIX: Provide specific error details based on HTTP status
+                let errorMessage = "Failed to export discrepancy report.";
+                if (response.status === 401) {
+                    errorMessage += " Your session may have expired. Please log in again.";
+                } else if (response.status === 404) {
+                    errorMessage += " The report was not found for this migration.";
+                } else if (response.status === 403) {
+                    errorMessage += " You don't have permission to access this report.";
+                } else if (response.status >= 500) {
+                    errorMessage += ` Server error (${response.status}). Please try again later.`;
+                } else {
+                    try {
+                        const errorData = await response.json();
+                        if (errorData.error) {
+                            errorMessage = errorData.error;
+                        }
+                    } catch {
+                        // Response wasn't JSON
+                    }
+                }
+                alert(errorMessage);
             }
         } catch (error) {
             console.error("Export error:", error);
-            alert("Failed to export report. Please try again.");
+            // FIX: Differentiate between network errors and other errors
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                alert("Network error: Unable to connect to the server. Please check your internet connection.");
+            } else {
+                alert("Failed to export report. Please try again.");
+            }
+        } finally {
+            // FIX: Always reset loading state
+            setIsExportingReport(false);
         }
     };
 
@@ -291,7 +362,7 @@ export default function MigrationDetailPage() {
             ═══════════════════════════════════════════════════════════════ */}
             {(discrepancyData?.has_discrepancies && showDiscrepancyDoctor) ? (
                 <DiscrepancyDoctor
-                    discrepancies={discrepancyData.discrepancies.map((d: any) => ({
+                    discrepancies={discrepancyData.discrepancies.map((d: ApiDiscrepancy) => ({
                         account_name: d.account_name,
                         account_type: d.account_type || "Unknown",
                         source_balance: d.source_balance,

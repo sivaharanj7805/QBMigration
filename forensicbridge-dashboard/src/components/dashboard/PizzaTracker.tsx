@@ -75,8 +75,15 @@ export function PizzaTracker({
                 </div>
             </div>
 
-            {/* Overall Progress Bar */}
-            <div className="progress-bar mb-8">
+            {/* Overall Progress Bar - FIX: Added ARIA attributes for accessibility */}
+            <div
+                className="progress-bar mb-8"
+                role="progressbar"
+                aria-valuenow={overallPercentage}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`Migration progress: ${overallPercentage}% complete`}
+            >
                 <div
                     className={`progress-bar-fill ${overallPercentage >= 100 ? "success" : ""}`}
                     style={{ width: `${overallPercentage}%` }}
@@ -129,7 +136,15 @@ export function PizzaTracker({
 
                                     {phase.status === "in_progress" && (
                                         <div className="mt-2 w-24 mx-auto">
-                                            <div className="progress-bar h-1">
+                                            {/* FIX: Added ARIA attributes to phase progress bar */}
+                                            <div
+                                                className="progress-bar h-1"
+                                                role="progressbar"
+                                                aria-valuenow={phase.percentage}
+                                                aria-valuemin={0}
+                                                aria-valuemax={100}
+                                                aria-label={`${label} progress: ${Math.round(phase.percentage)}%`}
+                                            >
                                                 <div
                                                     className="progress-bar-fill"
                                                     style={{ width: `${phase.percentage}%` }}

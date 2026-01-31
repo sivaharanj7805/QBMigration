@@ -93,17 +93,16 @@ export default function DashboardLayout({
         router.push("/login");
     };
 
-    // Show loading while checking auth
+    // FIX: Return loading UI without duplicate html/body tags
+    // The root layout already provides html/body, this is a nested layout
     if (isLoading) {
         return (
-            <html lang="en">
-                <body className="flex h-screen items-center justify-center bg-gray-50">
-                    <div className="text-center">
-                        <Loader2 className="w-8 h-8 mx-auto animate-spin text-blue-600 mb-4" />
-                        <p className="text-gray-500">Checking authentication...</p>
-                    </div>
-                </body>
-            </html>
+            <div className="flex h-screen items-center justify-center bg-gray-50">
+                <div className="text-center">
+                    <Loader2 className="w-8 h-8 mx-auto animate-spin text-blue-600 mb-4" />
+                    <p className="text-gray-500">Checking authentication...</p>
+                </div>
+            </div>
         );
     }
 
@@ -120,44 +119,44 @@ export default function DashboardLayout({
     };
     const status = statusConfig[systemStatus];
 
+    // FIX: Remove duplicate html/body tags - use fragment or div wrapper
+    // Next.js root layout provides html/body, nested layouts should not repeat them
     return (
-        <html lang="en">
-            <body className="flex h-screen overflow-hidden">
-                <Providers>
-                    {/* Sidebar */}
-                    <Sidebar />
+        <Providers>
+            <div className="flex h-screen overflow-hidden">
+                {/* Sidebar */}
+                <Sidebar />
 
-                    {/* Main Content */}
-                    <div className="flex-1 flex flex-col overflow-hidden">
-                        {/* Header */}
-                        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
-                            <div className="flex items-center gap-4">
-                                <h2 className="text-sm text-gray-500">
-                                    Welcome back, <span className="font-medium text-gray-900">{userName}</span>
-                                </h2>
-                            </div>
-                            <div className="flex items-center gap-4">
-                                <span className={`text-xs ${status.color} px-2 py-1 rounded-full`}>
-                                    {status.icon} {status.text}
-                                </span>
-                                <button
-                                    onClick={handleLogout}
-                                    className="text-xs text-gray-500 hover:text-red-600 transition-colors"
-                                >
-                                    Logout
-                                </button>
-                            </div>
-                        </header>
+                {/* Main Content */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                    {/* Header */}
+                    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
+                        <div className="flex items-center gap-4">
+                            <h2 className="text-sm text-gray-500">
+                                Welcome back, <span className="font-medium text-gray-900">{userName}</span>
+                            </h2>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <span className={`text-xs ${status.color} px-2 py-1 rounded-full`}>
+                                {status.icon} {status.text}
+                            </span>
+                            <button
+                                onClick={handleLogout}
+                                className="text-xs text-gray-500 hover:text-red-600 transition-colors"
+                            >
+                                Logout
+                            </button>
+                        </div>
+                    </header>
 
-                        {/* Page Content */}
-                        <main className="flex-1 overflow-auto bg-gray-50 p-6">
-                            <MigrationBalanceBanner />
-                            {children}
-                        </main>
-                    </div>
-                </Providers>
-            </body>
-        </html>
+                    {/* Page Content */}
+                    <main className="flex-1 overflow-auto bg-gray-50 p-6">
+                        <MigrationBalanceBanner />
+                        {children}
+                    </main>
+                </div>
+            </div>
+        </Providers>
     );
 }
 
