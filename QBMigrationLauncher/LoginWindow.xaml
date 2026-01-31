@@ -96,13 +96,12 @@
                     </Button.Resources>
                 </Button>
                 
-                <!-- Register Link -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
-                    <TextBlock Text="Don't have an account? " FontSize="13" Foreground="#94A3B8"/>
-                    <TextBlock x:Name="RegisterLink" Text="Register" FontSize="13" 
-                               Foreground="#3B82F6" Cursor="Hand" TextDecorations="Underline"
-                               MouseLeftButtonDown="RegisterLink_Click"/>
-                </StackPanel>
+                <!-- FIX #18: Register Link - now keyboard accessible using Hyperlink -->
+                <TextBlock HorizontalAlignment="Center" Margin="0,20,0,0" FontSize="13">
+                    <Run Text="Don't have an account? " Foreground="#94A3B8"/>
+                    <Hyperlink x:Name="RegisterLink" Foreground="#3B82F6" Click="RegisterLink_Click"
+                               FocusVisualStyle="{x:Null}">Register</Hyperlink>
+                </TextBlock>
             </StackPanel>
         </Border>
         

@@ -33,25 +33,39 @@ namespace QBMigrationLauncher.Services
                 // Query for QB process command line
                 string query = "SELECT CommandLine FROM Win32_Process WHERE Name = 'QBW32.exe' OR Name = 'QBW.exe'";
                 using var searcher = new ManagementObjectSearcher(query);
-                
-                foreach (ManagementObject obj in searcher.Get())
+
+                // FIX #37: Properly dispose ManagementObject instances
+                using var results = searcher.Get();
+                foreach (ManagementObject obj in results)
                 {
-                    string? cmdLine = obj["CommandLine"]?.ToString();
-                    if (!string.IsNullOrEmpty(cmdLine))
+                    using (obj) // Dispose each ManagementObject
                     {
-                        // Extract .qbw file path from command line
-                        var parts = cmdLine.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
-                        var qbwFile = parts.FirstOrDefault(p => p.EndsWith(".qbw", StringComparison.OrdinalIgnoreCase));
-                        if (!string.IsNullOrEmpty(qbwFile))
+                        string? cmdLine = obj["CommandLine"]?.ToString();
+                        if (!string.IsNullOrEmpty(cmdLine))
                         {
-                            return qbwFile;
+                            // Extract .qbw file path from command line
+                            var parts = cmdLine.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
+                            var qbwFile = parts.FirstOrDefault(p => p.EndsWith(".qbw", StringComparison.OrdinalIgnoreCase));
+                            if (!string.IsNullOrEmpty(qbwFile))
+                            {
+                                return qbwFile;
+                            }
                         }
                     }
                 }
             }
+            // FIX #10: Handle specific WMI exceptions
+            catch (ManagementException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WARN] WMI query failed: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WARN] Access denied for WMI query: {ex.Message}");
+            }
             catch (Exception ex)
             {
-                Console.WriteLine($"Warning: Could not detect open QB file: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[WARN] Could not detect open QB file: {ex.Message}");
             }
 
             return null;
@@ -67,8 +81,14 @@ namespace QBMigrationLauncher.Services
                 var qbType = Type.GetTypeFromProgID("QBFC16.QBSessionManager");
                 return qbType != null;
             }
-            catch
+            catch (System.Runtime.InteropServices.COMException)
             {
+                // COM registration issue - SDK not properly installed
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                // Type resolution failed
                 return false;
             }
         }
@@ -90,6 +110,7 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Load config from disk.
+        /// FIX: Added null checks for dynamic object deserialization.
         /// </summary>
         public bool Load()
         {
@@ -98,12 +119,27 @@ namespace QBMigrationLauncher.Services
             try
             {
                 var json = File.ReadAllText(_configPath);
-                dynamic config = JsonConvert.DeserializeObject(json)!;
-                ServerUrl = config.serverUrl;
+                var config = JsonConvert.DeserializeObject<dynamic>(json);
+
+                // FIX: Check for null before accessing properties
+                if (config == null)
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARN] Config file deserialized to null");
+                    return false;
+                }
+
+                // Safely access serverUrl property
+                ServerUrl = config.serverUrl?.ToString();
                 return true;
             }
-            catch
+            catch (JsonException ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[WARN] Failed to parse config: {ex.Message}");
+                return false;
+            }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WARN] Failed to read config file: {ex.Message}");
                 return false;
             }
         }

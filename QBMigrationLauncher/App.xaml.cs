@@ -61,8 +61,9 @@ namespace QBMigrationLauncher
             CurrentSession = null;
             LicenseResult = null;
             SessionResult = null;
-            
+
             // Delete session file
+            // FIX #7: Log session deletion errors instead of silently swallowing
             try
             {
                 var sessionPath = System.IO.Path.Combine(
@@ -72,15 +73,33 @@ namespace QBMigrationLauncher
                 if (System.IO.File.Exists(sessionPath))
                     System.IO.File.Delete(sessionPath);
             }
-            catch { }
-            
-            // Close all windows and show login
+            catch (Exception ex)
+            {
+                // Log the error - session file may be locked or have permission issues
+                System.Diagnostics.Debug.WriteLine($"[WARN] Could not delete session file: {ex.Message}");
+            }
+
+            // FIX #16: Create a copy of windows to avoid modifying collection during iteration
+            var windowsToClose = new System.Collections.Generic.List<Window>();
             foreach (Window window in Current.Windows)
             {
                 if (!(window is LoginWindow))
-                    window.Close();
+                    windowsToClose.Add(window);
             }
-            
+
+            // Now safely close windows from the copy
+            foreach (var window in windowsToClose)
+            {
+                try
+                {
+                    window.Close();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Could not close window: {ex.Message}");
+                }
+            }
+
             var loginWindow = new LoginWindow();
             loginWindow.Show();
         }

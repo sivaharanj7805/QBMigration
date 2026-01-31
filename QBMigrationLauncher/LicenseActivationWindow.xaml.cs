@@ -116,9 +116,16 @@ namespace QBMigrationLauncher
             if (parts[1].Length != 14 || !long.TryParse(parts[1], out _))
                 return false;
 
-            // Last part should be 8 alphanumeric characters
+            // FIX #32: Last part should be 8 alphanumeric characters - validate properly
             if (parts[2].Length != 8)
                 return false;
+
+            // FIX #32: Ensure all characters are alphanumeric (A-Z, 0-9)
+            foreach (char c in parts[2])
+            {
+                if (!char.IsLetterOrDigit(c))
+                    return false;
+            }
 
             return true;
         }
@@ -134,6 +141,7 @@ namespace QBMigrationLauncher
 
         /// <summary>
         /// Handle Purchase link click
+        /// FIX: Use specific exception types instead of bare catch
         /// </summary>
         private void PurchaseLink_Click(object sender, RoutedEventArgs e)
         {
@@ -145,8 +153,16 @@ namespace QBMigrationLauncher
                     UseShellExecute = true
                 });
             }
-            catch
+            catch (System.ComponentModel.Win32Exception ex)
             {
+                // No default browser configured or browser failed to start
+                System.Diagnostics.Debug.WriteLine($"[WARN] Could not open browser: {ex.Message}");
+                ShowStatus("Unable to open browser. Visit https://forensicbridge.ca/pricing", false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Process-related error
+                System.Diagnostics.Debug.WriteLine($"[WARN] Process start failed: {ex.Message}");
                 ShowStatus("Unable to open browser. Visit https://forensicbridge.ca/pricing", false);
             }
         }
