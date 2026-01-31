@@ -105,7 +105,7 @@ namespace QBMigrationLauncher.Services
                 FilePath = Path.GetFullPath(filePath), // Store full path
                 FileName = Path.GetFileName(filePath),
                 Status = JobStatus.Queued,
-                QueuedAt = DateTime.Now
+                QueuedAt = DateTime.UtcNow  // FIX: Use UtcNow for consistency
             };
 
             lock (_lock)
@@ -137,9 +137,15 @@ namespace QBMigrationLauncher.Services
             }
 
             _isProcessing = true;
+
+            // FIX: Dispose old CancellationTokenSource before creating new one
+            _cts?.Dispose();
             _cts = new CancellationTokenSource();
 
-            LogMessage?.Invoke(this, $"[START] Beginning queue processing. {_jobQueue.Count} jobs queued.");
+            // FIX: Get count with lock to avoid race condition
+            int jobCount;
+            lock (_lock) { jobCount = _jobQueue.Count; }
+            LogMessage?.Invoke(this, $"[START] Beginning queue processing. {jobCount} jobs queued.");
 
             try
             {
@@ -215,7 +221,7 @@ namespace QBMigrationLauncher.Services
         {
             CurrentJob = job;
             job.Status = JobStatus.InProgress;
-            job.StartedAt = DateTime.Now;
+            job.StartedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
 
             LogMessage?.Invoke(this, $"[PROCESSING] Starting: {job.FileName}");
             JobStarted?.Invoke(this, job);
@@ -232,13 +238,13 @@ namespace QBMigrationLauncher.Services
 
                 // FIX #2: Pass all 3 required parameters to RunExtractionAsync
                 // Use job ID as session code, create job-specific output directory
-                var jobOutputDir = Path.Combine(_outputDirectory, $"Job_{job.Id}_{DateTime.Now:yyyyMMdd_HHmmss}");
+                var jobOutputDir = Path.Combine(_outputDirectory, $"Job_{job.Id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
                 Directory.CreateDirectory(jobOutputDir);
 
                 await _runner.RunExtractionAsync(job.FilePath, job.Id, jobOutputDir);
 
                 job.Status = JobStatus.Completed;
-                job.CompletedAt = DateTime.Now;
+                job.CompletedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
                 job.OutputDirectory = jobOutputDir; // Store where results went
                 LogMessage?.Invoke(this, $"[SUCCESS] Completed: {job.FileName} in {job.Duration?.TotalMinutes:F1} minutes");
                 LogMessage?.Invoke(this, $"[SUCCESS] Output saved to: {jobOutputDir}");
@@ -247,7 +253,7 @@ namespace QBMigrationLauncher.Services
             catch (Exception ex)
             {
                 job.Status = JobStatus.Failed;
-                job.CompletedAt = DateTime.Now;
+                job.CompletedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
                 job.ErrorMessage = ex.Message;
                 LogMessage?.Invoke(this, $"[FAILED] {job.FileName}: {ex.Message}");
                 JobFailed?.Invoke(this, job);
@@ -263,20 +269,32 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Generate a summary report of all jobs.
+        /// FIX: Thread-safe iteration of completed jobs.
         /// </summary>
         public string GenerateSummaryReport()
         {
             var report = new System.Text.StringBuilder();
             report.AppendLine("BULK MIGRATION SUMMARY");
             report.AppendLine("=".PadRight(50, '='));
-            report.AppendLine($"Total Jobs: {_completedJobs.Count}");
-            report.AppendLine($"Completed: {CompletedCount}");
-            report.AppendLine($"Failed: {FailedCount}");
+
+            // FIX: Take a snapshot under lock to avoid collection modification during iteration
+            List<MigrationJob> jobSnapshot;
+            lock (_lock)
+            {
+                jobSnapshot = _completedJobs.ToList();
+            }
+
+            int completedCount = jobSnapshot.Count(j => j.Status == JobStatus.Completed);
+            int failedCount = jobSnapshot.Count(j => j.Status == JobStatus.Failed);
+
+            report.AppendLine($"Total Jobs: {jobSnapshot.Count}");
+            report.AppendLine($"Completed: {completedCount}");
+            report.AppendLine($"Failed: {failedCount}");
             report.AppendLine();
             report.AppendLine("DETAILS:");
             report.AppendLine("-".PadRight(50, '-'));
 
-            foreach (var job in _completedJobs)
+            foreach (var job in jobSnapshot)
             {
                 var status = job.Status == JobStatus.Completed ? "✓" : "✗";
                 var duration = job.Duration?.TotalMinutes.ToString("F1") + " min" ?? "N/A";
