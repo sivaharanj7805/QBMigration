@@ -102,6 +102,32 @@ export default function MigrationDetailPage() {
     const [showDiscrepancyDoctor, setShowDiscrepancyDoctor] = useState(true);
     // FIX: Add state for concurrent request throttling
     const [isExportingReport, setIsExportingReport] = useState(false);
+    // FIX: Add error states to replace alert() calls
+    const [exportError, setExportError] = useState<string | null>(null);
+    const [cancelError, setCancelError] = useState<string | null>(null);
+    const [certificateError, setCertificateError] = useState<string | null>(null);
+
+    // FIX: Auto-dismiss errors after 5 seconds
+    useEffect(() => {
+        if (exportError) {
+            const timer = setTimeout(() => setExportError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [exportError]);
+
+    useEffect(() => {
+        if (cancelError) {
+            const timer = setTimeout(() => setCancelError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [cancelError]);
+
+    useEffect(() => {
+        if (certificateError) {
+            const timer = setTimeout(() => setCertificateError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [certificateError]);
 
     // FIX: Improved error messages with specific details
     const handleExportDiscrepancyReport = async () => {
@@ -145,15 +171,19 @@ export default function MigrationDetailPage() {
                         // Response wasn't JSON
                     }
                 }
-                alert(errorMessage);
+                // FIX: Replace alert() with state-based error toast
+                setExportError(errorMessage);
             }
         } catch (error) {
-            console.error("Export error:", error);
-            // FIX: Differentiate between network errors and other errors
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Export error:", error);
+            }
+            // FIX: Differentiate between network errors and other errors - replace alert() with state
             if (error instanceof TypeError && error.message.includes('fetch')) {
-                alert("Network error: Unable to connect to the server. Please check your internet connection.");
+                setExportError("Network error: Unable to connect to the server. Please check your internet connection.");
             } else {
-                alert("Failed to export report. Please try again.");
+                setExportError("Failed to export report. Please try again.");
             }
         } finally {
             // FIX: Always reset loading state
@@ -169,25 +199,32 @@ export default function MigrationDetailPage() {
     const handleCancelMigration = async () => {
         if (!confirm("Are you sure you want to cancel this migration?")) return;
         setIsCancelling(true);
+        setCancelError(null); // Clear previous errors
         try {
             const result = await api.cancelMigration(id);
             if (result.success) {
                 router.refresh();
             } else {
-                alert(result.error || "Failed to cancel migration");
+                // FIX: Replace alert() with state-based error toast
+                setCancelError(result.error || "Failed to cancel migration");
             }
         } catch (error) {
-            console.error("Cancel error:", error);
-            alert("Failed to cancel migration");
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Cancel error:", error);
+            }
+            // FIX: Replace alert() with state-based error toast
+            setCancelError("Failed to cancel migration. Please try again.");
         } finally {
             setIsCancelling(false);
         }
     };
 
-    // Mock download handler since api is removed
+    // Certificate download handler
     const [isDownloading, setIsDownloading] = useState(false);
     const handleDownloadCertificate = async () => {
         setIsDownloading(true);
+        setCertificateError(null); // Clear previous errors
         try {
             const blob = await api.downloadAuditCertificate(id);
             if (blob) {
@@ -200,11 +237,16 @@ export default function MigrationDetailPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             } else {
-                alert("Certificate download failed.");
+                // FIX: Replace alert() with state-based error toast
+                setCertificateError("Certificate download failed. The file may not be available yet.");
             }
         } catch (e) {
-            console.error(e);
-            alert("Error downloading certificate.");
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Certificate download error:", e);
+            }
+            // FIX: Replace alert() with state-based error toast
+            setCertificateError("Error downloading certificate. Please try again.");
         } finally {
             setIsDownloading(false);
         }
@@ -254,6 +296,60 @@ export default function MigrationDetailPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error Toast UI - replaces alert() calls */}
+            {(exportError || cancelError || certificateError) && (
+                <div className="fixed top-4 right-4 z-50 space-y-2">
+                    {exportError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Export Error</p>
+                                <p className="text-sm opacity-90">{exportError}</p>
+                            </div>
+                            <button
+                                onClick={() => setExportError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                    {cancelError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Cancel Error</p>
+                                <p className="text-sm opacity-90">{cancelError}</p>
+                            </div>
+                            <button
+                                onClick={() => setCancelError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                    {certificateError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Download Error</p>
+                                <p className="text-sm opacity-90">{certificateError}</p>
+                            </div>
+                            <button
+                                onClick={() => setCertificateError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">

@@ -33,6 +33,8 @@ interface UserSubscription {
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<SettingsTab>("branding");
     const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+    // FIX: Add error state to replace alert() calls
+    const [saveError, setSaveError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [userName, setUserName] = useState("");
     const [userEmail, setUserEmail] = useState("");
@@ -45,6 +47,14 @@ export default function SettingsPage() {
     useEffect(() => {
         loadUserData();
     }, []);
+
+    // FIX: Auto-dismiss error after 5 seconds
+    useEffect(() => {
+        if (saveError) {
+            const timer = setTimeout(() => setSaveError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [saveError]);
 
     const loadUserData = async () => {
         setLoading(true);
@@ -104,6 +114,7 @@ export default function SettingsPage() {
 
     const handleSaveWhitelabel = async (config: WhitelabelConfig) => {
         setSaveStatus("saving");
+        setSaveError(null); // Clear previous errors
         try {
             const response = await fetch(`${API_URL}/api/settings/whitelabel`, {
                 method: 'POST',
@@ -124,7 +135,8 @@ export default function SettingsPage() {
                     console.error("Failed to save whitelabel config");
                 }
                 setSaveStatus("idle");
-                alert("Failed to save branding settings. Please try again.");
+                // FIX: Replace alert() with state-based error toast
+                setSaveError("Failed to save branding settings. Please try again.");
             }
         } catch (err) {
             // FIX: Use proper error logging only in development
@@ -133,7 +145,8 @@ export default function SettingsPage() {
             }
             setSaveStatus("idle");
             const errorMessage = err instanceof Error ? err.message : "Network error";
-            alert(`Failed to connect: ${errorMessage}`);
+            // FIX: Replace alert() with state-based error toast
+            setSaveError(`Failed to connect: ${errorMessage}`);
         }
     };
 
@@ -167,6 +180,24 @@ export default function SettingsPage() {
             {saveStatus === "saved" && (
                 <div className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 z-50">
                     ✓ Changes saved successfully
+                </div>
+            )}
+
+            {/* FIX: Error Toast - replaces alert() calls */}
+            {saveError && (
+                <div className="fixed top-4 right-4 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md z-50">
+                    <Shield className="w-5 h-5 flex-shrink-0" />
+                    <div className="flex-1">
+                        <p className="font-medium text-sm">Save Error</p>
+                        <p className="text-sm opacity-90">{saveError}</p>
+                    </div>
+                    <button
+                        onClick={() => setSaveError(null)}
+                        className="text-white/80 hover:text-white"
+                        aria-label="Dismiss error"
+                    >
+                        ×
+                    </button>
                 </div>
             )}
 
