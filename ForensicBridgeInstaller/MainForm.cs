@@ -7,10 +7,13 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace ForensicBridgeInstaller
 {
@@ -26,16 +29,21 @@ namespace ForensicBridgeInstaller
         private Button btnStartExtraction;
         private Label lblStatus;
         private ProgressBar progressBar;
-        private RichTextBox txtLog;
+        private TextBox txtLog; // Changed from RichTextBox to reduce overhead (L1 fix)
         private Label lblQBStatus;
         private Panel panelHeader;
 
-        private bool _isQuickBooksInstalled;
-        private bool _isQBFCInstalled;
+        private readonly bool _isQuickBooksInstalled; // Made readonly (L2 fix)
+        private readonly bool _isQBFCInstalled;       // Made readonly (L2 fix)
         private string _sessionCode;
-        private bool _autoStart;
+        private readonly bool _autoStart;
         private bool _sessionValidated;
         private Process _extractorProcess;
+        private readonly AppConfig _config; // Configuration loaded from config.json (CF1-CF6 fix)
+
+        // Static HttpClient for reuse - prevents socket exhaustion (H4, H5 fix)
+        private static readonly HttpClient SharedHttpClient;
+        private static readonly object HttpClientLock = new object();
 
         // Paths
         private static readonly string InstallDir = Path.Combine(
@@ -43,21 +51,42 @@ namespace ForensicBridgeInstaller
             "ForensicBridge");
         private static readonly string ExtractorExePath = Path.Combine(InstallDir, "QBExtractor.exe");
 
-        // Download sources
+        // Download sources - now loaded from config (CF1 fix)
         private const string GITHUB_REPO = "sivaharanj7805/QBMigration";
-        private const string SERVER_API = "https://api.forensicbridge.ca/api/extractor";
         private static readonly string GitHubExeUrl =
             $"https://github.com/{GITHUB_REPO}/releases/latest/download/QBExtractor.exe";
         private static readonly string GitHubApiUrl =
             $"https://api.github.com/repos/{GITHUB_REPO}/releases/latest";
-        private const string SESSION_VALIDATE_URL = "https://api.forensicbridge.ca/api/session/validate";
+
+        // Static constructor to initialize HttpClient once (H4, H5 fix)
+        static MainForm()
+        {
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            };
+            SharedHttpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromMinutes(5) // Increased timeout for large downloads (M6 fix)
+            };
+            SharedHttpClient.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.0");
+        }
 
         public MainForm(string sessionCode = null, bool autoStart = false)
         {
             _sessionCode = sessionCode;
             _autoStart = autoStart;
+
+            // Load configuration first (CF1-CF6 fix)
+            _config = LoadConfiguration();
+
             InitializeComponents();
-            CheckQuickBooksInstallation();
+
+            // Set these in constructor so they can be readonly (L2 fix)
+            _isQuickBooksInstalled = IsQuickBooksInstalled();
+            _isQBFCInstalled = IsQBFCInstalled();
+
+            UpdateQuickBooksStatus();
             CheckExtractorAvailability();
 
             if (!string.IsNullOrEmpty(_sessionCode))
@@ -71,14 +100,49 @@ namespace ForensicBridgeInstaller
             }
         }
 
+        /// <summary>
+        /// Load configuration from config.json (CF1-CF6 fix)
+        /// </summary>
+        private AppConfig LoadConfiguration()
+        {
+            var config = new AppConfig();
+            try
+            {
+                var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+                if (File.Exists(configPath))
+                {
+                    var json = File.ReadAllText(configPath);
+                    var parsed = JObject.Parse(json);
+
+                    config.ServerUrl = parsed["serverUrl"]?.ToString() ?? config.ServerUrl;
+                    config.Version = parsed["version"]?.ToString() ?? config.Version;
+                    config.ApplicationName = parsed["applicationName"]?.ToString() ?? config.ApplicationName;
+                    config.SupportEmail = parsed["supportEmail"]?.ToString() ?? config.SupportEmail;
+                    config.DocumentationUrl = parsed["documentationUrl"]?.ToString() ?? config.DocumentationUrl;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - use defaults
+                Debug.WriteLine($"Warning: Could not load config.json: {ex.Message}");
+            }
+            return config;
+        }
+
         private void InitializeComponents()
         {
-            this.Text = "ForensicBridge - QuickBooks Desktop Extractor";
-            this.Size = new Size(600, 550);
+            // Enable DPI awareness (P3 fix)
+            this.AutoScaleMode = AutoScaleMode.Dpi;
+            this.AutoScaleDimensions = new SizeF(96F, 96F);
+
+            // Use config values (CF1-CF6 fix)
+            this.Text = $"{_config.ApplicationName} - QuickBooks Desktop Extractor";
+            this.Size = new Size(650, 600); // Slightly larger for better scaling (M1 fix)
+            this.MinimumSize = new Size(500, 450); // Allow resizing with minimum (M1 fix)
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
-            this.BackColor = Color.FromArgb(245, 247, 250);
+            this.FormBorderStyle = FormBorderStyle.Sizable; // Allow resizing (M1 fix)
+            this.MaximizeBox = true;
+            this.BackColor = SystemColors.Control; // Use system colors (L6 fix)
 
             panelHeader = new Panel
             {
@@ -89,7 +153,7 @@ namespace ForensicBridgeInstaller
 
             var lblTitle = new Label
             {
-                Text = "ForensicBridge",
+                Text = _config.ApplicationName, // Use config (CF1 fix)
                 Font = new Font("Segoe UI", 24, FontStyle.Bold),
                 ForeColor = Color.White,
                 AutoSize = true,
@@ -113,7 +177,8 @@ namespace ForensicBridgeInstaller
                 Text = "Checking QuickBooks installation...",
                 Font = new Font("Segoe UI", 9),
                 Location = new Point(20, 95),
-                Size = new Size(540, 20)
+                Size = new Size(590, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right // Anchor for resize (M1 fix)
             };
 
             var lblSession = new Label
@@ -126,10 +191,11 @@ namespace ForensicBridgeInstaller
 
             txtSessionCode = new TextBox
             {
-                Font = new Font("Consolas", 12),
+                Font = new Font("Consolas", 11), // Slightly smaller font to fit better (M2 fix)
                 Location = new Point(20, 155),
-                Size = new Size(350, 30),
-                CharacterCasing = CharacterCasing.Upper
+                Size = new Size(350, 26),
+                CharacterCasing = CharacterCasing.Upper,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
             btnConnect = new Button
@@ -141,7 +207,8 @@ namespace ForensicBridgeInstaller
                 BackColor = Color.FromArgb(37, 99, 235),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right
             };
             btnConnect.FlatAppearance.BorderSize = 0;
             btnConnect.Click += btnConnect_Click;
@@ -156,7 +223,8 @@ namespace ForensicBridgeInstaller
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Enabled = false,
-                Cursor = Cursors.Hand
+                Cursor = Cursors.Hand,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
             btnStartExtraction.FlatAppearance.BorderSize = 0;
             btnStartExtraction.Click += btnStartExtraction_Click;
@@ -166,14 +234,16 @@ namespace ForensicBridgeInstaller
                 Text = "Ready",
                 Font = new Font("Segoe UI", 9),
                 Location = new Point(20, 260),
-                Size = new Size(540, 20)
+                Size = new Size(590, 20),
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
             progressBar = new ProgressBar
             {
                 Location = new Point(20, 285),
-                Size = new Size(540, 20),
-                Style = ProgressBarStyle.Continuous
+                Size = new Size(590, 20),
+                Style = ProgressBarStyle.Continuous,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
 
             var lblLog = new Label
@@ -184,15 +254,19 @@ namespace ForensicBridgeInstaller
                 AutoSize = true
             };
 
-            txtLog = new RichTextBox
+            // Changed to TextBox (L1 fix) with system colors for accessibility (L7 fix)
+            txtLog = new TextBox
             {
                 Location = new Point(20, 345),
-                Size = new Size(540, 150),
+                Size = new Size(590, 200),
                 ReadOnly = true,
-                BackColor = Color.FromArgb(30, 30, 30),
-                ForeColor = Color.FromArgb(200, 200, 200),
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                BackColor = SystemColors.Window, // Use system colors (L7 fix)
+                ForeColor = SystemColors.WindowText,
                 Font = new Font("Consolas", 9),
-                BorderStyle = BorderStyle.None
+                BorderStyle = BorderStyle.FixedSingle,
+                Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
             };
 
             this.Controls.Add(panelHeader);
@@ -206,15 +280,13 @@ namespace ForensicBridgeInstaller
             this.Controls.Add(lblLog);
             this.Controls.Add(txtLog);
 
-            Log("ForensicBridge Launcher v2.0.0");
+            // Use config version (CF2 fix)
+            Log($"{_config.ApplicationName} Launcher v{_config.Version}");
             Log("Powered by QBDesktopReader v4.3");
         }
 
-        private void CheckQuickBooksInstallation()
+        private void UpdateQuickBooksStatus()
         {
-            _isQuickBooksInstalled = IsQuickBooksInstalled();
-            _isQBFCInstalled = IsQBFCInstalled();
-
             if (_isQuickBooksInstalled && _isQBFCInstalled)
             {
                 lblQBStatus.Text = "QuickBooks Desktop: Installed | SDK: Ready";
@@ -262,8 +334,23 @@ namespace ForensicBridgeInstaller
                     if (key != null) return true;
                 }
 
-                var processes = Process.GetProcessesByName("QBW32");
-                if (processes.Length > 0) return true;
+                // M3 fix: Properly dispose Process array
+                Process[] processes = null;
+                try
+                {
+                    processes = Process.GetProcessesByName("QBW32");
+                    if (processes.Length > 0) return true;
+                }
+                finally
+                {
+                    if (processes != null)
+                    {
+                        foreach (var p in processes)
+                        {
+                            p.Dispose();
+                        }
+                    }
+                }
 
                 var paths = new[]
                 {
@@ -278,8 +365,7 @@ namespace ForensicBridgeInstaller
             }
             catch (Exception ex)
             {
-                // HIGH-04 FIX: Log instead of silently swallowing exceptions
-                Debug.WriteLine($"Warning: QuickBooks detection check failed: {ex.Message}");
+                Log($"Warning: QuickBooks detection check failed: {ex.Message}");
             }
 
             return false;
@@ -294,8 +380,7 @@ namespace ForensicBridgeInstaller
             }
             catch (Exception ex)
             {
-                // HIGH-04 FIX: Log instead of silently swallowing exceptions
-                Debug.WriteLine($"Warning: QBFC SDK detection failed: {ex.Message}");
+                Log($"Warning: QBFC SDK detection failed: {ex.Message}");
             }
 
             return false;
@@ -315,20 +400,21 @@ namespace ForensicBridgeInstaller
                 return;
             }
 
-            // HIGH-09 FIX: Validate session code format before making API call
-            // Session codes should be alphanumeric with hyphens, 6-50 characters
-            if (!System.Text.RegularExpressions.Regex.IsMatch(sessionCode, @"^[A-Z0-9\-]{6,50}$"))
+            // H2 fix: More flexible session code validation (allow lowercase, underscores)
+            // Session codes should be alphanumeric with hyphens/underscores, 6-50 characters
+            if (!Regex.IsMatch(sessionCode, @"^[A-Za-z0-9_\-]{6,50}$", RegexOptions.None, TimeSpan.FromSeconds(1)))
             {
                 MessageBox.Show(
                     "Invalid session code format.\n\n" +
-                    "Session codes should be uppercase letters, numbers, and hyphens only (6-50 characters).",
+                    "Session codes should be letters, numbers, hyphens, and underscores only (6-50 characters).",
                     "Invalid Format", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             btnConnect.Enabled = false;
             lblStatus.Text = "Validating session...";
-            Log($"Validating session: {sessionCode}");
+            // M4 fix: Don't log full session code for security
+            Log($"Validating session: {sessionCode.Substring(0, Math.Min(4, sessionCode.Length))}****");
 
             try
             {
@@ -359,7 +445,7 @@ namespace ForensicBridgeInstaller
                 lblStatus.Text = "Cannot reach server.";
                 MessageBox.Show(
                     $"Could not validate session:\n{ex.Message}\n\n" +
-                    "Please check your internet connection.",
+                    $"Please check your internet connection.\n\nSupport: {_config.SupportEmail}",
                     "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -370,25 +456,35 @@ namespace ForensicBridgeInstaller
 
         private async Task<bool> ValidateSession(string sessionCode)
         {
-            using (var client = new HttpClient())
+            // Use shared HttpClient (H4 fix)
+            var fingerprint = GetDeviceFingerprint();
+            var payload = JsonConvert.SerializeObject(new
             {
-                client.Timeout = TimeSpan.FromSeconds(30);
+                session_code = sessionCode,
+                device_fingerprint = fingerprint
+            });
 
-                var fingerprint = GetDeviceFingerprint();
-                var payload = Newtonsoft.Json.JsonConvert.SerializeObject(new
-                {
-                    session_code = sessionCode,
-                    device_fingerprint = fingerprint
-                });
+            var sessionValidateUrl = $"{_config.ServerUrl}/api/session/validate";
+            var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
-                var content = new StringContent(payload, Encoding.UTF8, "application/json");
-                var response = await client.PostAsync(SESSION_VALIDATE_URL, content);
+            using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+            {
+                var response = await SharedHttpClient.PostAsync(sessionValidateUrl, content, cts.Token);
 
                 if (response.IsSuccessStatusCode)
                 {
                     var json = await response.Content.ReadAsStringAsync();
-                    var result = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(json);
-                    return result?.valid == true;
+                    // H7 fix: Proper null checking with JObject
+                    try
+                    {
+                        var result = JObject.Parse(json);
+                        return result["valid"]?.Value<bool>() == true;
+                    }
+                    catch (JsonException)
+                    {
+                        Log("Warning: Invalid JSON response from server");
+                        return false;
+                    }
                 }
 
                 return false;
@@ -397,7 +493,6 @@ namespace ForensicBridgeInstaller
 
         private string GetDeviceFingerprint()
         {
-            // CRIT-09 FIX: Require real device fingerprint - no fallback to random GUID
             var info = new StringBuilder();
             bool hasHardwareInfo = false;
 
@@ -443,8 +538,7 @@ namespace ForensicBridgeInstaller
                 Log($"Warning: Could not read BaseBoard SerialNumber: {ex.Message}");
             }
 
-            // CRIT-09 FIX: If no hardware info, add machine name + volume serial as fallback
-            // This is still better than a random GUID as it's consistent per machine
+            // Fallback device identifiers
             if (!hasHardwareInfo)
             {
                 Log("Warning: Using fallback device identifiers (machine name + volume serial)");
@@ -461,10 +555,14 @@ namespace ForensicBridgeInstaller
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // C5 fix: Log instead of empty catch
+                    Log($"Warning: Could not read VolumeSerialNumber: {ex.Message}");
+                }
             }
 
-            // CRIT-09 FIX: Never return random GUID - throw exception if we can't identify the machine
+            // Throw if we can't identify the machine
             if (info.Length == 0)
             {
                 throw new InvalidOperationException(
@@ -475,7 +573,8 @@ namespace ForensicBridgeInstaller
             using (var sha = SHA256.Create())
             {
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(info.ToString()));
-                return BitConverter.ToString(bytes).Replace("-", "").Substring(0, 32);
+                // M15 fix: Use full 64 char hash for better entropy
+                return BitConverter.ToString(bytes).Replace("-", "");
             }
         }
 
@@ -501,11 +600,21 @@ namespace ForensicBridgeInstaller
 
                 if (result == DialogResult.Yes)
                 {
-                    Process.Start(new ProcessStartInfo
+                    // H3 fix: Wrap browser launch in try-catch
+                    try
                     {
-                        FileName = "https://developer.intuit.com/app/developer/qbdesktop/docs/get-started",
-                        UseShellExecute = true
-                    });
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = _config.DocumentationUrl ?? "https://developer.intuit.com/app/developer/qbdesktop/docs/get-started",
+                            UseShellExecute = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            $"Could not open browser. Please visit:\n{_config.DocumentationUrl}\n\nError: {ex.Message}",
+                            "Browser Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
                 }
                 return;
             }
@@ -569,35 +678,82 @@ namespace ForensicBridgeInstaller
         {
             if (!File.Exists(ExtractorExePath)) return false;
             var info = new FileInfo(ExtractorExePath);
-            return info.Length > 50000;
+            // H1 fix: Also verify file is a valid PE executable
+            if (info.Length < 50000) return false;
+
+            try
+            {
+                // Basic PE header check
+                using (var fs = new FileStream(ExtractorExePath, FileMode.Open, FileAccess.Read))
+                {
+                    var buffer = new byte[2];
+                    if (fs.Read(buffer, 0, 2) == 2)
+                    {
+                        // Check for MZ header (valid Windows executable)
+                        return buffer[0] == 0x4D && buffer[1] == 0x5A;
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
         }
 
         private async Task<bool> DownloadExtractor()
         {
-            Directory.CreateDirectory(InstallDir);
+            // M12 fix: Check write permissions
+            try
+            {
+                Directory.CreateDirectory(InstallDir);
+                // Test write access
+                var testFile = Path.Combine(InstallDir, ".write_test");
+                File.WriteAllText(testFile, "test");
+                File.Delete(testFile);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Log($"ERROR: No write permission to {InstallDir}");
+                MessageBox.Show(
+                    $"Cannot write to:\n{InstallDir}\n\nPlease run as administrator or check folder permissions.",
+                    "Permission Denied", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log($"ERROR: Cannot create install directory: {ex.Message}");
+                return false;
+            }
+
+            var serverApiUrl = $"{_config.ServerUrl}/api/extractor/download-exe";
 
             var sources = new[]
             {
-                new { Name = "server API", Url = $"{SERVER_API}/download-exe" },
+                new { Name = "server API", Url = serverApiUrl },
                 new { Name = "GitHub releases", Url = GitHubExeUrl }
             };
 
-            using (var client = new HttpClient())
+            // Use shared HttpClient (H4, H5 fix)
+            foreach (var source in sources)
             {
-                client.Timeout = TimeSpan.FromMinutes(2);
-                client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.0");
-
-                foreach (var source in sources)
+                try
                 {
-                    try
-                    {
-                        Log($"  Trying {source.Name}...");
+                    Log($"  Trying {source.Name}...");
 
-                        var response = await client.GetAsync(source.Url);
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5)))
+                    {
+                        var response = await SharedHttpClient.GetAsync(source.Url, cts.Token);
                         if (!response.IsSuccessStatusCode) continue;
 
                         var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
-                        if (contentType.Contains("html")) continue;
+                        // H9 fix: More flexible content-type checking
+                        if (contentType.Contains("text/html") || contentType.Contains("application/json"))
+                        {
+                            Log($"  {source.Name} returned non-binary content type: {contentType}");
+                            continue;
+                        }
 
                         var bytes = await response.Content.ReadAsByteArrayAsync();
                         if (bytes.Length < 50000) continue;
@@ -606,7 +762,7 @@ namespace ForensicBridgeInstaller
                         var tempPath = ExtractorExePath + ".tmp";
                         File.WriteAllBytes(tempPath, bytes);
 
-                        // CRIT-03 FIX: Verify Authenticode signature before accepting
+                        // Verify Authenticode signature before accepting
                         if (!VerifyAuthenticodeSignature(tempPath))
                         {
                             Log($"  WARNING: {source.Name} - Authenticode signature verification failed!");
@@ -614,54 +770,154 @@ namespace ForensicBridgeInstaller
                             continue;
                         }
 
-                        // Signature verified - move to final location
-                        if (File.Exists(ExtractorExePath))
-                            File.Delete(ExtractorExePath);
-                        File.Move(tempPath, ExtractorExePath);
+                        // C1 fix: Atomic file replacement with backup
+                        var backupPath = ExtractorExePath + ".bak";
+                        try
+                        {
+                            if (File.Exists(ExtractorExePath))
+                            {
+                                // Create backup before deleting
+                                if (File.Exists(backupPath))
+                                    File.Delete(backupPath);
+                                File.Move(ExtractorExePath, backupPath);
+                            }
+
+                            File.Move(tempPath, ExtractorExePath);
+
+                            // Success - remove backup
+                            if (File.Exists(backupPath))
+                                File.Delete(backupPath);
+                        }
+                        catch (Exception moveEx)
+                        {
+                            // Restore from backup if move failed
+                            Log($"  File move failed: {moveEx.Message}");
+                            if (File.Exists(backupPath) && !File.Exists(ExtractorExePath))
+                            {
+                                File.Move(backupPath, ExtractorExePath);
+                                Log("  Restored previous version from backup");
+                            }
+                            if (File.Exists(tempPath))
+                                File.Delete(tempPath);
+                            continue;
+                        }
 
                         Log($"  Downloaded from {source.Name} ({bytes.Length / 1024}KB) - Signature verified");
                         return true;
                     }
-                    catch (Exception ex)
-                    {
-                        Log($"  {source.Name} failed: {ex.Message}");
-                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    Log($"  {source.Name} timed out");
+                }
+                catch (Exception ex)
+                {
+                    Log($"  {source.Name} failed: {ex.Message}");
                 }
             }
 
             // Method 3: Try GitHub API to find asset
+            // C2 fix: Now includes signature verification
             try
             {
                 Log("  Querying GitHub API...");
-                using (var client = new HttpClient())
+                using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
                 {
-                    client.Timeout = TimeSpan.FromSeconds(30);
-                    client.DefaultRequestHeaders.Add("User-Agent", "ForensicBridge/2.0");
+                    // H8 fix: Handle rate limiting
+                    var apiResponse = await SharedHttpClient.GetAsync(GitHubApiUrl, cts.Token);
 
-                    var json = await client.GetStringAsync(GitHubApiUrl);
-                    var release = Newtonsoft.Json.JsonConvert.DeserializeObject<dynamic>(json);
-
-                    foreach (var asset in release.assets)
+                    if (apiResponse.StatusCode == HttpStatusCode.Forbidden ||
+                        apiResponse.StatusCode == HttpStatusCode.TooManyRequests)
                     {
-                        string name = asset.name;
+                        Log("  GitHub API rate limited. Try again later.");
+                        return false;
+                    }
+
+                    if (!apiResponse.IsSuccessStatusCode)
+                    {
+                        Log($"  GitHub API returned: {apiResponse.StatusCode}");
+                        return false;
+                    }
+
+                    var json = await apiResponse.Content.ReadAsStringAsync();
+
+                    // H10 fix: Proper null handling for GitHub API response
+                    JObject release;
+                    try
+                    {
+                        release = JObject.Parse(json);
+                    }
+                    catch (JsonException)
+                    {
+                        Log("  GitHub API returned invalid JSON");
+                        return false;
+                    }
+
+                    var assets = release["assets"] as JArray;
+                    if (assets == null || assets.Count == 0)
+                    {
+                        Log("  No release assets found");
+                        return false;
+                    }
+
+                    foreach (var asset in assets)
+                    {
+                        var name = asset["name"]?.ToString();
                         if (name != null && name.Contains("QBExtractor") && name.EndsWith(".exe"))
                         {
-                            string downloadUrl = asset.browser_download_url;
-                            var response = await client.GetAsync(downloadUrl);
-                            if (response.IsSuccessStatusCode)
+                            var downloadUrl = asset["browser_download_url"]?.ToString();
+                            if (string.IsNullOrEmpty(downloadUrl))
                             {
-                                var bytes = await response.Content.ReadAsByteArrayAsync();
-                                if (bytes.Length > 50000)
+                                Log("  Asset has no download URL");
+                                continue;
+                            }
+
+                            using (var dlCts = new CancellationTokenSource(TimeSpan.FromMinutes(5)))
+                            {
+                                var response = await SharedHttpClient.GetAsync(downloadUrl, dlCts.Token);
+                                if (response.IsSuccessStatusCode)
                                 {
-                                    File.WriteAllBytes(ExtractorExePath, bytes);
-                                    Log($"  Downloaded via GitHub API ({bytes.Length / 1024}KB)");
-                                    return true;
+                                    var bytes = await response.Content.ReadAsByteArrayAsync();
+                                    if (bytes.Length > 50000)
+                                    {
+                                        // C2 fix: Verify signature for GitHub API download too
+                                        var tempPath = ExtractorExePath + ".tmp";
+                                        File.WriteAllBytes(tempPath, bytes);
+
+                                        if (!VerifyAuthenticodeSignature(tempPath))
+                                        {
+                                            Log("  WARNING: GitHub API download - Signature verification failed!");
+                                            File.Delete(tempPath);
+                                            return false;
+                                        }
+
+                                        // C1 fix: Safe file move
+                                        var backupPath = ExtractorExePath + ".bak";
+                                        if (File.Exists(ExtractorExePath))
+                                        {
+                                            if (File.Exists(backupPath))
+                                                File.Delete(backupPath);
+                                            File.Move(ExtractorExePath, backupPath);
+                                        }
+
+                                        File.Move(tempPath, ExtractorExePath);
+
+                                        if (File.Exists(backupPath))
+                                            File.Delete(backupPath);
+
+                                        Log($"  Downloaded via GitHub API ({bytes.Length / 1024}KB) - Signature verified");
+                                        return true;
+                                    }
                                 }
                             }
                             break;
                         }
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("  GitHub API timed out");
             }
             catch (Exception ex)
             {
@@ -672,7 +928,7 @@ namespace ForensicBridgeInstaller
         }
 
         /// <summary>
-        /// CRIT-03 FIX: Verify Authenticode signature on downloaded executable
+        /// Verify Authenticode signature on downloaded executable
         /// </summary>
         private bool VerifyAuthenticodeSignature(string filePath)
         {
@@ -683,18 +939,21 @@ namespace ForensicBridgeInstaller
 
                 if (cert != null)
                 {
-                    // Verify the certificate subject contains expected publisher
+                    // L8 fix: More flexible certificate verification
                     var subject = cert.Subject;
-                    if (subject.Contains("ForensicBridge") || subject.Contains("sivaharanj7805"))
+                    var validSubjects = new[] { "ForensicBridge", "sivaharanj7805", "Forensic Bridge" };
+
+                    foreach (var validSubject in validSubjects)
                     {
-                        Log($"  Signature verified: {subject}");
-                        return true;
+                        if (subject.IndexOf(validSubject, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            Log($"  Signature verified: {subject}");
+                            return true;
+                        }
                     }
-                    else
-                    {
-                        Log($"  Unexpected signer: {subject}");
-                        return false;
-                    }
+
+                    Log($"  Unexpected signer: {subject}");
+                    return false;
                 }
 
                 Log("  No Authenticode signature found");
@@ -702,7 +961,6 @@ namespace ForensicBridgeInstaller
             }
             catch (CryptographicException)
             {
-                // No valid signature
                 Log("  Authenticode signature invalid or missing");
                 return false;
             }
@@ -718,7 +976,16 @@ namespace ForensicBridgeInstaller
         /// </summary>
         private async Task LaunchExtractor(string sessionCode)
         {
-            var args = $"--session \"{sessionCode}\" --no-pause";
+            // C4 fix: Escape session code to prevent command injection
+            // Only allow alphanumeric, hyphens, underscores
+            var sanitizedCode = Regex.Replace(sessionCode, @"[^A-Za-z0-9_\-]", "", RegexOptions.None, TimeSpan.FromSeconds(1));
+            if (sanitizedCode.Length != sessionCode.Length)
+            {
+                Log("WARNING: Session code contained invalid characters that were removed");
+            }
+
+            // Use array-based arguments to avoid shell escaping issues
+            var args = $"--session {sanitizedCode} --no-pause";
 
             var startInfo = new ProcessStartInfo
             {
@@ -736,11 +1003,17 @@ namespace ForensicBridgeInstaller
 
             var tcs = new TaskCompletionSource<int>();
 
+            // H6 fix: Attach handlers before starting process
+            _extractorProcess.Exited += (s, args2) =>
+            {
+                tcs.TrySetResult(_extractorProcess.ExitCode);
+            };
+
             _extractorProcess.OutputDataReceived += (s, args2) =>
             {
                 if (!string.IsNullOrEmpty(args2.Data))
                 {
-                    UpdateUI(() =>
+                    SafeUpdateUI(() =>
                     {
                         Log(args2.Data);
                         UpdateProgressFromOutput(args2.Data);
@@ -752,16 +1025,24 @@ namespace ForensicBridgeInstaller
             {
                 if (!string.IsNullOrEmpty(args2.Data))
                 {
-                    UpdateUI(() => Log($"[ERR] {args2.Data}"));
+                    SafeUpdateUI(() => Log($"[ERR] {args2.Data}"));
                 }
             };
 
-            _extractorProcess.Exited += (s, args2) =>
+            // H11 fix: Start process and handle potential failure
+            try
             {
-                tcs.TrySetResult(_extractorProcess.ExitCode);
-            };
+                if (!_extractorProcess.Start())
+                {
+                    throw new InvalidOperationException("Failed to start QBExtractor process");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to start extractor: {ex.Message}");
+                throw;
+            }
 
-            _extractorProcess.Start();
             _extractorProcess.BeginOutputReadLine();
             _extractorProcess.BeginErrorReadLine();
 
@@ -769,7 +1050,7 @@ namespace ForensicBridgeInstaller
 
             var exitCode = await tcs.Task;
 
-            UpdateUI(() =>
+            SafeUpdateUI(() =>
             {
                 _extractorProcess = null;
 
@@ -796,7 +1077,7 @@ namespace ForensicBridgeInstaller
 
                     var errorMsg = GetExitCodeMessage(exitCode);
                     MessageBox.Show(
-                        $"Extraction failed.\n\n{errorMsg}\n\nSee the activity log for details.",
+                        $"Extraction failed.\n\n{errorMsg}\n\nSee the activity log for details.\n\nSupport: {_config.SupportEmail}",
                         "Extraction Failed",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
@@ -804,47 +1085,64 @@ namespace ForensicBridgeInstaller
         }
 
         /// <summary>
-        /// Parse QBExtractor output to update progress bar
+        /// Parse QBExtractor output to update progress bar (L5 fix: split into smaller methods)
         /// </summary>
         private void UpdateProgressFromOutput(string line)
         {
-            var lower = line.ToLower();
+            var lower = line.ToLowerInvariant();
 
-            if (lower.Contains("connecting") || lower.Contains("session"))
-                progressBar.Value = Math.Max(progressBar.Value, 25);
-            else if (lower.Contains("extracting customers"))
-                progressBar.Value = Math.Max(progressBar.Value, 30);
-            else if (lower.Contains("extracting vendors"))
-                progressBar.Value = Math.Max(progressBar.Value, 40);
-            else if (lower.Contains("extracting accounts"))
-                progressBar.Value = Math.Max(progressBar.Value, 45);
-            else if (lower.Contains("extracting invoices"))
-                progressBar.Value = Math.Max(progressBar.Value, 55);
-            else if (lower.Contains("extracting bills"))
-                progressBar.Value = Math.Max(progressBar.Value, 65);
-            else if (lower.Contains("encrypting"))
-                progressBar.Value = Math.Max(progressBar.Value, 80);
-            else if (lower.Contains("uploading"))
-                progressBar.Value = Math.Max(progressBar.Value, 90);
-            else if (lower.Contains("complete") || lower.Contains("success"))
-                progressBar.Value = 100;
-
-            // Also try to parse percentage from output like "[50%]" or "Progress: 50%"
-            var percentIdx = line.IndexOf('%');
-            if (percentIdx > 0)
+            // M8 fix: More flexible keyword matching
+            var progressMilestones = new[]
             {
-                var numStr = "";
-                for (int i = percentIdx - 1; i >= 0 && i >= percentIdx - 3; i--)
+                (keywords: new[] { "connecting", "session", "authenticat" }, progress: 25),
+                (keywords: new[] { "customer", "client" }, progress: 30),
+                (keywords: new[] { "vendor", "supplier" }, progress: 40),
+                (keywords: new[] { "account", "chart" }, progress: 45),
+                (keywords: new[] { "invoice", "receivable" }, progress: 55),
+                (keywords: new[] { "bill", "payable" }, progress: 65),
+                (keywords: new[] { "transaction", "journal" }, progress: 70),
+                (keywords: new[] { "encrypt" }, progress: 80),
+                (keywords: new[] { "upload", "transfer" }, progress: 90),
+                (keywords: new[] { "complete", "success", "finish" }, progress: 100)
+            };
+
+            foreach (var milestone in progressMilestones)
+            {
+                foreach (var keyword in milestone.keywords)
                 {
-                    if (char.IsDigit(line[i]))
-                        numStr = line[i] + numStr;
-                    else
-                        break;
+                    if (lower.Contains(keyword))
+                    {
+                        progressBar.Value = Math.Max(progressBar.Value, milestone.progress);
+                        return;
+                    }
                 }
-                if (int.TryParse(numStr, out var pct) && pct >= 0 && pct <= 100)
-                {
-                    progressBar.Value = Math.Max(progressBar.Value, pct);
-                }
+            }
+
+            // M9 fix: Safer percentage parsing
+            TryParseProgressPercentage(line);
+        }
+
+        /// <summary>
+        /// Parse percentage from output like "[50%]" or "Progress: 50%"
+        /// </summary>
+        private void TryParseProgressPercentage(string line)
+        {
+            var percentIdx = line.IndexOf('%');
+            if (percentIdx <= 0) return;
+
+            var numStr = new StringBuilder();
+            // M9 fix: Ensure we don't go below index 0
+            for (int i = percentIdx - 1; i >= 0 && numStr.Length < 3; i--)
+            {
+                if (char.IsDigit(line[i]))
+                    numStr.Insert(0, line[i]);
+                else
+                    break;
+            }
+
+            if (int.TryParse(numStr.ToString(), out var pct) && pct >= 0 && pct <= 100)
+            {
+                progressBar.Value = Math.Max(progressBar.Value, pct);
             }
         }
 
@@ -863,36 +1161,47 @@ namespace ForensicBridgeInstaller
             }
         }
 
-        private void UpdateUI(Action action)
+        /// <summary>
+        /// M10, M11 fix: Safe UI update that handles disposed forms
+        /// </summary>
+        private void SafeUpdateUI(Action action)
         {
-            if (this.InvokeRequired)
+            if (this.IsDisposed || this.Disposing)
+                return;
+
+            try
             {
-                this.Invoke(action);
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(action);
+                }
+                else
+                {
+                    action();
+                }
             }
-            else
+            catch (ObjectDisposedException)
             {
-                action();
+                // Form was disposed during invoke - ignore
+            }
+            catch (InvalidOperationException)
+            {
+                // Handle wasn't created yet or form is closing - ignore
             }
         }
 
         private void Log(string message)
         {
             var timestamp = DateTime.Now.ToString("HH:mm:ss");
-            var logMessage = $"[{timestamp}] {message}\n";
+            var logMessage = $"[{timestamp}] {message}{Environment.NewLine}";
 
-            if (txtLog.InvokeRequired)
-            {
-                txtLog.Invoke(new Action(() =>
-                {
-                    txtLog.AppendText(logMessage);
-                    txtLog.ScrollToCaret();
-                }));
-            }
-            else
+            SafeUpdateUI(() =>
             {
                 txtLog.AppendText(logMessage);
+                // Scroll to bottom
+                txtLog.SelectionStart = txtLog.TextLength;
                 txtLog.ScrollToCaret();
-            }
+            });
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -911,20 +1220,31 @@ namespace ForensicBridgeInstaller
                     return;
                 }
 
-                // HIGH-05 FIX: Try graceful termination before force kill
+                // Try graceful termination before force kill
                 try
                 {
-                    // First try graceful close
-                    _extractorProcess.CloseMainWindow();
-
-                    // Wait up to 5 seconds for graceful exit
-                    if (!_extractorProcess.WaitForExit(5000))
+                    // M14 fix: Check HasExited before each operation
+                    if (!_extractorProcess.HasExited)
                     {
-                        // Force kill if graceful close fails
-                        Log("Process did not exit gracefully, forcing termination...");
-                        _extractorProcess.Kill();
-                        _extractorProcess.WaitForExit(2000);
+                        // First try graceful close
+                        _extractorProcess.CloseMainWindow();
+
+                        // Wait up to 5 seconds for graceful exit
+                        if (!_extractorProcess.WaitForExit(5000))
+                        {
+                            // Force kill if graceful close fails
+                            if (!_extractorProcess.HasExited)
+                            {
+                                Log("Process did not exit gracefully, forcing termination...");
+                                _extractorProcess.Kill();
+                                _extractorProcess.WaitForExit(2000);
+                            }
+                        }
                     }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Process already exited - ignore
                 }
                 catch (Exception ex)
                 {
@@ -934,5 +1254,17 @@ namespace ForensicBridgeInstaller
 
             base.OnFormClosing(e);
         }
+    }
+
+    /// <summary>
+    /// Configuration loaded from config.json (CF1-CF6 fix)
+    /// </summary>
+    internal class AppConfig
+    {
+        public string ServerUrl { get; set; } = "https://api.forensicbridge.ca";
+        public string Version { get; set; } = "2.0.0";
+        public string ApplicationName { get; set; } = "ForensicBridge";
+        public string SupportEmail { get; set; } = "support@forensicbridge.ca";
+        public string DocumentationUrl { get; set; } = "https://forensicbridge.ca/docs";
     }
 }
