@@ -19,6 +19,42 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 // Destination type
 type DestinationType = "qbo" | "caseware";
 
+// FIX: Define proper types for API responses instead of using 'any'
+interface LiveStatusResponse {
+    migration_id: string;
+    phase: string;
+    phase_number: number;
+    percentage: number;
+    current_entity: string | null;
+    status_message: string;
+    status: string;
+    alerts: string[];
+    integrity_verified: boolean;
+    phases: Array<{
+        name: string;
+        status: "pending" | "in_progress" | "completed";
+        percentage: number;
+        description: string;
+    }>;
+    company_name: string;
+    started_at: string;
+    elapsed_seconds: number;
+    completed_at?: string;
+    duration_seconds?: number;
+    error?: string;
+    destination?: DestinationType;
+}
+
+interface ApiDiscrepancy {
+    account_name: string;
+    account_type?: string;
+    source_balance: number;
+    destination_balance: number;
+    difference: number;
+    severity?: "critical" | "warning" | "info";
+    possible_cause?: string;
+}
+
 export default function MigrationDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -58,13 +94,46 @@ export default function MigrationDetailPage() {
         enabled: !!id,
     });
 
-    // Destination from API response
-    const destination: DestinationType = (liveStatus as any)?.destination || "qbo";
+    // FIX: Remove 'any' cast - use typed response
+    // The liveStatus is typed from useLiveStatus hook, destination is optional
+    const destination: DestinationType = (liveStatus as LiveStatusResponse | undefined)?.destination || "qbo";
 
     const [isCancelling, setIsCancelling] = useState(false);
     const [showDiscrepancyDoctor, setShowDiscrepancyDoctor] = useState(true);
+    // FIX: Add state for concurrent request throttling
+    const [isExportingReport, setIsExportingReport] = useState(false);
+    // FIX: Add error states to replace alert() calls
+    const [exportError, setExportError] = useState<string | null>(null);
+    const [cancelError, setCancelError] = useState<string | null>(null);
+    const [certificateError, setCertificateError] = useState<string | null>(null);
 
+    // FIX: Auto-dismiss errors after 5 seconds
+    useEffect(() => {
+        if (exportError) {
+            const timer = setTimeout(() => setExportError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [exportError]);
+
+    useEffect(() => {
+        if (cancelError) {
+            const timer = setTimeout(() => setCancelError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [cancelError]);
+
+    useEffect(() => {
+        if (certificateError) {
+            const timer = setTimeout(() => setCertificateError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [certificateError]);
+
+    // FIX: Improved error messages with specific details
     const handleExportDiscrepancyReport = async () => {
+        // FIX: Prevent concurrent requests
+        if (isExportingReport) return;
+        setIsExportingReport(true);
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/migrations/${id}/discrepancy-report`, {
@@ -82,11 +151,43 @@ export default function MigrationDetailPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             } else {
-                alert("Failed to export discrepancy report");
+                // FIX: Provide specific error details based on HTTP status
+                let errorMessage = "Failed to export discrepancy report.";
+                if (response.status === 401) {
+                    errorMessage += " Your session may have expired. Please log in again.";
+                } else if (response.status === 404) {
+                    errorMessage += " The report was not found for this migration.";
+                } else if (response.status === 403) {
+                    errorMessage += " You don't have permission to access this report.";
+                } else if (response.status >= 500) {
+                    errorMessage += ` Server error (${response.status}). Please try again later.`;
+                } else {
+                    try {
+                        const errorData = await response.json();
+                        if (errorData.error) {
+                            errorMessage = errorData.error;
+                        }
+                    } catch {
+                        // Response wasn't JSON
+                    }
+                }
+                // FIX: Replace alert() with state-based error toast
+                setExportError(errorMessage);
             }
         } catch (error) {
-            console.error("Export error:", error);
-            alert("Failed to export report. Please try again.");
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Export error:", error);
+            }
+            // FIX: Differentiate between network errors and other errors - replace alert() with state
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                setExportError("Network error: Unable to connect to the server. Please check your internet connection.");
+            } else {
+                setExportError("Failed to export report. Please try again.");
+            }
+        } finally {
+            // FIX: Always reset loading state
+            setIsExportingReport(false);
         }
     };
 
@@ -98,25 +199,32 @@ export default function MigrationDetailPage() {
     const handleCancelMigration = async () => {
         if (!confirm("Are you sure you want to cancel this migration?")) return;
         setIsCancelling(true);
+        setCancelError(null); // Clear previous errors
         try {
             const result = await api.cancelMigration(id);
             if (result.success) {
                 router.refresh();
             } else {
-                alert(result.error || "Failed to cancel migration");
+                // FIX: Replace alert() with state-based error toast
+                setCancelError(result.error || "Failed to cancel migration");
             }
         } catch (error) {
-            console.error("Cancel error:", error);
-            alert("Failed to cancel migration");
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Cancel error:", error);
+            }
+            // FIX: Replace alert() with state-based error toast
+            setCancelError("Failed to cancel migration. Please try again.");
         } finally {
             setIsCancelling(false);
         }
     };
 
-    // Mock download handler since api is removed
+    // Certificate download handler
     const [isDownloading, setIsDownloading] = useState(false);
     const handleDownloadCertificate = async () => {
         setIsDownloading(true);
+        setCertificateError(null); // Clear previous errors
         try {
             const blob = await api.downloadAuditCertificate(id);
             if (blob) {
@@ -129,11 +237,16 @@ export default function MigrationDetailPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             } else {
-                alert("Certificate download failed.");
+                // FIX: Replace alert() with state-based error toast
+                setCertificateError("Certificate download failed. The file may not be available yet.");
             }
         } catch (e) {
-            console.error(e);
-            alert("Error downloading certificate.");
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Certificate download error:", e);
+            }
+            // FIX: Replace alert() with state-based error toast
+            setCertificateError("Error downloading certificate. Please try again.");
         } finally {
             setIsDownloading(false);
         }
@@ -183,6 +296,60 @@ export default function MigrationDetailPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error Toast UI - replaces alert() calls */}
+            {(exportError || cancelError || certificateError) && (
+                <div className="fixed top-4 right-4 z-50 space-y-2">
+                    {exportError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Export Error</p>
+                                <p className="text-sm opacity-90">{exportError}</p>
+                            </div>
+                            <button
+                                onClick={() => setExportError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                    {cancelError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Cancel Error</p>
+                                <p className="text-sm opacity-90">{cancelError}</p>
+                            </div>
+                            <button
+                                onClick={() => setCancelError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                    {certificateError && (
+                        <div className="bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md animate-in slide-in-from-right">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <p className="font-medium text-sm">Download Error</p>
+                                <p className="text-sm opacity-90">{certificateError}</p>
+                            </div>
+                            <button
+                                onClick={() => setCertificateError(null)}
+                                className="text-white/80 hover:text-white"
+                                aria-label="Dismiss error"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -291,7 +458,7 @@ export default function MigrationDetailPage() {
             ═══════════════════════════════════════════════════════════════ */}
             {(discrepancyData?.has_discrepancies && showDiscrepancyDoctor) ? (
                 <DiscrepancyDoctor
-                    discrepancies={discrepancyData.discrepancies.map((d: any) => ({
+                    discrepancies={discrepancyData.discrepancies.map((d: ApiDiscrepancy) => ({
                         account_name: d.account_name,
                         account_type: d.account_type || "Unknown",
                         source_balance: d.source_balance,

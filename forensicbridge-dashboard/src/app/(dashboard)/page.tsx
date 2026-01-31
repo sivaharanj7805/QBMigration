@@ -79,7 +79,10 @@ export default function DashboardHome() {
             });
             setApiConnected(response.ok);
         } catch (error) {
-            console.error("API connection failed:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("API connection failed:", error);
+            }
             setApiConnected(false);
         }
     };
@@ -127,7 +130,10 @@ export default function DashboardHome() {
                 }
             }
         } catch (error) {
-            console.error("Failed to fetch dashboard data:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch dashboard data:", error);
+            }
         } finally {
             setLoading(false);
         }
@@ -157,6 +163,25 @@ export default function DashboardHome() {
         }
     }, []);
 
+    // FIX: Improved file extension validation to prevent double-extension bypass attacks
+    const isValidQBFile = useCallback((fileName: string): boolean => {
+        // Normalize filename - remove leading/trailing whitespace
+        const normalizedName = fileName.trim().toLowerCase();
+
+        // Only allow files that end with exactly one of the valid extensions
+        // This prevents attacks like "malware.qbw.exe" or "file.qbw.js"
+        const validExtensions = ['.qbw', '.qbb', '.qbm'];
+        const hasValidExtension = validExtensions.some(ext => normalizedName.endsWith(ext));
+
+        // Additional safety: reject files with multiple extensions (common attack vector)
+        const extensionCount = (normalizedName.match(/\.[a-z0-9]+/g) || []).length;
+        if (extensionCount > 1) {
+            return false;
+        }
+
+        return hasValidExtension;
+    }, []);
+
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -165,18 +190,42 @@ export default function DashboardHome() {
         const files = e.dataTransfer.files;
         if (files?.[0]) {
             const file = files[0];
-            const ext = file.name.split('.').pop()?.toLowerCase();
-            if (['qbw', 'qbb', 'qbm'].includes(ext || '')) {
-                handleFileUpload(file);
-            } else {
-                setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file.");
+            if (!isValidQBFile(file.name)) {
+                setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file. Files with multiple extensions are not allowed.");
+                return;
             }
+            // FIX: Add file size validation (max 5GB for large QuickBooks files)
+            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
+            if (file.size > MAX_FILE_SIZE) {
+                setUploadError("File too large. Maximum file size is 5GB.");
+                return;
+            }
+            if (file.size === 0) {
+                setUploadError("File appears to be empty. Please select a valid QuickBooks file.");
+                return;
+            }
+            handleFileUpload(file);
         }
-    }, []);
+    }, [isValidQBFile]);
 
+    // FIX: Also apply validation to file select input
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            if (!isValidQBFile(file.name)) {
+                setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file.");
+                return;
+            }
+            // FIX: Add file size validation (max 5GB for large QuickBooks files)
+            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
+            if (file.size > MAX_FILE_SIZE) {
+                setUploadError("File too large. Maximum file size is 5GB.");
+                return;
+            }
+            if (file.size === 0) {
+                setUploadError("File appears to be empty. Please select a valid QuickBooks file.");
+                return;
+            }
             handleFileUpload(file);
         }
     };
@@ -209,7 +258,10 @@ export default function DashboardHome() {
                 setUploadStatus("error");
             }
         } catch (error) {
-            console.error("Upload error:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Upload error:", error);
+            }
             setUploadError("Failed to connect to server. Please try again.");
             setUploadStatus("error");
         }

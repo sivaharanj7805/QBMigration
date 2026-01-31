@@ -42,6 +42,9 @@ export default function VaultPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedArchive, setSelectedArchive] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    // FIX: Add error state for restore operations instead of using alert()
+    const [restoreError, setRestoreError] = useState<string | null>(null);
+    const [restoringId, setRestoringId] = useState<string | null>(null);
 
     // Real data from API - starts at 0/empty
     const [archivedCompanies, setArchivedCompanies] = useState<ArchivedCompany[]>([]);
@@ -69,7 +72,10 @@ export default function VaultPage() {
                 setStats({ archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
             }
         } catch (error) {
-            console.error("Failed to fetch vault data:", error);
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch vault data:", error);
+            }
             setArchivedCompanies([]);
             setStats({ archivedCompanies: 0, totalRecords: 0, storageSize: "0 GB", monthlyCost: "$0.00" });
         } finally {
@@ -77,9 +83,18 @@ export default function VaultPage() {
         }
     };
 
-    const filteredArchives = archivedCompanies.filter(a =>
-        a.companyName.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    // FIX: Add search term sanitization and length limits
+    const MAX_SEARCH_LENGTH = 100;
+    const sanitizedSearchTerm = searchTerm
+        .slice(0, MAX_SEARCH_LENGTH) // Limit length
+        .trim()
+        .toLowerCase();
+
+    const filteredArchives = archivedCompanies.filter(a => {
+        // Guard against missing companyName
+        const companyName = a.companyName || '';
+        return companyName.toLowerCase().includes(sanitizedSearchTerm);
+    });
 
     const formatRecords = (count: number): string => {
         if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
@@ -105,6 +120,22 @@ export default function VaultPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error toast for restore errors */}
+            {restoreError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-red-700">
+                        <Database className="w-5 h-5" />
+                        {restoreError}
+                    </div>
+                    <button
+                        onClick={() => setRestoreError(null)}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
@@ -248,8 +279,11 @@ export default function VaultPage() {
                                     {archive.status === "archived" && (
                                         <button
                                             className="btn-secondary text-sm py-1.5 flex items-center gap-1"
+                                            disabled={restoringId === archive.id}
                                             onClick={async (e) => {
                                                 e.stopPropagation();
+                                                setRestoreError(null);
+                                                setRestoringId(archive.id);
                                                 try {
                                                     const response = await fetch(`${API_URL}/api/vault/${archive.id}/restore`, {
                                                         method: 'POST',
@@ -258,16 +292,29 @@ export default function VaultPage() {
                                                     if (response.ok) {
                                                         fetchVaultData();
                                                     } else {
-                                                        alert("Failed to initiate restore");
+                                                        // FIX: Use error state instead of alert
+                                                        const errorMsg = response.status === 401
+                                                            ? "Session expired. Please log in again."
+                                                            : "Failed to initiate restore. Please try again.";
+                                                        setRestoreError(errorMsg);
                                                     }
                                                 } catch (error) {
-                                                    console.error("Restore error:", error);
-                                                    alert("Failed to connect to server");
+                                                    // FIX: Only log in development
+                                                    if (process.env.NODE_ENV === 'development') {
+                                                        console.error("Restore error:", error);
+                                                    }
+                                                    setRestoreError("Failed to connect to server. Please check your connection.");
+                                                } finally {
+                                                    setRestoringId(null);
                                                 }
                                             }}
                                         >
-                                            <RefreshCw className="w-4 h-4" />
-                                            Restore
+                                            {restoringId === archive.id ? (
+                                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <RefreshCw className="w-4 h-4" />
+                                            )}
+                                            {restoringId === archive.id ? "Restoring..." : "Restore"}
                                         </button>
                                     )}
 
