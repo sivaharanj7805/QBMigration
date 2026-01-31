@@ -66,9 +66,15 @@ export default function ReportsPage() {
     const [reports, setReports] = useState<Report[]>([]);
     const [showGenerateModal, setShowGenerateModal] = useState(false);
     const [downloadingId, setDownloadingId] = useState<string | null>(null);
+    // FIX: Add error state to distinguish from empty state
+    const [error, setError] = useState<string | null>(null);
+
+    // FIX: Add download error state for UI feedback
+    const [downloadError, setDownloadError] = useState<string | null>(null);
 
     const handleDownloadReport = async (reportId: string, reportName: string) => {
         setDownloadingId(reportId);
+        setDownloadError(null);
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/reports/${reportId}/download`, {
@@ -87,11 +93,24 @@ export default function ReportsPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
             } else {
-                alert("Failed to download report");
+                // FIX: Better error message based on status
+                let errorMsg = "Failed to download report.";
+                if (response.status === 401) {
+                    errorMsg = "Session expired. Please log in again.";
+                } else if (response.status === 404) {
+                    errorMsg = "Report not found. It may have been deleted.";
+                } else if (response.status >= 500) {
+                    errorMsg = `Server error (${response.status}). Please try again later.`;
+                }
+                setDownloadError(errorMsg);
             }
-        } catch (error) {
-            console.error("Download error:", error);
-            alert("Failed to connect to server");
+        } catch (err) {
+            // FIX: Use proper error logging and state
+            const errorMessage = err instanceof Error ? err.message : "Network error";
+            setDownloadError(`Failed to connect: ${errorMessage}`);
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Download error:", err);
+            }
         } finally {
             setDownloadingId(null);
         }
@@ -103,6 +122,7 @@ export default function ReportsPage() {
 
     const fetchReports = async () => {
         setLoading(true);
+        setError(null);
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/reports`, {
@@ -113,11 +133,21 @@ export default function ReportsPage() {
                 const data = await response.json();
                 setReports(data.reports || []);
             } else {
+                // FIX: Set error state instead of silent failure
+                const errorText = response.status === 401
+                    ? "Session expired. Please log in again."
+                    : `Failed to load reports (${response.status})`;
+                setError(errorText);
                 setReports([]);
             }
-        } catch (error) {
-            console.error("Failed to fetch reports:", error);
+        } catch (err) {
+            // FIX: Track error state and use proper error logging
+            const errorMessage = err instanceof Error ? err.message : "Network error";
+            setError(`Failed to connect to server: ${errorMessage}`);
             setReports([]);
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch reports:", err);
+            }
         } finally {
             setLoading(false);
         }
@@ -205,10 +235,37 @@ export default function ReportsPage() {
                     <span className="text-sm text-gray-500">{loading ? "--" : filteredReports.length} reports</span>
                 </div>
 
+                {/* FIX: Show download error if present */}
+                {downloadError && (
+                    <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                        {downloadError}
+                        <button
+                            onClick={() => setDownloadError(null)}
+                            className="ml-auto text-red-500 hover:text-red-700"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                )}
+
                 {loading ? (
                     <div className="p-8 text-center text-gray-500">
                         <Loader2 className="w-8 h-8 mx-auto animate-spin mb-2" />
                         Loading reports...
+                    </div>
+                ) : error ? (
+                    // FIX: Show error state distinctly from empty state
+                    <div className="p-8 text-center">
+                        <AlertTriangle className="w-12 h-12 mx-auto text-red-400 mb-3" />
+                        <p className="text-lg font-medium text-gray-900">Failed to load reports</p>
+                        <p className="text-sm text-gray-500 mt-1">{error}</p>
+                        <button
+                            onClick={fetchReports}
+                            className="mt-4 btn-secondary"
+                        >
+                            Try Again
+                        </button>
                     </div>
                 ) : filteredReports.length === 0 ? (
                     <div className="p-8 text-center text-gray-500">
@@ -306,12 +363,23 @@ export default function ReportsPage() {
                                                 if (response.ok) {
                                                     fetchReports();
                                                 } else {
-                                                    const error = await response.json();
-                                                    alert(error.error || "Failed to generate report");
+                                                    // FIX: Better error handling
+                                                    let errorMsg = "Failed to generate report";
+                                                    try {
+                                                        const errorData = await response.json();
+                                                        errorMsg = errorData.error || errorMsg;
+                                                    } catch {
+                                                        // Response wasn't JSON
+                                                    }
+                                                    setDownloadError(errorMsg);
                                                 }
-                                            } catch (error) {
-                                                console.error("Generate report error:", error);
-                                                alert("Failed to connect to server");
+                                            } catch (err) {
+                                                // FIX: Use proper error logging
+                                                const errorMessage = err instanceof Error ? err.message : "Network error";
+                                                setDownloadError(`Failed to connect: ${errorMessage}`);
+                                                if (process.env.NODE_ENV === 'development') {
+                                                    console.error("Generate report error:", err);
+                                                }
                                             }
                                         }}
                                     >

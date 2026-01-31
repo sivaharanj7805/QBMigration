@@ -41,6 +41,8 @@ export default function UploadPage() {
     const [files, setFiles] = useState<UploadedFile[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
     const [destination, setDestination] = useState<DestinationType>(null);
+    // FIX: Add error state instead of using alert()
+    const [migrationError, setMigrationError] = useState<string | null>(null);
 
     const handleDrag = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -95,7 +97,10 @@ export default function UploadPage() {
                 ));
             }
         } catch (error) {
-            console.error('File validation error:', error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('File validation error:', error);
+            }
             setFiles(prev => prev.map(f =>
                 f.name === file.name
                     ? { ...f, status: "error", error: 'Failed to connect to validation server' }
@@ -134,6 +139,7 @@ export default function UploadPage() {
         if (!destination || readyFiles.length === 0) return;
 
         setIsProcessing(true);
+        setMigrationError(null);
         try {
             const formData = new FormData();
             formData.append('destination', destination);
@@ -155,12 +161,16 @@ export default function UploadPage() {
                     window.location.href = `/migrations/${migrationId}`;
                 }
             } else {
-                const errorData = await response.json();
-                alert(errorData.error || "Failed to start migration");
+                // FIX: Use error state instead of alert
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                setMigrationError(errorData.error || "Failed to start migration. Please try again.");
             }
         } catch (error) {
-            console.error("Migration start error:", error);
-            alert("Failed to connect to server. Please try again.");
+            // FIX: Only log in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Migration start error:", error);
+            }
+            setMigrationError("Failed to connect to server. Please check your connection and try again.");
         } finally {
             setIsProcessing(false);
         }
@@ -168,6 +178,22 @@ export default function UploadPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error toast for migration errors */}
+            {migrationError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-red-700">
+                        <AlertCircle className="w-5 h-5" />
+                        {migrationError}
+                    </div>
+                    <button
+                        onClick={() => setMigrationError(null)}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-gray-900">Upload Files</h1>

@@ -35,15 +35,22 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
     const [logIndex, setLogIndex] = useState(0);
     const terminalRef = useRef<HTMLDivElement>(null);
 
-    // Simulate live log streaming
+    // FIX: Properly handle interval cleanup to prevent memory leaks
+    // Separating static logs initialization from live streaming to avoid cleanup issues
     useEffect(() => {
         if (!isLive) {
-            // Show static logs
+            // Show static logs when not live
             setLogs(demoLogs.slice(0, 5).map(log => ({
                 ...log,
                 timestamp: new Date().toISOString()
             })));
-            return;
+        }
+    }, [isLive]);
+
+    // Separate effect for live streaming - always returns cleanup function
+    useEffect(() => {
+        if (!isLive) {
+            return; // No interval to clean up when not live
         }
 
         const interval = setInterval(() => {
@@ -55,7 +62,10 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
             setLogIndex(prev => prev + 1);
         }, 800);
 
-        return () => clearInterval(interval);
+        // FIX: Always return cleanup function when isLive is true
+        return () => {
+            clearInterval(interval);
+        };
     }, [isLive, logIndex]);
 
     // Auto-scroll to bottom

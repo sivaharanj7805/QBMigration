@@ -33,6 +33,8 @@ interface UserSubscription {
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState<SettingsTab>("branding");
     const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+    // FIX: Add error state to replace alert() calls
+    const [saveError, setSaveError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [userName, setUserName] = useState("");
     const [userEmail, setUserEmail] = useState("");
@@ -45,6 +47,14 @@ export default function SettingsPage() {
     useEffect(() => {
         loadUserData();
     }, []);
+
+    // FIX: Auto-dismiss error after 5 seconds
+    useEffect(() => {
+        if (saveError) {
+            const timer = setTimeout(() => setSaveError(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [saveError]);
 
     const loadUserData = async () => {
         setLoading(true);
@@ -92,8 +102,11 @@ export default function SettingsPage() {
                     });
                 }
             }
-        } catch (error) {
-            console.error("Failed to load user data:", error);
+        } catch (err) {
+            // FIX: Use proper error logging only in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to load user data:", err);
+            }
         } finally {
             setLoading(false);
         }
@@ -101,6 +114,7 @@ export default function SettingsPage() {
 
     const handleSaveWhitelabel = async (config: WhitelabelConfig) => {
         setSaveStatus("saving");
+        setSaveError(null); // Clear previous errors
         try {
             const response = await fetch(`${API_URL}/api/settings/whitelabel`, {
                 method: 'POST',
@@ -116,14 +130,23 @@ export default function SettingsPage() {
                 setSaveStatus("saved");
                 setTimeout(() => setSaveStatus("idle"), 2000);
             } else {
-                console.error("Failed to save whitelabel config");
+                // FIX: Use proper error logging only in development
+                if (process.env.NODE_ENV === 'development') {
+                    console.error("Failed to save whitelabel config");
+                }
                 setSaveStatus("idle");
-                alert("Failed to save branding settings");
+                // FIX: Replace alert() with state-based error toast
+                setSaveError("Failed to save branding settings. Please try again.");
             }
-        } catch (error) {
-            console.error("Save whitelabel error:", error);
+        } catch (err) {
+            // FIX: Use proper error logging only in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Save whitelabel error:", err);
+            }
             setSaveStatus("idle");
-            alert("Failed to connect to server");
+            const errorMessage = err instanceof Error ? err.message : "Network error";
+            // FIX: Replace alert() with state-based error toast
+            setSaveError(`Failed to connect: ${errorMessage}`);
         }
     };
 
@@ -160,6 +183,24 @@ export default function SettingsPage() {
                 </div>
             )}
 
+            {/* FIX: Error Toast - replaces alert() calls */}
+            {saveError && (
+                <div className="fixed top-4 right-4 bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-md z-50">
+                    <Shield className="w-5 h-5 flex-shrink-0" />
+                    <div className="flex-1">
+                        <p className="font-medium text-sm">Save Error</p>
+                        <p className="text-sm opacity-90">{saveError}</p>
+                    </div>
+                    <button
+                        onClick={() => setSaveError(null)}
+                        className="text-white/80 hover:text-white"
+                        aria-label="Dismiss error"
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
+
             {/* Tab Navigation */}
             <div className="border-b border-gray-200">
                 <nav className="flex gap-4 overflow-x-auto">
@@ -191,17 +232,35 @@ export default function SettingsPage() {
                     <div className="card-forensic p-6">
                         <h2 className="text-lg font-semibold mb-4">Notification Preferences</h2>
                         <div className="space-y-4">
-                            <label className="flex items-center justify-between">
+                            {/* FIX: Added proper id, name attributes for accessibility */}
+                            <label htmlFor="notify-complete" className="flex items-center justify-between cursor-pointer">
                                 <span>Email on migration complete</span>
-                                <input type="checkbox" defaultChecked className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-complete"
+                                    name="notify-complete"
+                                    defaultChecked
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
-                            <label className="flex items-center justify-between">
+                            <label htmlFor="notify-failure" className="flex items-center justify-between cursor-pointer">
                                 <span>Email on migration failure</span>
-                                <input type="checkbox" defaultChecked className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-failure"
+                                    name="notify-failure"
+                                    defaultChecked
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
-                            <label className="flex items-center justify-between">
+                            <label htmlFor="notify-weekly" className="flex items-center justify-between cursor-pointer">
                                 <span>Weekly summary report</span>
-                                <input type="checkbox" className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-weekly"
+                                    name="notify-weekly"
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
                         </div>
                     </div>

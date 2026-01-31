@@ -38,6 +38,8 @@ interface MigrationsTableProps {
     isLoading?: boolean;
     selectedIds?: Set<string>;
     onSelectionChange?: (ids: Set<string>) => void;
+    // FIX: Add error state to distinguish from empty state
+    error?: string | null;
 }
 
 type SortField = "company_name" | "status" | "progress_percent" | "created_at";
@@ -51,6 +53,7 @@ export function MigrationsTable({
     isLoading,
     selectedIds = new Set(),
     onSelectionChange,
+    error,
 }: MigrationsTableProps) {
     const [sortField, setSortField] = useState<SortField>("created_at");
     const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
@@ -173,12 +176,51 @@ export function MigrationsTable({
         );
     };
 
+    // FIX: Add loading skeleton for better UX
     if (isLoading) {
         return (
             <div className="card-forensic overflow-hidden">
+                <table className="data-table">
+                    <thead>
+                        <tr>
+                            <th className="w-12"><div className="h-4 w-4 bg-gray-200 rounded animate-pulse" /></th>
+                            <th>Client Name</th>
+                            <th>File Size</th>
+                            <th>Last Sync</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th className="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {[1, 2, 3].map((i) => (
+                            <tr key={i}>
+                                <td><div className="h-4 w-4 bg-gray-200 rounded animate-pulse" /></td>
+                                <td>
+                                    <div className="h-4 w-32 bg-gray-200 rounded animate-pulse mb-1" />
+                                    <div className="h-3 w-24 bg-gray-100 rounded animate-pulse" />
+                                </td>
+                                <td><div className="h-4 w-16 bg-gray-200 rounded animate-pulse" /></td>
+                                <td><div className="h-4 w-16 bg-gray-200 rounded animate-pulse" /></td>
+                                <td><div className="h-6 w-20 bg-gray-200 rounded-full animate-pulse" /></td>
+                                <td><div className="h-2 w-20 bg-gray-200 rounded animate-pulse" /></td>
+                                <td><div className="h-6 w-6 bg-gray-200 rounded animate-pulse ml-auto" /></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    }
+
+    // FIX: Show error state if error is provided
+    if (error) {
+        return (
+            <div className="card-forensic overflow-hidden">
                 <div className="p-8 text-center">
-                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-[var(--bridge-blue)]" />
-                    <p className="mt-2 text-gray-500">Loading migrations...</p>
+                    <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
+                    <p className="text-lg font-medium text-gray-900">Failed to load migrations</p>
+                    <p className="mt-1 text-gray-500">{error}</p>
                 </div>
             </div>
         );
@@ -236,8 +278,11 @@ export function MigrationsTable({
                 <tbody>
                     {sortedMigrations.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="text-center py-8 text-gray-500">
-                                No migrations found
+                            <td colSpan={7} className="text-center py-8">
+                                {/* FIX: Better empty state with helpful message */}
+                                <Upload className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                <p className="text-lg font-medium text-gray-600">No migrations yet</p>
+                                <p className="text-gray-400 text-sm mt-1">Upload a QuickBooks file to get started</p>
                             </td>
                         </tr>
                     ) : (
@@ -265,7 +310,15 @@ export function MigrationsTable({
                                 <td>{getStatusBadge(migration.status)}</td>
                                 <td>
                                     <div className="flex items-center gap-2">
-                                        <div className="progress-bar w-20">
+                                        {/* FIX: Added ARIA attributes for accessibility */}
+                                        <div
+                                            className="progress-bar w-20"
+                                            role="progressbar"
+                                            aria-valuenow={migration.progress_percent}
+                                            aria-valuemin={0}
+                                            aria-valuemax={100}
+                                            aria-label={`${migration.company_name} migration progress: ${migration.progress_percent}%`}
+                                        >
                                             <div
                                                 className={`progress-bar-fill ${migration.status === "completed" ? "success" : ""
                                                     }`}

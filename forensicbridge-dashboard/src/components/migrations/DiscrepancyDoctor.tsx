@@ -40,7 +40,12 @@ export function DiscrepancyDoctor({
         setExpandedRows(newExpanded);
     };
 
-    const formatCurrency = (amount: number) => {
+    // FIX: Handle NaN, Infinity, null, and undefined values for financial display
+    const formatCurrency = (amount: number | null | undefined) => {
+        // Guard against invalid values that could display as "NaN" or "Infinity"
+        if (amount === null || amount === undefined || !Number.isFinite(amount)) {
+            return "$0.00";
+        }
         return new Intl.NumberFormat("en-US", {
             style: "currency",
             currency: "USD",

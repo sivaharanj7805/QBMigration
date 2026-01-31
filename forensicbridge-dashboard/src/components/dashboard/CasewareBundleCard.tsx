@@ -57,7 +57,10 @@ export function CasewareBundleCard({
         } catch (err) {
             const message = err instanceof Error ? err.message : "Unknown error occurred";
             setError(message);
-            console.error("Caseware download error:", err);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Caseware download error:", err);
+            }
         } finally {
             setIsDownloading(false);
             // Clear status after 3 seconds

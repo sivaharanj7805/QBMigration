@@ -54,7 +54,10 @@ export function TeamManagement() {
                 setError('Team management requires Enterprise or Forensic tier');
             }
         } catch (err) {
-            console.error('Failed to load team data:', err);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to load team data:', err);
+            }
         } finally {
             setLoading(false);
         }

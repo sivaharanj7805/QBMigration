@@ -82,7 +82,10 @@ export function Sidebar() {
                 }
             });
         } catch (error) {
-            console.error("Backend logout failed:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Backend logout failed:", error);
+            }
         }
         clearAuth();
         router.push("/login");
