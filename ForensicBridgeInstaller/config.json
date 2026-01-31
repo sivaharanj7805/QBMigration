@@ -1,7 +1,10 @@
 {
+  "$schema": "https://forensicbridge.ca/schemas/config.json",
   "serverUrl": "https://api.forensicbridge.ca",
   "version": "2.0.0",
   "applicationName": "ForensicBridge",
-  "supportEmail": "support@forensicbridge.com",
-  "documentationUrl": "https://forensicbridge.ca/docs"
+  "supportEmail": "support@forensicbridge.ca",
+  "documentationUrl": "https://forensicbridge.ca/docs",
+  "sdkDownloadUrl": "https://developer.intuit.com/app/developer/qbdesktop/docs/get-started",
+  "githubRepo": "sivaharanj7805/QBMigration"
 }
