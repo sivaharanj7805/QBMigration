@@ -668,8 +668,9 @@ namespace QBDesktopExtractor
                 var addr = new MailAddress(email);
                 return addr.Address == email;
             }
-            catch
+            catch (FormatException)
             {
+                // Invalid email format
                 return false;
             }
         }

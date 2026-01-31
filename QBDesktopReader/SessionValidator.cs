@@ -403,8 +403,9 @@ namespace QBDesktopExtractor
             {
                 return Environment.MachineName;
             }
-            catch
+            catch (InvalidOperationException)
             {
+                // Machine name not available
                 return "Unknown Device";
             }
         }
@@ -456,8 +457,14 @@ namespace QBDesktopExtractor
 
                 return cache.SessionId;
             }
-            catch
+            catch (CryptographicException)
             {
+                // Cache corrupted or from different user context
+                return null;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Invalid JSON in cache
                 return null;
             }
         }

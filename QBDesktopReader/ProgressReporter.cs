@@ -148,9 +148,13 @@ namespace QBDesktopExtractor
                 {
                     await SendMessageAsync(message);
                 }
-                catch
+                catch (WebSocketException)
                 {
                     // WebSocket may be closed, ignore
+                }
+                catch (InvalidOperationException)
+                {
+                    // WebSocket in invalid state, ignore
                 }
             }
         }
@@ -243,9 +247,9 @@ namespace QBDesktopExtractor
                         CancellationToken.None);
                 }
             }
-            catch
+            catch (WebSocketException)
             {
-                // Best effort
+                // WebSocket already closed, best effort
             }
             finally
             {
