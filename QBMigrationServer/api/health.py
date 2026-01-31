@@ -15,6 +15,7 @@ FIX HIGH-03: Added rate limiting to health endpoints
 from flask import Blueprint, jsonify, current_app, request
 from sqlalchemy import text
 from models.database import db
+from extensions import limiter
 from functools import wraps
 import os
 import hmac
@@ -23,6 +24,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 health_bp = Blueprint('health', __name__)
+
+# FIX HIGH-03: Rate limiting for health endpoints
+HEALTH_RATE_LIMIT = "60 per minute"
+DETAILED_RATE_LIMIT = "10 per minute"
 
 # Admin API key for sensitive endpoints
 ADMIN_API_KEY = os.getenv('ADMIN_API_KEY')
@@ -57,6 +62,7 @@ REQUIRED_REGION = 'ca-central-1'  # Montreal
 
 
 @health_bp.route('/api/health', methods=['GET'])
+@limiter.limit(HEALTH_RATE_LIMIT)
 def health_check():
     """
     Health check endpoint
@@ -108,12 +114,14 @@ def health_check():
 
 
 @health_bp.route('/api/health/detailed', methods=['GET'])
+@limiter.limit(DETAILED_RATE_LIMIT)
 @require_admin_auth
 def detailed_health_check():
     """
     Detailed health check with full compliance verification.
     Used for enterprise deployment validation.
     FIX CRIT-05: Now requires admin authentication.
+    FIX HIGH-03: Rate limited.
     """
     from datetime import datetime
     
@@ -324,12 +332,14 @@ def detailed_health_check():
 
 
 @health_bp.route('/api/health/compliance', methods=['GET'])
+@limiter.limit(DETAILED_RATE_LIMIT)
 @require_admin_auth
 def compliance_check():
     """
     Compliance verification endpoint for enterprise audits.
     Returns all compliance-relevant configuration.
     FIX CRIT-05: Now requires admin authentication.
+    FIX HIGH-03: Rate limited.
     """
     from datetime import datetime
     
