@@ -838,45 +838,57 @@ def get_captcha_configuration():
 def check_captcha_requirement():
     """
     Check if CAPTCHA is required for a specific email.
-    
+
     FIX #38: Allow frontend to check CAPTCHA requirement before submitting credentials.
-    
+    HIGH FIX: Email enumeration prevention - never reveal if user exists.
+
     Request:
     {
         "email": "user@example.com"
     }
-    
+
     Response:
     {
         "captcha_required": false,
-        "failed_attempts": 0,
         "threshold": 3
     }
     """
+    import time
+    start_time = time.time()
+
     data = request.get_json()
-    
+
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
+
     email = data.get('email', '').strip().lower()
-    
+
     if not email:
         return jsonify({'success': False, 'error': 'Email required'}), 400
-    
+
     # Look up user
     user = User.query.filter_by(email=email).first()
-    
+
     # Get failed attempts (0 if user doesn't exist)
     failed_attempts = user.failed_login_attempts if user else 0
-    
+
     # Check if CAPTCHA is required
     captcha_required = is_captcha_required(email, failed_attempts)
-    
+
+    # HIGH FIX: Ensure constant response timing to prevent email enumeration
+    # Response should take the same time regardless of whether user exists
+    elapsed = time.time() - start_time
+    min_response_time = 0.1  # 100ms minimum response time
+    if elapsed < min_response_time:
+        time.sleep(min_response_time - elapsed)
+
+    # HIGH FIX: Do NOT return failed_attempts - this reveals if user exists
+    # Attackers could enumerate emails by checking which ones have > 0 attempts
     return jsonify({
         'success': True,
         'captcha_required': captcha_required,
-        'failed_attempts': failed_attempts,
         'threshold': 3  # CAPTCHA required after 3 failed attempts
+        # NOTE: failed_attempts intentionally removed to prevent email enumeration
     })
 
 

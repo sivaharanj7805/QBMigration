@@ -92,14 +92,26 @@ def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
     if not provider:
         provider = get_captcha_provider()
 
-    # If no CAPTCHA configured, skip verification (development mode)
+    # CRITICAL FIX: Fail-closed when CAPTCHA not configured in production
+    # In production, if CAPTCHA is required but not configured, we MUST fail
+    # This prevents attackers from bypassing CAPTCHA by removing the config
     if provider == 'none':
-        logger.warning("CAPTCHA verification skipped - no provider configured")
-        # In development, allow bypass, but log warning
-        if os.getenv('FLASK_ENV') == 'development':
-            return True, ""
+        is_production = os.getenv('FLASK_ENV', 'development') == 'production'
+
+        if is_production:
+            # FAIL-CLOSED: In production, missing CAPTCHA config is a security failure
+            logger.error(
+                "SECURITY CRITICAL: CAPTCHA verification required but no provider configured. "
+                "Blocking request for security. Configure a CAPTCHA provider immediately."
+            )
+            return False, "Security verification unavailable. Please contact support."
         else:
-            return False, "CAPTCHA not configured"
+            # Development mode: Allow bypass with explicit warning
+            logger.warning(
+                "CAPTCHA verification skipped - no provider configured (development mode only). "
+                "This would FAIL in production!"
+            )
+            return True, ""
 
     # Get provider configuration
     config = CAPTCHA_PROVIDERS.get(provider)

@@ -740,12 +740,36 @@ def create_app(config_name='development'):
 
         # API-02: Add X-RateLimit-* headers per RFC 6585
         # Flask-Limiter adds these when RATELIMIT_HEADERS_ENABLED=True, but we ensure they exist
-        # Check if rate limit headers were added by limiter, otherwise add defaults
+        # SECURITY FIX: Ensure rate limit headers accurately reflect actual limits
         if 'X-RateLimit-Limit' not in response.headers:
-            # Add default headers for non-rate-limited endpoints
-            response.headers['X-RateLimit-Limit'] = str(app.config.get('RATELIMIT_DEFAULT', '100 per minute'))
-            response.headers['X-RateLimit-Remaining'] = '100'
-            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + 60)
+            # Get actual rate limits from route-specific decorators or defaults
+            # Default: 100 requests per minute for general API endpoints
+            default_limit = 100
+            default_window_seconds = 60
+
+            # Determine endpoint-specific limits based on path
+            path = request.path
+            if path.startswith('/api/auth/register'):
+                limit = 3
+                window_seconds = 3600  # 3 per hour
+            elif path.startswith('/api/auth/login'):
+                limit = 5
+                window_seconds = 900  # 5 per 15 minutes
+            elif path.startswith('/api/upload'):
+                limit = 10
+                window_seconds = 60  # 10 per minute
+            elif path.startswith('/api/webhooks'):
+                limit = 500
+                window_seconds = 60  # 500 per minute (high for webhook callbacks)
+            else:
+                limit = default_limit
+                window_seconds = default_window_seconds
+
+            # Add headers with accurate values
+            response.headers['X-RateLimit-Limit'] = str(limit)
+            response.headers['X-RateLimit-Remaining'] = str(limit)  # Conservative default
+            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + window_seconds)
+            response.headers['X-RateLimit-Window'] = f"{window_seconds}s"
 
         if not app.config.get('DEBUG'):
             # SECURITY FIX: Add preload directive for HSTS preload list submission
@@ -887,6 +911,9 @@ def create_app(config_name='development'):
         # SECURITY: Log full error server-side, but sanitize for client
         app.logger.error("Internal server error", exc_info=True)
         db.session.rollback()
+        # CRITICAL FIX: Call db.session.remove() after rollback to prevent stale sessions
+        # This ensures the session is properly cleaned up and returned to the pool
+        db.session.remove()
 
         # CRITICAL: Never expose raw error details in production
         response = create_error_response(error, context='api', status_code=500)
@@ -898,6 +925,9 @@ def create_app(config_name='development'):
         # SECURITY: Log full error server-side with stack trace
         app.logger.exception("Unexpected exception occurred")
         db.session.rollback()
+        # CRITICAL FIX: Call db.session.remove() after rollback to prevent stale sessions
+        # This ensures the session is properly cleaned up and returned to the pool
+        db.session.remove()
 
         # CRITICAL: Always sanitize error messages for client response
         response = create_error_response(error, context='api', status_code=500)

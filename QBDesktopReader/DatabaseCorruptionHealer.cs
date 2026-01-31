@@ -123,7 +123,7 @@ namespace QBDesktopExtractor
                         RecordCorruption("Account", account.ListID, "DuplicateListID",
                             $"Duplicate ListID: {account.ListID}", true);
                         // Generate unique ID
-                        account.ListID = $"{account.ListID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        account.ListID = GenerateUniqueId(account.ListID);
                     }
                     seenIds.Add(account.ListID);
                 }
@@ -174,7 +174,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Customer", customer.ListID, "DuplicateListID",
                             $"Duplicate ListID", true);
-                        customer.ListID = $"{customer.ListID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        customer.ListID = GenerateUniqueId(customer.ListID);
                     }
                     seenIds.Add(customer.ListID);
                 }
@@ -227,7 +227,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Vendor", vendor.ListID, "DuplicateListID",
                             $"Duplicate ListID", true);
-                        vendor.ListID = $"{vendor.ListID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        vendor.ListID = GenerateUniqueId(vendor.ListID);
                     }
                     seenIds.Add(vendor.ListID);
                 }
@@ -263,7 +263,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Item", item.ListID, "DuplicateListID",
                             $"Duplicate ListID", true);
-                        item.ListID = $"{item.ListID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        item.ListID = GenerateUniqueId(item.ListID);
                     }
                     seenIds.Add(item.ListID);
                 }
@@ -305,7 +305,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Class", qbClass.ListID, "DuplicateListID",
                             $"Duplicate ListID", true);
-                        qbClass.ListID = $"{qbClass.ListID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        qbClass.ListID = GenerateUniqueId(qbClass.ListID);
                     }
                     seenIds.Add(qbClass.ListID);
                 }
@@ -350,7 +350,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Invoice", invoice.TxnID, "DuplicateTxnID",
                             "Duplicate TxnID", true);
-                        invoice.TxnID = $"{invoice.TxnID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        invoice.TxnID = GenerateUniqueId(invoice.TxnID);
                     }
                     seenIds.Add(invoice.TxnID);
                 }
@@ -428,7 +428,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Bill", bill.TxnID, "DuplicateTxnID",
                             "Duplicate TxnID", true);
-                        bill.TxnID = $"{bill.TxnID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        bill.TxnID = GenerateUniqueId(bill.TxnID);
                     }
                     seenIds.Add(bill.TxnID);
                 }
@@ -467,7 +467,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Payment", payment.TxnID, "DuplicateTxnID",
                             "Duplicate TxnID", true);
-                        payment.TxnID = $"{payment.TxnID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        payment.TxnID = GenerateUniqueId(payment.TxnID);
                     }
                     seenIds.Add(payment.TxnID);
                 }
@@ -506,7 +506,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("JournalEntry", entry.TxnID, "DuplicateTxnID",
                             "Duplicate TxnID", true);
-                        entry.TxnID = $"{entry.TxnID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        entry.TxnID = GenerateUniqueId(entry.TxnID);
                     }
                     seenIds.Add(entry.TxnID);
                 }
@@ -562,7 +562,7 @@ namespace QBDesktopExtractor
                     {
                         RecordCorruption("Check", check.TxnID, "DuplicateTxnID",
                             "Duplicate TxnID", true);
-                        check.TxnID = $"{check.TxnID}_DUP_{Guid.NewGuid():N}".Substring(0, 36);
+                        check.TxnID = GenerateUniqueId(check.TxnID);
                     }
                     seenIds.Add(check.TxnID);
                 }
@@ -640,6 +640,38 @@ namespace QBDesktopExtractor
         // =====================================================================
         // UTILITY METHODS
         // =====================================================================
+
+        /// <summary>
+        /// FIX MEDIUM: Safe substring operation that validates length before extracting.
+        /// Returns the original string if it's shorter than the requested length.
+        /// </summary>
+        private string SafeSubstring(string input, int startIndex, int maxLength)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input ?? string.Empty;
+
+            if (startIndex < 0)
+                startIndex = 0;
+
+            if (startIndex >= input.Length)
+                return string.Empty;
+
+            int availableLength = input.Length - startIndex;
+            int actualLength = Math.Min(maxLength, availableLength);
+
+            return input.Substring(startIndex, actualLength);
+        }
+
+        /// <summary>
+        /// FIX MEDIUM: Generate a unique replacement ID with safe length handling.
+        /// Ensures the result is always <= maxLength characters.
+        /// </summary>
+        private string GenerateUniqueId(string originalId, int maxLength = 36)
+        {
+            string suffix = $"_DUP_{Guid.NewGuid():N}";
+            string combined = (originalId ?? "") + suffix;
+            return SafeSubstring(combined, 0, maxLength);
+        }
 
         private bool IsValidDecimal(decimal value)
         {

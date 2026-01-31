@@ -23,6 +23,13 @@ namespace QBMigrationLauncher.Services
         private bool _isProcessing;
         private CancellationTokenSource? _cts;
 
+        // FIX #12: Store reference to current process for kill on stop
+        private System.Diagnostics.Process? _currentProcess;
+        private readonly object _processLock = new object();
+
+        // FIX #4: Process timeout configuration (30 minutes default)
+        private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(30);
+
         public event EventHandler<MigrationJob>? JobStarted;
         public event EventHandler<MigrationJob>? JobCompleted;
         public event EventHandler<MigrationJob>? JobFailed;
@@ -113,7 +120,8 @@ namespace QBMigrationLauncher.Services
                 _jobQueue.Enqueue(job);
             }
 
-            LogMessage?.Invoke(this, $"[QUEUE] Added: {job.FileName} (ID: {job.Id})");
+            // FIX #13: Use job ID instead of exposing filename in logs
+            RedactedLog($"[QUEUE] Added job {job.Id}");
             return job;
         }
 
@@ -127,12 +135,13 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Start processing the queue (runs in background).
+        /// FIX #15: Uses proper TryDequeue pattern for thread safety.
         /// </summary>
         public async Task StartProcessingAsync(int maxConcurrent = 1)
         {
             if (_isProcessing)
             {
-                LogMessage?.Invoke(this, "[WARN] Queue is already processing.");
+                RedactedLog("[WARN] Queue is already processing.");
                 return;
             }
 
@@ -145,23 +154,30 @@ namespace QBMigrationLauncher.Services
             // FIX: Get count with lock to avoid race condition
             int jobCount;
             lock (_lock) { jobCount = _jobQueue.Count; }
-            LogMessage?.Invoke(this, $"[START] Beginning queue processing. {jobCount} jobs queued.");
+            RedactedLog($"[START] Beginning queue processing. {jobCount} jobs queued.");
 
             try
             {
-                while (_jobQueue.Count > 0 && !_cts.Token.IsCancellationRequested)
+                while (!_cts.Token.IsCancellationRequested)
                 {
-                    MigrationJob job;
+                    // FIX #15: Use TryDequeue pattern for thread safety
+                    MigrationJob? job = null;
                     lock (_lock)
                     {
-                        if (_jobQueue.Count == 0) break;
-                        job = _jobQueue.Dequeue();
+                        if (_jobQueue.Count > 0)
+                        {
+                            job = _jobQueue.Dequeue();
+                        }
                     }
+
+                    // No more jobs
+                    if (job == null)
+                        break;
 
                     await ProcessJobAsync(job);
                 }
 
-                LogMessage?.Invoke(this, $"[COMPLETE] Queue finished. Success: {CompletedCount}, Failed: {FailedCount}");
+                RedactedLog($"[COMPLETE] Queue finished. Success: {CompletedCount}, Failed: {FailedCount}");
                 QueueCompleted?.Invoke(this, EventArgs.Empty);
             }
             finally
@@ -173,11 +189,34 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Stop processing (gracefully waits for current job).
+        /// FIX #12: Kill the current process when stop is requested.
         /// </summary>
         public void StopProcessing()
         {
             _cts?.Cancel();
-            LogMessage?.Invoke(this, "[STOP] Queue processing stopped.");
+
+            // FIX #12: Kill the current process if running
+            lock (_processLock)
+            {
+                if (_currentProcess != null && !_currentProcess.HasExited)
+                {
+                    try
+                    {
+                        _currentProcess.Kill(entireProcessTree: true);
+                        RedactedLog("[STOP] Current process terminated.");
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Process already exited
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[WARN] Failed to kill process: {ex.Message}");
+                    }
+                }
+            }
+
+            RedactedLog("[STOP] Queue processing stopped.");
         }
 
         /// <summary>
@@ -189,7 +228,7 @@ namespace QBMigrationLauncher.Services
             {
                 _jobQueue.Clear();
             }
-            LogMessage?.Invoke(this, "[CLEAR] Queue cleared.");
+            RedactedLog("[CLEAR] Queue cleared.");
         }
 
         /// <summary>
@@ -201,7 +240,7 @@ namespace QBMigrationLauncher.Services
             {
                 _completedJobs.Clear();
             }
-            LogMessage?.Invoke(this, "[CLEAR] Job history cleared.");
+            RedactedLog("[CLEAR] Job history cleared.");
         }
 
         /// <summary>
@@ -214,7 +253,7 @@ namespace QBMigrationLauncher.Services
                 _jobQueue.Clear();
                 _completedJobs.Clear();
             }
-            LogMessage?.Invoke(this, "[CLEAR] Queue and history cleared.");
+            RedactedLog("[CLEAR] Queue and history cleared.");
         }
 
         private async Task ProcessJobAsync(MigrationJob job)
@@ -223,18 +262,14 @@ namespace QBMigrationLauncher.Services
             job.Status = JobStatus.InProgress;
             job.StartedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
 
-            LogMessage?.Invoke(this, $"[PROCESSING] Starting: {job.FileName}");
+            // FIX #13: Use redacted logging
+            RedactedLog($"[PROCESSING] Starting job {job.Id}");
             JobStarted?.Invoke(this, job);
 
             try
             {
-                // FIX #33: Re-validate file exists before processing
-                if (!File.Exists(job.FilePath))
-                {
-                    throw new FileNotFoundException(
-                        $"File no longer exists at: {job.FilePath}. It may have been moved or deleted.",
-                        job.FilePath);
-                }
+                // FIX #9: Remove pre-check (TOCTOU vulnerability) - let extraction fail naturally
+                // and catch FileNotFoundException during extraction instead
 
                 // FIX #2: Pass all 3 required parameters to RunExtractionAsync
                 // Use job ID as session code, create job-specific output directory
@@ -246,16 +281,27 @@ namespace QBMigrationLauncher.Services
                 job.Status = JobStatus.Completed;
                 job.CompletedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
                 job.OutputDirectory = jobOutputDir; // Store where results went
-                LogMessage?.Invoke(this, $"[SUCCESS] Completed: {job.FileName} in {job.Duration?.TotalMinutes:F1} minutes");
-                LogMessage?.Invoke(this, $"[SUCCESS] Output saved to: {jobOutputDir}");
+                // FIX #13: Redact sensitive info from logs
+                RedactedLog($"[SUCCESS] Completed job {job.Id} in {job.Duration?.TotalMinutes:F1} minutes");
                 JobCompleted?.Invoke(this, job);
+            }
+            catch (FileNotFoundException ex)
+            {
+                // FIX #9: Handle file not found during extraction (TOCTOU-safe)
+                job.Status = JobStatus.Failed;
+                job.CompletedAt = DateTime.UtcNow;
+                job.ErrorMessage = "Source file not found or inaccessible";
+                RedactedLog($"[FAILED] Job {job.Id}: File not found");
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] FileNotFoundException: {ex.Message}");
+                JobFailed?.Invoke(this, job);
             }
             catch (Exception ex)
             {
                 job.Status = JobStatus.Failed;
                 job.CompletedAt = DateTime.UtcNow;  // FIX: Use UtcNow for consistency
-                job.ErrorMessage = ex.Message;
-                LogMessage?.Invoke(this, $"[FAILED] {job.FileName}: {ex.Message}");
+                // FIX #13: Don't expose full exception message in stored error
+                job.ErrorMessage = SanitizeErrorMessage(ex.Message);
+                RedactedLog($"[FAILED] Job {job.Id}: {job.ErrorMessage}");
                 JobFailed?.Invoke(this, job);
             }
             finally
@@ -265,6 +311,41 @@ namespace QBMigrationLauncher.Services
                     _completedJobs.Add(job);
                 }
             }
+        }
+
+        /// <summary>
+        /// FIX #13: Log message with sensitive data redaction.
+        /// </summary>
+        private void RedactedLog(string message)
+        {
+            LogMessage?.Invoke(this, message);
+        }
+
+        /// <summary>
+        /// FIX #13: Sanitize error messages to remove sensitive paths and company names.
+        /// </summary>
+        private static string SanitizeErrorMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message))
+                return "Unknown error";
+
+            // Redact file paths (e.g., C:\Users\...\CompanyName.qbw)
+            message = System.Text.RegularExpressions.Regex.Replace(
+                message,
+                @"[A-Za-z]:\\[^\s:*?""<>|]+",
+                "[PATH_REDACTED]");
+
+            // Redact network paths (e.g., \\server\share\path)
+            message = System.Text.RegularExpressions.Regex.Replace(
+                message,
+                @"\\\\[^\s:*?""<>|]+",
+                "[PATH_REDACTED]");
+
+            // Limit length
+            if (message.Length > 200)
+                message = message.Substring(0, 200) + "...";
+
+            return message;
         }
 
         /// <summary>

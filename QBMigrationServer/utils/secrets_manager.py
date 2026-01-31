@@ -15,10 +15,18 @@ Usage:
 import os
 import json
 import logging
-from functools import lru_cache
+import time
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Cache TTL for secret rotation support
+# Secrets are cached for this duration before being re-fetched
+SECRETS_CACHE_TTL_SECONDS = int(os.getenv('SECRETS_CACHE_TTL_SECONDS', '300'))  # Default: 5 minutes
+
+# Global cache storage with TTL support
+_secrets_cache: Dict[str, Any] = {}
+_secrets_cache_timestamp: float = 0
 
 
 class SecretsManagerError(Exception):
@@ -39,47 +47,73 @@ def _get_boto3_client():
         raise SecretsManagerError("boto3 not installed. Run: pip install boto3")
 
 
-@lru_cache(maxsize=1)
-def get_all_secrets(secret_name: Optional[str] = None) -> Dict[str, Any]:
+def _is_cache_valid() -> bool:
+    """Check if the secrets cache is still valid based on TTL."""
+    global _secrets_cache_timestamp
+    if not _secrets_cache:
+        return False
+    elapsed = time.time() - _secrets_cache_timestamp
+    return elapsed < SECRETS_CACHE_TTL_SECONDS
+
+
+def get_all_secrets(secret_name: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
     """
-    Retrieve all secrets from AWS Secrets Manager.
-    
-    Uses caching to avoid repeated API calls. Cache is cleared on module reload.
-    
+    Retrieve all secrets from AWS Secrets Manager with TTL-based caching.
+
+    Uses caching to avoid repeated API calls. Cache expires after SECRETS_CACHE_TTL_SECONDS
+    to support secret rotation. Use force_refresh=True to bypass cache.
+
     Args:
-        secret_name: Name of the secret in Secrets Manager. 
+        secret_name: Name of the secret in Secrets Manager.
                      Defaults to SECRETS_MANAGER_NAME env var or 'forensicbridge/production'.
-    
+        force_refresh: If True, bypass cache and fetch fresh secrets.
+
     Returns:
         Dictionary of secret key-value pairs.
-        
+
     Raises:
         SecretsManagerError: If secrets cannot be retrieved.
     """
+    global _secrets_cache, _secrets_cache_timestamp
+
     # In development mode, fall back to environment variables
     if os.getenv('FLASK_ENV', 'development') == 'development':
         logger.info("Development mode: Using environment variables instead of Secrets Manager")
         return _get_env_secrets()
-    
+
+    # Check if cached secrets are still valid (TTL-based)
+    if not force_refresh and _is_cache_valid():
+        cache_age = time.time() - _secrets_cache_timestamp
+        logger.debug(f"Using cached secrets (age: {cache_age:.1f}s, TTL: {SECRETS_CACHE_TTL_SECONDS}s)")
+        return _secrets_cache
+
     secret_name = secret_name or os.getenv(
-        'SECRETS_MANAGER_NAME', 
+        'SECRETS_MANAGER_NAME',
         'forensicbridge/production'
     )
-    
+
     try:
         from botocore.exceptions import ClientError, NoCredentialsError
-        
+
         client = _get_boto3_client()
         response = client.get_secret_value(SecretId=secret_name)
-        
+
         if 'SecretString' in response:
             secrets = json.loads(response['SecretString'])
-            logger.info(f"Successfully loaded {len(secrets)} secrets from Secrets Manager")
+
+            # Update cache with TTL
+            _secrets_cache = secrets
+            _secrets_cache_timestamp = time.time()
+
+            logger.info(
+                f"Successfully loaded {len(secrets)} secrets from Secrets Manager "
+                f"(cache TTL: {SECRETS_CACHE_TTL_SECONDS}s)"
+            )
             return secrets
         else:
             # Binary secret
             raise SecretsManagerError("Binary secrets not supported")
-            
+
     except NoCredentialsError:
         logger.warning("No AWS credentials found. Falling back to environment variables.")
         return _get_env_secrets()
@@ -154,8 +188,30 @@ def _get_env_secrets() -> Dict[str, Any]:
 
 def clear_cache():
     """Clear the secrets cache. Useful for testing or when secrets are rotated."""
-    get_all_secrets.cache_clear()
+    global _secrets_cache, _secrets_cache_timestamp
+    _secrets_cache = {}
+    _secrets_cache_timestamp = 0
     logger.info("Secrets cache cleared")
+
+
+def get_cache_status() -> Dict[str, Any]:
+    """Get current cache status for monitoring/debugging."""
+    global _secrets_cache, _secrets_cache_timestamp
+    if not _secrets_cache:
+        return {
+            'cached': False,
+            'ttl_seconds': SECRETS_CACHE_TTL_SECONDS,
+        }
+
+    age = time.time() - _secrets_cache_timestamp
+    return {
+        'cached': True,
+        'age_seconds': round(age, 1),
+        'ttl_seconds': SECRETS_CACHE_TTL_SECONDS,
+        'expires_in_seconds': round(max(0, SECRETS_CACHE_TTL_SECONDS - age), 1),
+        'is_valid': _is_cache_valid(),
+        'secret_count': len(_secrets_cache),
+    }
 
 
 def validate_required_secrets(required_keys: list) -> Dict[str, bool]:

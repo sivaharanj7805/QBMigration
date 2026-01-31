@@ -92,7 +92,16 @@ class PremiumQBOClient:
         if qbo_plan is None:
             import os
             qbo_plan = os.getenv("QBO_PLAN", "Plus")
-        
+
+        # VALIDATION FIX: Validate QBO_PLAN env var
+        valid_plans = ["Simple Start", "Essentials", "Plus", "Advanced"]
+        if qbo_plan not in valid_plans:
+            logger.warning(
+                f"Invalid QBO_PLAN '{qbo_plan}'. Valid options: {valid_plans}. "
+                f"Defaulting to 'Plus'."
+            )
+            qbo_plan = "Plus"
+
         self.qbo_plan = qbo_plan
         self.max_workers = self._get_plan_worker_limit(qbo_plan)
         self.enable_parallel = True
@@ -1296,13 +1305,42 @@ class PremiumQBOClient:
     
 
     
-    def __del__(self):
-        """Cleanup: close session"""
+    # HIGH FIX: Context manager support to prevent session leaks
+    # Allows usage: with PremiumQBOClient(...) as client:
+    def __enter__(self):
+        """Enter context manager - return self for use in 'with' block"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context manager - ensure session is properly closed"""
+        self.close()
+        # Don't suppress exceptions
+        return False
+
+    def close(self):
+        """
+        HIGH FIX: Explicitly close the HTTP session to prevent connection leaks.
+
+        This should be called when done using the client, or use the context manager:
+            with PremiumQBOClient(...) as client:
+                client.create_entity(...)
+            # Session automatically closed here
+        """
         try:
-            self.session.close()
+            if self.session:
+                self.session.close()
+                logger.debug("QBO client session closed")
+        except Exception as e:
+            logger.warning(f"Error closing QBO session: {e}")
+
+    def __del__(self):
+        """Cleanup: close session (fallback for non-context-manager usage)"""
+        try:
+            self.close()
         except Exception:
             # FIX SVC-04: Catch specific Exception instead of bare except
             pass
+
 
 # Alias for backward compatibility
 QBOClient = PremiumQBOClient

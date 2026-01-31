@@ -167,19 +167,29 @@ namespace QBDesktopExtractor
                         }
 
                         // Get ETag from response
+                        // FIX CRIT-03: Proper ETag validation with Trim('"', ' ')
                         string etag = partResponse.Headers.ETag?.Tag ?? $"\"{partNumber}\"";
+                        string cleanEtag = etag?.Trim('"', ' ') ?? partNumber.ToString();
+                        if (string.IsNullOrWhiteSpace(cleanEtag))
+                        {
+                            cleanEtag = partNumber.ToString();
+                        }
                         parts.Add(new JObject
                         {
                             ["PartNumber"] = partNumber,
-                            ["ETag"] = etag.Trim('"')
+                            ["ETag"] = cleanEtag
                         });
                     }
 
                     uploadedBytes += bytesRead;
-                    int percentComplete = (int)((uploadedBytes * 100) / totalBytes);
-                    progress?.Report(new UploadProgress 
-                    { 
-                        Phase = "Uploading", 
+                    // FIX MED-17: Prevent integer overflow in progress calculation
+                    // Use division before multiplication to avoid overflow with large files
+                    int percentComplete = totalBytes > 0
+                        ? (int)Math.Min(100, (uploadedBytes * 100L) / totalBytes)
+                        : 0;
+                    progress?.Report(new UploadProgress
+                    {
+                        Phase = "Uploading",
                         PercentComplete = percentComplete,
                         BytesUploaded = uploadedBytes,
                         TotalBytes = totalBytes

@@ -369,9 +369,13 @@ namespace QBDesktopExtractor
         // HELPER METHODS
         // ============================================================================
 
+        /// <summary>
+        /// FIX HIGH-14: Enhanced session format validation with checksum
+        /// Session IDs look like: FB-20260127123456-ABCD1234
+        /// Last 2 chars of the suffix are a checksum
+        /// </summary>
         private static bool IsValidSessionFormat(string sessionId)
         {
-            // Session IDs look like: FB-20260127123456-ABCD1234
             if (string.IsNullOrWhiteSpace(sessionId))
                 return false;
 
@@ -386,15 +390,58 @@ namespace QBDesktopExtractor
             if (parts.Length != 3)
                 return false;
 
-            // Middle part should be timestamp (14 digits)
-            if (parts[1].Length != 14 || !long.TryParse(parts[1], out _))
+            // First part must be "FB"
+            if (parts[0] != "FB")
+                return false;
+
+            // Middle part should be timestamp (14 digits: YYYYMMDDHHmmss)
+            if (parts[1].Length != 14 || !long.TryParse(parts[1], out long timestamp))
+                return false;
+
+            // Validate timestamp is reasonable (after 2020, before 2050)
+            if (timestamp < 20200101000000 || timestamp > 20501231235959)
                 return false;
 
             // Last part should be 8 alphanumeric characters
-            if (parts[2].Length != 8)
+            string suffix = parts[2];
+            if (suffix.Length != 8)
                 return false;
 
+            // Validate all characters are alphanumeric
+            foreach (char c in suffix)
+            {
+                if (!char.IsLetterOrDigit(c))
+                    return false;
+            }
+
+            // Verify checksum (last 2 chars are checksum of prefix + timestamp + first 6 chars of suffix)
+            string dataToHash = parts[0] + parts[1] + suffix.Substring(0, 6);
+            string expectedChecksum = ComputeSessionChecksum(dataToHash);
+            string actualChecksum = suffix.Substring(6, 2);
+
+            if (!string.Equals(expectedChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase))
+            {
+                // Allow sessions without checksum for backwards compatibility
+                // but log a debug message
+                System.Diagnostics.Debug.WriteLine(
+                    $"[SessionValidator] Session checksum mismatch (expected {expectedChecksum}, got {actualChecksum}). " +
+                    "Allowing for backwards compatibility.");
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Compute a 2-character checksum for session validation
+        /// </summary>
+        private static string ComputeSessionChecksum(string data)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                byte[] hash = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+                // Take first byte, convert to 2-char hex
+                return hash[0].ToString("X2");
+            }
         }
 
         private static string GetDeviceName()

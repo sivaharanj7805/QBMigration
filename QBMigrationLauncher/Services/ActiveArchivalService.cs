@@ -16,7 +16,11 @@ namespace QBMigrationLauncher.Services
     {
         private readonly string _archiveDirectory;
         private readonly string _indexPath;
+        private readonly string _lockFilePath;
         private ArchiveIndex _index;
+
+        // FIX #17: Lock object for thread synchronization within this process
+        private readonly object _indexLock = new object();
 
         public event EventHandler<string>? LogMessage;
 
@@ -24,30 +28,39 @@ namespace QBMigrationLauncher.Services
         {
             _archiveDirectory = Path.GetFullPath(archiveDirectory);
             _indexPath = Path.Combine(_archiveDirectory, "archive_index.json");
+            // FIX #17: Lock file for cross-process synchronization
+            _lockFilePath = Path.Combine(_archiveDirectory, "archive_index.lock");
 
             Directory.CreateDirectory(_archiveDirectory);
             _index = LoadOrCreateIndex();
         }
 
         /// <summary>
-        /// FIX #3: Validate that a path is safely within the archive directory (prevent path traversal).
+        /// FIX #2: Validate that a path is safely within the archive directory (prevent path traversal).
+        /// Uses proper path validation: constructs full path and verifies it starts with archive directory.
         /// </summary>
         private string ValidateAndNormalizePath(string subPath, string paramName)
         {
             if (string.IsNullOrWhiteSpace(subPath))
                 throw new ArgumentException($"{paramName} cannot be empty", paramName);
 
-            // Remove any path traversal attempts
-            var normalizedSubPath = subPath.Replace("..", "").Replace("~", "");
+            // FIX #2: Do NOT sanitize input - instead validate the final result
+            // This is more secure as it handles all edge cases (null bytes, unicode, etc.)
 
             // Build full path and normalize it
-            var fullPath = Path.GetFullPath(Path.Combine(_archiveDirectory, normalizedSubPath));
+            var fullPath = Path.GetFullPath(Path.Combine(_archiveDirectory, subPath));
 
-            // Ensure the resulting path is still within our archive directory
-            if (!fullPath.StartsWith(_archiveDirectory, StringComparison.OrdinalIgnoreCase))
+            // FIX #2: Ensure the archive directory path ends with separator for proper prefix matching
+            // This prevents matching "archive" when archive dir is "archiv"
+            var normalizedArchiveDir = _archiveDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                                      + Path.DirectorySeparatorChar;
+
+            // FIX #2: Verify the result path starts with the archive directory (proper path traversal defense)
+            if (!fullPath.StartsWith(normalizedArchiveDir, StringComparison.OrdinalIgnoreCase) &&
+                !fullPath.Equals(_archiveDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
             {
                 throw new UnauthorizedAccessException(
-                    $"Access denied: path '{subPath}' would escape the archive directory");
+                    $"Access denied: path would escape the archive directory");
             }
 
             return fullPath;
@@ -307,10 +320,51 @@ namespace QBMigrationLauncher.Services
             return new ArchiveIndex();
         }
 
+        /// <summary>
+        /// FIX #17: Save index with file-based locking for cross-process synchronization.
+        /// </summary>
         private async Task SaveIndexAsync()
         {
-            var json = JsonSerializer.Serialize(_index, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(_indexPath, json);
+            // FIX #17: Use file-based locking for cross-process synchronization
+            var maxRetries = 5;
+            var retryDelay = TimeSpan.FromMilliseconds(100);
+
+            for (int i = 0; i < maxRetries; i++)
+            {
+                FileStream? lockFile = null;
+                try
+                {
+                    // Acquire file lock - this blocks other processes
+                    lockFile = new FileStream(
+                        _lockFilePath,
+                        FileMode.OpenOrCreate,
+                        FileAccess.ReadWrite,
+                        FileShare.None,
+                        4096,
+                        FileOptions.DeleteOnClose);
+
+                    // Serialize and write atomically (write to temp, then rename)
+                    var json = JsonSerializer.Serialize(_index, new JsonSerializerOptions { WriteIndented = true });
+                    var tempPath = _indexPath + ".tmp";
+                    await File.WriteAllTextAsync(tempPath, json);
+
+                    // Atomic replace
+                    File.Move(tempPath, _indexPath, overwrite: true);
+                    return; // Success
+                }
+                catch (IOException) when (i < maxRetries - 1)
+                {
+                    // Lock contention - wait and retry
+                    await Task.Delay(retryDelay);
+                    retryDelay = TimeSpan.FromMilliseconds(retryDelay.TotalMilliseconds * 2); // Exponential backoff
+                }
+                finally
+                {
+                    lockFile?.Dispose();
+                }
+            }
+
+            throw new IOException("Failed to acquire lock for archive index after multiple retries");
         }
 
         private string GenerateTransactionHtml(ArchivedTransaction txn)

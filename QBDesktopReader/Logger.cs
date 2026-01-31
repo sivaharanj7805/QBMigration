@@ -127,37 +127,53 @@ namespace QBDesktopExtractor
         
         private static void Log(LogLevel level, string component, string message, object? data = null, Exception? exception = null)
         {
+            // FIX LOW: Bounds validation for LogLevel enum to handle invalid values
+            if (!Enum.IsDefined(typeof(LogLevel), level))
+            {
+                level = LogLevel.Info; // Default to Info for unknown levels
+            }
+
             var logEntry = new LogEntry
             {
                 Timestamp = DateTime.UtcNow,
                 Level = level.ToString().ToUpperInvariant(),
-                Component = component,
-                Message = message,
+                Component = component ?? "Unknown",
+                Message = message ?? "(no message)",
                 Data = data,
                 Exception = exception?.ToString(),
                 MachineName = Environment.MachineName,
                 ProcessId = Process.GetCurrentProcess().Id
             };
-            
+
             lock (_logLock)
             {
                 try
                 {
                     // Console output with color coding
                     WriteToConsole(level, component, message);
-                    
+
                     // File logging (structured JSON)
                     WriteToFile(logEntry);
-                    
+
                     // Windows Event Log for errors in production
                     if (_useEventLog && level >= LogLevel.Error)
                     {
                         WriteToEventLog(level, component, message, exception);
                     }
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
-                    // Swallow logging errors - never let logging crash the app
+                    // FIX LOW: Fallback to stderr on logging error - never let logging crash the app
+                    // but provide visibility into logging failures for debugging
+                    try
+                    {
+                        Console.Error.WriteLine($"[LOGGING ERROR] Failed to log: {ex.Message}");
+                        Console.Error.WriteLine($"[FALLBACK LOG] [{level}] [{component}] {message}");
+                    }
+                    catch
+                    {
+                        // Swallow even stderr errors - absolute last resort
+                    }
                 }
             }
         }
@@ -167,9 +183,13 @@ namespace QBDesktopExtractor
             // Only write to console in development or for warnings/errors
             if (_isProduction && level < LogLevel.Warn)
                 return;
-            
+
+            // FIX LOW: Handle null parameters with null-coalescing
+            var safeComponent = component ?? "Unknown";
+            var safeMessage = message ?? "(no message)";
+
             var originalColor = Console.ForegroundColor;
-            
+
             try
             {
                 var prefix = level switch
@@ -181,7 +201,7 @@ namespace QBDesktopExtractor
                     LogLevel.Fatal => "[FTL]",
                     _ => "[LOG]"
                 };
-                
+
                 Console.ForegroundColor = level switch
                 {
                     LogLevel.Debug => ConsoleColor.Gray,
@@ -191,8 +211,8 @@ namespace QBDesktopExtractor
                     LogLevel.Fatal => ConsoleColor.DarkRed,
                     _ => ConsoleColor.White
                 };
-                
-                Console.WriteLine($"{prefix} [{component}] {message}");
+
+                Console.WriteLine($"{prefix} [{safeComponent}] {safeMessage}");
             }
             finally
             {

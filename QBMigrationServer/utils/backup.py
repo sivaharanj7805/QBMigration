@@ -116,24 +116,49 @@ class BackupManager:
             return None
     
     def _backup_postgresql(self, db_uri):
-        """Backup PostgreSQL database using pg_dump"""
+        """Backup PostgreSQL database using pg_dump with secure .pgpass authentication"""
         try:
             import subprocess
+            import tempfile
             from urllib.parse import urlparse
-            
+
             # Parse database URI
             parsed = urlparse(db_uri)
-            
+
             # Create backup filename
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             backup_filename = f"qb_migrations_backup_{timestamp}.sql"
             backup_path = os.path.join(self.backup_dir, backup_filename)
-            
-            # Set environment variables for pg_dump
+
+            # SECURITY FIX: Use .pgpass file instead of PGPASSWORD env var
+            # PGPASSWORD is visible in process listings and environment dumps
+            pgpass_file = None
             env = os.environ.copy()
+
             if parsed.password:
-                env['PGPASSWORD'] = parsed.password
-            
+                # Create temporary .pgpass file with proper permissions
+                pgpass_fd, pgpass_path = tempfile.mkstemp(prefix='pgpass_', suffix='.conf')
+                pgpass_file = pgpass_path
+                try:
+                    # .pgpass format: hostname:port:database:username:password
+                    pgpass_entry = f"{parsed.hostname or 'localhost'}:{parsed.port or 5432}:{parsed.path.lstrip('/')}:{parsed.username or 'postgres'}:{parsed.password}\n"
+                    os.write(pgpass_fd, pgpass_entry.encode())
+                    os.close(pgpass_fd)
+
+                    # Set restrictive permissions (required by PostgreSQL)
+                    os.chmod(pgpass_path, 0o600)
+
+                    # Point pg_dump to use this .pgpass file
+                    env['PGPASSFILE'] = pgpass_path
+                except Exception as e:
+                    os.close(pgpass_fd)
+                    if pgpass_file and os.path.exists(pgpass_file):
+                        os.remove(pgpass_file)
+                    logger.warning(f"Failed to create .pgpass file, falling back to env var: {e}")
+                    # Fallback to env var (less secure but functional)
+                    env['PGPASSWORD'] = parsed.password
+                    pgpass_file = None
+
             # Run pg_dump
             cmd = [
                 'pg_dump',
@@ -144,14 +169,25 @@ class BackupManager:
                 '-F', 'c',  # Custom format (compressed)
                 '-f', backup_path
             ]
-            
-            result = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+            finally:
+                # SECURITY: Always clean up the .pgpass file
+                if pgpass_file and os.path.exists(pgpass_file):
+                    try:
+                        # Overwrite with zeros before deletion
+                        with open(pgpass_file, 'wb') as f:
+                            f.write(b'\x00' * 256)
+                        os.remove(pgpass_file)
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up .pgpass file: {e}")
             
             if result.returncode != 0:
                 logger.error(f"pg_dump failed: {result.stderr}")
@@ -267,42 +303,69 @@ class BackupManager:
     
     def _verify_backup(self, backup_path):
         """
-        Verify backup integrity
-        
+        Verify backup integrity with cryptographic hash verification
+
         Args:
             backup_path: Path to backup file
-            
+
         Returns:
             bool: True if valid
         """
         try:
+            import hashlib
+
             # Check file exists and has content
             if not os.path.exists(backup_path):
                 return False
-            
+
             if os.path.getsize(backup_path) == 0:
                 logger.error("Backup file is empty")
                 return False
-            
+
+            # SECURITY FIX: Calculate and store cryptographic hash for verification
+            sha256_hash = hashlib.sha256()
+            with open(backup_path, 'rb') as f:
+                # Read in 64KB chunks for memory efficiency
+                for chunk in iter(lambda: f.read(65536), b''):
+                    sha256_hash.update(chunk)
+
+            file_hash = sha256_hash.hexdigest()
+            hash_file_path = f"{backup_path}.sha256"
+
+            # Store hash for future verification
+            with open(hash_file_path, 'w') as hf:
+                hf.write(f"{file_hash}  {Path(backup_path).name}\n")
+
+            logger.info(f"Backup SHA-256: {file_hash[:16]}...")
+
             # If encrypted, try to decrypt a small portion
             if backup_path.endswith('.encrypted'):
                 if not self.encryption_key:
                     logger.warning("Cannot verify encrypted backup without key")
                     return True  # Assume valid
-                
+
                 try:
                     key = self.encryption_key.encode() if isinstance(self.encryption_key, str) else self.encryption_key
                     f = Fernet(key)
-                    
+
                     with open(backup_path, 'rb') as file:
-                        sample = file.read(1024)  # Read first 1KB
-                    
-                    f.decrypt(sample)  # Will raise exception if invalid
+                        encrypted_data = file.read()
+
+                    # SECURITY FIX: Verify full decryption works (Fernet includes MAC)
+                    # Fernet's decrypt() verifies the HMAC before returning
+                    decrypted_data = f.decrypt(encrypted_data)
+
+                    # Verify decrypted data is not empty
+                    if len(decrypted_data) == 0:
+                        logger.error("Decrypted backup is empty")
+                        return False
+
+                    logger.info(f"Encrypted backup verified: {len(decrypted_data)} bytes decrypted successfully")
                     return True
                 except Exception as e:
                     logger.error(f"Backup verification failed: {str(e)}")
                     return False
-            
+
             # For unencrypted SQLite, try to open
             if backup_path.endswith('.db'):
                 import sqlite3
@@ -316,11 +379,69 @@ class BackupManager:
                 except Exception as e:
                     logger.error(f"SQLite backup verification failed: {str(e)}")
                     return False
-            
+
+            # For PostgreSQL custom format (.sql), verify header
+            if backup_path.endswith('.sql'):
+                try:
+                    with open(backup_path, 'rb') as f:
+                        header = f.read(5)
+                    # pg_dump custom format starts with "PGDMP"
+                    if header == b'PGDMP':
+                        logger.info("PostgreSQL backup header verified")
+                        return True
+                    else:
+                        logger.warning(f"Unexpected backup header: {header}")
+                        # May still be valid (plain SQL format)
+                        return True
+                except Exception as e:
+                    logger.error(f"PostgreSQL backup verification failed: {str(e)}")
+                    return False
+
             return True
-            
+
         except Exception as e:
             logger.exception(f"Backup verification failed: {str(e)}")
+            return False
+
+    def verify_backup_hash(self, backup_path):
+        """
+        Verify backup against stored SHA-256 hash
+
+        Args:
+            backup_path: Path to backup file
+
+        Returns:
+            bool: True if hash matches
+        """
+        import hashlib
+
+        hash_file_path = f"{backup_path}.sha256"
+        if not os.path.exists(hash_file_path):
+            logger.warning(f"No hash file found for {backup_path}")
+            return False
+
+        try:
+            # Read stored hash
+            with open(hash_file_path, 'r') as hf:
+                stored_hash = hf.read().split()[0]
+
+            # Calculate current hash
+            sha256_hash = hashlib.sha256()
+            with open(backup_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(65536), b''):
+                    sha256_hash.update(chunk)
+
+            current_hash = sha256_hash.hexdigest()
+
+            if current_hash == stored_hash:
+                logger.info(f"Backup hash verification passed: {current_hash[:16]}...")
+                return True
+            else:
+                logger.error(f"Backup hash mismatch! Stored: {stored_hash[:16]}..., Current: {current_hash[:16]}...")
+                return False
+
+        except Exception as e:
+            logger.error(f"Hash verification failed: {str(e)}")
             return False
     
     def _upload_to_s3(self, backup_path, backup_filename):

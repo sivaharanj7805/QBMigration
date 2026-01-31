@@ -146,10 +146,37 @@ def create_checkout(current_user):
         })
         
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe error: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 400
+        # CRITICAL FIX: Sanitize Stripe errors before returning to client
+        # Raw Stripe errors can leak internal configuration details (API keys, account info)
+        logger.error(f"Stripe error for user {current_user.id}: {str(e)}")
+
+        # Map Stripe error types to safe user-facing messages
+        safe_error_messages = {
+            stripe.error.CardError: "Your card was declined. Please try a different payment method.",
+            stripe.error.RateLimitError: "Payment system is busy. Please try again in a moment.",
+            stripe.error.InvalidRequestError: "Invalid payment request. Please try again.",
+            stripe.error.AuthenticationError: "Payment system configuration error. Please contact support.",
+            stripe.error.APIConnectionError: "Unable to connect to payment system. Please try again.",
+            stripe.error.StripeError: "Payment processing failed. Please try again or contact support."
+        }
+
+        # Get the most specific safe error message
+        safe_message = safe_error_messages.get(
+            type(e),
+            safe_error_messages[stripe.error.StripeError]
+        )
+
+        # For CardError, we can safely include the decline reason
+        if isinstance(e, stripe.error.CardError):
+            decline_code = getattr(e, 'decline_code', None)
+            if decline_code == 'insufficient_funds':
+                safe_message = "Insufficient funds. Please try a different payment method."
+            elif decline_code == 'expired_card':
+                safe_message = "Your card has expired. Please use a different card."
+
+        return jsonify({'success': False, 'error': safe_message}), 400
     except Exception as e:
-        logger.exception(f"Payment error: {str(e)}")
+        logger.exception(f"Payment error for user {current_user.id}: {str(e)}")
         return jsonify({'success': False, 'error': 'Failed to create checkout session'}), 500
 
 

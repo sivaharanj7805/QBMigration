@@ -83,9 +83,10 @@ class Migration(db.Model):
     ec2_terminated = db.Column(db.Boolean, default=False)
     ec2_terminated_at = db.Column(db.DateTime)
     
-    # Cost tracking (PRECISION FIX: 12,6 allows up to $999,999.999999 with micro-dollar precision)
-    estimated_cost_usd = db.Column(db.Numeric(12, 6))  # Was (10, 4) - can overflow on enterprise migrations
-    actual_cost_usd = db.Column(db.Numeric(12, 6))     # Was (10, 4) - prevents accounting errors
+    # MEDIUM FIX: Cost tracking overflow - increased from Numeric(12,6) to Numeric(14,6)
+    # Allows up to $99,999,999.999999 - handles enterprise migrations exceeding $1M
+    estimated_cost_usd = db.Column(db.Numeric(14, 6))  # Increased from (12, 6) - prevents overflow
+    actual_cost_usd = db.Column(db.Numeric(14, 6))     # Increased from (12, 6) - handles large migrations
     cost_breakdown = db.Column(db.Text)  # JSON: {ec2: X, s3: Y, data_transfer: Z}
     
     # Forensic Data (Stored as JSON Text)
@@ -130,24 +131,43 @@ class Migration(db.Model):
     # ============================================================================
     
     def set_error_message(self, message):
-        """Set encrypted error message"""
+        """Set encrypted error message - CRITICAL: Fail-closed if encryption unavailable"""
         if not message:
             self.error_message_encrypted = None
             return
-        
+
+        import os
         try:
             key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
             if not key:
-                # Fallback: store unencrypted in development
-                self.error_message_encrypted = message
-                return
-            
+                # CRITICAL FIX: Fail-closed instead of storing unencrypted
+                # Storing unencrypted error messages could leak sensitive QB data
+                is_production = os.getenv('FLASK_ENV', 'development') == 'production'
+
+                if is_production:
+                    # In production, raise an exception - encryption is mandatory
+                    raise ValueError(
+                        "BACKUP_ENCRYPTION_KEY not configured - cannot store error messages securely. "
+                        "This is a critical configuration error in production."
+                    )
+                else:
+                    # In development, store a sanitized placeholder, not the actual error
+                    current_app.logger.warning(
+                        "BACKUP_ENCRYPTION_KEY not configured - storing sanitized error message"
+                    )
+                    self.error_message_encrypted = "[REDACTED - encryption key not configured]"
+                    return
+
             f = Fernet(key.encode() if isinstance(key, str) else key)
             self.error_message_encrypted = f.encrypt(message.encode()).decode()
+        except ValueError:
+            # Re-raise configuration errors
+            raise
         except Exception as e:
-            # Log error but don't fail
+            # CRITICAL FIX: Fail-closed on encryption errors
             current_app.logger.error(f"Failed to encrypt error message: {str(e)}")
-            self.error_message_encrypted = "Error message encryption failed"
+            # Do not store unencrypted - store a placeholder instead
+            self.error_message_encrypted = "[ENCRYPTION FAILED - message redacted]"
     
     def get_error_message(self):
         """Get decrypted error message"""

@@ -208,18 +208,24 @@ export default function ReportsPage() {
             </div>
 
             {/* Report Type Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+                role="group"
+                aria-label="Filter reports by type"
+            >
                 {reportTypes.map((type) => {
                     const Icon = type.icon;
+                    const isSelected = filter === type.type;
                     return (
                         <button
                             key={type.type}
-                            onClick={() => setFilter(filter === type.type ? "all" : type.type)}
-                            className={`card-forensic-hover p-4 text-left ${filter === type.type ? "ring-2 ring-[var(--bridge-blue)]" : ""
-                                }`}
+                            onClick={() => setFilter(isSelected ? "all" : type.type)}
+                            className={`card-forensic-hover p-4 text-left ${isSelected ? "ring-2 ring-[var(--bridge-blue)]" : ""}`}
+                            aria-pressed={isSelected}
+                            aria-label={`Filter by ${type.name}${isSelected ? " (currently selected)" : ""}`}
                         >
                             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${type.color} mb-3`}>
-                                <Icon className="w-5 h-5" />
+                                <Icon className="w-5 h-5" aria-hidden="true" />
                             </div>
                             <h3 className="font-semibold text-gray-900">{type.name}</h3>
                             <p className="text-xs text-gray-500 mt-1">{type.description}</p>
@@ -268,10 +274,24 @@ export default function ReportsPage() {
                         </button>
                     </div>
                 ) : filteredReports.length === 0 ? (
-                    <div className="p-8 text-center text-gray-500">
-                        <FileX className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-                        <p className="text-lg font-medium text-gray-600">No reports generated yet</p>
-                        <p className="text-sm">Complete a migration to generate verification reports</p>
+                    <div className="p-8 text-center text-gray-500" role="status" aria-live="polite">
+                        <FileX className="w-12 h-12 mx-auto text-gray-300 mb-3" aria-hidden="true" />
+                        <p className="text-lg font-medium text-gray-600">
+                            {filter !== "all" ? `No ${reportTypes.find(r => r.type === filter)?.name || filter} reports` : "No reports generated yet"}
+                        </p>
+                        <p className="text-sm">
+                            {filter !== "all"
+                                ? "Try selecting a different report type or generate a new report"
+                                : "Complete a migration to generate verification reports"}
+                        </p>
+                        {filter !== "all" && (
+                            <button
+                                onClick={() => setFilter("all")}
+                                className="mt-4 btn-secondary"
+                            >
+                                Show All Reports
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <table className="table-forensic">

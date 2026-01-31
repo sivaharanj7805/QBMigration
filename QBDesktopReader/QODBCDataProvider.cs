@@ -67,6 +67,33 @@ namespace QBDesktopExtractor
                 string connectionString;
                 if (!string.IsNullOrEmpty(companyFilePath))
                 {
+                    // FIX HIGH-09: Validate path is absolute and doesn't contain traversal
+                    if (!Path.IsPathRooted(companyFilePath))
+                    {
+                        throw new ArgumentException(
+                            "Company file path must be an absolute path",
+                            nameof(companyFilePath));
+                    }
+
+                    // Check for path traversal attempts
+                    string normalizedPath = Path.GetFullPath(companyFilePath);
+                    if (companyFilePath.Contains("..") ||
+                        !normalizedPath.Equals(Path.GetFullPath(normalizedPath), StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new ArgumentException(
+                            "Invalid company file path: path traversal sequences are not allowed",
+                            nameof(companyFilePath));
+                    }
+
+                    // Verify the path doesn't contain dangerous characters for connection strings
+                    if (companyFilePath.Contains(";") || companyFilePath.Contains("'") ||
+                        companyFilePath.Contains("\""))
+                    {
+                        throw new ArgumentException(
+                            "Invalid company file path: contains illegal characters for connection string",
+                            nameof(companyFilePath));
+                    }
+
                     connectionString = $"Driver={{{_driverName}}};DFQ={companyFilePath};";
                 }
                 else

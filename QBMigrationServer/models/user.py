@@ -250,22 +250,48 @@ class User(UserMixin, db.Model):
     def check_password_reuse(self, password):
         """
         Check if password was recently used
-        
+
         Args:
             password: Password to check
-            
+
         Returns:
             bool: True if password was recently used, False otherwise
         """
         if not self.password_history:
             return False
-        
-        # Parse password history
+
+        # HIGH FIX: Validate JSON structure when loading password history
+        # Prevents code injection or corruption attacks via malformed JSON
         try:
             history = json.loads(self.password_history)
-        except (json.JSONDecodeError, TypeError):
+
+            # Validate structure: must be a list
+            if not isinstance(history, list):
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Invalid password_history structure for user {self.id}: expected list, got {type(history).__name__}"
+                )
+                return False
+
+            # Validate each item: must be a non-empty string (hash)
+            validated_history = []
+            for item in history:
+                if isinstance(item, str) and item:
+                    validated_history.append(item)
+                else:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"Invalid item in password_history for user {self.id}: {type(item).__name__}"
+                    )
+            history = validated_history
+
+        except (json.JSONDecodeError, TypeError) as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Failed to parse password_history for user {self.id}: {e}"
+            )
             return False
-        
+
         # Check against each previous password
         for old_hash in history:
             try:
@@ -273,30 +299,50 @@ class User(UserMixin, db.Model):
                     return True
             except (VerifyMismatchError, VerificationError, InvalidHash):
                 continue
-        
+
         return False
-    
+
     def _add_to_password_history(self, password_hash):
         """
         Add password hash to history
-        
+
         Maintains last 5 passwords
-        
+
         Args:
             password_hash: Hashed password to add
         """
-        # Parse existing history
+        # HIGH FIX: Validate JSON structure when loading password history
         try:
             history = json.loads(self.password_history) if self.password_history else []
+
+            # Validate structure: must be a list
+            if not isinstance(history, list):
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Invalid password_history structure for user {self.id}, resetting"
+                )
+                history = []
+
+            # Validate each item: must be a non-empty string (hash)
+            validated_history = []
+            for item in history:
+                if isinstance(item, str) and item:
+                    validated_history.append(item)
+            history = validated_history
+
         except (json.JSONDecodeError, TypeError):
             history = []
-        
+
+        # Validate the new hash before adding
+        if not isinstance(password_hash, str) or not password_hash:
+            raise ValueError("Invalid password hash format")
+
         # Add new hash
         history.append(password_hash)
-        
+
         # Keep only last 5
         history = history[-5:]
-        
+
         # Save
         self.password_history = json.dumps(history)
     
