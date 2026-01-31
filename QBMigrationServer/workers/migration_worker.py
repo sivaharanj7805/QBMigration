@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 import os
 import sys
 import json
+import logging
+
+# SECURITY FIX: Initialize logger to prevent NameError
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'QBMigrationService'))

@@ -15,8 +15,11 @@ import {
     HardDrive,
     RefreshCw,
     Loader2,
-    FolderOpen
+    FolderOpen,
+    Upload
 } from "lucide-react";
+import { authFetch } from "@/lib/auth";
+import { sanitize } from "@/lib/sanitize";
 
 // Types
 interface CompanyFile {
@@ -61,10 +64,17 @@ export default function ProjectsPage() {
     const fetchProjectData = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/projects`, { credentials: 'include' });
+            // SECURITY FIX: Use authFetch for proper CSRF token handling
+            const response = await authFetch(`${API_URL}/api/projects`);
             if (response.ok) {
                 const data = await response.json();
-                setCompanyFiles(data.files || []);
+                // SECURITY: Sanitize all user-controlled data before display
+                const sanitizedFiles = (data.files || []).map((file: CompanyFile) => ({
+                    ...file,
+                    companyName: sanitize.text(file.companyName),
+                    fileName: sanitize.text(file.fileName),
+                }));
+                setCompanyFiles(sanitizedFiles);
                 setStats(data.stats || { totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
             } else {
                 // Fallback to empty data if API not available
@@ -83,7 +93,7 @@ export default function ProjectsPage() {
         }
     };
 
-    const filteredFiles = companyFiles.filter(f =>
+    const filteredFiles = companyFiles.filter((f: CompanyFile) =>
         f.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -196,14 +206,15 @@ export default function ProjectsPage() {
             </div>
 
             {/* Search */}
-            <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <div className="relative" role="search">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
                 <input
-                    type="text"
+                    type="search"
                     placeholder="Search company files..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
                     className="input pl-10"
+                    aria-label="Search company files"
                 />
             </div>
 
@@ -215,10 +226,22 @@ export default function ProjectsPage() {
                         Loading company files...
                     </div>
                 ) : filteredFiles.length === 0 ? (
-                    <div className="p-8 text-center text-gray-500">
-                        <FolderOpen className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-                        <p className="text-lg font-medium text-gray-600">No company files yet</p>
-                        <p className="text-sm">Upload a QuickBooks file to get started</p>
+                    <div className="p-8 text-center text-gray-500" role="status" aria-live="polite">
+                        <FolderOpen className="w-12 h-12 mx-auto text-gray-300 mb-3" aria-hidden="true" />
+                        <p className="text-lg font-medium text-gray-600">
+                            {searchTerm ? "No company files match your search" : "No company files yet"}
+                        </p>
+                        <p className="text-sm">
+                            {searchTerm
+                                ? `No results found for "${searchTerm}". Try a different search term.`
+                                : "Upload a QuickBooks file to get started"}
+                        </p>
+                        {!searchTerm && (
+                            <Link href="/upload" className="btn-primary mt-4 inline-flex items-center gap-2">
+                                <Upload className="w-4 h-4" aria-hidden="true" />
+                                Upload Company File
+                            </Link>
+                        )}
                     </div>
                 ) : (
                     <table className="table-forensic">
@@ -289,9 +312,9 @@ export default function ProjectsPage() {
                                                             if (!confirm("Are you sure you want to delete this file?")) return;
                                                             setActionError(null);
                                                             try {
-                                                                const response = await fetch(`${API_URL}/api/projects/${file.id}`, {
+                                                                // SECURITY FIX: Use authFetch for proper CSRF token handling
+                                                                const response = await authFetch(`${API_URL}/api/projects/${file.id}`, {
                                                                     method: 'DELETE',
-                                                                    credentials: 'include',
                                                                 });
                                                                 if (response.ok) {
                                                                     fetchProjectData();

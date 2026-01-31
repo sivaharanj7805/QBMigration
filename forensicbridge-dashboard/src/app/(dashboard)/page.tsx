@@ -17,6 +17,7 @@ import {
     Loader2
 } from "lucide-react";
 import { authFetch, getAuthHeader } from "@/lib/auth";
+import { sanitize } from "@/lib/sanitize";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -36,7 +37,6 @@ interface Migration {
     total_records?: number;
     date: string;
     created_at?: string;
-    duration?: string;
     progress?: number;
     progress_percent?: number;
 }
@@ -46,6 +46,111 @@ interface Stats {
     total_records: string;
     avg_duration: string;
     success_rate: string;
+}
+
+// Constants
+const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
+const VALID_EXTENSIONS = ['.qbw', '.qbb', '.qbm'];
+
+/**
+ * Validate QuickBooks file
+ * SECURITY: Prevents double-extension attacks and validates file type
+ */
+function isValidQBFile(fileName: string): boolean {
+    const normalizedName = fileName.trim().toLowerCase();
+
+    // Only allow files that end with exactly one of the valid extensions
+    const hasValidExtension = VALID_EXTENSIONS.some(ext => normalizedName.endsWith(ext));
+
+    // Reject files with multiple extensions (common attack vector)
+    const extensionCount = (normalizedName.match(/\.[a-z0-9]+/g) || []).length;
+    if (extensionCount > 1) {
+        return false;
+    }
+
+    return hasValidExtension;
+}
+
+/**
+ * Format date for display
+ */
+function formatDate(isoDate: string | null): string {
+    if (!isoDate) return "--";
+    try {
+        const date = new Date(isoDate);
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        });
+    } catch {
+        return "--";
+    }
+}
+
+/**
+ * Status Badge Component
+ */
+function StatusBadge({ status }: { status: string }) {
+    switch (status) {
+        case "completed":
+            return (
+                <span className="badge badge-success">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Completed
+                </span>
+            );
+        case "processing":
+        case "queued":
+            return (
+                <span className="badge badge-info">
+                    <Clock className="w-3 h-3 mr-1 animate-spin" />
+                    In Progress
+                </span>
+            );
+        case "failed":
+            return (
+                <span className="badge badge-error">
+                    <AlertCircle className="w-3 h-3 mr-1" />
+                    Failed
+                </span>
+            );
+        case "uploaded":
+            return <span className="badge badge-warning">Ready</span>;
+        default:
+            return <span className="badge badge-gray">{status}</span>;
+    }
+}
+
+/**
+ * Stats Card Component
+ */
+function StatsCard({
+    value,
+    label,
+    icon: Icon,
+    color,
+    loading,
+}: {
+    value: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    color: string;
+    loading: boolean;
+}) {
+    return (
+        <div className="stat-card">
+            <div className="flex items-start justify-between">
+                <div>
+                    <p className="stat-card-value">{loading ? "--" : value}</p>
+                    <p className="stat-card-label">{label}</p>
+                </div>
+                <div className={`stat-card-icon ${color}`}>
+                    <Icon className="w-5 h-5" />
+                </div>
+            </div>
+        </div>
+    );
 }
 
 export default function DashboardHome() {
@@ -73,16 +178,18 @@ export default function DashboardHome() {
     }, []);
 
     const checkApiConnection = async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
         try {
             const response = await fetch(`${API_URL}/health`, {
                 method: 'GET',
+                signal: controller.signal,
             });
+            clearTimeout(timeoutId);
             setApiConnected(response.ok);
-        } catch (error) {
-            // FIX: Only log in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error("API connection failed:", error);
-            }
+        } catch {
+            clearTimeout(timeoutId);
             setApiConnected(false);
         }
     };
@@ -104,7 +211,6 @@ export default function DashboardHome() {
             if (migrationsResponse.ok) {
                 const migrationsData = await migrationsResponse.json();
                 if (migrationsData.success) {
-                    // MED-36 FIX: Define inline type for API response mapping
                     interface ApiMigration {
                         id?: string;
                         migration_id: string;
@@ -115,12 +221,12 @@ export default function DashboardHome() {
                         created_at?: string;
                         progress_percent?: number;
                     }
-                    // Transform API data to our format
+
                     const formattedMigrations = migrationsData.migrations.map((m: ApiMigration) => ({
                         id: m.migration_id || m.id || '',
                         migration_id: m.migration_id,
-                        companyName: m.company_name || "Unknown Company",
-                        fileName: m.qb_file_name || "Unknown File",
+                        companyName: sanitize.text(m.company_name || "Unknown Company"),
+                        fileName: sanitize.text(m.qb_file_name || "Unknown File"),
                         status: m.status,
                         records: m.total_records || 0,
                         date: formatDate(m.created_at || null),
@@ -129,27 +235,12 @@ export default function DashboardHome() {
                     setMigrations(formattedMigrations);
                 }
             }
-        } catch (error) {
-            // FIX: Only log in development mode
+        } catch {
             if (process.env.NODE_ENV === 'development') {
-                console.error("Failed to fetch dashboard data:", error);
+                console.error("Failed to fetch dashboard data");
             }
         } finally {
             setLoading(false);
-        }
-    };
-
-    const formatDate = (isoDate: string | null): string => {
-        if (!isoDate) return "--";
-        try {
-            const date = new Date(isoDate);
-            return date.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-            });
-        } catch {
-            return "--";
         }
     };
 
@@ -161,25 +252,6 @@ export default function DashboardHome() {
         } else if (e.type === "dragleave") {
             setIsDragActive(false);
         }
-    }, []);
-
-    // FIX: Improved file extension validation to prevent double-extension bypass attacks
-    const isValidQBFile = useCallback((fileName: string): boolean => {
-        // Normalize filename - remove leading/trailing whitespace
-        const normalizedName = fileName.trim().toLowerCase();
-
-        // Only allow files that end with exactly one of the valid extensions
-        // This prevents attacks like "malware.qbw.exe" or "file.qbw.js"
-        const validExtensions = ['.qbw', '.qbb', '.qbm'];
-        const hasValidExtension = validExtensions.some(ext => normalizedName.endsWith(ext));
-
-        // Additional safety: reject files with multiple extensions (common attack vector)
-        const extensionCount = (normalizedName.match(/\.[a-z0-9]+/g) || []).length;
-        if (extensionCount > 1) {
-            return false;
-        }
-
-        return hasValidExtension;
     }, []);
 
     const handleDrop = useCallback((e: React.DragEvent) => {
@@ -194,8 +266,6 @@ export default function DashboardHome() {
                 setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file. Files with multiple extensions are not allowed.");
                 return;
             }
-            // FIX: Add file size validation (max 5GB for large QuickBooks files)
-            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
             if (file.size > MAX_FILE_SIZE) {
                 setUploadError("File too large. Maximum file size is 5GB.");
                 return;
@@ -206,9 +276,8 @@ export default function DashboardHome() {
             }
             handleFileUpload(file);
         }
-    }, [isValidQBFile]);
+    }, []);
 
-    // FIX: Also apply validation to file select input
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -216,8 +285,6 @@ export default function DashboardHome() {
                 setUploadError("Invalid file type. Please upload a .QBW, .QBB, or .QBM file.");
                 return;
             }
-            // FIX: Add file size validation (max 5GB for large QuickBooks files)
-            const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB - supports 2.4GB+ files
             if (file.size > MAX_FILE_SIZE) {
                 setUploadError("File too large. Maximum file size is 5GB.");
                 return;
@@ -231,6 +298,11 @@ export default function DashboardHome() {
     };
 
     const handleFileUpload = async (file: File) => {
+        // FIX: Guard against double uploads - prevent concurrent upload requests
+        if (uploadStatus === "uploading" || uploadStatus === "processing") {
+            return;
+        }
+
         setUploadedFile(file);
         setUploadStatus("uploading");
         setUploadError(null);
@@ -242,44 +314,33 @@ export default function DashboardHome() {
             const response = await fetch(`${API_URL}/api/upload`, {
                 method: 'POST',
                 body: formData,
-                headers: getAuthHeader(),
+                headers: getAuthHeader(true),
+                credentials: 'include',
             });
 
             if (response.ok) {
                 setUploadStatus("processing");
-                // Simulate processing time then complete
                 setTimeout(() => {
                     setUploadStatus("complete");
-                    fetchDashboardData(); // Refresh data
+                    fetchDashboardData();
                 }, 2000);
             } else {
-                const errorData = await response.json();
-                setUploadError(errorData.error || "Upload failed");
+                // SECURITY FIX: Wrap response.json() in try/catch for non-OK responses
+                // The response body may not be valid JSON
+                let errorMessage = "Upload failed";
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || errorMessage;
+                } catch {
+                    // Response body was not valid JSON, use default error message
+                    errorMessage = `Upload failed with status ${response.status}`;
+                }
+                setUploadError(errorMessage);
                 setUploadStatus("error");
             }
-        } catch (error) {
-            // FIX: Only log in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error("Upload error:", error);
-            }
+        } catch {
             setUploadError("Failed to connect to server. Please try again.");
             setUploadStatus("error");
-        }
-    };
-
-    const getStatusBadge = (status: string) => {
-        switch (status) {
-            case "completed":
-                return <span className="badge badge-success"><CheckCircle2 className="w-3 h-3 mr-1" />Completed</span>;
-            case "processing":
-            case "queued":
-                return <span className="badge badge-info"><Clock className="w-3 h-3 mr-1 animate-spin" />In Progress</span>;
-            case "failed":
-                return <span className="badge badge-error"><AlertCircle className="w-3 h-3 mr-1" />Failed</span>;
-            case "uploaded":
-                return <span className="badge badge-warning">Ready</span>;
-            default:
-                return <span className="badge badge-gray">{status}</span>;
         }
     };
 
@@ -329,17 +390,14 @@ export default function DashboardHome() {
             {/* Stats Grid */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {statsDisplay.map((stat) => (
-                    <div key={stat.label} className="stat-card">
-                        <div className="flex items-start justify-between">
-                            <div>
-                                <p className="stat-card-value">{loading ? "--" : stat.value}</p>
-                                <p className="stat-card-label">{stat.label}</p>
-                            </div>
-                            <div className={`stat-card-icon ${stat.color}`}>
-                                <stat.icon className="w-5 h-5" />
-                            </div>
-                        </div>
-                    </div>
+                    <StatsCard
+                        key={stat.label}
+                        value={stat.value}
+                        label={stat.label}
+                        icon={stat.icon}
+                        color={stat.color}
+                        loading={loading}
+                    />
                 ))}
             </div>
 
@@ -392,7 +450,9 @@ export default function DashboardHome() {
                             <div className="w-16 h-16 mx-auto bg-blue-50 rounded-full flex items-center justify-center mb-4 animate-pulse-subtle">
                                 <Loader2 className="w-8 h-8 text-[var(--bridge-blue)] animate-spin" />
                             </div>
-                            <p className="text-lg font-medium text-gray-700 mb-2">Uploading {uploadedFile?.name}...</p>
+                            <p className="text-lg font-medium text-gray-700 mb-2">
+                                Uploading {sanitize.text(uploadedFile?.name || '')}...
+                            </p>
                             <div className="w-64 mx-auto progress-bar">
                                 <div className="progress-bar-fill" style={{ width: "60%" }} />
                             </div>
@@ -415,7 +475,9 @@ export default function DashboardHome() {
                                 <CheckCircle2 className="w-8 h-8 text-[var(--success)]" />
                             </div>
                             <p className="text-lg font-medium text-gray-700 mb-2">Ready to Migrate!</p>
-                            <p className="text-sm text-gray-500 mb-4">{uploadedFile?.name}</p>
+                            <p className="text-sm text-gray-500 mb-4">
+                                {sanitize.text(uploadedFile?.name || '')}
+                            </p>
                             <div className="flex items-center justify-center gap-3">
                                 <button
                                     className="btn-primary flex items-center gap-2"
@@ -471,7 +533,9 @@ export default function DashboardHome() {
                             {migrations.map((migration) => (
                                 <tr key={migration.id}>
                                     <td>
-                                        <span className="font-medium text-gray-900">{migration.companyName}</span>
+                                        <span className="font-medium text-gray-900">
+                                            {migration.companyName}
+                                        </span>
                                     </td>
                                     <td>
                                         <span className="text-gray-500 flex items-center gap-2">
@@ -485,7 +549,9 @@ export default function DashboardHome() {
                                     <td>
                                         <span className="text-gray-500">{migration.date}</span>
                                     </td>
-                                    <td>{getStatusBadge(migration.status)}</td>
+                                    <td>
+                                        <StatusBadge status={migration.status} />
+                                    </td>
                                     <td>
                                         <Link
                                             href={`/migrations/${migration.migration_id || migration.id}`}

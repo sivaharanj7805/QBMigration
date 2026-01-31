@@ -48,14 +48,20 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
     }, [isLive]);
 
     // Separate effect for live streaming - always returns cleanup function
+    // FIX: Removed logIndex from dependency array to prevent infinite loop
+    // Use a ref to track the current index instead
+    const logIndexRef = useRef(logIndex);
+    logIndexRef.current = logIndex;
+
     useEffect(() => {
         if (!isLive) {
             return; // No interval to clean up when not live
         }
 
         const interval = setInterval(() => {
+            const currentIndex = logIndexRef.current;
             const newLog = {
-                ...demoLogs[logIndex % demoLogs.length],
+                ...demoLogs[currentIndex % demoLogs.length],
                 timestamp: new Date().toISOString()
             };
             setLogs(prev => [...prev.slice(-15), newLog]);
@@ -66,7 +72,7 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
         return () => {
             clearInterval(interval);
         };
-    }, [isLive, logIndex]);
+    }, [isLive]); // FIX: Removed logIndex from dependency array
 
     // Auto-scroll to bottom
     useEffect(() => {

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -82,81 +83,94 @@ namespace QBDesktopExtractor
             long totalBytesWritten = 0;
             int totalChunks = 0;
 
-            using (var dataHasher = SHA256.Create())
-            using (var encryptedHasher = SHA256.Create())
+            // FIX HIGH-11: Add try-finally to clear buffer even on exception
+            byte[] buffer = new byte[chunkSize];
+            byte[] encryptedChunk = null;
+
+            try
             {
-                byte[] buffer = new byte[chunkSize];
-
-                // Write file header (magic + version + key ID length + key ID)
-                byte[] magic = Encoding.ASCII.GetBytes("QBEX");
-                outputStream.Write(magic, 0, 4);
-                totalBytesWritten += 4;
-
-                byte[] version = BitConverter.GetBytes((ushort)2);
-                outputStream.Write(version, 0, 2);
-                totalBytesWritten += 2;
-
-                byte[] keyIdBytes = Encoding.UTF8.GetBytes(keyId);
-                byte[] keyIdLen = BitConverter.GetBytes((ushort)keyIdBytes.Length);
-                outputStream.Write(keyIdLen, 0, 2);
-                outputStream.Write(keyIdBytes, 0, keyIdBytes.Length);
-                totalBytesWritten += 2 + keyIdBytes.Length;
-
-                // Process chunks
-                while (true)
+                using (var dataHasher = SHA256.Create())
+                using (var encryptedHasher = SHA256.Create())
                 {
-                    int bytesRead = inputStream.Read(buffer, 0, buffer.Length);
-                    if (bytesRead == 0) break;
+                    // Write file header (magic + version + key ID length + key ID)
+                    byte[] magic = Encoding.ASCII.GetBytes("QBEX");
+                    outputStream.Write(magic, 0, 4);
+                    totalBytesWritten += 4;
 
-                    totalBytesRead += bytesRead;
+                    byte[] version = BitConverter.GetBytes((ushort)2);
+                    outputStream.Write(version, 0, 2);
+                    totalBytesWritten += 2;
 
-                    // Update data hash
-                    dataHasher.TransformBlock(buffer, 0, bytesRead, null, 0);
+                    byte[] keyIdBytes = Encoding.UTF8.GetBytes(keyId);
+                    byte[] keyIdLen = BitConverter.GetBytes((ushort)keyIdBytes.Length);
+                    outputStream.Write(keyIdLen, 0, 2);
+                    outputStream.Write(keyIdBytes, 0, keyIdBytes.Length);
+                    totalBytesWritten += 2 + keyIdBytes.Length;
 
-                    // Encrypt chunk
-                    byte[] encryptedChunk = EncryptChunk(buffer, bytesRead, key);
+                    // Process chunks
+                    while (true)
+                    {
+                        int bytesRead = inputStream.Read(buffer, 0, buffer.Length);
+                        if (bytesRead == 0) break;
 
-                    // Write chunk length + encrypted data
-                    byte[] chunkLen = BitConverter.GetBytes(encryptedChunk.Length);
-                    outputStream.Write(chunkLen, 0, 4);
-                    outputStream.Write(encryptedChunk, 0, encryptedChunk.Length);
+                        totalBytesRead += bytesRead;
 
-                    // Update encrypted hash
-                    encryptedHasher.TransformBlock(encryptedChunk, 0, encryptedChunk.Length, null, 0);
+                        // Update data hash
+                        dataHasher.TransformBlock(buffer, 0, bytesRead, null, 0);
 
-                    totalBytesWritten += 4 + encryptedChunk.Length;
-                    totalChunks++;
+                        // Encrypt chunk
+                        encryptedChunk = EncryptChunk(buffer, bytesRead, key);
 
-                    // SECURITY FIX: Clear buffer to prevent data leakage in memory
-                    // Critical for 2GB+ files where buffer reuse could expose sensitive data
-                    Array.Clear(buffer, 0, buffer.Length);
-                    Array.Clear(encryptedChunk, 0, encryptedChunk.Length);
+                        // Write chunk length + encrypted data
+                        byte[] chunkLen = BitConverter.GetBytes(encryptedChunk.Length);
+                        outputStream.Write(chunkLen, 0, 4);
+                        outputStream.Write(encryptedChunk, 0, encryptedChunk.Length);
 
-                    // Progress callback
-                    progressCallback?.Invoke(totalBytesRead, totalSize);
+                        // Update encrypted hash
+                        encryptedHasher.TransformBlock(encryptedChunk, 0, encryptedChunk.Length, null, 0);
+
+                        totalBytesWritten += 4 + encryptedChunk.Length;
+                        totalChunks++;
+
+                        // SECURITY FIX: Clear buffer to prevent data leakage in memory
+                        // Critical for 2GB+ files where buffer reuse could expose sensitive data
+                        Array.Clear(buffer, 0, buffer.Length);
+                        Array.Clear(encryptedChunk, 0, encryptedChunk.Length);
+                        encryptedChunk = null;
+
+                        // Progress callback
+                        progressCallback?.Invoke(totalBytesRead, totalSize);
+                    }
+
+                    // Finalize hashes
+                    dataHasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                    encryptedHasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+
+                    // Protect key with DPAPI for local storage
+                    byte[] protectedKey = ProtectKey(key);
+
+                    return new EncryptionResult
+                    {
+                        KeyId = keyId,
+                        Algorithm = AlgorithmName,
+                        ProtectedKey = protectedKey,
+                        PlaintextSizeBytes = totalBytesRead,
+                        EncryptedSizeBytes = totalBytesWritten,
+                        ChunkSize = chunkSize,
+                        TotalChunks = totalChunks,
+                        DataHashSHA256 = Convert.ToBase64String(dataHasher.Hash),
+                        EncryptedHashSHA256 = Convert.ToBase64String(encryptedHasher.Hash),
+                        // v3.1 format - KeyBase64 for TLS-protected transmission
+                        KeyBase64 = Convert.ToBase64String(key)
+                    };
                 }
-
-                // Finalize hashes
-                dataHasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-                encryptedHasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-
-                // Protect key with DPAPI for local storage
-                byte[] protectedKey = ProtectKey(key);
-
-                return new EncryptionResult
-                {
-                    KeyId = keyId,
-                    Algorithm = AlgorithmName,
-                    ProtectedKey = protectedKey,
-                    PlaintextSizeBytes = totalBytesRead,
-                    EncryptedSizeBytes = totalBytesWritten,
-                    ChunkSize = chunkSize,
-                    TotalChunks = totalChunks,
-                    DataHashSHA256 = Convert.ToBase64String(dataHasher.Hash),
-                    EncryptedHashSHA256 = Convert.ToBase64String(encryptedHasher.Hash),
-                    // v3.1 format - KeyBase64 for TLS-protected transmission
-                    KeyBase64 = Convert.ToBase64String(key)
-                };
+            }
+            finally
+            {
+                // SECURITY: Always clear sensitive data from memory, even on exception
+                if (buffer != null) Array.Clear(buffer, 0, buffer.Length);
+                if (encryptedChunk != null) Array.Clear(encryptedChunk, 0, encryptedChunk.Length);
+                if (key != null) Array.Clear(key, 0, key.Length);
             }
         }
 
@@ -211,10 +225,14 @@ namespace QBDesktopExtractor
                 long bytesProcessed = 0;
 
                 // Read and validate header
+                // FIX CRIT-04: Validate length before GetString, use StringComparison.OrdinalIgnoreCase
                 byte[] magic = new byte[4];
-                inputStream.Read(magic, 0, 4);
-                if (Encoding.ASCII.GetString(magic) != "QBEX")
-                    throw new InvalidDataException("Invalid file format");
+                int magicBytesRead = inputStream.Read(magic, 0, 4);
+                if (magicBytesRead < 4)
+                    throw new InvalidDataException("File too short - could not read magic header");
+                string magicStr = Encoding.ASCII.GetString(magic);
+                if (!string.Equals(magicStr, "QBEX", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Invalid file format: expected 'QBEX' but got '{magicStr}'");
 
                 byte[] versionBytes = new byte[2];
                 inputStream.Read(versionBytes, 0, 2);
@@ -282,10 +300,34 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Protect key using DPAPI (Windows) - FAILS if DPAPI unavailable
+        /// Protect key using DPAPI (Windows) or fallback for non-Windows
+        /// FIX CRIT-07: Add RuntimeInformation check and fallback for non-Windows
         /// </summary>
         private static byte[] ProtectKey(byte[] key)
         {
+            // Check if running on Windows
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Non-Windows: Check for KMS endpoint configuration
+                string kmsEndpoint = Environment.GetEnvironmentVariable("KMS_ENCRYPTION_ENDPOINT");
+                if (!string.IsNullOrEmpty(kmsEndpoint))
+                {
+                    // TODO: Implement KMS encryption when endpoint is configured
+                    throw new CryptographicException(
+                        "KMS encryption is configured but not yet implemented. " +
+                        "This application currently requires Windows DPAPI for key protection.");
+                }
+
+                // Non-Windows without KMS: SECURITY FIX - throw exception instead of returning plaintext
+                // Returning plaintext keys is a critical security vulnerability
+                // Applications running on non-Windows platforms MUST configure KMS for key protection
+                throw new CryptographicException(
+                    "Key protection is not available on non-Windows platforms without KMS configuration. " +
+                    "Returning unprotected encryption keys is a security vulnerability. " +
+                    "Please configure KMS_ENCRYPTION_ENDPOINT environment variable for cross-platform support, " +
+                    "or run this application on Windows where DPAPI is available.");
+            }
+
             try
             {
                 return ProtectedData.Protect(key, null, DataProtectionScope.CurrentUser);
@@ -302,10 +344,47 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Unprotect key using DPAPI - FAILS if DPAPI unavailable
+        /// Unprotect key using DPAPI or handle non-Windows fallback format
+        /// FIX CRIT-07: Handle non-Windows fallback format
         /// </summary>
         private static byte[] UnprotectKey(byte[] protectedKey)
         {
+            if (protectedKey == null || protectedKey.Length == 0)
+            {
+                throw new CryptographicException("Protected key is null or empty");
+            }
+
+            // Check for non-Windows fallback marker
+            byte[] marker = Encoding.UTF8.GetBytes("NOPROTECT:");
+            if (protectedKey.Length > marker.Length)
+            {
+                bool hasMarker = true;
+                for (int i = 0; i < marker.Length; i++)
+                {
+                    if (protectedKey[i] != marker[i])
+                    {
+                        hasMarker = false;
+                        break;
+                    }
+                }
+
+                if (hasMarker)
+                {
+                    // Non-Windows fallback format - extract the key
+                    byte[] key = new byte[protectedKey.Length - marker.Length];
+                    Buffer.BlockCopy(protectedKey, marker.Length, key, 0, key.Length);
+                    return key;
+                }
+            }
+
+            // Standard Windows DPAPI protection
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                throw new CryptographicException(
+                    "DPAPI decryption is only available on Windows. " +
+                    "The protected key appears to be DPAPI-encrypted but this is not a Windows system.");
+            }
+
             try
             {
                 return ProtectedData.Unprotect(protectedKey, null, DataProtectionScope.CurrentUser);

@@ -120,27 +120,32 @@ def migration_started():
         # Get request data
         data = request.get_json() or {}
         instance_id = data.get('instance_id')
-        
-        # Find migration
-        migration = Migration.query.filter_by(migration_id=migration_id).first()
-        
+
+        # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
+        # This ensures only one webhook handler can process the same migration at a time
+        migration = db.session.query(Migration).filter_by(
+            migration_id=migration_id
+        ).with_for_update(nowait=False).first()
+
         if not migration:
             logger.error(f"Migration not found: {migration_id}")
             return jsonify({
                 'success': False,
                 'error': 'Migration not found'
             }), 404
-        
+
         # Check idempotency (prevent duplicate processing)
+        # Now protected by row-level lock from SELECT FOR UPDATE
         if migration.is_webhook_processed(webhook_id):
             logger.info(f"Webhook {webhook_id} already processed for {migration_id}")
+            db.session.commit()  # Release the lock
             return jsonify({
                 'success': True,
                 'message': 'Already processed',
                 'idempotent': True
             }), 200
-        
-        # Mark webhook as processed
+
+        # Mark webhook as processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
         
         # Update migration
@@ -209,18 +214,21 @@ def migration_progress():
         data = request.get_json() or {}
         progress_percent = min(data.get('progress_percent', 0), 100)
         current_step = data.get('current_step', '')
-        
-        # Find migration
-        migration = Migration.query.filter_by(migration_id=migration_id).first()
-        
+
+        # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
+        migration = db.session.query(Migration).filter_by(
+            migration_id=migration_id
+        ).with_for_update(nowait=False).first()
+
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
-        
-        # Check idempotency
+
+        # Check idempotency (protected by row-level lock)
         if migration.is_webhook_processed(webhook_id):
+            db.session.commit()  # Release the lock
             return jsonify({'success': True, 'message': 'Already processed', 'idempotent': True}), 200
-        
-        # Mark processed
+
+        # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
         
         # Update progress
@@ -276,18 +284,21 @@ def migration_completed():
         # Get data
         data = request.get_json() or {}
         results = data.get('results', {})
-        
-        # Find migration
-        migration = Migration.query.filter_by(migration_id=migration_id).first()
-        
+
+        # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
+        migration = db.session.query(Migration).filter_by(
+            migration_id=migration_id
+        ).with_for_update(nowait=False).first()
+
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
-        
-        # Check idempotency
+
+        # Check idempotency (protected by row-level lock)
         if migration.is_webhook_processed(webhook_id):
+            db.session.commit()  # Release the lock
             return jsonify({'success': True, 'message': 'Already processed', 'idempotent': True}), 200
-        
-        # Mark processed
+
+        # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
         
         # Mark as completed
@@ -352,18 +363,21 @@ def migration_failed():
         data = request.get_json() or {}
         error_message = data.get('error', 'Unknown error')
         error_code = data.get('error_code', 'UNKNOWN_ERROR')
-        
-        # Find migration
-        migration = Migration.query.filter_by(migration_id=migration_id).first()
-        
+
+        # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
+        migration = db.session.query(Migration).filter_by(
+            migration_id=migration_id
+        ).with_for_update(nowait=False).first()
+
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
-        
-        # Check idempotency
+
+        # Check idempotency (protected by row-level lock)
         if migration.is_webhook_processed(webhook_id):
+            db.session.commit()  # Release the lock
             return jsonify({'success': True, 'message': 'Already processed', 'idempotent': True}), 200
-        
-        # Mark processed
+
+        # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
         
         # Mark as failed

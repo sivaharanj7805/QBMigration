@@ -31,12 +31,14 @@ namespace QBMigrationLauncher.ViewModels
         // FIX: Use ConcurrentDictionary for thread safety during async operations
         private readonly ConcurrentDictionary<string, string> _detectedFilePaths = new ConcurrentDictionary<string, string>();
 
-        // FIX: Limit log output to prevent unbounded memory growth
-        private readonly StringBuilder _logBuilder = new StringBuilder();
-        private const int MaxLogLength = 500000; // ~500KB max log size
+        // FIX #14: Use circular buffer for logs to prevent memory growth
+        // FIX LOW: Use constant instead of magic number
+        private readonly CircularLogBuffer _logBuffer = new CircularLogBuffer(maxLines: Constants.Logging.MaxLogBufferLines);
+        private readonly object _logLock = new object();
 
+        // FIX LOW: Use constants for status messages
         [ObservableProperty]
-        private string _connectionStatusText = "Searching for QuickBooks...";
+        private string _connectionStatusText = Constants.Messages.SearchingQuickBooks;
 
         [ObservableProperty]
         private Brush _connectionStatusColor = Brushes.Gray;
@@ -55,7 +57,7 @@ namespace QBMigrationLauncher.ViewModels
         private int _progressPercentage;
 
         [ObservableProperty]
-        private string _currentStatusMessage = "Ready to start.";
+        private string _currentStatusMessage = Constants.Messages.Ready;
 
         [ObservableProperty]
         private string _logOutput = "";
@@ -146,16 +148,51 @@ namespace QBMigrationLauncher.ViewModels
             {
                 var result = _healthCheck.RunHealthCheck(_outputDirectory);
 
+                // FIX MEDIUM: Validate health check results before proceeding
+                if (result == null)
+                {
+                    LogOutput += "[ERROR] Health check returned null result.\n";
+                    CurrentStatusMessage = "Health check failed - no results";
+                    return;
+                }
+
+                // FIX MEDIUM: Validate that Checks collection is not null
+                if (result.Checks == null)
+                {
+                    LogOutput += "[WARN] Health check returned no individual check results.\n";
+                    result.Checks = new System.Collections.Generic.List<Services.HealthCheck>();
+                }
+
+                // FIX MEDIUM: Log critical issues found during health check
+                var criticalFailures = result.Checks.Where(c =>
+                    c.Severity == Services.CheckSeverity.Critical && !c.Passed).ToList();
+
+                if (criticalFailures.Any())
+                {
+                    LogOutput += $"[WARN] {criticalFailures.Count} CRITICAL issue(s) found:\n";
+                    foreach (var failure in criticalFailures)
+                    {
+                        LogOutput += $"  - {failure.Name}: {failure.Message}\n";
+                    }
+                }
+
                 // Generate HTML report
                 var reportPath = _certificateGenerator.GenerateHealthCheckReport(result, SelectedFile ?? "Unknown");
 
+                // FIX MEDIUM: Validate report was actually created
+                if (string.IsNullOrEmpty(reportPath) || !File.Exists(reportPath))
+                {
+                    LogOutput += "[WARN] Health check report may not have been generated successfully.\n";
+                }
+                else
+                {
+                    LogOutput += $"[INFO] Report saved to: {reportPath}\n";
+                    // FIX WPF-02 & WPF-04: Add path validation and error handling for Process.Start
+                    OpenFileInBrowser(reportPath);
+                }
+
                 LogOutput += $"[INFO] Health Check Complete: {result.GetSummary()}\n";
-                LogOutput += $"[INFO] Report saved to: {reportPath}\n";
-
                 CurrentStatusMessage = result.GetSummary();
-
-                // FIX WPF-02 & WPF-04: Add path validation and error handling for Process.Start
-                OpenFileInBrowser(reportPath);
             }
             catch (Exception ex)
             {
@@ -215,11 +252,17 @@ namespace QBMigrationLauncher.ViewModels
         {
             if (IsMigrating) return;
 
+            // FIX MEDIUM: Validate that selected file exists before starting migration
+            if (!ValidateSelectedFileExists())
+            {
+                return;
+            }
+
             // ============================================================================
             // LICENSE VALIDATION - Required before any migration
             // ============================================================================
-            LogOutput = "[INFO] Validating license...\n";
-            CurrentStatusMessage = "Validating license...";
+            LogOutput = $"{Constants.Logging.InfoPrefix} Validating license...\n";
+            CurrentStatusMessage = Constants.Messages.ValidatingLicense;
             
             try
             {
@@ -271,7 +314,8 @@ namespace QBMigrationLauncher.ViewModels
             CurrentStatusMessage = "Starting extraction engine...";
 
             // FIX WPF-01: Generate MigrationId once and reuse
-            string migrationId = Guid.NewGuid().ToString("N").Substring(0, 12).ToUpper();
+            // FIX LOW: Use constant for migration ID length
+            string migrationId = Guid.NewGuid().ToString("N").Substring(0, Constants.Migration.MigrationIdLength).ToUpper();
 
             try
             {
@@ -311,7 +355,7 @@ namespace QBMigrationLauncher.ViewModels
                 // FIX WPF-02 & WPF-04: Use safe file opening method
                 OpenFileInBrowser(certPath);
                 
-                CurrentStatusMessage = "Migration Complete!";
+                CurrentStatusMessage = Constants.Messages.MigrationComplete;
                 ButtonText = "SUCCESS";
                 ButtonColor = Brushes.Green;
             }
@@ -343,23 +387,12 @@ namespace QBMigrationLauncher.ViewModels
             // FIX #15: Use BeginInvoke (non-blocking) and check for null App.Current
             SafeDispatch(() =>
             {
-                // FIX: Use StringBuilder with max length to prevent memory leak
-                _logBuilder.AppendLine(log);
-
-                // Trim if exceeding max length (keep most recent logs)
-                if (_logBuilder.Length > MaxLogLength)
+                // FIX #14: Use circular buffer for efficient log management
+                lock (_logLock)
                 {
-                    var excess = _logBuilder.Length - MaxLogLength;
-                    _logBuilder.Remove(0, excess);
-                    // Find next newline to avoid cutting mid-line
-                    var nextNewline = _logBuilder.ToString().IndexOf('\n');
-                    if (nextNewline > 0)
-                    {
-                        _logBuilder.Remove(0, nextNewline + 1);
-                    }
+                    _logBuffer.Add(log);
+                    LogOutput = _logBuffer.ToString();
                 }
-
-                LogOutput = _logBuilder.ToString();
             });
         }
 
@@ -448,12 +481,75 @@ namespace QBMigrationLauncher.ViewModels
 
         /// <summary>
         /// FIX #27: Get full path for a selected file.
+        /// FIX MEDIUM: Validate that the path still exists before returning.
         /// </summary>
         private string? GetFullFilePath(string? fileName)
         {
             if (string.IsNullOrEmpty(fileName)) return null;
-            if (Path.IsPathRooted(fileName)) return fileName;
-            return _detectedFilePaths.TryGetValue(fileName, out var fullPath) ? fullPath : null;
+
+            string? fullPath = null;
+            if (Path.IsPathRooted(fileName))
+            {
+                fullPath = fileName;
+            }
+            else if (_detectedFilePaths.TryGetValue(fileName, out var detectedPath))
+            {
+                fullPath = detectedPath;
+            }
+
+            // FIX MEDIUM: Validate that the file still exists before returning
+            if (!string.IsNullOrEmpty(fullPath))
+            {
+                try
+                {
+                    if (!File.Exists(fullPath))
+                    {
+                        LogOutput += $"[WARN] Detected file no longer exists: {fullPath}\n";
+                        // Remove stale entry from detected paths
+                        if (!string.IsNullOrEmpty(fileName) && _detectedFilePaths.ContainsKey(fileName))
+                        {
+                            _detectedFilePaths.TryRemove(fileName, out _);
+                        }
+                        return null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogOutput += $"[WARN] Unable to verify file exists: {ex.Message}\n";
+                    return null;
+                }
+            }
+
+            return fullPath;
+        }
+
+        /// <summary>
+        /// FIX MEDIUM: Validate that detected files still exist before starting migration.
+        /// Returns true if validation passes.
+        /// </summary>
+        private bool ValidateSelectedFileExists()
+        {
+            if (string.IsNullOrEmpty(SelectedFile))
+            {
+                LogOutput += "[ERROR] No file selected for migration.\n";
+                return false;
+            }
+
+            // Skip validation for auto-detected files placeholder
+            if (SelectedFile.Contains("will be auto-selected"))
+            {
+                return true;
+            }
+
+            var fullPath = GetFullFilePath(SelectedFile);
+            if (fullPath == null)
+            {
+                LogOutput += $"[ERROR] Selected file '{SelectedFile}' no longer exists or cannot be accessed.\n";
+                CurrentStatusMessage = "Selected file not found. Please select a different file.";
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -464,5 +560,86 @@ namespace QBMigrationLauncher.ViewModels
             _parser.ProgressChanged -= OnProgressChanged;
             _parser.LogReceived -= OnLogReceived;
         }
+    }
+
+    /// <summary>
+    /// FIX #14: Circular buffer for log lines to prevent unbounded memory growth.
+    /// Efficiently maintains a fixed-size window of the most recent log lines.
+    /// </summary>
+    public class CircularLogBuffer
+    {
+        private readonly string[] _buffer;
+        private readonly int _maxLines;
+        private int _head;
+        private int _count;
+        private readonly StringBuilder _outputCache;
+        private bool _cacheValid;
+
+        public CircularLogBuffer(int maxLines = 1000)
+        {
+            _maxLines = maxLines;
+            _buffer = new string[maxLines];
+            _head = 0;
+            _count = 0;
+            _outputCache = new StringBuilder();
+            _cacheValid = false;
+        }
+
+        /// <summary>
+        /// Add a log line to the buffer. Old lines are overwritten when buffer is full.
+        /// </summary>
+        public void Add(string line)
+        {
+            _buffer[_head] = line;
+            _head = (_head + 1) % _maxLines;
+
+            if (_count < _maxLines)
+                _count++;
+
+            _cacheValid = false; // Invalidate cache
+        }
+
+        /// <summary>
+        /// Get all lines in the buffer, oldest to newest.
+        /// Uses caching for efficiency when repeatedly called without new additions.
+        /// </summary>
+        public override string ToString()
+        {
+            if (_cacheValid)
+                return _outputCache.ToString();
+
+            _outputCache.Clear();
+
+            if (_count == 0)
+                return string.Empty;
+
+            // Calculate start position (oldest line)
+            int start = (_count < _maxLines) ? 0 : _head;
+
+            for (int i = 0; i < _count; i++)
+            {
+                int index = (start + i) % _maxLines;
+                _outputCache.AppendLine(_buffer[index]);
+            }
+
+            _cacheValid = true;
+            return _outputCache.ToString();
+        }
+
+        /// <summary>
+        /// Clear all log lines from the buffer.
+        /// </summary>
+        public void Clear()
+        {
+            _head = 0;
+            _count = 0;
+            _outputCache.Clear();
+            _cacheValid = false;
+        }
+
+        /// <summary>
+        /// Current number of lines in the buffer.
+        /// </summary>
+        public int Count => _count;
     }
 }

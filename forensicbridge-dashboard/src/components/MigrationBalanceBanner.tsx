@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Package, ArrowRight, RefreshCw, Zap, Building2, Shield, Crown, Scale } from 'lucide-react';
 
@@ -33,13 +33,19 @@ export function MigrationBalanceBanner() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
+    // FIX: Track mounted state to prevent state updates on unmounted component
+    const isMountedRef = useRef(true);
+
     const loadBalanceData = useCallback(async (showRefresh = false) => {
         try {
             if (showRefresh) setRefreshing(true);
 
             const token = localStorage.getItem('token');
             if (!token) {
-                setLoading(false);
+                // FIX: Check if mounted before setting state
+                if (isMountedRef.current) {
+                    setLoading(false);
+                }
                 return;
             }
 
@@ -49,8 +55,14 @@ export function MigrationBalanceBanner() {
                 }
             });
 
+            // FIX: Check if mounted before setting state after async operation
+            if (!isMountedRef.current) return;
+
             if (response.ok) {
                 const data = await response.json();
+                // FIX: Check if mounted again after parsing JSON
+                if (!isMountedRef.current) return;
+
                 if (data.success && data.user) {
                     setBalanceData({
                         tier: data.user.subscription_tier || 'none',
@@ -68,14 +80,24 @@ export function MigrationBalanceBanner() {
                 console.error('Failed to load balance data:', error);
             }
         } finally {
-            setLoading(false);
-            setRefreshing(false);
+            // FIX: Check if mounted before setting state in finally block
+            if (isMountedRef.current) {
+                setLoading(false);
+                setRefreshing(false);
+            }
         }
     }, []);
 
-    // Initial load
+    // Initial load and cleanup
     useEffect(() => {
+        // FIX: Reset mounted state on mount
+        isMountedRef.current = true;
         loadBalanceData();
+
+        // FIX: Mark as unmounted on cleanup to prevent state updates
+        return () => {
+            isMountedRef.current = false;
+        };
     }, [loadBalanceData]);
 
     // Auto-refresh every 30 seconds

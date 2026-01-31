@@ -74,12 +74,10 @@ export function Sidebar() {
 
     const handleLogout = async () => {
         try {
-            await fetch(`${API_URL}/api/auth/logout`, {
+            // SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage token
+            const { authFetch } = await import('@/lib/auth');
+            await authFetch(`${API_URL}/api/auth/logout`, {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                }
             });
         } catch (error) {
             // FIX: Only log in development mode
@@ -92,8 +90,11 @@ export function Sidebar() {
     };
 
     return (
-        <aside className={`flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 ${collapsed ? "w-20" : "w-64"
-            }`}>
+        <aside
+            className={`flex flex-col h-screen bg-white border-r border-gray-200 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}
+            role="navigation"
+            aria-label="Main navigation"
+        >
             {/* Logo */}
             <div className="flex items-center justify-between h-20 px-3 border-b border-gray-100">
                 {collapsed ? (
@@ -132,13 +133,15 @@ export function Sidebar() {
                 <button
                     onClick={() => setCollapsed(!collapsed)}
                     className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors flex-shrink-0"
+                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    aria-expanded={!collapsed}
                 >
-                    <ChevronLeft className={`w-5 h-5 text-gray-400 transition-transform ${collapsed ? "rotate-180" : ""}`} />
+                    <ChevronLeft className={`w-5 h-5 text-gray-400 transition-transform ${collapsed ? "rotate-180" : ""}`} aria-hidden="true" />
                 </button>
             </div>
 
             {/* Main Navigation */}
-            <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+            <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto" aria-label="Primary">
                 {navigation.map((item) => {
                     const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
                     return (
@@ -147,8 +150,10 @@ export function Sidebar() {
                             href={item.href}
                             className={`sidebar-link ${isActive ? "active" : ""}`}
                             title={collapsed ? item.name : undefined}
+                            aria-current={isActive ? "page" : undefined}
+                            aria-label={collapsed ? item.name : undefined}
                         >
-                            <item.icon className="w-5 h-5 flex-shrink-0" />
+                            <item.icon className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
                             {!collapsed && <span>{item.name}</span>}
                         </Link>
                     );
@@ -156,7 +161,7 @@ export function Sidebar() {
             </nav>
 
             {/* Bottom Navigation */}
-            <div className="px-2 py-4 border-t border-gray-100 space-y-1">
+            <nav className="px-2 py-4 border-t border-gray-100 space-y-1" aria-label="Secondary">
                 {bottomNav.map((item) => {
                     const isActive = pathname === item.href;
                     return (
@@ -165,8 +170,10 @@ export function Sidebar() {
                             href={item.href}
                             className={`sidebar-link ${isActive ? "active" : ""}`}
                             title={collapsed ? item.name : undefined}
+                            aria-current={isActive ? "page" : undefined}
+                            aria-label={collapsed ? item.name : undefined}
                         >
-                            <item.icon className="w-5 h-5 flex-shrink-0" />
+                            <item.icon className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
                             {!collapsed && <span>{item.name}</span>}
                         </Link>
                     );
@@ -174,11 +181,12 @@ export function Sidebar() {
                 <button
                     onClick={handleLogout}
                     className="sidebar-link w-full text-red-500 hover:bg-red-50"
+                    aria-label="Log out of your account"
                 >
-                    <LogOut className="w-5 h-5 flex-shrink-0" />
+                    <LogOut className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
                     {!collapsed && <span>Logout</span>}
                 </button>
-            </div>
+            </nav>
 
             {/* User Info */}
             {!collapsed && (

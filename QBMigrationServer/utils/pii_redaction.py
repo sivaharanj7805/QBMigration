@@ -81,7 +81,7 @@ def hash_ip(ip_address: str) -> str:
 
 def redact_phone(text: str) -> str:
     """
-    Redact phone numbers from text.
+    Redact phone numbers from text while avoiding false positives.
 
     Args:
         text: Text potentially containing phone numbers
@@ -92,18 +92,62 @@ def redact_phone(text: str) -> str:
     Example:
         >>> redact_phone("Call 555-123-4567")
         "Call XXX-XXX-4567"
+
+    False positive prevention:
+        - Excludes date-like patterns (2024-01-15)
+        - Excludes version numbers (1.2.3.4)
+        - Excludes IDs and reference numbers with letters
+        - Excludes IP addresses
     """
-    # Match common phone formats including international
-    phone_patterns = [
-        r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',  # 555-123-4567
-        r'\(\d{3}\)\s*\d{3}[-.]?\d{4}',     # (555) 123-4567
-        r'\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # +1 555-123-4567, +44 20 7946 0958
-        r'\+\d{7,15}\b',  # +12125551234 (compact international)
-    ]
+    # Patterns that look like phone numbers but aren't
+    # Pre-process to mark these as "safe" before phone redaction
+    safe_patterns = {
+        # Date patterns (YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY)
+        r'\b\d{4}[-/]\d{2}[-/]\d{2}\b': lambda m: f"__DATE_{m.start()}__",
+        r'\b\d{2}[-/]\d{2}[-/]\d{4}\b': lambda m: f"__DATE_{m.start()}__",
+        # Time patterns (HH:MM:SS, including milliseconds)
+        r'\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b': lambda m: f"__TIME_{m.start()}__",
+        # Version numbers (1.2.3, 10.0.0.1)
+        r'\b\d+\.\d+\.\d+(?:\.\d+)?\b': lambda m: f"__VERSION_{m.start()}__",
+        # IP addresses
+        r'\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b': lambda m: f"__IP_{m.start()}__",
+        # Invoice/reference numbers with letters (INV-12345678, REF123456789)
+        r'\b[A-Z]{2,4}[-]?\d{6,12}\b': lambda m: f"__REF_{m.start()}__",
+        # Zip codes (should not be redacted)
+        r'\b\d{5}(?:-\d{4})?\b': lambda m: f"__ZIP_{m.start()}__",
+        # Account numbers (often just digits but context matters)
+        r'(?:account|acct|acc)[:\s#]*\d{4,10}\b': lambda m: f"__ACCT_{m.start()}__",
+    }
 
     result = text
+    replacements = {}
+
+    # Mark safe patterns
+    for pattern, replacement_fn in safe_patterns.items():
+        for match in re.finditer(pattern, result, re.IGNORECASE):
+            placeholder = replacement_fn(match)
+            replacements[placeholder] = match.group(0)
+
+    # Replace safe patterns with placeholders
+    for placeholder, original in replacements.items():
+        result = result.replace(original, placeholder, 1)
+
+    # Match phone number formats (more specific patterns)
+    phone_patterns = [
+        # US format with area code: (555) 123-4567 or 555-123-4567
+        r'(?<![.\d])(?:\(\d{3}\)\s*|\b\d{3}[-.])\d{3}[-.]?\d{4}\b(?![.\d])',
+        # International with + prefix: +1-555-123-4567
+        r'\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b',
+        # Compact international: +12125551234 (10+ digits after +)
+        r'\+\d{10,15}\b',
+    ]
+
     for pattern in phone_patterns:
         result = re.sub(pattern, 'XXX-XXX-XXXX', result)
+
+    # Restore safe patterns
+    for placeholder, original in replacements.items():
+        result = result.replace(placeholder, original)
 
     return result
 

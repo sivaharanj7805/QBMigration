@@ -50,16 +50,71 @@ export function WhitelabelPreview({
     const [isPreviewMode, setIsPreviewMode] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    /**
+     * Resize image to maximum dimensions while maintaining aspect ratio.
+     * Prevents storing excessively large base64 strings.
+     */
+    const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            img.onload = () => {
+                let { width, height } = img;
+
+                // Calculate new dimensions maintaining aspect ratio
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width = Math.round(width * ratio);
+                    height = Math.round(height * ratio);
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+
+                if (ctx) {
+                    ctx.drawImage(img, 0, 0, width, height);
+                    // Use JPEG for photos, PNG for logos with transparency
+                    const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+                    const quality = mimeType === 'image/jpeg' ? 0.85 : undefined;
+                    resolve(canvas.toDataURL(mimeType, quality));
+                } else {
+                    reject(new Error('Could not get canvas context'));
+                }
+            };
+
+            img.onerror = () => reject(new Error('Failed to load image'));
+
+            // Create object URL for the image
+            img.src = URL.createObjectURL(file);
+        });
+    };
+
+    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const dataUrl = event.target?.result as string;
-                setPreviewLogo(dataUrl);
-                setConfig(prev => ({ ...prev, logo_url: dataUrl }));
-            };
-            reader.readAsDataURL(file);
+            // Validate file size (max 2MB)
+            if (file.size > 2 * 1024 * 1024) {
+                alert('Image file must be less than 2MB');
+                return;
+            }
+
+            try {
+                // Resize image to max 200x200 before storing as base64
+                const resizedDataUrl = await resizeImage(file, 200, 200);
+                setPreviewLogo(resizedDataUrl);
+                setConfig(prev => ({ ...prev, logo_url: resizedDataUrl }));
+            } catch (error) {
+                // Fallback to original behavior if resize fails
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const dataUrl = event.target?.result as string;
+                    setPreviewLogo(dataUrl);
+                    setConfig(prev => ({ ...prev, logo_url: dataUrl }));
+                };
+                reader.readAsDataURL(file);
+            }
         }
     };
 
@@ -89,29 +144,33 @@ export function WhitelabelPreview({
                         Preview how ForensicBridge will appear with your branding
                     </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" role="toolbar" aria-label="Brand customization actions">
                     <button
                         onClick={() => setIsPreviewMode(!isPreviewMode)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${isPreviewMode
                             ? "bg-[var(--bridge-blue)] text-white border-[var(--bridge-blue)]"
                             : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
                             }`}
+                        aria-label={isPreviewMode ? "Exit preview mode" : "Enter preview mode"}
+                        aria-pressed={isPreviewMode}
                     >
-                        <Eye className="w-4 h-4" />
+                        <Eye className="w-4 h-4" aria-hidden="true" />
                         {isPreviewMode ? "Exit Preview" : "Preview"}
                     </button>
                     <button
                         onClick={handleReset}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50"
+                        aria-label="Reset brand settings to defaults"
                     >
-                        <RefreshCw className="w-4 h-4" />
+                        <RefreshCw className="w-4 h-4" aria-hidden="true" />
                         Reset
                     </button>
                     <button
                         onClick={handleSave}
                         className="flex items-center gap-2 px-4 py-2 bg-[var(--bridge-blue)] text-white rounded-lg hover:bg-[var(--bridge-blue)]/90"
+                        aria-label="Save brand customization changes"
                     >
-                        <Save className="w-4 h-4" />
+                        <Save className="w-4 h-4" aria-hidden="true" />
                         Save Changes
                     </button>
                 </div>

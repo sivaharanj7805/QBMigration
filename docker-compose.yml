@@ -1,0 +1,201 @@
+# =============================================================================
+# QBMigration Docker Compose Configuration
+# =============================================================================
+#
+# Usage:
+#   Development: docker-compose up -d
+#   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Testing:     docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # QBMigration Server (Flask API)
+  # ---------------------------------------------------------------------------
+  server:
+    build:
+      context: .
+      target: development
+    container_name: qbmigration-server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./QBMigrationServer:/app/QBMigrationServer:ro
+      - ./QBMigrationService:/app/QBMigrationService:ro
+      - qbmigration-data:/app/data
+      - qbmigration-logs:/app/logs
+    environment:
+      - FLASK_APP=QBMigrationServer/app.py
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      # SECURITY FIX: Use environment variables for all secrets - fail if not set
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
+      - AWS_REGION=${AWS_REGION:-ca-central-1}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - QBO_CLIENT_ID=${QBO_CLIENT_ID:-}
+      - QBO_CLIENT_SECRET=${QBO_CLIENT_SECRET:-}
+      - QBO_ENVIRONMENT=${QBO_ENVIRONMENT:-sandbox}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
+      - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - qbmigration-network
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: qbmigration-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      # SECURITY FIX: Use environment variables - never hardcode passwords
+      - POSTGRES_USER=${POSTGRES_USER:-qbmigration}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required - generate with: openssl rand -base64 32}
+      - POSTGRES_DB=${POSTGRES_DB:-qbmigration}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qbmigration -d qbmigration"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - qbmigration-network
+
+  # ---------------------------------------------------------------------------
+  # Redis (for caching and rate limiting)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: qbmigration-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    # SECURITY FIX: Add password authentication to Redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qbmigration-network
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker (for background tasks)
+  # ---------------------------------------------------------------------------
+  celery-worker:
+    build:
+      context: .
+      target: development
+    container_name: qbmigration-celery-worker
+    restart: unless-stopped
+    command: celery -A QBMigrationServer.celery_worker worker --loglevel=info --concurrency=4
+    volumes:
+      - ./QBMigrationServer:/app/QBMigrationServer:ro
+      - ./QBMigrationService:/app/QBMigrationService:ro
+      - qbmigration-data:/app/data
+      - qbmigration-logs:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://qbmigration:qbmigration@postgres:5432/qbmigration
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - AWS_REGION=${AWS_REGION:-ca-central-1}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
+      - QBO_CLIENT_ID=${QBO_CLIENT_ID:-}
+      - QBO_CLIENT_SECRET=${QBO_CLIENT_SECRET:-}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - qbmigration-network
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat (for scheduled tasks)
+  # ---------------------------------------------------------------------------
+  celery-beat:
+    build:
+      context: .
+      target: development
+    container_name: qbmigration-celery-beat
+    restart: unless-stopped
+    command: celery -A QBMigrationServer.celery_worker beat --loglevel=info
+    volumes:
+      - ./QBMigrationServer:/app/QBMigrationServer:ro
+      - celery-schedule:/app/celerybeat-schedule
+    environment:
+      - DATABASE_URL=postgresql://qbmigration:qbmigration@postgres:5432/qbmigration
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - qbmigration-network
+
+  # ---------------------------------------------------------------------------
+  # Nginx (reverse proxy, optional)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: qbmigration-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - server
+    profiles:
+      - production
+    networks:
+      - qbmigration-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  qbmigration-data:
+    driver: local
+  qbmigration-logs:
+    driver: local
+  celery-schedule:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  qbmigration-network:
+    driver: bridge

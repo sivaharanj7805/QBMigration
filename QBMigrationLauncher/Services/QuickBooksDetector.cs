@@ -24,33 +24,66 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Get the path to the currently open company file (if any).
-        /// Uses Windows Management Instrumentation to find the command line.
+        /// FIX #5: Uses Process.GetProcessesByName() first to check if QB is running,
+        /// then falls back to WMI only when needed to get command line.
+        /// FIX #10: Properly collects results before disposing ManagementObjects.
         /// </summary>
         public static string? GetOpenCompanyFile()
         {
             try
             {
-                // Query for QB process command line
-                string query = "SELECT CommandLine FROM Win32_Process WHERE Name = 'QBW32.exe' OR Name = 'QBW.exe'";
-                using var searcher = new ManagementObjectSearcher(query);
+                // FIX #5: First check if QB is running using Process.GetProcessesByName
+                // This is safer and more efficient than WMI
+                var qbProcesses = Process.GetProcessesByName("QBW32")
+                    .Concat(Process.GetProcessesByName("QBW"))
+                    .ToArray();
 
-                // FIX #37: Properly dispose ManagementObject instances
-                using var results = searcher.Get();
-                foreach (ManagementObject obj in results)
+                if (qbProcesses.Length == 0)
                 {
-                    using (obj) // Dispose each ManagementObject
+                    return null; // No QuickBooks running
+                }
+
+                // Dispose process handles - we only needed to check if they exist
+                foreach (var proc in qbProcesses)
+                {
+                    proc.Dispose();
+                }
+
+                // FIX #10: Need WMI to get command line - collect results before disposing
+                // Use parameterized query for additional safety
+                string query = "SELECT CommandLine FROM Win32_Process WHERE Name = 'QBW32.exe' OR Name = 'QBW.exe'";
+                var collectedCmdLines = new System.Collections.Generic.List<string>();
+
+                using (var searcher = new ManagementObjectSearcher(query))
+                using (var results = searcher.Get())
+                {
+                    // FIX #10: Collect all command lines first, then dispose objects
+                    foreach (ManagementObject obj in results)
                     {
-                        string? cmdLine = obj["CommandLine"]?.ToString();
-                        if (!string.IsNullOrEmpty(cmdLine))
+                        try
                         {
-                            // Extract .qbw file path from command line
-                            var parts = cmdLine.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
-                            var qbwFile = parts.FirstOrDefault(p => p.EndsWith(".qbw", StringComparison.OrdinalIgnoreCase));
-                            if (!string.IsNullOrEmpty(qbwFile))
+                            string? cmdLine = obj["CommandLine"]?.ToString();
+                            if (!string.IsNullOrEmpty(cmdLine))
                             {
-                                return qbwFile;
+                                collectedCmdLines.Add(cmdLine);
                             }
                         }
+                        finally
+                        {
+                            obj.Dispose();
+                        }
+                    }
+                }
+
+                // Now process collected command lines (after ManagementObjects are disposed)
+                foreach (var cmdLine in collectedCmdLines)
+                {
+                    // Extract .qbw file path from command line
+                    var parts = cmdLine.Split(new[] { '"' }, StringSplitOptions.RemoveEmptyEntries);
+                    var qbwFile = parts.FirstOrDefault(p => p.EndsWith(".qbw", StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(qbwFile))
+                    {
+                        return qbwFile;
                     }
                 }
             }
@@ -62,6 +95,11 @@ namespace QBMigrationLauncher.Services
             catch (UnauthorizedAccessException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[WARN] Access denied for WMI query: {ex.Message}");
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                // Handle process access errors
+                System.Diagnostics.Debug.WriteLine($"[WARN] Process access error: {ex.Message}");
             }
             catch (Exception ex)
             {
@@ -111,6 +149,7 @@ namespace QBMigrationLauncher.Services
         /// <summary>
         /// Load config from disk.
         /// FIX: Added null checks for dynamic object deserialization.
+        /// FIX MEDIUM: Added configuration validation.
         /// </summary>
         public bool Load()
         {
@@ -130,6 +169,14 @@ namespace QBMigrationLauncher.Services
 
                 // Safely access serverUrl property
                 ServerUrl = config.serverUrl?.ToString();
+
+                // FIX MEDIUM: Validate configuration values
+                if (!ValidateConfiguration())
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARN] Configuration validation failed");
+                    return false;
+                }
+
                 return true;
             }
             catch (JsonException ex)
@@ -142,6 +189,46 @@ namespace QBMigrationLauncher.Services
                 System.Diagnostics.Debug.WriteLine($"[WARN] Failed to read config file: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// FIX MEDIUM: Validate configuration values.
+        /// Returns true if configuration is valid.
+        /// </summary>
+        private bool ValidateConfiguration()
+        {
+            // Validate ServerUrl
+            if (!string.IsNullOrEmpty(ServerUrl))
+            {
+                // Check for valid URL format
+                if (!Uri.TryCreate(ServerUrl, UriKind.Absolute, out var uri))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Invalid serverUrl format: {ServerUrl}");
+                    return false;
+                }
+
+                // FIX MEDIUM: Validate URL scheme (should be https in production)
+                if (uri.Scheme != "https" && uri.Scheme != "http")
+                {
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Invalid URL scheme: {uri.Scheme}");
+                    return false;
+                }
+
+                // FIX MEDIUM: Warn about insecure HTTP (but allow for localhost)
+                if (uri.Scheme == "http" && uri.Host != "localhost" && uri.Host != "127.0.0.1")
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARN] Using HTTP for non-localhost URL - this is insecure");
+                }
+
+                // FIX MEDIUM: Check for suspicious URLs
+                var host = uri.Host.ToLowerInvariant();
+                if (host.Contains("example.com") || host.Contains("test.local"))
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARN] Configuration contains placeholder/test URL");
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

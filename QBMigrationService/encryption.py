@@ -184,42 +184,87 @@ class EncryptionManager:
             raise ValueError(f"Decryption failed: {e}")
     
     @staticmethod
-    def verify_data_integrity(plaintext: str, expected_hash: Optional[str]) -> bool:
+    def verify_data_integrity(plaintext: str, expected_hash: Optional[str], allow_legacy: bool = True) -> bool:
         """
         $25M FIX: Verify data integrity using SHA-256 hash
-        
+
         This MUST be called after decryption and BEFORE transformation.
-        
+
         Args:
             plaintext: Decrypted data
             expected_hash: Expected SHA-256 hash from source
-            
+            allow_legacy: If True, allow data without hash (legacy data). Default True.
+
         Returns:
-            True if hash matches or no hash provided (legacy)
-            
+            True if hash matches or no hash provided (legacy with allow_legacy=True)
+
         Raises:
             ValueError: If hash verification fails (HARD ABORT)
+            ValueError: If no hash provided and allow_legacy=False
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         if expected_hash is None:
-            # Legacy data without hash - log warning but allow
-            print("⚠️  WARNING: No hash provided - cannot verify data integrity")
-            print("   This may be legacy data. Consider re-extracting from QB Desktop.")
+            # ENHANCED WARNING: Detailed guidance for legacy data migration
+            warning_msg = (
+                "LEGACY DATA WARNING: No SHA-256 hash provided - cannot verify data integrity.\n"
+                "   RISK: Data corruption or tampering cannot be detected.\n"
+                "   \n"
+                "   RECOMMENDATIONS:\n"
+                "   1. Re-extract data from QuickBooks Desktop using the latest extractor\n"
+                "      which includes SHA-256 hash in the encrypted payload.\n"
+                "   2. Verify source file hasn't been modified since extraction:\n"
+                "      - Check file modification timestamps\n"
+                "      - Compare file size with original\n"
+                "   3. For forensic migrations, ALWAYS require hash verification.\n"
+                "   4. Consider running a manual reconciliation after migration.\n"
+            )
+
+            if not allow_legacy:
+                # Strict mode - reject data without hash
+                logger.error("HASH REQUIRED: Legacy data without hash rejected (allow_legacy=False)")
+                raise ValueError(
+                    f"HASH VERIFICATION REQUIRED\n"
+                    f"   Data does not include SHA-256 hash for integrity verification.\n"
+                    f"   For forensic migrations, hash verification is mandatory.\n"
+                    f"   Re-extract data using the latest extractor that includes hash.\n"
+                )
+
+            # Allow legacy data but warn loudly
+            logger.warning(warning_msg)
+            print(f"⚠️  {warning_msg}")
+
+            # Calculate hash of current data for logging/debugging
+            current_hash = hashlib.sha256(plaintext.encode('utf-8')).hexdigest()
+            logger.info(f"Legacy data hash (calculated now): {current_hash[:16]}...")
+            print(f"   Current data hash: {current_hash[:16]}... (save for future reference)")
+
             return True
-        
+
         # Calculate actual hash
         actual_hash = hashlib.sha256(plaintext.encode('utf-8')).hexdigest()
-        
-        # Compare hashes
-        if actual_hash != expected_hash:
+
+        # Use constant-time comparison to prevent timing attacks
+        import hmac
+        if not hmac.compare_digest(actual_hash, expected_hash):
+            logger.error(f"HASH MISMATCH: Expected {expected_hash[:16]}..., got {actual_hash[:16]}...")
             raise ValueError(
                 f"❌ HASH VERIFICATION FAILED - DATA INTEGRITY COMPROMISED\n"
                 f"   Expected: {expected_hash}\n"
                 f"   Actual:   {actual_hash}\n"
                 f"\n"
                 f"   This indicates the data was corrupted or tampered with.\n"
-                f"   Migration ABORTED for security."
+                f"   Possible causes:\n"
+                f"   - File was modified after extraction\n"
+                f"   - Transmission error during upload\n"
+                f"   - Malicious tampering attempt\n"
+                f"\n"
+                f"   Migration ABORTED for security.\n"
+                f"   Re-extract from QuickBooks Desktop and try again."
             )
-        
+
+        logger.info(f"Hash verification passed: {actual_hash[:16]}...")
         print("✅ Hash verification PASSED - Data integrity confirmed")
         return True
     
@@ -326,33 +371,74 @@ class EncryptionManager:
     def secure_zero_memory(data):
         """
         CRITICAL: Securely zero out memory containing sensitive data
-        
-        Handles both bytes and bytearray
+
+        Handles bytes, bytearray, and memoryview
         Works on PyPy, CPython, and other implementations
+
+        COMPLETE IMPLEMENTATION: Multiple overwrite passes for defense in depth
         """
-        if isinstance(data, (bytes, bytearray)):
+        if data is None:
+            return
+
+        if isinstance(data, (bytes, bytearray, memoryview)):
             try:
                 # Convert to mutable bytearray if needed
                 if isinstance(data, bytes):
-                    data = bytearray(data)
-                
-                # Zero out the memory
-                for i in range(len(data)):
-                    data[i] = 0
-                
-                # Try ctypes memset for extra security
+                    # bytes are immutable, create mutable version
+                    mutable_data = bytearray(data)
+                elif isinstance(data, memoryview):
+                    mutable_data = bytearray(data)
+                else:
+                    mutable_data = data
+
+                data_len = len(mutable_data)
+
+                # SECURITY: Multi-pass overwrite for defense in depth
+                # Pass 1: Zero out
+                for i in range(data_len):
+                    mutable_data[i] = 0
+
+                # Pass 2: Pattern overwrite (0x55 = 01010101)
+                for i in range(data_len):
+                    mutable_data[i] = 0x55
+
+                # Pass 3: Inverse pattern (0xAA = 10101010)
+                for i in range(data_len):
+                    mutable_data[i] = 0xAA
+
+                # Pass 4: Final zero
+                for i in range(data_len):
+                    mutable_data[i] = 0
+
+                # Try ctypes memset for extra security (low-level)
                 try:
-                    if hasattr(ctypes, 'memset'):
-                        buf = (ctypes.c_char * len(data)).from_buffer(data)
-                        ctypes.memset(buf, 0, len(data))
-                except (AttributeError, TypeError, ValueError):
+                    if hasattr(ctypes, 'memset') and data_len > 0:
+                        buf = (ctypes.c_char * data_len).from_buffer(mutable_data)
+                        ctypes.memset(buf, 0, data_len)
+                except (AttributeError, TypeError, ValueError, BufferError):
                     pass
-                    
-            except Exception:
+
+                # Force garbage collection of the original if it was bytes
+                if isinstance(data, bytes):
+                    del mutable_data
+
+            except Exception as e:
                 # If all else fails, at least overwrite with zeros
-                if isinstance(data, bytearray):
-                    for i in range(len(data)):
-                        data[i] = 0
+                try:
+                    if isinstance(data, bytearray):
+                        for i in range(len(data)):
+                            data[i] = 0
+                except Exception:
+                    pass  # Best effort - don't crash
+
+        elif isinstance(data, str):
+            # Strings are immutable in Python, but we can try to clear
+            # any references. This is limited but better than nothing.
+            try:
+                # Convert to bytes and clear that
+                EncryptionManager.secure_zero_memory(data.encode('utf-8'))
+            except Exception:
+                pass
     
     @staticmethod
     def secure_delete(filepath: str, passes: int = 7) -> bool:

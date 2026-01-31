@@ -14,9 +14,187 @@ Version: 1.0.0
 import re
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# STANDARDIZED API ERROR RESPONSE FORMAT
+# =============================================================================
+
+class APIError:
+    """
+    Standardized API error response builder.
+
+    All API endpoints should use this for consistent error formatting.
+
+    Usage:
+        return APIError.bad_request("Invalid email format")
+        return APIError.not_found("Migration not found", error_code="MIG001")
+        return APIError.internal_error(exception)
+    """
+
+    @staticmethod
+    def response(
+        message: str,
+        status_code: int = 400,
+        error_code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        field: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """
+        Create a standardized error response.
+
+        Args:
+            message: Human-readable error message
+            status_code: HTTP status code
+            error_code: Application-specific error code (e.g., "AUTH001")
+            details: Additional error details
+            field: Field name if this is a field-specific error
+
+        Returns:
+            Tuple of (response_dict, status_code)
+        """
+        response = {
+            'success': False,
+            'error': message,
+        }
+
+        if error_code:
+            response['error_code'] = error_code
+
+        if field:
+            response['field'] = field
+
+        if details:
+            response['details'] = details
+
+        return response, status_code
+
+    @staticmethod
+    def bad_request(
+        message: str,
+        error_code: Optional[str] = None,
+        field: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """400 Bad Request error"""
+        return APIError.response(
+            message=message,
+            status_code=400,
+            error_code=error_code or "BAD_REQUEST",
+            field=field,
+            details=details
+        )
+
+    @staticmethod
+    def unauthorized(
+        message: str = "Authentication required",
+        error_code: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """401 Unauthorized error"""
+        return APIError.response(
+            message=message,
+            status_code=401,
+            error_code=error_code or "UNAUTHORIZED"
+        )
+
+    @staticmethod
+    def forbidden(
+        message: str = "Access denied",
+        error_code: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """403 Forbidden error"""
+        return APIError.response(
+            message=message,
+            status_code=403,
+            error_code=error_code or "FORBIDDEN"
+        )
+
+    @staticmethod
+    def not_found(
+        message: str = "Resource not found",
+        error_code: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """404 Not Found error"""
+        return APIError.response(
+            message=message,
+            status_code=404,
+            error_code=error_code or "NOT_FOUND"
+        )
+
+    @staticmethod
+    def conflict(
+        message: str,
+        error_code: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """409 Conflict error"""
+        return APIError.response(
+            message=message,
+            status_code=409,
+            error_code=error_code or "CONFLICT",
+            details=details
+        )
+
+    @staticmethod
+    def validation_error(
+        message: str,
+        field: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """422 Unprocessable Entity (validation error)"""
+        return APIError.response(
+            message=message,
+            status_code=422,
+            error_code="VALIDATION_ERROR",
+            field=field,
+            details=details
+        )
+
+    @staticmethod
+    def rate_limited(
+        message: str = "Rate limit exceeded. Please try again later.",
+        retry_after: Optional[int] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """429 Too Many Requests error"""
+        details = {'retry_after_seconds': retry_after} if retry_after else None
+        return APIError.response(
+            message=message,
+            status_code=429,
+            error_code="RATE_LIMITED",
+            details=details
+        )
+
+    @staticmethod
+    def internal_error(
+        exception: Optional[Exception] = None,
+        message: str = "An internal error occurred. Please try again.",
+        error_code: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """500 Internal Server Error"""
+        # Log the actual exception for debugging
+        if exception:
+            logger.exception(f"Internal error: {exception}")
+
+        return APIError.response(
+            message=message,
+            status_code=500,
+            error_code=error_code or "INTERNAL_ERROR"
+        )
+
+    @staticmethod
+    def service_unavailable(
+        message: str = "Service temporarily unavailable. Please try again later.",
+        error_code: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], int]:
+        """503 Service Unavailable error"""
+        return APIError.response(
+            message=message,
+            status_code=503,
+            error_code=error_code or "SERVICE_UNAVAILABLE"
+        )
 
 # Sensitive patterns to redact from error messages
 SENSITIVE_PATTERNS = [
@@ -27,12 +205,49 @@ SENSITIVE_PATTERNS = [
     (r'/tmp/.*?(?=[\s\'"\\]|$)', '[REDACTED_PATH]'),
     (r'C:\\.*?(?=[\s\'"\\]|$)', '[REDACTED_PATH]'),
 
-    # Database errors (PostgreSQL, MySQL, SQLite)
+    # IMPROVED: Database errors (PostgreSQL, MySQL, SQLite) - More comprehensive patterns
+    # PostgreSQL-specific errors
     (r'relation "([^"]+)" does not exist', 'Database table not found'),
-    (r'column "([^"]+)" does not exist', 'Database column error'),
-    (r'SQLSTATE\[\w+\]', 'Database error'),
-    (r'psycopg2\.\w+Error', 'Database connection error'),
-    (r'Duplicate entry.*for key', 'Duplicate entry'),
+    (r'column "([^"]+)"(?:\s+of\s+relation\s+"[^"]+")?(?:\s+does not exist)?', 'Database column error'),
+    (r'duplicate key value violates unique constraint "([^"]+)"', 'Duplicate entry violation'),
+    (r'null value in column "([^"]+)"(?:\s+violates not-null constraint)?', 'Required field missing'),
+    (r'foreign key constraint "([^"]+)"', 'Foreign key constraint violation'),
+    (r'check constraint "([^"]+)"', 'Data validation constraint violation'),
+    (r'invalid input syntax for (?:type\s+)?(\w+):\s*"[^"]*"', 'Invalid data format'),
+    (r'value too long for type (?:character varying|varchar)\((\d+)\)', 'Value exceeds maximum length'),
+    (r'connection to server at "([^"]+)".*?failed', 'Database connection failed'),
+    (r'could not connect to server:.*?Is the server running', 'Database server unreachable'),
+    (r'password authentication failed for user "([^"]+)"', 'Database authentication failed'),
+    (r'database "([^"]+)" does not exist', 'Database not found'),
+    (r'permission denied for (?:table|schema|database)\s+"([^"]+)"', 'Database permission denied'),
+    (r'deadlock detected', 'Database deadlock - please retry'),
+    (r'canceling statement due to (?:user request|statement timeout)', 'Database query timeout'),
+
+    # SQLAlchemy/psycopg2 error prefixes
+    (r'SQLSTATE\[(\w+)\](?:\s*\[[^\]]+\])*', 'Database error'),
+    (r'\(psycopg2\.(?:errors\.)?(\w+)\)', 'Database error'),
+    (r'psycopg2\.(?:errors\.)?(\w+Error)', 'Database connection error'),
+    (r'sqlalchemy\.exc\.(\w+)', 'Database error'),
+
+    # MySQL-specific errors
+    (r"Unknown column '([^']+)'", 'Database column error'),
+    (r"Table '([^']+)' doesn't exist", 'Database table not found'),
+    (r"Duplicate entry '([^']+)' for key '([^']+)'", 'Duplicate entry'),
+    (r"Can't connect to MySQL server", 'Database connection failed'),
+    (r"Access denied for user '([^']+)'@'([^']+)'", 'Database authentication failed'),
+
+    # SQLite-specific errors
+    (r'no such table:\s*(\w+)', 'Database table not found'),
+    (r'no such column:\s*(\w+)', 'Database column error'),
+    (r'UNIQUE constraint failed:\s*([^\s]+)', 'Duplicate entry'),
+    (r'database is locked', 'Database temporarily unavailable'),
+    (r'unable to open database file', 'Database file not accessible'),
+
+    # Generic database error patterns
+    (r'IntegrityError.*?(?:DETAIL|constraint).*', 'Data integrity constraint violation'),
+    (r'OperationalError.*?(?:connection|timeout|lock)', 'Database operation failed'),
+    (r'ProgrammingError.*?(?:syntax|relation)', 'Database query error'),
+    (r'DataError.*?(?:out of range|invalid|overflow)', 'Invalid data value'),
 
     # AWS secrets and credentials
     (r'aws_access_key_id.*', '[REDACTED_AWS_KEY]'),
@@ -54,10 +269,13 @@ SENSITIVE_PATTERNS = [
     # Stack trace line numbers (preserve file name but redact path)
     (r'File "(/[^"]+/)?([^/"]+\.py)"', 'File "\\2"'),
 
-    # Connection strings
-    (r'postgresql://[^@]+@[^\s]+', 'postgresql://[REDACTED]'),
-    (r'mysql://[^@]+@[^\s]+', 'mysql://[REDACTED]'),
-    (r'mongodb://[^@]+@[^\s]+', 'mongodb://[REDACTED]'),
+    # Connection strings (improved patterns)
+    (r'postgresql://[^:]+:[^@]+@[^\s?]+', 'postgresql://[REDACTED]'),
+    (r'postgres://[^:]+:[^@]+@[^\s?]+', 'postgresql://[REDACTED]'),
+    (r'mysql://[^:]+:[^@]+@[^\s?]+', 'mysql://[REDACTED]'),
+    (r'mongodb://[^:]+:[^@]+@[^\s?]+', 'mongodb://[REDACTED]'),
+    (r'mongodb\+srv://[^:]+:[^@]+@[^\s?]+', 'mongodb://[REDACTED]'),
+    (r'redis://[^:]+:[^@]+@[^\s?]+', 'redis://[REDACTED]'),
 ]
 
 # Generic error messages for common exception types

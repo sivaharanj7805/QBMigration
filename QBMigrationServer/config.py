@@ -344,7 +344,7 @@ class DevelopmentConfig(Config):
 
 
 class TestingConfig(Config):
-    """Testing configuration"""
+    """Testing configuration with validation for test environment"""
     TESTING = True
     DEBUG = False
 
@@ -357,6 +357,11 @@ class TestingConfig(Config):
     BACKUP_TO_S3 = False
     WTF_CSRF_ENABLED = False
     AWS_S3_BUCKET = None
+
+    # Test-specific timeout settings (shorter for faster test runs)
+    EC2_STARTUP_TIMEOUT_MINUTES = 1
+    MIGRATION_MAX_DURATION_HOURS = 1
+    WEBHOOK_TIMEOUT_SECONDS = 5
 
     # Use simpler connection pool for tests (only for non-SQLite)
     @property
@@ -373,13 +378,72 @@ class TestingConfig(Config):
 
     @classmethod
     def init_app(cls, app):
-        """Initialize app with test database"""
+        """Initialize app with test database and validate test configuration"""
         # Use environment variable if set, otherwise use class default
         db_url = os.getenv('DATABASE_URL', cls.SQLALCHEMY_DATABASE_URI)
         app.config['SQLALCHEMY_DATABASE_URI'] = db_url
         # Adjust engine options based on database type
         if 'sqlite' in db_url:
             app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {}
+
+        # TESTING CONFIG VALIDATION: Ensure test-specific settings are correct
+        cls._validate_test_config(app)
+
+    @classmethod
+    def _validate_test_config(cls, app):
+        """
+        Validate test configuration to prevent test pollution and ensure
+        tests don't accidentally affect production resources.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        issues = []
+
+        # Ensure we're not pointing to production database
+        db_url = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        if db_url:
+            if 'production' in db_url.lower():
+                issues.append("Database URL contains 'production' - refusing to run tests against production DB")
+            if 'rds.amazonaws.com' in db_url and 'test' not in db_url.lower():
+                issues.append("Database URL appears to be production RDS - ensure test database is used")
+
+        # Ensure S3 bucket is not production
+        s3_bucket = app.config.get('AWS_S3_BUCKET', '')
+        if s3_bucket and 'prod' in s3_bucket.lower() and 'test' not in s3_bucket.lower():
+            issues.append(f"S3 bucket '{s3_bucket}' appears to be production - use test bucket")
+
+        # Ensure dangerous features are disabled for tests
+        if app.config.get('AUTO_CLEANUP_ENABLED'):
+            issues.append("AUTO_CLEANUP_ENABLED should be False in testing")
+
+        if app.config.get('BACKUP_TO_S3'):
+            issues.append("BACKUP_TO_S3 should be False in testing")
+
+        # Validate encryption key is present (tests need this for encryption tests)
+        backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
+        if not backup_key:
+            # Generate a test key if not provided
+            from cryptography.fernet import Fernet
+            test_key = Fernet.generate_key().decode()
+            app.config['BACKUP_ENCRYPTION_KEY'] = test_key
+            logger.info("Generated test BACKUP_ENCRYPTION_KEY")
+
+        # Validate SECRET_KEY
+        secret_key = app.config.get('SECRET_KEY')
+        if not secret_key or len(secret_key) < 32:
+            import secrets as secrets_module
+            test_secret = 'test-secret-key-' + secrets_module.token_hex(16)
+            app.config['SECRET_KEY'] = test_secret
+            logger.info("Generated test SECRET_KEY")
+
+        # Report any issues
+        if issues:
+            for issue in issues:
+                logger.error(f"TEST CONFIG ISSUE: {issue}")
+            raise RuntimeError(f"Test configuration validation failed: {'; '.join(issues)}")
+
+        logger.info("Test configuration validated successfully")
 
 
 class ProductionConfig(Config):
