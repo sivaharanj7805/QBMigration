@@ -244,6 +244,11 @@ if MAX_PARALLEL_WORKERS > 10:
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 ENABLE_REDIS = get_env_bool("ENABLE_REDIS", "false")
 
+# SQLite configuration (for state tracking)
+# AUDIT FIX: Centralized timeout constants instead of magic numbers
+SQLITE_TIMEOUT_SECONDS = get_env_float("SQLITE_TIMEOUT_SECONDS", 30.0)
+SQLITE_BUSY_TIMEOUT_MS = get_env_int("SQLITE_BUSY_TIMEOUT_MS", 30000)
+
 # QBO Plan-specific worker limits
 # These are conservative limits to avoid rate limiting
 QBO_PLAN_WORKER_LIMITS = {

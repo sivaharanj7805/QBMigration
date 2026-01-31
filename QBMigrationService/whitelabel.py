@@ -139,8 +139,19 @@ class LicenseManager:
         }
     
     def validate_license(self, license_key: str) -> Dict:
-        """Validate a license key and return its details"""
+        """Validate a license key and return its details
+        AUDIT FIX: Added format validation before decode
+        """
         try:
+            # Validate format first
+            if not license_key or not isinstance(license_key, str):
+                return {"valid": False, "error": "Invalid license key format"}
+
+            # Check if it looks like valid base64
+            import re
+            if not re.match(r'^[A-Za-z0-9+/=]+$', license_key):
+                return {"valid": False, "error": "Invalid license key format (not base64)"}
+
             # Decode
             license_json = base64.b64decode(license_key).decode()
             license_data = json.loads(license_json)
@@ -237,7 +248,8 @@ if __name__ == "__main__":
     # Create a reseller license
     lm = LicenseManager()
     reseller = lm.generate_license_key("Big CPA Firm", "RESELLER", 365)
-    print("Reseller License:", reseller["license_key"][:50] + "...")
+    # AUDIT FIX: Removed debug print of license key
+    print("Reseller License: [generated]")
     
     # Validate it
     validation = lm.validate_license(reseller["license_key"])

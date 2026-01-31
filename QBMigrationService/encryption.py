@@ -29,9 +29,18 @@ class EncryptionManager:
     """
     
     # HIGH-15 FIX: KDF salt should be generated randomly per-key or loaded from secure config
-    # This default is ONLY used when no salt is provided - production should always use random salt
-    # WARNING: Do not use this default for new key derivations in production!
-    DEFAULT_KDF_SALT = os.environ.get('QBM_KDF_SALT', '').encode() or os.urandom(32)
+    # AUDIT FIX: Use a deterministic fallback salt for consistency, but warn loudly
+    # WARNING: Production MUST set QBM_KDF_SALT environment variable!
+    _ENV_SALT = os.environ.get('QBM_KDF_SALT', '')
+    if _ENV_SALT:
+        DEFAULT_KDF_SALT = _ENV_SALT.encode()
+    else:
+        # Use a deterministic but unique-per-installation fallback
+        # This allows decryption to work across process restarts
+        import hashlib as _hs
+        _machine_id = os.environ.get('HOSTNAME', '') + os.environ.get('USER', 'default')
+        DEFAULT_KDF_SALT = _hs.sha256(f"QBMigration-KDF-{_machine_id}".encode()).digest()
+        # Note: This is logged at first use, not at import time
     
     @staticmethod
     def encrypt_data(plaintext: bytes) -> Dict[str, str]:
