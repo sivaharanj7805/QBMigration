@@ -31,6 +31,65 @@ logger = logging.getLogger(__name__)
 
 extractor_bp = Blueprint('extractor', __name__, url_prefix='/api/extractor')
 
+
+# FIX: Helper function to sanitize URLs from error messages
+def _sanitize_url_for_logging(url: str) -> str:
+    """
+    Sanitize a URL for safe logging by removing internal infrastructure details.
+
+    This prevents internal URLs, tokens, and paths from being exposed in logs.
+    """
+    import re
+    from urllib.parse import urlparse
+
+    if not url:
+        return "[NO_URL]"
+
+    try:
+        parsed = urlparse(url)
+        # Only log the domain and path basename, not full internal paths
+        if parsed.netloc:
+            # Extract just the filename from the path
+            path_parts = parsed.path.rstrip('/').split('/')
+            filename = path_parts[-1] if path_parts else ''
+            return f"{parsed.scheme}://{parsed.netloc}/.../{filename}" if filename else f"{parsed.scheme}://{parsed.netloc}/..."
+        else:
+            # Local path - sanitize to just the filename
+            return f"[LOCAL]/{os.path.basename(url)}"
+    except Exception:
+        return "[SANITIZED_URL]"
+
+
+def _sanitize_error_for_logging(error: Exception) -> str:
+    """
+    Sanitize an exception message for safe logging by removing internal URLs and paths.
+    """
+    import re
+    error_str = str(error)
+
+    # Remove full URLs (http/https)
+    error_str = re.sub(
+        r'https?://[^\s<>"\']+',
+        '[URL_REDACTED]',
+        error_str
+    )
+
+    # Remove internal file paths
+    error_str = re.sub(
+        r'(/var/www|/opt|/home|/tmp|/etc)[^\s<>"\']*',
+        '[PATH_REDACTED]',
+        error_str
+    )
+
+    # Remove Windows paths
+    error_str = re.sub(
+        r'[A-Za-z]:\\[^\s<>"\']*',
+        '[PATH_REDACTED]',
+        error_str
+    )
+
+    return error_str
+
 # GitHub repository for releases
 GITHUB_REPO = 'sivaharanj7805/QBMigration'
 GITHUB_API_URL = f'https://api.github.com/repos/{GITHUB_REPO}/releases/latest'
@@ -274,9 +333,11 @@ def download_and_cache_from_github():
                         download_url = asset.get('browser_download_url', download_url)
                         break
         except Exception as e:
-            logger.warning(f"Could not fetch GitHub API: {e}")
+            # FIX: Sanitize error to remove internal URLs
+            logger.warning(f"Could not fetch GitHub API: {_sanitize_error_for_logging(e)}")
 
-        logger.info(f"Downloading extractor from: {download_url}")
+        # FIX: Sanitize URL for logging to avoid exposing internal infrastructure
+        logger.info(f"Downloading extractor from: {_sanitize_url_for_logging(download_url)}")
         response = requests.get(download_url, headers=headers, stream=True, timeout=120)
 
         if response.status_code != 200:
@@ -320,7 +381,8 @@ def download_and_cache_from_github():
         logger.error("GitHub download timed out")
         return None
     except Exception as e:
-        logger.error(f"Failed to download from GitHub: {e}")
+        # FIX: Sanitize error to remove internal URLs
+        logger.error(f"Failed to download from GitHub: {_sanitize_error_for_logging(e)}")
         return None
 
 
@@ -331,7 +393,8 @@ def check_github_release_exists():
         response = requests.head(GITHUB_RELEASE_URL, allow_redirects=True, timeout=10, headers=headers)
         return response.status_code == 200
     except Exception as e:
-        logger.warning(f"Could not check GitHub release: {e}")
+        # FIX: Sanitize error to remove internal URLs
+        logger.warning(f"Could not check GitHub release: {_sanitize_error_for_logging(e)}")
         return False
 
 

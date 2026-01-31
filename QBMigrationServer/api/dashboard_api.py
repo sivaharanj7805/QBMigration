@@ -243,7 +243,15 @@ def get_bulk_status():
     try:
         data = request.get_json() or {}
         migration_ids = data.get('migration_ids', [])
-        
+
+        # FIX: Add max length check to prevent DoS via large arrays
+        MAX_MIGRATION_IDS = 100
+        if isinstance(migration_ids, list) and len(migration_ids) > MAX_MIGRATION_IDS:
+            return jsonify({
+                'success': False,
+                'error': f'Too many migration IDs. Maximum allowed: {MAX_MIGRATION_IDS}'
+            }), 400
+
         if not migration_ids:
             # Return all migrations if no IDs specified
             migrations = Migration.query.filter_by(user_id=current_user.id)\
@@ -971,12 +979,26 @@ def download_caseware_bundle(migration_id):
             }), 404
 
         # FIX: Validate path is within allowed directories (prevent serving arbitrary files)
+        # Using os.path.commonpath() instead of startswith() for secure path validation
         bundle_path = os.path.realpath(migration.caseware_bundle_path)
         allowed_dirs = [
             os.path.realpath(current_app.root_path),
             os.path.realpath('/tmp'),
         ]
-        if not any(bundle_path.startswith(d + os.sep) or bundle_path.startswith(d) for d in allowed_dirs):
+        path_is_valid = False
+        for allowed_dir in allowed_dirs:
+            try:
+                # os.path.commonpath raises ValueError if paths are on different drives (Windows)
+                # or returns the common path if they share a prefix
+                common = os.path.commonpath([bundle_path, allowed_dir])
+                if common == allowed_dir:
+                    path_is_valid = True
+                    break
+            except ValueError:
+                # Paths on different drives or no common path - not valid
+                continue
+
+        if not path_is_valid:
             logger.warning(f"Attempted to serve file outside allowed dirs: {bundle_path}")
             return jsonify({
                 'success': False,

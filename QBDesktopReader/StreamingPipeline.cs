@@ -152,14 +152,17 @@ namespace QBDesktopExtractor
                     // On Windows, set restrictive ACLs
                     if (Environment.OSVersion.Platform == PlatformID.Win32NT)
                     {
+                        bool aclsApplied = false;
+                        Exception aclException = null;
+
                         try
                         {
                             var dirInfo = new DirectoryInfo(baseDir);
                             var security = dirInfo.GetAccessControl();
-                            
+
                             // Remove inherited permissions
                             security.SetAccessRuleProtection(true, false);
-                            
+
                             // Grant full control only to current user
                             var currentUser = WindowsIdentity.GetCurrent();
                             security.AddAccessRule(new FileSystemAccessRule(
@@ -168,12 +171,29 @@ namespace QBDesktopExtractor
                                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                                 PropagationFlags.None,
                                 AccessControlType.Allow));
-                            
+
                             dirInfo.SetAccessControl(security);
+
+                            // FIX: Verify ACLs were actually applied by reading them back
+                            var verifiedSecurity = dirInfo.GetAccessControl();
+                            var rules = verifiedSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
+                            aclsApplied = rules.Count > 0;
                         }
                         catch (Exception ex)
                         {
+                            aclException = ex;
                             _logger?.Log(LogLevel.Warning, "Could not set temp directory ACLs: {0}", ex.Message);
+                        }
+
+                        // FIX: If ACLs could not be applied, throw exception for security-critical environments
+                        // Check if strict security mode is enabled via environment variable
+                        bool strictSecurityMode = Environment.GetEnvironmentVariable("QBEXTRACTOR_STRICT_SECURITY") == "1";
+                        if (strictSecurityMode && !aclsApplied)
+                        {
+                            throw new UnauthorizedAccessException(
+                                "Failed to apply restrictive ACLs to temp directory. " +
+                                "This is required in strict security mode. " +
+                                "Error: " + (aclException?.Message ?? "ACL verification failed"));
                         }
                     }
                 }

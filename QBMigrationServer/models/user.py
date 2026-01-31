@@ -262,7 +262,14 @@ class User(UserMixin, db.Model):
 
         # HIGH FIX: Validate JSON structure when loading password history
         # Prevents code injection or corruption attacks via malformed JSON
+        # FIX: Use database-level locking for thread-safe password history access
         try:
+            # Acquire row-level lock to prevent concurrent modifications
+            db.session.execute(
+                db.text("SELECT password_history FROM users WHERE id = :user_id FOR SHARE"),
+                {"user_id": self.id}
+            )
+
             history = json.loads(self.password_history)
 
             # Validate structure: must be a list
@@ -312,7 +319,14 @@ class User(UserMixin, db.Model):
             password_hash: Hashed password to add
         """
         # HIGH FIX: Validate JSON structure when loading password history
+        # FIX: Use database-level locking for thread-safe password history manipulation
         try:
+            # Acquire row-level lock to prevent concurrent modifications
+            db.session.execute(
+                db.text("SELECT password_history FROM users WHERE id = :user_id FOR UPDATE"),
+                {"user_id": self.id}
+            )
+
             history = json.loads(self.password_history) if self.password_history else []
 
             # Validate structure: must be a list
@@ -353,20 +367,22 @@ class User(UserMixin, db.Model):
     def is_locked(self):
         """
         Check if account is currently locked
-        
+
         Returns:
             bool: True if account is locked, False otherwise
         """
         if not self.account_locked_until:
             return False
-        
+
         # Check if lock has expired
         if datetime.utcnow() > self.account_locked_until:
             # Lock expired, reset
             self.account_locked_until = None
             self.failed_login_attempts = 0
+            # FIX: Commit the lock reset to persist the change
+            db.session.commit()
             return False
-        
+
         return True
     
     def record_failed_login(self):

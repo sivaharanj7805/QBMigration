@@ -118,4 +118,5 @@ cookies.txt
 session.txt
 tokens.txt
 credentials.txt
-auth.txtQBMigrationServer/package-lock.json
+auth.txt
+QBMigrationServer/package-lock.json

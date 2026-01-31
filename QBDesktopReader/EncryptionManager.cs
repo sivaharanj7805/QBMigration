@@ -318,19 +318,14 @@ namespace QBDesktopExtractor
                         "This application currently requires Windows DPAPI for key protection.");
                 }
 
-                // Non-Windows without KMS: Return key with warning marker
-                // SECURITY WARNING: This is less secure than DPAPI but allows operation on non-Windows
-                // In production, KMS should be configured for cross-platform support
-                byte[] marker = Encoding.UTF8.GetBytes("NOPROTECT:");
-                byte[] result = new byte[marker.Length + key.Length];
-                Buffer.BlockCopy(marker, 0, result, 0, marker.Length);
-                Buffer.BlockCopy(key, 0, result, marker.Length, key.Length);
-
-                System.Diagnostics.Debug.WriteLine(
-                    "[EncryptionManager] WARNING: DPAPI not available on non-Windows platform. " +
-                    "Key protection is reduced. Configure KMS_ENCRYPTION_ENDPOINT for production use.");
-
-                return result;
+                // Non-Windows without KMS: SECURITY FIX - throw exception instead of returning plaintext
+                // Returning plaintext keys is a critical security vulnerability
+                // Applications running on non-Windows platforms MUST configure KMS for key protection
+                throw new CryptographicException(
+                    "Key protection is not available on non-Windows platforms without KMS configuration. " +
+                    "Returning unprotected encryption keys is a security vulnerability. " +
+                    "Please configure KMS_ENCRYPTION_ENDPOINT environment variable for cross-platform support, " +
+                    "or run this application on Windows where DPAPI is available.");
             }
 
             try

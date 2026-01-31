@@ -44,8 +44,33 @@ namespace QBDesktopExtractor
                 SESSION_API_URL = SESSION_API_URL.Replace("http://", "https://");
             }
 
-            // Ensure directory exists
-            Directory.CreateDirectory(APP_DATA_PATH);
+            // FIX: Add error handling for Directory.CreateDirectory failure
+            // Ensure directory exists with proper error handling
+            try
+            {
+                Directory.CreateDirectory(APP_DATA_PATH);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Log the error but don't crash - session validation can still work without cache
+                System.Diagnostics.Debug.WriteLine(
+                    $"[SessionValidator] Cannot create app data directory (access denied): {ex.Message}. " +
+                    "Session caching will be disabled.");
+            }
+            catch (IOException ex)
+            {
+                // Log the error but don't crash - session validation can still work without cache
+                System.Diagnostics.Debug.WriteLine(
+                    $"[SessionValidator] Cannot create app data directory (IO error): {ex.Message}. " +
+                    "Session caching will be disabled.");
+            }
+            catch (Exception ex)
+            {
+                // Catch-all for unexpected errors - log but don't crash
+                System.Diagnostics.Debug.WriteLine(
+                    $"[SessionValidator] Cannot create app data directory: {ex.Message}. " +
+                    "Session caching will be disabled.");
+            }
         }
 
         /// <summary>

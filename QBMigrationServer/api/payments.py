@@ -176,7 +176,17 @@ def create_checkout(current_user):
 
         return jsonify({'success': False, 'error': safe_message}), 400
     except Exception as e:
-        logger.exception(f"Payment error for user {current_user.id}: {str(e)}")
+        # FIX: Sanitize exception message before logging to avoid card details
+        # Remove potential card numbers, CVVs, and other sensitive payment info
+        import re
+        error_str = str(e)
+        # Redact card numbers (13-19 digits, optionally with spaces/dashes)
+        error_str = re.sub(r'\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{1,7}\b', '[CARD_REDACTED]', error_str)
+        # Redact CVV/CVC (3-4 digit codes)
+        error_str = re.sub(r'\b(cvv|cvc|cvn|security[\s_]?code)[\s:=]*\d{3,4}\b', r'\1=[REDACTED]', error_str, flags=re.IGNORECASE)
+        # Redact expiry dates in various formats (MM/YY, MM/YYYY, MMYY, etc.)
+        error_str = re.sub(r'\b(exp|expir[ey]|expiration)[\s:=]*\d{2}[/\-]?\d{2,4}\b', r'\1=[REDACTED]', error_str, flags=re.IGNORECASE)
+        logger.exception(f"Payment error for user {current_user.id}: {type(e).__name__}: {error_str}")
         return jsonify({'success': False, 'error': 'Failed to create checkout session'}), 500
 
 

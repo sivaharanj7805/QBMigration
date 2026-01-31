@@ -11,7 +11,7 @@ import datetime
 import re
 import hmac
 import hashlib
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable, Any
 import logging
 
 from models.database import db
@@ -79,33 +79,42 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
-def require_auth(f):
-    """Decorator to require authentication for an endpoint (supports both JWT and session)"""
+def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator to require authentication for an endpoint (supports both JWT and session)
+
+    Args:
+        f: The function to decorate
+
+    Returns:
+        The decorated function that requires authentication
+    """
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> Tuple[Any, int]:
         # Check for JWT token in Authorization header
         auth_header = request.headers.get('Authorization')
-        
+
         if auth_header:
             try:
                 # Expect "Bearer <token>"
                 parts = auth_header.split()
                 if len(parts) != 2 or parts[0].lower() != 'bearer':
                     return jsonify({'success': False, 'error': 'Invalid authorization format'}), 401
-                
+
                 token = parts[1]
                 payload = decode_token(token)
-                
+
                 if not payload:
                     return jsonify({'success': False, 'error': 'Invalid or expired token'}), 401
-                
+
                 # Add user info to request
                 request.current_user = payload
                 return f(*args, **kwargs)
-                
+
             except Exception as e:
+                # FIX: Log specific exception type before returning generic error
+                logger.warning(f"Authentication failed with {type(e).__name__}: {str(e)}")
                 return jsonify({'success': False, 'error': 'Authentication failed'}), 401
-        
+
         # Check for session-based auth
         if 'user_id' in session:
             request.current_user = {
@@ -113,7 +122,7 @@ def require_auth(f):
                 'email': session.get('email', '')
             }
             return f(*args, **kwargs)
-        
+
         return jsonify({'success': False, 'error': 'No authorization provided'}), 401
     return decorated
 

@@ -66,6 +66,8 @@ function validatePassword(password: string): PasswordValidation {
 
 /**
  * Check for common password patterns
+ * SECURITY FIX: Corrected logic - only check if password contains common patterns
+ * or if password is too similar to a common pattern (not the reverse)
  */
 function isCommonPassword(password: string): boolean {
     const commonPatterns = [
@@ -75,8 +77,12 @@ function isCommonPassword(password: string): boolean {
     ];
 
     const lower = password.toLowerCase();
+
+    // Check if password contains any common pattern
+    // OR if password is essentially the same as a common pattern (exact match)
+    // FIX: Removed pattern.includes(lower) which incorrectly flags short passwords
     return commonPatterns.some(pattern =>
-        lower.includes(pattern) || pattern.includes(lower)
+        lower.includes(pattern) || lower === pattern
     );
 }
 

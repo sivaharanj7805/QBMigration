@@ -24,8 +24,10 @@ import {
 } from './schemas';
 import { getCsrfToken, setCsrfToken } from './auth';
 
-// FIX FE-01: Production-safe API URL configuration
-const API_BASE_URL = (() => {
+// FIX: Production-safe API URL configuration
+// Moved error throwing to runtime (when API is first used) instead of module load time
+// This prevents build/SSR failures and allows for better error handling
+const getApiBaseUrl = (): string => {
     const envUrl = process.env.NEXT_PUBLIC_API_URL;
     if (envUrl) return envUrl;
 
@@ -34,11 +36,27 @@ const API_BASE_URL = (() => {
         return "http://localhost:5000";
     }
 
-    throw new Error(
-        'NEXT_PUBLIC_API_URL environment variable is required in production. ' +
-        'Set it to your API server URL.'
-    );
-})();
+    // In production, return empty string - actual error will be thrown at runtime
+    return "";
+};
+
+// Lazy initialization - URL is resolved when first accessed
+let _apiBaseUrl: string | null = null;
+const API_BASE_URL = (): string => {
+    if (_apiBaseUrl === null) {
+        _apiBaseUrl = getApiBaseUrl();
+    }
+
+    // FIX: Throw error at runtime when API is actually used, not at module load time
+    if (!_apiBaseUrl && process.env.NODE_ENV === 'production') {
+        throw new Error(
+            'NEXT_PUBLIC_API_URL environment variable is required in production. ' +
+            'Set it to your API server URL.'
+        );
+    }
+
+    return _apiBaseUrl;
+};
 
 interface ApiResponse<T> {
     success: boolean;
@@ -541,8 +559,8 @@ class ApiClient {
     }
 }
 
-// Export singleton instance
-export const api = new ApiClient(API_BASE_URL);
+// Export singleton instance - FIX: Use function call to get URL at runtime
+export const api = new ApiClient(API_BASE_URL());
 
 // Export class for testing
 export { ApiClient };
