@@ -4,20 +4,33 @@
 **Auditor:** Claude Code (Opus 4.5)
 **Codebase:** ForensicBridge QB Migration Platform
 **Branch:** `claude/production-readiness-review-NHHaJ`
+**Audit Type:** Deep Folder-by-Folder Review
 
 ---
 
 ## Executive Summary
 
-This audit identifies **47 issues** across 6 severity categories that could cause problems in production. The codebase demonstrates solid security fundamentals but has several race conditions, edge cases, and configuration issues that should be addressed before production deployment.
+This audit identifies **63 issues** across 6 severity categories that could cause problems in production. Each folder was examined individually for a comprehensive review. The codebase demonstrates solid security fundamentals but has several race conditions, edge cases, and configuration issues that should be addressed before production deployment.
 
 | Severity | Count | Description |
 |----------|-------|-------------|
-| 🔴 **CRITICAL** | 6 | Must fix before production - can cause data loss, security breach, or system failure |
-| 🟠 **HIGH** | 12 | Should fix before production - significant risk of failures |
-| 🟡 **MEDIUM** | 15 | Fix soon after launch - user-facing issues or edge cases |
-| 🔵 **LOW** | 10 | Improvements - code quality and maintainability |
+| 🔴 **CRITICAL** | 9 | Must fix before production - can cause data loss, security breach, or system failure |
+| 🟠 **HIGH** | 16 | Should fix before production - significant risk of failures |
+| 🟡 **MEDIUM** | 20 | Fix soon after launch - user-facing issues or edge cases |
+| 🔵 **LOW** | 14 | Improvements - code quality and maintainability |
 | ⚪ **INFO** | 4 | Observations - no action required |
+
+## Folders Audited
+
+| Folder | Files Reviewed | Issues Found |
+|--------|---------------|--------------|
+| QBMigrationServer | 45+ Python files | 32 issues |
+| forensicbridge-dashboard | 20+ TypeScript files | 8 issues |
+| QBMigrationService | 25+ Python files | 10 issues |
+| QBDesktopReader | 20+ C# files | 5 issues |
+| QBMigrationLauncher | 10+ C# files | 2 issues |
+| aws | CloudFormation + Lambda | 4 issues |
+| shared, docs, .github | Config + docs | 2 issues |
 
 ---
 
@@ -141,6 +154,70 @@ service_path = os.getenv('QBM_SERVICE_PATH', os.path.join(os.path.dirname(__file
 
 ---
 
+### CRIT-07: ENCRYPTION KEY COMMITTED TO REPOSITORY
+
+**Location:** `QBMigrationService/.master_key`
+
+**Problem:** An actual encryption master key file is committed to the repository! This file contains raw binary key data that should NEVER be in source control.
+
+```
+/;R�@6PhZXlyL%��k�z�>}��v�-
+```
+
+**Impact:**
+- Anyone with repository access has the encryption key
+- Historical versions in git contain the key forever
+- Violates all security compliance standards (SOC 2, PIPEDA, etc.)
+- Enables decryption of all data encrypted with this key
+
+**Fix:**
+1. **IMMEDIATELY** rotate this key in production
+2. Add `.master_key` to `.gitignore`
+3. Remove from git history using `git filter-branch` or BFG Repo-Cleaner
+4. Use AWS KMS, HashiCorp Vault, or environment variables for key management
+5. Audit all encrypted data to ensure compromise assessment
+
+---
+
+### CRIT-08: CloudFormation References Non-Existent Redis Cluster
+
+**Location:** `aws/cloudformation.yaml:559`
+
+**Problem:** The EC2 UserData script references `${RedisCluster.RedisEndpoint.Address}` but the resource is named `RedisReplicationGroup`, not `RedisCluster`.
+
+```yaml
+REDIS_URL=redis://${RedisCluster.RedisEndpoint.Address}:6379  # WRONG!
+```
+
+**Impact:** CloudFormation stack deployment will fail with unresolved reference error.
+
+**Fix:** Change to:
+```yaml
+REDIS_URL=redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379
+```
+
+---
+
+### CRIT-09: Lambda Trigger Has No Authentication
+
+**Location:** `aws/lambda/s3_trigger.py:81-91`
+
+**Problem:** The Lambda function calls an internal API endpoint without any authentication:
+
+```python
+req = urllib.request.Request(
+    f"{api_url}/api/internal/trigger-processing",
+    data=req_data,
+    headers={'Content-Type': 'application/json'}  # No auth header!
+)
+```
+
+**Impact:** The `/api/internal/trigger-processing` endpoint, if exposed, could be called by anyone to trigger migrations.
+
+**Fix:** Add API key or IAM-based authentication to internal endpoints.
+
+---
+
 ## 🟠 HIGH Severity Issues
 
 ### HIGH-01: Missing Transaction Rollback in Credit Sync
@@ -258,6 +335,80 @@ service_path = os.getenv('QBM_SERVICE_PATH', os.path.join(os.path.dirname(__file
 **Problem:** No password reset functionality. Users who forget passwords cannot recover their accounts.
 
 **Fix:** Implement email-based password reset with time-limited tokens.
+
+---
+
+### HIGH-13: Frontend Upload Page Simulates Validation Instead of Actually Validating
+
+**Location:** `forensicbridge-dashboard/src/app/(dashboard)/upload/page.tsx:66-72`
+
+**Problem:** The file validation is simulated with `setTimeout` and random record counts:
+
+```typescript
+// Simulate validation
+setTimeout(() => {
+    setFiles(prev => prev.map(f =>
+        f.name === file.name
+            ? { ...f, status: "ready", records: Math.floor(Math.random() * 50000) + 5000 }
+            : f
+    ));
+}, 1500);
+```
+
+**Impact:** Files are marked as "ready" without actual validation. Invalid files will fail during actual migration.
+
+**Fix:** Call actual validation API endpoint before marking files ready.
+
+---
+
+### HIGH-14: AesGcmCompat Uses CBC Instead of GCM
+
+**Location:** `QBDesktopReader/EncryptionManager.cs:441-523`
+
+**Problem:** The `AesGcmCompat` class claims to be GCM but actually uses CBC mode with HMAC. While this provides authenticated encryption, it's not true GCM and has different security properties.
+
+```csharp
+aes.Mode = CipherMode.CBC;  // Not GCM!
+```
+
+**Impact:**
+- Performance difference (CBC requires separate HMAC pass)
+- Security properties differ from actual GCM
+- May cause interoperability issues with systems expecting real GCM
+
+**Fix:** Document this clearly or upgrade to .NET 5+ which has native AesGcm support.
+
+---
+
+### HIGH-15: KDF Salt is Hardcoded and Non-Random
+
+**Location:** `QBMigrationService/encryption.py:31`
+
+**Problem:** The KDF (Key Derivation Function) uses a hardcoded static salt:
+
+```python
+DEFAULT_KDF_SALT = b'QB_MIGRATION_TOOL_V2_2025'
+```
+
+**Impact:** Same password will always derive the same key, enabling rainbow table attacks.
+
+**Fix:** Generate random salt per encryption operation and store with ciphertext.
+
+---
+
+### HIGH-16: Config File Has allowInsecureHttpForLocalhost Enabled
+
+**Location:** `QBDesktopReader/config.json:24`
+
+```json
+"allowInsecureHttpForLocalhost": true
+```
+
+**Problem:** Development config allows HTTP. If accidentally deployed to production, data could be transmitted unencrypted.
+
+**Impact:** Man-in-the-middle attacks possible if config not properly overridden.
+
+**Fix:** Ensure production config (`config_production.json`) has this set to `false` (which it does), but add startup validation to prevent HTTP in production.
 
 ---
 
@@ -397,6 +548,60 @@ stripe.api_key = os.getenv('STRIPE_SECRET_KEY')  # At import time
 
 ---
 
+### MED-16: CloudFormation Hardcodes US AMI ID
+
+**Location:** `aws/cloudformation.yaml:534`
+
+```yaml
+ImageId: ami-0c7217cdde317cfec  # Ubuntu 22.04 LTS us-east-1
+```
+
+**Problem:** AMI ID is hardcoded for us-east-1. Deploying to ca-central-1 (required for PIPEDA) will fail.
+
+**Fix:** Use SSM parameter or mappings for region-specific AMIs.
+
+---
+
+### MED-17: Login Page Doesn't Use Centralized API Client
+
+**Location:** `forensicbridge-dashboard/src/app/(auth)/login/page.tsx:24`
+
+**Problem:** Login page makes direct `fetch()` calls instead of using the `api` client from `lib/api.ts`.
+
+**Impact:** Inconsistent error handling, missing timeout, no schema validation.
+
+**Fix:** Use the centralized API client for all API calls.
+
+---
+
+### MED-18: Upload Page Also Uses Direct Fetch
+
+**Location:** `forensicbridge-dashboard/src/app/(dashboard)/upload/page.tsx:112-117`
+
+**Problem:** Same issue as MED-17 - direct fetch instead of API client.
+
+---
+
+### MED-19: No File Type Validation on Upload
+
+**Location:** `forensicbridge-dashboard/src/app/(dashboard)/upload/page.tsx:55-73`
+
+**Problem:** While accept attribute limits file picker, actual file type isn't validated. Users can rename any file to .qbw.
+
+**Fix:** Validate file magic bytes, not just extension.
+
+---
+
+### MED-20: Service Startup Prints Secrets to Console
+
+**Location:** `QBMigrationService/main.py:72-78`
+
+**Problem:** Migration ID and timestamps are printed. If extended to include any sensitive data, it would be logged.
+
+**Fix:** Use structured logging with sensitive data redaction.
+
+---
+
 ## 🔵 LOW Severity Issues
 
 ### LOW-01: Inconsistent Date Handling
@@ -515,6 +720,12 @@ stripe.api_key = os.getenv('STRIPE_SECRET_KEY')  # At import time
 
 ## Recommended Action Plan
 
+### IMMEDIATE (Before ANY Production Traffic)
+
+1. **CRIT-07**: Remove `.master_key` from repository and rotate all keys
+2. **CRIT-08**: Fix CloudFormation Redis reference
+3. **CRIT-09**: Add authentication to internal Lambda endpoints
+
 ### Before Production Launch (Week 1)
 
 1. **CRIT-01**: Add `SELECT FOR UPDATE` to credit consumption
@@ -524,7 +735,8 @@ stripe.api_key = os.getenv('STRIPE_SECRET_KEY')  # At import time
 5. **CRIT-06**: Fix hardcoded development path
 6. **HIGH-03**: Add JWT token revocation
 7. **HIGH-07**: Validate migration ID format
-8. **MED-08**: Add timeouts to external HTTP calls
+8. **HIGH-13**: Implement actual file validation in frontend
+9. **MED-08**: Add timeouts to external HTTP calls
 
 ### First Week After Launch (Week 2)
 
@@ -533,25 +745,79 @@ stripe.api_key = os.getenv('STRIPE_SECRET_KEY')  # At import time
 3. **HIGH-04**: Apply S3 lifecycle at bucket level
 4. **HIGH-06**: Add distributed lock for token refresh
 5. **HIGH-12**: Implement password reset
+6. **HIGH-14**: Document AesGcmCompat limitations
+7. **HIGH-15**: Use random salts for KDF
+8. **MED-16**: Fix CloudFormation AMI for ca-central-1
 
 ### First Month (Weeks 3-4)
 
 1. **HIGH-05**: Add CloudWatch alarm for connection pool
 2. **HIGH-09**: Add retry logic to frontend API client
-3. **MED-01** through **MED-15**: Address all medium issues
-4. **LOW-01** through **LOW-10**: Address code quality issues
+3. **HIGH-16**: Add startup validation to prevent HTTP in production
+4. **MED-01** through **MED-20**: Address all medium issues
+5. **LOW-01** through **LOW-14**: Address code quality issues
+
+---
+
+## Per-Folder Summary
+
+### QBMigrationServer (Flask Backend)
+**Status: Needs Work**
+- Good: Argon2id hashing, rate limiting, security headers
+- Fix: Race conditions in credit/payment handling, QBO token encryption, JWT revocation
+
+### forensicbridge-dashboard (Next.js Frontend)
+**Status: Mostly Ready**
+- Good: Timeout handling, Zod schema validation
+- Fix: Use centralized API client everywhere, implement actual file validation
+
+### QBMigrationService (Python Service)
+**Status: Critical Issue**
+- Good: SHA-256 verification, fail-closed security
+- Fix: REMOVE `.master_key` FILE IMMEDIATELY, use random KDF salts
+
+### QBDesktopReader (C# Extractor)
+**Status: Good**
+- Good: AES encryption, DPAPI key protection, secure delete
+- Fix: Document CBC-HMAC vs GCM difference
+
+### aws (CloudFormation)
+**Status: Needs Fixes**
+- Good: WAF rules, encryption at rest, private subnets
+- Fix: Redis reference error, AMI hardcoding, Lambda authentication
 
 ---
 
 ## Conclusion
 
-The ForensicBridge codebase demonstrates professional-grade security practices and well-thought-out architecture. However, several race conditions and edge cases need to be addressed before production deployment. The most critical issues involve payment processing and credential storage, which should be resolved immediately.
+The ForensicBridge codebase demonstrates professional-grade security practices and well-thought-out architecture. However, **one critical issue requires immediate attention**: the `.master_key` file committed to the repository represents a serious security breach.
 
-**Overall Production Readiness Score: 7.5/10**
+Beyond that, several race conditions and edge cases need to be addressed before production deployment. The most critical issues involve:
+1. Encryption key exposure (CRIT-07)
+2. Payment processing race conditions (CRIT-01, CRIT-05)
+3. Credential storage (CRIT-02)
+4. Infrastructure configuration errors (CRIT-08)
 
-With the critical and high-priority fixes applied, this score would rise to **9/10**.
+**Overall Production Readiness Score: 6.5/10**
+
+With the critical issues fixed: **8.5/10**
+With all high-priority fixes: **9.5/10**
+
+---
+
+## Appendix: Files Requiring Immediate Attention
+
+| File | Issue | Priority |
+|------|-------|----------|
+| `QBMigrationService/.master_key` | Delete and rotate keys | 🔴 IMMEDIATE |
+| `QBMigrationServer/models/user.py` | Encrypt QBO tokens | 🔴 CRITICAL |
+| `QBMigrationServer/api/payments.py` | Fix webhook security | 🔴 CRITICAL |
+| `QBMigrationServer/api/upload.py` | Add row locking | 🔴 CRITICAL |
+| `aws/cloudformation.yaml` | Fix Redis reference | 🔴 CRITICAL |
+| `QBMigrationServer/api/dashboard_api.py` | Fix hardcoded path | 🔴 CRITICAL |
 
 ---
 
 *Generated by Claude Code Production Readiness Audit*
+*Deep Folder-by-Folder Analysis*
 *Session: https://claude.ai/code/session_01ARBukdqkaH4GsfG4QdCmfM*
