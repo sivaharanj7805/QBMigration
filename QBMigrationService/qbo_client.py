@@ -144,13 +144,25 @@ class PremiumQBOClient:
     def _register_signal_handlers(self):
         """
         FIX #251, #386: Graceful shutdown on SIGTERM/SIGINT
+        AUDIT FIX: Only register from main thread to avoid ValueError
         """
+        import threading
+
+        # Signal handlers can only be registered from the main thread
+        if threading.current_thread() is not threading.main_thread():
+            logger.debug("Skipping signal handler registration (not main thread)")
+            return
+
         def shutdown_handler(signum, frame):
             logger.warning("Shutdown signal received. Completing current requests...")
             self.shutdown_requested = True
-        
-        signal.signal(signal.SIGTERM, shutdown_handler)
-        signal.signal(signal.SIGINT, shutdown_handler)
+
+        try:
+            signal.signal(signal.SIGTERM, shutdown_handler)
+            signal.signal(signal.SIGINT, shutdown_handler)
+        except ValueError as e:
+            # May still fail in some embedded environments
+            logger.debug(f"Could not register signal handlers: {e}")
     
     def _check_shutdown(self):
         """Check if shutdown was requested"""
@@ -167,6 +179,7 @@ class PremiumQBOClient:
         FIX #81: SQLite with check_same_thread=False for parallel access
         FIX #50: Database indexes for performance
         CRIT-07 FIX: Set restrictive file permissions (0600)
+        AUDIT FIX: Enable WAL mode for better concurrent write handling
         """
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -175,8 +188,17 @@ class PremiumQBOClient:
 
         with self.db_lock:
             # FIX #81: check_same_thread=False for multi-threading
-            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            # AUDIT FIX: Add timeout to handle concurrent access better
+            conn = sqlite3.connect(
+                str(self.db_path),
+                check_same_thread=False,
+                timeout=30.0  # Wait up to 30 seconds for lock
+            )
             cursor = conn.cursor()
+
+            # AUDIT FIX: Enable WAL mode for better concurrent read/write
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
             
             # Create entities table
             cursor.execute('''
@@ -1082,6 +1104,42 @@ class PremiumQBOClient:
             
             print(f"✓ Exported {len(self.failed_items)} failed items to {filepath}")
     
+    def query_count(
+        self,
+        entity_type: str,
+        oauth_manager: Optional[Any] = None
+    ) -> int:
+        """
+        AUDIT FIX: Get count of entities (used by verifier)
+
+        Args:
+            entity_type: Type of entity to count (Customer, Vendor, etc.)
+            oauth_manager: Optional OAuth manager for token refresh
+
+        Returns:
+            Count of entities
+        """
+        query = f"SELECT COUNT(*) FROM {entity_type}"
+        endpoint = f"query?query={requests.utils.quote(query)}"
+
+        try:
+            response = self._make_request("GET", endpoint, oauth_manager=oauth_manager)
+            # QBO returns count in QueryResponse.totalCount
+            total_count = response.get("QueryResponse", {}).get("totalCount", 0)
+            return int(total_count)
+        except Exception as e:
+            logger.error(f"Query count failed for {entity_type}: {e}")
+            # Fallback: query all and count
+            try:
+                results = self.query(entity_type, max_results=1, oauth_manager=oauth_manager)
+                # If we got results, do full count
+                if results:
+                    all_results = self.query(entity_type, oauth_manager=oauth_manager)
+                    return len(all_results)
+            except Exception:
+                pass
+            return 0
+
     def query(
         self,
         entity_type: str,
