@@ -112,7 +112,7 @@ namespace QBMigrationLauncher.Services
         
         <div class='footer'>
             <p>This certificate is generated automatically and serves as official documentation for auditing purposes.</p>
-            <p>Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss UTC}</p>
+            <p>Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
         </div>
     </div>
 </body>

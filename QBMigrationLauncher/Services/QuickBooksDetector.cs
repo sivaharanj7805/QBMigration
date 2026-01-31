@@ -81,8 +81,14 @@ namespace QBMigrationLauncher.Services
                 var qbType = Type.GetTypeFromProgID("QBFC16.QBSessionManager");
                 return qbType != null;
             }
-            catch
+            catch (System.Runtime.InteropServices.COMException)
             {
+                // COM registration issue - SDK not properly installed
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                // Type resolution failed
                 return false;
             }
         }
