@@ -110,30 +110,45 @@ class SecurityManager:
                 return True
                 
             except Exception as e:
-                # Redis failure - fallback to local store
+                # CRIT-12 FIX: Fail-closed in production when Redis unavailable
+                import os
+                flask_env = os.getenv('FLASK_ENV', 'development')
+
+                if flask_env == 'production':
+                    print(f"CRITICAL: Redis rate limiting failed in production: {e}")
+                    print("   Denying request - fail-closed security policy")
+                    return False  # Fail-closed in production
+
+                # Development only: fallback to local store
                 print(f"⚠️  Redis rate limiting failed: {e}")
-                print("   Falling back to local rate limiting")
-        
-        # Fallback: In-memory rate limiting (single instance only)
+                print("   Falling back to local rate limiting (development only)")
+
+        # Fallback: In-memory rate limiting (DEVELOPMENT ONLY - single instance)
+        import os
+        if os.getenv('FLASK_ENV', 'development') == 'production':
+            # CRIT-12 FIX: Never use in-memory fallback in production
+            print("CRITICAL: In-memory rate limiting not allowed in production")
+            return False
+
         if not hasattr(SecurityManager, '_rate_limit_store'):
             SecurityManager._rate_limit_store = {}
-        
+
         now = datetime.now()
         window_start = now - timedelta(minutes=window_minutes)
-        
+
         if user_id not in SecurityManager._rate_limit_store:
             SecurityManager._rate_limit_store[user_id] = []
-        
+
         # Clean old requests
         SecurityManager._rate_limit_store[user_id] = [
             req_time for req_time in SecurityManager._rate_limit_store[user_id]
             if req_time > window_start
         ]
-        
+
         # Check limit
         if len(SecurityManager._rate_limit_store[user_id]) >= max_requests:
             return False
-        
+
         # Add this request
         SecurityManager._rate_limit_store[user_id].append(now)
         return True

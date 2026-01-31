@@ -166,9 +166,13 @@ class PremiumQBOClient:
         """
         FIX #81: SQLite with check_same_thread=False for parallel access
         FIX #50: Database indexes for performance
+        CRIT-07 FIX: Set restrictive file permissions (0600)
         """
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
+        # CRIT-07 FIX: Set restrictive permissions on database file
+        db_exists = self.db_path.exists()
+
         with self.db_lock:
             # FIX #81: check_same_thread=False for multi-threading
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
@@ -243,7 +247,13 @@ class PremiumQBOClient:
             
             conn.commit()
             conn.close()
-            
+
+        # CRIT-07 FIX: Set restrictive file permissions after database creation
+        try:
+            os.chmod(str(self.db_path), 0o600)  # Owner read/write only
+        except (OSError, AttributeError):
+            pass  # May fail on Windows
+
         logger.info(f"SQLite state database initialized: {self.db_path}")
     
     def record_created(

@@ -2,7 +2,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
+/**
+ * MED-01 to MED-15 FIX: App providers with Error Boundary wrapper
+ */
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(() => new QueryClient({
         defaultOptions: {
@@ -14,8 +18,10 @@ export default function Providers({ children }: { children: React.ReactNode }) {
     }));
 
     return (
-        <QueryClientProvider client={queryClient}>
-            {children}
-        </QueryClientProvider>
+        <ErrorBoundary>
+            <QueryClientProvider client={queryClient}>
+                {children}
+            </QueryClientProvider>
+        </ErrorBoundary>
     );
 }

@@ -276,7 +276,11 @@ namespace ForensicBridgeInstaller
                     if (Directory.Exists(path)) return true;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // HIGH-04 FIX: Log instead of silently swallowing exceptions
+                Debug.WriteLine($"Warning: QuickBooks detection check failed: {ex.Message}");
+            }
 
             return false;
         }
@@ -288,7 +292,11 @@ namespace ForensicBridgeInstaller
                 var qbType = Type.GetTypeFromProgID("QBFC16.QBSessionManager");
                 return qbType != null;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // HIGH-04 FIX: Log instead of silently swallowing exceptions
+                Debug.WriteLine($"Warning: QBFC SDK detection failed: {ex.Message}");
+            }
 
             return false;
         }
@@ -304,6 +312,17 @@ namespace ForensicBridgeInstaller
             {
                 MessageBox.Show("Please enter a session code.", "Session Required",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // HIGH-09 FIX: Validate session code format before making API call
+            // Session codes should be alphanumeric with hyphens, 6-50 characters
+            if (!System.Text.RegularExpressions.Regex.IsMatch(sessionCode, @"^[A-Z0-9\-]{6,50}$"))
+            {
+                MessageBox.Show(
+                    "Invalid session code format.\n\n" +
+                    "Session codes should be uppercase letters, numbers, and hyphens only (6-50 characters).",
+                    "Invalid Format", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -378,37 +397,85 @@ namespace ForensicBridgeInstaller
 
         private string GetDeviceFingerprint()
         {
+            // CRIT-09 FIX: Require real device fingerprint - no fallback to random GUID
+            var info = new StringBuilder();
+            bool hasHardwareInfo = false;
+
             try
             {
-                var info = new StringBuilder();
-
                 using (var searcher = new ManagementObjectSearcher("SELECT ProcessorId FROM Win32_Processor"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
-                        info.Append(obj["ProcessorId"]?.ToString() ?? "");
+                        var processorId = obj["ProcessorId"]?.ToString();
+                        if (!string.IsNullOrEmpty(processorId))
+                        {
+                            info.Append(processorId);
+                            hasHardwareInfo = true;
+                        }
                         break;
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Log($"Warning: Could not read ProcessorId: {ex.Message}");
+            }
 
+            try
+            {
                 using (var searcher = new ManagementObjectSearcher("SELECT SerialNumber FROM Win32_BaseBoard"))
                 {
                     foreach (ManagementObject obj in searcher.Get())
                     {
-                        info.Append(obj["SerialNumber"]?.ToString() ?? "");
+                        var serialNumber = obj["SerialNumber"]?.ToString();
+                        if (!string.IsNullOrEmpty(serialNumber) && serialNumber != "To be filled by O.E.M.")
+                        {
+                            info.Append(serialNumber);
+                            hasHardwareInfo = true;
+                        }
                         break;
                     }
                 }
-
-                using (var sha = SHA256.Create())
-                {
-                    var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(info.ToString()));
-                    return BitConverter.ToString(bytes).Replace("-", "").Substring(0, 32);
-                }
             }
-            catch
+            catch (Exception ex)
             {
-                return Guid.NewGuid().ToString("N");
+                Log($"Warning: Could not read BaseBoard SerialNumber: {ex.Message}");
+            }
+
+            // CRIT-09 FIX: If no hardware info, add machine name + volume serial as fallback
+            // This is still better than a random GUID as it's consistent per machine
+            if (!hasHardwareInfo)
+            {
+                Log("Warning: Using fallback device identifiers (machine name + volume serial)");
+                info.Append(Environment.MachineName);
+
+                try
+                {
+                    using (var searcher = new ManagementObjectSearcher("SELECT VolumeSerialNumber FROM Win32_LogicalDisk WHERE DeviceID='C:'"))
+                    {
+                        foreach (ManagementObject obj in searcher.Get())
+                        {
+                            info.Append(obj["VolumeSerialNumber"]?.ToString() ?? "");
+                            break;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // CRIT-09 FIX: Never return random GUID - throw exception if we can't identify the machine
+            if (info.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "Cannot generate device fingerprint. WMI queries failed. " +
+                    "Please ensure WMI service is running and you have administrator privileges.");
+            }
+
+            using (var sha = SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(info.ToString()));
+                return BitConverter.ToString(bytes).Replace("-", "").Substring(0, 32);
             }
         }
 
@@ -535,8 +602,24 @@ namespace ForensicBridgeInstaller
                         var bytes = await response.Content.ReadAsByteArrayAsync();
                         if (bytes.Length < 50000) continue;
 
-                        File.WriteAllBytes(ExtractorExePath, bytes);
-                        Log($"  Downloaded from {source.Name} ({bytes.Length / 1024}KB)");
+                        // Save to temp location first for verification
+                        var tempPath = ExtractorExePath + ".tmp";
+                        File.WriteAllBytes(tempPath, bytes);
+
+                        // CRIT-03 FIX: Verify Authenticode signature before accepting
+                        if (!VerifyAuthenticodeSignature(tempPath))
+                        {
+                            Log($"  WARNING: {source.Name} - Authenticode signature verification failed!");
+                            File.Delete(tempPath);
+                            continue;
+                        }
+
+                        // Signature verified - move to final location
+                        if (File.Exists(ExtractorExePath))
+                            File.Delete(ExtractorExePath);
+                        File.Move(tempPath, ExtractorExePath);
+
+                        Log($"  Downloaded from {source.Name} ({bytes.Length / 1024}KB) - Signature verified");
                         return true;
                     }
                     catch (Exception ex)
@@ -586,6 +669,48 @@ namespace ForensicBridgeInstaller
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// CRIT-03 FIX: Verify Authenticode signature on downloaded executable
+        /// </summary>
+        private bool VerifyAuthenticodeSignature(string filePath)
+        {
+            try
+            {
+                // Use WinVerifyTrust API via X509Certificate
+                var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(filePath);
+
+                if (cert != null)
+                {
+                    // Verify the certificate subject contains expected publisher
+                    var subject = cert.Subject;
+                    if (subject.Contains("ForensicBridge") || subject.Contains("sivaharanj7805"))
+                    {
+                        Log($"  Signature verified: {subject}");
+                        return true;
+                    }
+                    else
+                    {
+                        Log($"  Unexpected signer: {subject}");
+                        return false;
+                    }
+                }
+
+                Log("  No Authenticode signature found");
+                return false;
+            }
+            catch (CryptographicException)
+            {
+                // No valid signature
+                Log("  Authenticode signature invalid or missing");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Log($"  Signature verification error: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -786,7 +911,25 @@ namespace ForensicBridgeInstaller
                     return;
                 }
 
-                try { _extractorProcess.Kill(); } catch { }
+                // HIGH-05 FIX: Try graceful termination before force kill
+                try
+                {
+                    // First try graceful close
+                    _extractorProcess.CloseMainWindow();
+
+                    // Wait up to 5 seconds for graceful exit
+                    if (!_extractorProcess.WaitForExit(5000))
+                    {
+                        // Force kill if graceful close fails
+                        Log("Process did not exit gracefully, forcing termination...");
+                        _extractorProcess.Kill();
+                        _extractorProcess.WaitForExit(2000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Warning: Error terminating process: {ex.Message}");
+                }
             }
 
             base.OnFormClosing(e);

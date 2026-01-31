@@ -101,15 +101,26 @@ export default function DashboardHome() {
             if (migrationsResponse.ok) {
                 const migrationsData = await migrationsResponse.json();
                 if (migrationsData.success) {
+                    // MED-36 FIX: Define inline type for API response mapping
+                    interface ApiMigration {
+                        id?: string;
+                        migration_id: string;
+                        company_name?: string;
+                        qb_file_name?: string;
+                        status: string;
+                        total_records?: number;
+                        created_at?: string;
+                        progress_percent?: number;
+                    }
                     // Transform API data to our format
-                    const formattedMigrations = migrationsData.migrations.map((m: any) => ({
-                        id: m.migration_id || m.id,
+                    const formattedMigrations = migrationsData.migrations.map((m: ApiMigration) => ({
+                        id: m.migration_id || m.id || '',
                         migration_id: m.migration_id,
                         companyName: m.company_name || "Unknown Company",
                         fileName: m.qb_file_name || "Unknown File",
                         status: m.status,
                         records: m.total_records || 0,
-                        date: formatDate(m.created_at),
+                        date: formatDate(m.created_at || null),
                         progress: m.progress_percent || 0
                     }));
                     setMigrations(formattedMigrations);
