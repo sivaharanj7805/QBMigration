@@ -92,8 +92,11 @@ export default function SettingsPage() {
                     });
                 }
             }
-        } catch (error) {
-            console.error("Failed to load user data:", error);
+        } catch (err) {
+            // FIX: Use proper error logging only in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to load user data:", err);
+            }
         } finally {
             setLoading(false);
         }
@@ -116,14 +119,21 @@ export default function SettingsPage() {
                 setSaveStatus("saved");
                 setTimeout(() => setSaveStatus("idle"), 2000);
             } else {
-                console.error("Failed to save whitelabel config");
+                // FIX: Use proper error logging only in development
+                if (process.env.NODE_ENV === 'development') {
+                    console.error("Failed to save whitelabel config");
+                }
                 setSaveStatus("idle");
-                alert("Failed to save branding settings");
+                alert("Failed to save branding settings. Please try again.");
             }
-        } catch (error) {
-            console.error("Save whitelabel error:", error);
+        } catch (err) {
+            // FIX: Use proper error logging only in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Save whitelabel error:", err);
+            }
             setSaveStatus("idle");
-            alert("Failed to connect to server");
+            const errorMessage = err instanceof Error ? err.message : "Network error";
+            alert(`Failed to connect: ${errorMessage}`);
         }
     };
 
@@ -191,17 +201,35 @@ export default function SettingsPage() {
                     <div className="card-forensic p-6">
                         <h2 className="text-lg font-semibold mb-4">Notification Preferences</h2>
                         <div className="space-y-4">
-                            <label className="flex items-center justify-between">
+                            {/* FIX: Added proper id, name attributes for accessibility */}
+                            <label htmlFor="notify-complete" className="flex items-center justify-between cursor-pointer">
                                 <span>Email on migration complete</span>
-                                <input type="checkbox" defaultChecked className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-complete"
+                                    name="notify-complete"
+                                    defaultChecked
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
-                            <label className="flex items-center justify-between">
+                            <label htmlFor="notify-failure" className="flex items-center justify-between cursor-pointer">
                                 <span>Email on migration failure</span>
-                                <input type="checkbox" defaultChecked className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-failure"
+                                    name="notify-failure"
+                                    defaultChecked
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
-                            <label className="flex items-center justify-between">
+                            <label htmlFor="notify-weekly" className="flex items-center justify-between cursor-pointer">
                                 <span>Weekly summary report</span>
-                                <input type="checkbox" className="w-5 h-5" />
+                                <input
+                                    type="checkbox"
+                                    id="notify-weekly"
+                                    name="notify-weekly"
+                                    className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
                             </label>
                         </div>
                     </div>

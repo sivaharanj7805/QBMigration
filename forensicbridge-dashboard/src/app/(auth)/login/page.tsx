@@ -88,16 +88,20 @@ export default function LoginPage() {
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {/* FIX: Added name and autoComplete attributes for accessibility */}
                         <div>
                             <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-2">
                                 Email Address
                             </label>
                             <input
                                 id="email"
+                                name="email"
                                 type="email"
+                                autoComplete="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 required
+                                aria-required="true"
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="you@company.com"
                             />
@@ -109,10 +113,13 @@ export default function LoginPage() {
                             </label>
                             <input
                                 id="password"
+                                name="password"
                                 type="password"
+                                autoComplete="current-password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 required
+                                aria-required="true"
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="••••••••"
                             />
