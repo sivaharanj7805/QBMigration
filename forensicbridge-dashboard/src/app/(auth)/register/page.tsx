@@ -287,7 +287,7 @@ export default function RegisterPage() {
                                 type="text"
                                 autoComplete="name"
                                 value={name}
-                                onChange={(e) => setName(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                                 required
                                 aria-required="true"
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
@@ -305,7 +305,7 @@ export default function RegisterPage() {
                                 type="email"
                                 autoComplete="email"
                                 value={email}
-                                onChange={(e) => setEmail(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                                 required
                                 aria-required="true"
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
@@ -323,7 +323,7 @@ export default function RegisterPage() {
                                 type="text"
                                 autoComplete="organization"
                                 value={company}
-                                onChange={(e) => setCompany(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompany(e.target.value)}
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="Acme CPA Firm"
                             />
@@ -339,7 +339,7 @@ export default function RegisterPage() {
                                 type="password"
                                 autoComplete="new-password"
                                 value={password}
-                                onChange={(e) => setPassword(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                                 onFocus={() => setShowPasswordRequirements(true)}
                                 required
                                 aria-required="true"
@@ -366,7 +366,7 @@ export default function RegisterPage() {
                                 type="password"
                                 autoComplete="new-password"
                                 value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
                                 required
                                 aria-required="true"
                                 minLength={12}

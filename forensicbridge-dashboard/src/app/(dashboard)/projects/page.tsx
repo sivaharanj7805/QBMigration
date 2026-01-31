@@ -15,8 +15,11 @@ import {
     HardDrive,
     RefreshCw,
     Loader2,
-    FolderOpen
+    FolderOpen,
+    Upload
 } from "lucide-react";
+import { authFetch } from "@/lib/auth";
+import { sanitize } from "@/lib/sanitize";
 
 // Types
 interface CompanyFile {
@@ -61,10 +64,17 @@ export default function ProjectsPage() {
     const fetchProjectData = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/projects`, { credentials: 'include' });
+            // SECURITY FIX: Use authFetch for proper CSRF token handling
+            const response = await authFetch(`${API_URL}/api/projects`);
             if (response.ok) {
                 const data = await response.json();
-                setCompanyFiles(data.files || []);
+                // SECURITY: Sanitize all user-controlled data before display
+                const sanitizedFiles = (data.files || []).map((file: CompanyFile) => ({
+                    ...file,
+                    companyName: sanitize.text(file.companyName),
+                    fileName: sanitize.text(file.fileName),
+                }));
+                setCompanyFiles(sanitizedFiles);
                 setStats(data.stats || { totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
             } else {
                 // Fallback to empty data if API not available
@@ -83,7 +93,7 @@ export default function ProjectsPage() {
         }
     };
 
-    const filteredFiles = companyFiles.filter(f =>
+    const filteredFiles = companyFiles.filter((f: CompanyFile) =>
         f.companyName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         f.fileName.toLowerCase().includes(searchTerm.toLowerCase())
     );
@@ -202,7 +212,7 @@ export default function ProjectsPage() {
                     type="search"
                     placeholder="Search company files..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
                     className="input pl-10"
                     aria-label="Search company files"
                 />
@@ -302,9 +312,9 @@ export default function ProjectsPage() {
                                                             if (!confirm("Are you sure you want to delete this file?")) return;
                                                             setActionError(null);
                                                             try {
-                                                                const response = await fetch(`${API_URL}/api/projects/${file.id}`, {
+                                                                // SECURITY FIX: Use authFetch for proper CSRF token handling
+                                                                const response = await authFetch(`${API_URL}/api/projects/${file.id}`, {
                                                                     method: 'DELETE',
-                                                                    credentials: 'include',
                                                                 });
                                                                 if (response.ok) {
                                                                     fetchProjectData();

@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Building2, Mail, FileText, Loader2, Download, ExternalLink, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
+import { authFetch, getAuthState } from '@/lib/auth';
+import { sanitize } from '@/lib/sanitize';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
@@ -31,23 +33,24 @@ export default function NewProjectPage() {
         setLoading(true);
 
         try {
-            const token = localStorage.getItem('token');
-            if (!token) {
+            // SECURITY FIX: Check auth state instead of localStorage token
+            const authState = getAuthState();
+            if (!authState.isAuthenticated) {
                 router.push('/login');
                 return;
             }
 
-            const response = await fetch(`${API_URL}/api/projects`, {
+            // SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage token
+            const response = await authFetch(`${API_URL}/api/projects`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    name,
-                    client_name: clientName,
-                    client_email: clientEmail,
-                    notes,
+                    name: sanitize.text(name),
+                    client_name: sanitize.text(clientName),
+                    client_email: sanitize.text(clientEmail),
+                    notes: sanitize.text(notes),
                 }),
             });
 
@@ -211,7 +214,7 @@ export default function NewProjectPage() {
                                 id="name"
                                 type="text"
                                 value={name}
-                                onChange={(e) => setName(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                                 required
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="e.g., Q1 2026 Migration"
@@ -227,7 +230,7 @@ export default function NewProjectPage() {
                                 id="clientName"
                                 type="text"
                                 value={clientName}
-                                onChange={(e) => setClientName(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setClientName(e.target.value)}
                                 required
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="e.g., Waterloo Manufacturing"
@@ -243,7 +246,7 @@ export default function NewProjectPage() {
                                 id="clientEmail"
                                 type="email"
                                 value={clientEmail}
-                                onChange={(e) => setClientEmail(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setClientEmail(e.target.value)}
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
                                 placeholder="client@company.com"
                             />
@@ -256,7 +259,7 @@ export default function NewProjectPage() {
                             <textarea
                                 id="notes"
                                 value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
                                 rows={3}
                                 className="w-full px-4 py-3 rounded-lg bg-slate-900/50 border border-slate-600 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all resize-none"
                                 placeholder="Any special instructions or notes..."

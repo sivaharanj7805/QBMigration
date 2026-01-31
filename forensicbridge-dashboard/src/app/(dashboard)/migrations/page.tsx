@@ -470,14 +470,14 @@ export default function MigrationsPage() {
                         type="text"
                         placeholder="Search migrations..."
                         value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
                         className="input pl-10"
                         aria-label="Search migrations"
                     />
                 </div>
                 <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatusFilter(e.target.value)}
                     className="input w-40"
                     aria-label="Filter by status"
                 >
