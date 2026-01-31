@@ -28,7 +28,10 @@ class EncryptionManager:
     3. If hash doesn't match → HARD ABORT (no "continue anyway")
     """
     
-    DEFAULT_KDF_SALT = b'QB_MIGRATION_TOOL_V2_2025'
+    # HIGH-15 FIX: KDF salt should be generated randomly per-key or loaded from secure config
+    # This default is ONLY used when no salt is provided - production should always use random salt
+    # WARNING: Do not use this default for new key derivations in production!
+    DEFAULT_KDF_SALT = os.environ.get('QBM_KDF_SALT', '').encode() or os.urandom(32)
     
     @staticmethod
     def encrypt_data(plaintext: bytes) -> Dict[str, str]:

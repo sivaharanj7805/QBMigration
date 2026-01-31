@@ -10,7 +10,13 @@ import secrets
 class TeamInvite(db.Model):
     """Represents a team member invitation"""
     __tablename__ = 'team_invites'
-    
+
+    # MED-10 FIX: Add index for cleanup queries
+    __table_args__ = (
+        db.Index('idx_team_invite_status_expires', 'status', 'expires_at'),
+        db.Index('idx_team_invite_owner_status', 'owner_user_id', 'status'),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     owner_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     
@@ -117,3 +123,20 @@ class TeamInvite(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None
         }
+
+    @classmethod
+    def cleanup_expired(cls):
+        """
+        MED-10 FIX: Cleanup expired invites.
+        Call this periodically (e.g., from a scheduled job).
+
+        Returns:
+            int: Number of invites marked as expired
+        """
+        now = datetime.utcnow()
+        expired_count = cls.query.filter(
+            cls.status == 'pending',
+            cls.expires_at < now
+        ).update({'status': 'expired'}, synchronize_session=False)
+        db.session.commit()
+        return expired_count

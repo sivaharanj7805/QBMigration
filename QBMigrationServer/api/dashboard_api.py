@@ -22,9 +22,13 @@ from io import BytesIO
 import sys
 
 # FIX #33: Import locale-aware lead sheet mapper for Caseware fallback
-# Add QBMigrationService to path for import
-if '/home/user/QBMigration/QBMigrationService' not in sys.path:
-    sys.path.insert(0, '/home/user/QBMigration/QBMigrationService')
+# CRIT-06 FIX: Use environment variable or relative path instead of hardcoded path
+_service_path = os.getenv(
+    'QBM_SERVICE_PATH',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'QBMigrationService'))
+)
+if _service_path not in sys.path:
+    sys.path.insert(0, _service_path)
 
 logger = logging.getLogger(__name__)
 

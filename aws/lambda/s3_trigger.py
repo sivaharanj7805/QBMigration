@@ -68,22 +68,33 @@ def trigger_migration_processing(session_id: str, bucket: str, key: str):
         return
     
     # Option 2: Call Flask API directly
+    # CRIT-09 FIX: Add API key authentication for internal endpoints
     api_url = os.getenv('API_BASE_URL')
+    api_key = os.getenv('INTERNAL_API_KEY')  # Must be set in Lambda environment
+
     if api_url:
         import urllib.request
-        
+
+        if not api_key:
+            print("ERROR: INTERNAL_API_KEY not configured - cannot call internal API securely")
+            return
+
         req_data = json.dumps({
             'session_id': session_id,
             's3_bucket': bucket,
             's3_key': key
         }).encode('utf-8')
-        
+
         req = urllib.request.Request(
             f"{api_url}/api/internal/trigger-processing",
             data=req_data,
-            headers={'Content-Type': 'application/json'}
+            headers={
+                'Content-Type': 'application/json',
+                'X-Internal-API-Key': api_key,  # CRIT-09 FIX: Add authentication header
+                'X-Lambda-Source': 'forensicbridge-s3-trigger'  # Identify the source
+            }
         )
-        
+
         try:
             with urllib.request.urlopen(req, timeout=10) as response:
                 print(f"API response: {response.read().decode()}")

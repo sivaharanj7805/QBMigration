@@ -11,6 +11,28 @@ migrations_bp = Blueprint('migrations', __name__)
 logger = logging.getLogger(__name__)
 
 
+# HIGH-07 FIX: UUID format validation for migration IDs
+def validate_migration_id(migration_id: str) -> bool:
+    """
+    Validate migration ID is a valid UUID format.
+
+    HIGH-07 FIX: Prevents unnecessary database queries for malformed IDs
+    and provides defense in depth against injection attacks.
+
+    Args:
+        migration_id: The migration ID to validate
+
+    Returns:
+        True if valid UUID format, False otherwise
+    """
+    if not migration_id or not isinstance(migration_id, str):
+        return False
+
+    # UUID format: 8-4-4-4-12 hexadecimal characters
+    uuid_pattern = r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'
+    return bool(re.match(uuid_pattern, migration_id))
+
+
 # FIX #42: SQL injection prevention helpers
 def validate_pagination_param(value, param_name, default, min_val, max_val):
     """
@@ -178,15 +200,24 @@ def list_migrations():
 def get_migration(migration_id):
     """
     Get specific migration details
-    
+
     Args:
         migration_id: Migration ID
-    
+
     Returns:
         200: Migration details
+        400: Invalid migration ID format
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        logger.warning(f"Invalid migration ID format: {migration_id[:50] if migration_id else 'None'}")
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
@@ -235,15 +266,23 @@ def get_migration(migration_id):
 def get_migration_status(migration_id):
     """
     Get migration status (lightweight endpoint for polling)
-    
+
     Args:
         migration_id: Migration ID
-    
+
     Returns:
         200: Migration status
+        400: Invalid migration ID format
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,

@@ -105,6 +105,7 @@ def qbo_callback():
         client_secret = current_app.config.get('QBO_CLIENT_SECRET')
         redirect_uri = current_app.config.get('QBO_REDIRECT_URI')
         
+        # MED-08 FIX: Add timeout to external HTTP calls
         response = requests.post(
             INTUIT_TOKEN_URL,
             data={
@@ -113,7 +114,8 @@ def qbo_callback():
                 'redirect_uri': redirect_uri
             },
             auth=(client_id, client_secret),
-            headers={'Accept': 'application/json'}
+            headers={'Accept': 'application/json'},
+            timeout=(10, 30)  # (connect timeout, read timeout)
         )
         
         if response.status_code != 200:
@@ -149,14 +151,16 @@ def qbo_callback():
         }), 500
 
 
-@qbo_bp.route('/disconnect', methods=['POST', 'GET'])
+@qbo_bp.route('/disconnect', methods=['POST'])  # MED-14 FIX: Remove GET method for state-changing operation
 @login_required
 def disconnect_qbo():
     """
     Disconnect from QuickBooks Online
-    
+
     Revokes OAuth tokens and clears stored credentials.
     Required by Intuit for App Store listing.
+
+    MED-14 FIX: Changed from POST+GET to POST only to prevent CSRF via GET requests.
     """
     try:
         # Revoke token at Intuit if we have one
@@ -165,11 +169,13 @@ def disconnect_qbo():
             client_secret = current_app.config.get('QBO_CLIENT_SECRET')
             
             try:
+                # MED-08 FIX: Add timeout to external HTTP calls
                 requests.post(
                     INTUIT_REVOKE_URL,
                     data={'token': current_user.qbo_refresh_token},
                     auth=(client_id, client_secret),
-                    headers={'Accept': 'application/json'}
+                    headers={'Accept': 'application/json'},
+                    timeout=(10, 30)  # (connect timeout, read timeout)
                 )
             except Exception as revoke_error:
                 # Log but don't fail - we'll clear locally anyway
@@ -251,6 +257,7 @@ def refresh_qbo_token():
         client_id = current_app.config.get('QBO_CLIENT_ID')
         client_secret = current_app.config.get('QBO_CLIENT_SECRET')
         
+        # MED-08 FIX: Add timeout to external HTTP calls
         response = requests.post(
             INTUIT_TOKEN_URL,
             data={
@@ -258,7 +265,8 @@ def refresh_qbo_token():
                 'refresh_token': current_user.qbo_refresh_token
             },
             auth=(client_id, client_secret),
-            headers={'Accept': 'application/json'}
+            headers={'Accept': 'application/json'},
+            timeout=(10, 30)  # (connect timeout, read timeout)
         )
         
         if response.status_code != 200:

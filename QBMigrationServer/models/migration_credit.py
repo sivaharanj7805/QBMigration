@@ -13,6 +13,12 @@ class MigrationCredit(db.Model):
     Users buy credits (by type) and use them to perform migrations.
     """
     __tablename__ = 'migration_credits'
+
+    # MED-10 FIX: Add composite index for common query patterns
+    __table_args__ = (
+        db.Index('idx_credit_user_status_payment', 'user_id', 'status', 'payment_status'),
+        db.Index('idx_credit_user_tier', 'user_id', 'tier_type'),
+    )
     
     id = db.Column(db.Integer, primary_key=True)
     # SECURITY FIX: Add CASCADE delete to clean up credits when user is deleted
@@ -24,8 +30,9 @@ class MigrationCredit(db.Model):
     price_cents = db.Column(db.Integer, nullable=False)  # Amount paid in cents
     
     # Stripe payment verification
-    stripe_checkout_session_id = db.Column(db.String(255))
-    stripe_payment_intent_id = db.Column(db.String(255))
+    # CRIT-05 FIX: Add unique constraint on payment_intent_id for idempotency
+    stripe_checkout_session_id = db.Column(db.String(255), unique=True, index=True)
+    stripe_payment_intent_id = db.Column(db.String(255), unique=True, nullable=True, index=True)
     payment_status = db.Column(db.String(50), default='pending')  # pending, paid, failed, refunded
     
     # Usage tracking
@@ -197,26 +204,46 @@ class MigrationCredit(db.Model):
         return summary
     
     @classmethod
-    def find_best_credit(cls, user_id, transaction_count):
+    def find_best_credit(cls, user_id, transaction_count, lock_for_update=False):
         """
         Find the best available credit for a given transaction count.
         Returns the smallest credit that can handle the transaction count,
         or None if no suitable credit is available.
+
+        CRIT-01 FIX: Added lock_for_update parameter to prevent race conditions
+        during credit consumption. When True, uses SELECT FOR UPDATE to ensure
+        atomic credit allocation.
+
+        Args:
+            user_id: User ID
+            transaction_count: Number of transactions to process
+            lock_for_update: If True, lock the row for update (use within transaction)
         """
-        available = cls.get_available_for_user(user_id)
-        
+        # Build base query
+        query = cls.query.filter_by(
+            user_id=user_id,
+            status='available',
+            payment_status='paid'
+        )
+
+        # CRIT-01 FIX: Apply row-level lock if requested
+        if lock_for_update:
+            query = query.with_for_update(skip_locked=True)
+
+        available = query.all()
+
         # Filter to credits that can handle the transaction count
         suitable = [c for c in available if c.can_handle_transactions(transaction_count)]
-        
+
         if not suitable:
             return None
-        
+
         # Sort by transaction limit (smallest first, -1/unlimited last)
         def sort_key(c):
             if c.transaction_limit == -1:
                 return float('inf')
             return c.transaction_limit
-        
+
         suitable.sort(key=sort_key)
         return suitable[0]  # Return smallest suitable credit
     
