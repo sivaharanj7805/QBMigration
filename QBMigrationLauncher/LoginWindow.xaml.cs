@@ -41,15 +41,26 @@ namespace QBMigrationLauncher
         public LoginWindow()
         {
             InitializeComponent();
-            
-            // Try to restore existing session
-            TryRestoreSession();
+
+            // FIX: Use Loaded event handler for async initialization (async void is safe for event handlers)
+            Loaded += LoginWindow_Loaded;
         }
-        
+
+        /// <summary>
+        /// FIX: Proper event handler for async initialization - async void is acceptable here
+        /// </summary>
+        private async void LoginWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Unsubscribe to prevent multiple calls
+            Loaded -= LoginWindow_Loaded;
+            await TryRestoreSessionAsync();
+        }
+
         /// <summary>
         /// Attempt to restore a saved session token
+        /// FIX: Changed from async void to async Task for proper exception propagation
         /// </summary>
-        private async void TryRestoreSession()
+        private async Task TryRestoreSessionAsync()
         {
             try
             {

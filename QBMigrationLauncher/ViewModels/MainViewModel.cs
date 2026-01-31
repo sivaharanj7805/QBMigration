@@ -15,7 +15,10 @@ using QBMigrationLauncher.Services;
 
 namespace QBMigrationLauncher.ViewModels
 {
-    public partial class MainViewModel : ObservableObject
+    /// <summary>
+    /// FIX: Implement IDisposable to properly unsubscribe from event handlers and prevent memory leaks
+    /// </summary>
+    public partial class MainViewModel : ObservableObject, IDisposable
     {
         private readonly ExtractorRunner _runner;
         private readonly LogParser _parser;
@@ -451,6 +454,15 @@ namespace QBMigrationLauncher.ViewModels
             if (string.IsNullOrEmpty(fileName)) return null;
             if (Path.IsPathRooted(fileName)) return fileName;
             return _detectedFilePaths.TryGetValue(fileName, out var fullPath) ? fullPath : null;
+        }
+
+        /// <summary>
+        /// FIX: Dispose pattern to unsubscribe from events and prevent memory leaks
+        /// </summary>
+        public void Dispose()
+        {
+            _parser.ProgressChanged -= OnProgressChanged;
+            _parser.LogReceived -= OnLogReceived;
         }
     }
 }

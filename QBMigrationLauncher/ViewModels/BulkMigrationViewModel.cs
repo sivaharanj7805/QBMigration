@@ -11,7 +11,10 @@ using QBMigrationLauncher.Services;
 
 namespace QBMigrationLauncher.ViewModels
 {
-    public partial class BulkMigrationViewModel : ObservableObject
+    /// <summary>
+    /// FIX: Implement IDisposable to properly unsubscribe from event handlers and prevent memory leaks
+    /// </summary>
+    public partial class BulkMigrationViewModel : ObservableObject, IDisposable
     {
         private readonly BulkMigrationManager _manager;
 
@@ -40,49 +43,56 @@ namespace QBMigrationLauncher.ViewModels
         {
             _manager = new BulkMigrationManager();
 
-            // FIX #15 & #46: Use BeginInvoke (non-blocking) and check for null App.Current
-            _manager.LogMessage += (s, msg) =>
-            {
-                SafeDispatch(() => LogOutput += msg + Environment.NewLine);
-            };
+            // FIX: Use named event handlers so they can be unsubscribed in Dispose()
+            _manager.LogMessage += OnLogMessage;
+            _manager.JobStarted += OnJobStarted;
+            _manager.JobCompleted += OnJobCompleted;
+            _manager.JobFailed += OnJobFailed;
+            _manager.QueueCompleted += OnQueueCompleted;
+        }
 
-            _manager.JobStarted += (s, job) =>
-            {
-                SafeDispatch(() =>
-                {
-                    CurrentJobName = job.FileName;
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+        // FIX: Named event handlers for proper unsubscription
+        private void OnLogMessage(object? sender, string msg)
+        {
+            SafeDispatch(() => LogOutput += msg + Environment.NewLine);
+        }
 
-            _manager.JobCompleted += (s, job) =>
+        private void OnJobStarted(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                SafeDispatch(() =>
-                {
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+                CurrentJobName = job.FileName;
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
 
-            _manager.JobFailed += (s, job) =>
+        private void OnJobCompleted(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                SafeDispatch(() =>
-                {
-                    UpdateJobInList(job);
-                    UpdateCounts();
-                });
-            };
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
 
-            _manager.QueueCompleted += (s, e) =>
+        private void OnJobFailed(object? sender, MigrationJob job)
+        {
+            SafeDispatch(() =>
             {
-                SafeDispatch(() =>
-                {
-                    IsProcessing = false;
-                    CurrentJobName = "";
-                    LogOutput += Environment.NewLine + _manager.GenerateSummaryReport();
-                });
-            };
+                UpdateJobInList(job);
+                UpdateCounts();
+            });
+        }
+
+        private void OnQueueCompleted(object? sender, EventArgs e)
+        {
+            SafeDispatch(() =>
+            {
+                IsProcessing = false;
+                CurrentJobName = "";
+                LogOutput += Environment.NewLine + _manager.GenerateSummaryReport();
+            });
         }
 
         /// <summary>
@@ -172,6 +182,18 @@ namespace QBMigrationLauncher.ViewModels
             QueuedCount = _manager.QueuedCount;
             CompletedCount = _manager.CompletedCount;
             FailedCount = _manager.FailedCount;
+        }
+
+        /// <summary>
+        /// FIX: Dispose pattern to unsubscribe from events and prevent memory leaks
+        /// </summary>
+        public void Dispose()
+        {
+            _manager.LogMessage -= OnLogMessage;
+            _manager.JobStarted -= OnJobStarted;
+            _manager.JobCompleted -= OnJobCompleted;
+            _manager.JobFailed -= OnJobFailed;
+            _manager.QueueCompleted -= OnQueueCompleted;
         }
     }
 
