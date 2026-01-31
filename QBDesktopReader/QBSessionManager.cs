@@ -323,13 +323,13 @@ namespace QBDesktopExtractor
             {
                 if (_isSessionOpen)
                 {
-                    try { _qbfcSessionManager.EndSession(); } catch { }
+                    try { _qbfcSessionManager.EndSession(); } catch (System.Runtime.InteropServices.COMException) { /* Expected during cleanup */ }
                     _isSessionOpen = false;
                 }
 
                 if (_isConnected)
                 {
-                    try { _qbfcSessionManager.CloseConnection(); } catch { }
+                    try { _qbfcSessionManager.CloseConnection(); } catch (System.Runtime.InteropServices.COMException) { /* Expected during cleanup */ }
                     _isConnected = false;
                 }
             }
@@ -654,7 +654,11 @@ namespace QBDesktopExtractor
                     snapshot.CompanyNameHash = Convert.ToBase64String(hash).Substring(0, 16);
                 }
             }
-            catch
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                snapshot.CompanyNameHash = "unavailable";
+            }
+            catch (ArgumentNullException)
             {
                 snapshot.CompanyNameHash = "unavailable";
             }
@@ -682,11 +686,26 @@ namespace QBDesktopExtractor
             }
             finally
             {
-                // Stop STA thread
+                // Stop STA thread with proper timeout handling
                 _staThreadRunning = false;
                 _workAvailable.Set();
-                _staThread?.Join(1000);
-                
+
+                if (_staThread != null && _staThread.IsAlive)
+                {
+                    // Wait up to 5 seconds for graceful shutdown
+                    bool terminated = _staThread.Join(5000);
+
+                    if (!terminated)
+                    {
+                        _logger?.Log(LogLevel.Warning,
+                            "STA thread did not terminate gracefully within 5 seconds. " +
+                            "QuickBooks resources may not be fully released.");
+
+                        // Don't forcibly abort - just log and continue
+                        // The thread will eventually terminate or the process will exit
+                    }
+                }
+
                 _workAvailable?.Dispose();
                 _workComplete?.Dispose();
             }

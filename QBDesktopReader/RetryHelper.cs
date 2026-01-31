@@ -39,7 +39,11 @@ namespace QBDesktopExtractor
 
                     if (attempt < maxRetries)
                     {
-                        int delay = baseDelayMs * (int)Math.Pow(2, attempt - 1);
+                        // Overflow protection: cap exponent and use long arithmetic
+                        int safeExponent = Math.Min(attempt - 1, 30);
+                        long delayLong = (long)baseDelayMs * (1L << safeExponent);
+                        int delay = (int)Math.Min(delayLong, int.MaxValue);
+
                         logger?.Log(LogLevel.Warning,
                             "{0} failed (attempt {1}/{2}): {3}. Retrying in {4}ms...",
                             operationName, attempt, maxRetries, ex.Message, delay);
@@ -84,7 +88,11 @@ namespace QBDesktopExtractor
 
                     if (attempt < maxRetries)
                     {
-                        int delay = baseDelayMs * (int)Math.Pow(2, attempt - 1);
+                        // Overflow protection: cap exponent and use long arithmetic
+                        int safeExponent = Math.Min(attempt - 1, 30);
+                        long delayLong = (long)baseDelayMs * (1L << safeExponent);
+                        int delay = (int)Math.Min(delayLong, int.MaxValue);
+
                         logger?.Log(LogLevel.Warning,
                             "{0} failed (attempt {1}/{2}): {3}. Retrying in {4}ms...",
                             operationName, attempt, maxRetries, ex.Message, delay);

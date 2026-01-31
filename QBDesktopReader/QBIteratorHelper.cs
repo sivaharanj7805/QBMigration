@@ -79,20 +79,24 @@ namespace QBDesktopExtractor
     {
         private readonly IQBSessionManager _sessionManager;
         private readonly IRedactingLogger _logger;
-        
+
+        // Thread-safe random for jitter calculations
+        private static readonly ThreadLocal<Random> _threadLocalRandom =
+            new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
+
         // Configuration
         public RetryPolicy RetryPolicy { get; set; } = new RetryPolicy();
         public TimeSpan? MaxDurationPerEntity { get; set; } = TimeSpan.FromMinutes(30);
-        
+
         // Progress event
         public event Action<ExtractionProgress> OnProgress;
-        
+
         // Adaptive batching parameters
         private const int MIN_BATCH_SIZE = 20;
         private const int MAX_BATCH_SIZE = 500;
         private const int DEFAULT_BATCH_SIZE = 100;
         private const int TARGET_REQUEST_TIME_MS = 5000; // Target 5 seconds per request
-        
+
         // CRITICAL: Incremental sync support
         public DateTime? IncrementalFromDate { get; set; }
 
@@ -279,6 +283,7 @@ namespace QBDesktopExtractor
 
         /// <summary>
         /// Calculate retry delay with exponential backoff and jitter
+        /// Thread-safe with overflow protection
         /// </summary>
         private int CalculateRetryDelay(int attempt)
         {
@@ -287,15 +292,20 @@ namespace QBDesktopExtractor
                 return RetryPolicy.BaseDelayMs;
             }
 
-            // Exponential backoff: baseDelay * 2^(attempt-1)
-            int delay = RetryPolicy.BaseDelayMs * (int)Math.Pow(2, attempt - 1);
-            
-            // Add jitter (10-30% random variation)
-            var random = new Random();
-            double jitter = 1.0 + (random.NextDouble() * 0.2);
+            // Exponential backoff: baseDelay * 2^(attempt-1) with overflow protection
+            // Cap exponent to prevent overflow (2^30 is max safe for int multiplication)
+            int safeExponent = Math.Min(attempt - 1, 30);
+            long delayLong = (long)RetryPolicy.BaseDelayMs * (1L << safeExponent);
+
+            // Cap at max delay before converting to int
+            delayLong = Math.Min(delayLong, RetryPolicy.MaxDelayMs);
+            int delay = (int)delayLong;
+
+            // Add jitter (10-30% random variation) using thread-safe Random
+            double jitter = 1.0 + (_threadLocalRandom.Value.NextDouble() * 0.2);
             delay = (int)(delay * jitter);
-            
-            // Cap at max delay
+
+            // Final cap at max delay
             return Math.Min(delay, RetryPolicy.MaxDelayMs);
         }
 
@@ -622,7 +632,7 @@ namespace QBDesktopExtractor
                 // Use short timeout for close request
                 request.Attributes.OnError = ENRqOnError.roeContinue;
                 
-                sessionManager.DoRequests(request);
+                _sessionManager.DoRequests(request);
             }
             catch (Exception ex)
             {

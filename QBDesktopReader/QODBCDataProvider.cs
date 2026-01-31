@@ -204,8 +204,10 @@ namespace QBDesktopExtractor
                         _qbVersion = result?.ToString() ?? "Unknown";
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    // sp_version may not be available on all QODBC versions
+                    _logger?.Log(LogLevel.Debug, "Could not get QB version via sp_version: {0}", ex.Message);
                     _qbVersion = "QODBC";
                 }
             }
@@ -1068,15 +1070,18 @@ namespace QBDesktopExtractor
 
             try
             {
-                using (var cmd = new OdbcCommand($@"
+                // SECURITY FIX: Use parameterized query to prevent SQL injection
+                using (var cmd = new OdbcCommand(@"
                     SELECT
                         TxnLineID, ItemRefListID, ItemRefFullName,
                         Description, Quantity, UnitOfMeasure,
                         Rate, Amount, ClassRefFullName,
                         SalesTaxCodeRefFullName, ServiceDate
                     FROM InvoiceLine
-                    WHERE InvoiceTxnID = '{txnId}'", _connection))
+                    WHERE InvoiceTxnID = ?", _connection))
                 {
+                    cmd.Parameters.AddWithValue("@txnId", txnId ?? "");
+
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
                     {
                         while (await Task.Run(() => reader.Read(), ct))
@@ -1203,7 +1208,11 @@ namespace QBDesktopExtractor
                                                 prop.SetValue(item, Convert.ToDateTime(value));
                                         }
                                     }
-                                    catch { }
+                                    catch (Exception)
+                                    {
+                                        // Property mapping failures are expected for schema mismatches
+                                        // Individual property failures don't warrant logging each one
+                                    }
                                 }
                             }
 
@@ -1283,6 +1292,10 @@ namespace QBDesktopExtractor
             }
         }
 
+        // NOTE: These helper methods intentionally return null on any exception.
+        // This is by design - columns may not exist in all QB editions/versions,
+        // and graceful degradation is preferred over failing the entire extraction.
+
         private string GetString(OdbcDataReader reader, string column)
         {
             try
@@ -1290,9 +1303,9 @@ namespace QBDesktopExtractor
                 int ordinal = reader.GetOrdinal(column);
                 return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1303,9 +1316,9 @@ namespace QBDesktopExtractor
                 int ordinal = reader.GetOrdinal(column);
                 return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1317,9 +1330,9 @@ namespace QBDesktopExtractor
                 if (reader.IsDBNull(ordinal)) return null;
                 return reader.GetBoolean(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1331,9 +1344,9 @@ namespace QBDesktopExtractor
                 if (reader.IsDBNull(ordinal)) return null;
                 return reader.GetInt32(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1345,9 +1358,9 @@ namespace QBDesktopExtractor
                 if (reader.IsDBNull(ordinal)) return null;
                 return reader.GetDecimal(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1359,9 +1372,9 @@ namespace QBDesktopExtractor
                 if (reader.IsDBNull(ordinal)) return null;
                 return reader.GetDecimal(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 
@@ -1373,9 +1386,9 @@ namespace QBDesktopExtractor
                 if (reader.IsDBNull(ordinal)) return null;
                 return reader.GetDateTime(ordinal);
             }
-            catch
+            catch (Exception)
             {
-                return null;
+                return null; // Column may not exist or type mismatch
             }
         }
 

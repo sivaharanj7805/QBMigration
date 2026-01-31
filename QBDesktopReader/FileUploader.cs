@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -77,6 +78,17 @@ namespace QBDesktopExtractor
             QBExtractedData data,
             CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(encryptedFilePath))
+                throw new ArgumentException("Encrypted file path is required", nameof(encryptedFilePath));
+            if (encryptionResult == null)
+                throw new ArgumentNullException(nameof(encryptionResult));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentException("Session ID is required", nameof(sessionId));
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (!File.Exists(encryptedFilePath))
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+
             _logger?.Log(LogLevel.Info, "Uploading file (direct)...");
 
             using (var content = new MultipartFormDataContent())
@@ -170,13 +182,28 @@ namespace QBDesktopExtractor
             }
             catch (Exception ex)
             {
-                _logger?.Log(LogLevel.Warning, "Could not encrypt key with RSA (server may not support it): {0}", ex.Message);
+                _logger?.Log(LogLevel.Warning, "Could not encrypt key with RSA: {0}", ex.Message);
             }
 
-            // Fallback: If RSA encryption failed, use TLS-protected plain key (with warning)
+            // Handle RSA encryption failure
             if (!isKeyEncrypted)
             {
-                _logger?.Log(LogLevel.Warning, "SECURITY WARNING: Sending key without RSA encryption (TLS-only protection)");
+                // Check if fallback is allowed via config
+                bool allowFallback = _config.Advanced?.AllowKeyEncryptionFallback ?? false;
+
+                if (!allowFallback)
+                {
+                    throw new SecurityException(
+                        "RSA key encryption failed and fallback is not allowed. " +
+                        "The server may not support RSA key encryption, or there was a configuration error. " +
+                        "Set 'allowKeyEncryptionFallback: true' in config to allow TLS-only protection (not recommended).");
+                }
+
+                _logger?.Log(LogLevel.Warning,
+                    "SECURITY WARNING: RSA key encryption unavailable. " +
+                    "Proceeding with TLS-only protection as allowKeyEncryptionFallback is enabled. " +
+                    "This provides less security than the intended RSA+TLS double encryption.");
+
                 keyToSend = encryptionResult.KeyBase64;
             }
 
@@ -346,6 +373,17 @@ namespace QBDesktopExtractor
             QBExtractedData data,
             CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(encryptedFilePath))
+                throw new ArgumentException("Encrypted file path is required", nameof(encryptedFilePath));
+            if (encryptionResult == null)
+                throw new ArgumentNullException(nameof(encryptionResult));
+            if (string.IsNullOrWhiteSpace(sessionId))
+                throw new ArgumentException("Session ID is required", nameof(sessionId));
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+            if (!File.Exists(encryptedFilePath))
+                throw new FileNotFoundException("Encrypted file not found", encryptedFilePath);
+
             var fileInfo = new FileInfo(encryptedFilePath);
             long fileSize = fileInfo.Length;
             int chunkSize = _config.Advanced.ChunkSizeKB * 1024;
@@ -400,7 +438,10 @@ namespace QBDesktopExtractor
                 {
                     await AbortUploadAsync(uploadId, cancellationToken);
                 }
-                catch { }
+                catch (HttpRequestException)
+                {
+                    // Abort failed due to network - continue with re-throw
+                }
                 throw;
             }
         }
@@ -639,9 +680,13 @@ namespace QBDesktopExtractor
 
                 await _httpClient.PostAsync($"{_serverUrl}/api/upload/abort", content, cancellationToken);
             }
-            catch
+            catch (HttpRequestException)
             {
-                // Best effort
+                // Network failure during abort - best effort
+            }
+            catch (TaskCanceledException)
+            {
+                // Request cancelled - best effort
             }
         }
 
@@ -682,7 +727,10 @@ namespace QBDesktopExtractor
 
             if (_config.Advanced.EnableExponentialBackoff)
             {
-                delayMs = baseDelay * (int)Math.Pow(2, attempt - 1);
+                // Overflow protection: cap exponent to prevent int overflow
+                int safeExponent = Math.Min(attempt - 1, 30);
+                long delayLong = (long)baseDelay * (1L << safeExponent);
+                delayMs = (int)Math.Min(delayLong, int.MaxValue);
             }
 
             // Cap at max delay

@@ -329,9 +329,9 @@ namespace QBDesktopExtractor
                     return Math.Round(parsed, 2, MidpointRounding.AwayFromZero);
                 }
             }
-            catch (Exception ex)
+            catch (FormatException)
             {
-                Console.WriteLine($"⚠ Warning: Could not parse decimal value '{qbValue}': {ex.Message}");
+                // Invalid format - return null as this is expected for certain QB values
             }
 
             return null;
@@ -357,7 +357,10 @@ namespace QBDesktopExtractor
                     return Math.Round(parsed, decimalPlaces, MidpointRounding.AwayFromZero);
                 }
             }
-            catch { }
+            catch (FormatException)
+            {
+                // Invalid format - expected for certain QB values
+            }
 
             return null;
         }
@@ -375,8 +378,9 @@ namespace QBDesktopExtractor
                 string value = qbValue.ToString();
                 return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
             }
-            catch
+            catch (NullReferenceException)
             {
+                // QB value accessor threw - return null
                 return null;
             }
         }
@@ -398,7 +402,10 @@ namespace QBDesktopExtractor
                 if (DateTime.TryParse(valueStr, out DateTime parsed))
                     return parsed;
             }
-            catch { }
+            catch (NullReferenceException)
+            {
+                // QB value accessor threw - return null
+            }
 
             return null;
         }
@@ -422,7 +429,10 @@ namespace QBDesktopExtractor
                 if (valueStr == "false" || valueStr == "0" || valueStr == "no")
                     return false;
             }
-            catch { }
+            catch (NullReferenceException)
+            {
+                // QB value accessor threw - return null
+            }
 
             return null;
         }
@@ -3201,7 +3211,8 @@ namespace QBDesktopExtractor
                             preferences.IsUsingMultiCurrency = pref.MultiCurrencyPreferences.IsMultiCurrencyOn?.GetValue() ?? false;
                         }
                     }
-                    catch { /* Multi-currency not in all QB versions */ }
+                    catch (System.Runtime.InteropServices.COMException) { /* Multi-currency not in all QB versions */ }
+                    catch (NullReferenceException) { /* Property not available */ }
                 }
                 
                 Console.WriteLine($"    Extracted Preferences");
@@ -3571,9 +3582,13 @@ namespace QBDesktopExtractor
                                         }
                                     }
                                 }
-                                catch
+                                catch (FormatException)
                                 {
                                     // Skip malformed rows
+                                }
+                                catch (ArgumentOutOfRangeException)
+                                {
+                                    // Skip rows with missing columns
                                 }
                             }
                             // Parse TotalRow for verification
@@ -3598,9 +3613,13 @@ namespace QBDesktopExtractor
                                         }
                                     }
                                 }
-                                catch
+                                catch (FormatException)
                                 {
                                     // Skip malformed totals
+                                }
+                                catch (ArgumentOutOfRangeException)
+                                {
+                                    // Skip totals with missing columns
                                 }
                             }
                         }
