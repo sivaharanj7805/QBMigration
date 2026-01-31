@@ -586,9 +586,9 @@ namespace QBDesktopExtractor
             {
                 return value.Normalize(NormalizationForm.FormC);
             }
-            catch
+            catch (ArgumentException)
             {
-                // If normalization fails, return original
+                // If normalization fails (invalid Unicode), return original
                 return value;
             }
         }
