@@ -45,6 +45,8 @@ export default function ProjectsPage() {
     const [loading, setLoading] = useState(true);
     const [companyFiles, setCompanyFiles] = useState<CompanyFile[]>([]);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    // FIX: Add error state for actions instead of using alert()
+    const [actionError, setActionError] = useState<string | null>(null);
     const [stats, setStats] = useState<ProjectStats>({
         totalFiles: 0,
         migrated: 0,
@@ -70,7 +72,10 @@ export default function ProjectsPage() {
                 setStats({ totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
             }
         } catch (error) {
-            console.error("Failed to fetch project data:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch project data:", error);
+            }
             setCompanyFiles([]);
             setStats({ totalFiles: 0, migrated: 0, pending: 0, totalRecords: 0 });
         } finally {
@@ -104,6 +109,22 @@ export default function ProjectsPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error toast for action errors */}
+            {actionError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-red-700">
+                        <AlertCircle className="w-5 h-5" />
+                        {actionError}
+                    </div>
+                    <button
+                        onClick={() => setActionError(null)}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
@@ -266,6 +287,7 @@ export default function ProjectsPage() {
                                                         onClick={async () => {
                                                             setOpenMenuId(null);
                                                             if (!confirm("Are you sure you want to delete this file?")) return;
+                                                            setActionError(null);
                                                             try {
                                                                 const response = await fetch(`${API_URL}/api/projects/${file.id}`, {
                                                                     method: 'DELETE',
@@ -274,11 +296,15 @@ export default function ProjectsPage() {
                                                                 if (response.ok) {
                                                                     fetchProjectData();
                                                                 } else {
-                                                                    alert("Failed to delete file");
+                                                                    // FIX: Use error state instead of alert
+                                                                    setActionError("Failed to delete file. Please try again.");
                                                                 }
                                                             } catch (error) {
-                                                                console.error("Delete error:", error);
-                                                                alert("Failed to connect to server");
+                                                                // FIX: Only log in development
+                                                                if (process.env.NODE_ENV === 'development') {
+                                                                    console.error("Delete error:", error);
+                                                                }
+                                                                setActionError("Failed to connect to server. Please check your connection.");
                                                             }
                                                         }}
                                                     >

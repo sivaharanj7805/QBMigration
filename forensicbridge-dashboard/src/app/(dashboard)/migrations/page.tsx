@@ -35,21 +35,28 @@ export default function MigrationsPage() {
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [actionLoading, setActionLoading] = useState<string | null>(null);
+    // FIX: Add error state instead of using alert()
+    const [actionError, setActionError] = useState<string | null>(null);
     const queryClient = useQueryClient();
 
     const handleCancelMigration = async (migrationId: string) => {
         if (!confirm("Are you sure you want to cancel this migration?")) return;
         setActionLoading(migrationId);
+        setActionError(null);
         try {
             const result = await api.cancelMigration(migrationId);
             if (result.success) {
                 queryClient.invalidateQueries({ queryKey: ["migrations"] });
             } else {
-                alert(result.error || "Failed to cancel migration");
+                // FIX: Use error state instead of alert
+                setActionError(result.error || "Failed to cancel migration");
             }
         } catch (error) {
-            console.error("Cancel error:", error);
-            alert("Failed to cancel migration");
+            // FIX: Only log in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Cancel error:", error);
+            }
+            setActionError("Failed to cancel migration. Please try again.");
         } finally {
             setActionLoading(null);
         }
@@ -57,16 +64,21 @@ export default function MigrationsPage() {
 
     const handleRetryMigration = async (migrationId: string) => {
         setActionLoading(migrationId);
+        setActionError(null);
         try {
             const result = await api.retryMigration(migrationId);
             if (result.success) {
                 queryClient.invalidateQueries({ queryKey: ["migrations"] });
             } else {
-                alert(result.error || "Failed to retry migration");
+                // FIX: Use error state instead of alert
+                setActionError(result.error || "Failed to retry migration");
             }
         } catch (error) {
-            console.error("Retry error:", error);
-            alert("Failed to retry migration");
+            // FIX: Only log in development
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Retry error:", error);
+            }
+            setActionError("Failed to retry migration. Please try again.");
         } finally {
             setActionLoading(null);
         }
@@ -128,6 +140,22 @@ export default function MigrationsPage() {
 
     return (
         <div className="space-y-6">
+            {/* FIX: Error toast for action errors */}
+            {actionError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-red-700">
+                        <AlertCircle className="w-5 h-5" />
+                        {actionError}
+                    </div>
+                    <button
+                        onClick={() => setActionError(null)}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-gray-900">Migrations</h1>

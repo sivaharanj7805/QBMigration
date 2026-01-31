@@ -63,7 +63,10 @@ export function MigrationBalanceBanner() {
                 }
             }
         } catch (error) {
-            console.error('Failed to load balance data:', error);
+            // FIX: Only log errors in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to load balance data:', error);
+            }
         } finally {
             setLoading(false);
             setRefreshing(false);
