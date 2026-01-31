@@ -121,19 +121,43 @@ class MigrationCredit(db.Model):
 
         return credit
     
-    def mark_paid(self, payment_intent_id):
-        """Mark credit as paid and available for use"""
-        self.payment_status = 'paid'
-        self.status = 'available'
-        self.stripe_payment_intent_id = payment_intent_id
-        self.paid_at = datetime.utcnow()
-        db.session.commit()
-    
-    def mark_failed(self):
-        """Mark payment as failed"""
-        self.payment_status = 'failed'
-        self.status = 'expired'
-        db.session.commit()
+    def mark_paid(self, payment_intent_id, auto_commit=True):
+        """
+        Mark credit as paid and available for use.
+
+        FIX HIGH-05: Added proper transaction handling with rollback on error.
+
+        Args:
+            payment_intent_id: Stripe payment intent ID
+            auto_commit: If True, commits immediately. If False, caller manages transaction.
+        """
+        try:
+            self.payment_status = 'paid'
+            self.status = 'available'
+            self.stripe_payment_intent_id = payment_intent_id
+            self.paid_at = datetime.utcnow()
+
+            if auto_commit:
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            raise
+
+    def mark_failed(self, auto_commit=True):
+        """
+        Mark payment as failed.
+
+        FIX HIGH-05: Added proper transaction handling.
+        """
+        try:
+            self.payment_status = 'failed'
+            self.status = 'expired'
+
+            if auto_commit:
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            raise
     
     def use_for_migration(self, migration_id, transactions_count=0):
         """
