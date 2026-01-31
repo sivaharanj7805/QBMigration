@@ -3,7 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Bulk Migration Manager - Enterprise Edition" Height="700" Width="900"
         WindowStartupLocation="CenterScreen" Background="#F5F5F5">
-    
+
+    <!-- FIX #1: Add missing BooleanToVisibilityConverter resource -->
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
+
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
