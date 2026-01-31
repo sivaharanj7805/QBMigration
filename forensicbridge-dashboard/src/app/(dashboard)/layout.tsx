@@ -85,7 +85,10 @@ export default function DashboardLayout({
             });
         } catch (error) {
             // Continue with local logout even if backend call fails
-            console.error("Backend logout failed:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Backend logout failed:", error);
+            }
         }
 
         // Clear local auth state

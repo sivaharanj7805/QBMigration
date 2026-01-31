@@ -79,7 +79,10 @@ export default function DashboardHome() {
             });
             setApiConnected(response.ok);
         } catch (error) {
-            console.error("API connection failed:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("API connection failed:", error);
+            }
             setApiConnected(false);
         }
     };
@@ -127,7 +130,10 @@ export default function DashboardHome() {
                 }
             }
         } catch (error) {
-            console.error("Failed to fetch dashboard data:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch dashboard data:", error);
+            }
         } finally {
             setLoading(false);
         }
@@ -252,7 +258,10 @@ export default function DashboardHome() {
                 setUploadStatus("error");
             }
         } catch (error) {
-            console.error("Upload error:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Upload error:", error);
+            }
             setUploadError("Failed to connect to server. Please try again.");
             setUploadStatus("error");
         }

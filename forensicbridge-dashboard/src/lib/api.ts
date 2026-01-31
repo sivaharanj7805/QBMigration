@@ -163,7 +163,10 @@ class ApiClient {
                 if (!response.ok) {
                     // HIGH-09 FIX: Check if error is retryable
                     if (this.isRetryableError(response.status) && attempt < this.maxRetries) {
-                        console.warn(`[API] Retryable error ${response.status} on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}`);
+                        // FIX: Only log in development mode
+                        if (process.env.NODE_ENV === 'development') {
+                            console.warn(`[API] Retryable error ${response.status} on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}`);
+                        }
                         await this.delay(attempt);
                         continue;
                     }
@@ -183,7 +186,10 @@ class ApiClient {
                             data: validatedData,
                         };
                     } catch (validationError) {
-                        console.error('Schema validation failed:', validationError);
+                        // FIX: Only log in development mode
+                        if (process.env.NODE_ENV === 'development') {
+                            console.error('Schema validation failed:', validationError);
+                        }
                         return {
                             success: false,
                             error: 'Invalid API response format. This may indicate a security issue.',
@@ -211,7 +217,10 @@ class ApiClient {
 
                 // HIGH-09 FIX: Retry on network errors
                 if (this.isRetryableError(0, lastError) && attempt < this.maxRetries) {
-                    console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}: ${lastError.message}`);
+                    // FIX: Only log in development mode
+                    if (process.env.NODE_ENV === 'development') {
+                        console.warn(`[API] Network error on ${endpoint}, attempt ${attempt + 1}/${this.maxRetries + 1}: ${lastError.message}`);
+                    }
                     await this.delay(attempt);
                     continue;
                 }
@@ -419,13 +428,19 @@ class ApiClient {
             });
 
             if (!response.ok) {
-                console.error("Failed to download certificate");
+                // FIX: Only log in development mode
+                if (process.env.NODE_ENV === 'development') {
+                    console.error("Failed to download certificate");
+                }
                 return null;
             }
 
             return await response.blob();
         } catch (error) {
-            console.error("Download error:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Download error:", error);
+            }
             return null;
         }
     }
@@ -493,7 +508,10 @@ class ApiClient {
 
             return await response.blob();
         } catch (error) {
-            console.error("Download error:", error);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Download error:", error);
+            }
             throw error;
         }
     }

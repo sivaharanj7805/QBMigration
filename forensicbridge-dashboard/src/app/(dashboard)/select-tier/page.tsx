@@ -56,7 +56,10 @@ export default function TierSelectionPage() {
                 setTiers(tiersWithIcons);
             }
         } catch (err) {
-            console.error('Failed to load tiers:', err);
+            // FIX: Only log in development mode
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to load tiers:', err);
+            }
             // Use fallback tiers
             setTiers([
                 { id: 'starter', name: 'Starter', price: 0, max_transactions: 5000, description: 'Small business, 1-2 years of data', migrations: 1, icon: Zap },

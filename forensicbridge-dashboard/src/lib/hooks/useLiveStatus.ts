@@ -25,7 +25,10 @@ export function useLiveStatus(migrationId: string) {
             // FIX: Stop polling after max refetch count to prevent infinite loops
             const refetchCount = query.state.dataUpdateCount;
             if (refetchCount >= MAX_REFETCH_COUNT) {
-                console.warn(`[useLiveStatus] Stopped polling after ${MAX_REFETCH_COUNT} refetches`);
+                // FIX: Only log in development mode
+                if (process.env.NODE_ENV === 'development') {
+                    console.warn(`[useLiveStatus] Stopped polling after ${MAX_REFETCH_COUNT} refetches`);
+                }
                 return false;
             }
             return REFETCH_INTERVAL_MS;
