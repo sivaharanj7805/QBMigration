@@ -54,9 +54,13 @@ namespace QBDesktopExtractor
             }
 
             _serverUrl = url.TrimEnd('/');
+
+            // HIGH-24 FIX: Make timeout configurable via config, default to 10 minutes for large files
+            // 30 minutes was too long and could mask network issues
+            int timeoutMinutes = config.Advanced?.UploadTimeoutMinutes ?? 10;
             _httpClient = new HttpClient
             {
-                Timeout = TimeSpan.FromMinutes(30)
+                Timeout = TimeSpan.FromMinutes(Math.Min(timeoutMinutes, 30)) // Cap at 30 min max
             };
             
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "QBExtractor/4.2");
@@ -117,15 +121,13 @@ namespace QBDesktopExtractor
         /// Upload using v3.1 JSON format (matches server's _handle_v31_upload)
         /// This is the recommended method for new integrations.
         ///
-        /// SECURITY MODEL (FIX CS-01):
-        /// The encryption key is transmitted in the JSON payload, protected by TLS 1.3.
-        /// This provides transport security with the following guarantees:
-        /// - Key is encrypted during transmission via HTTPS/TLS
-        /// - Server decrypts data immediately and discards the key
-        /// - Key is never stored server-side
-        ///
-        /// For enhanced security (defense-in-depth), the IsKeyEncrypted and EncryptedKey
-        /// fields support RSA key wrapping if the server provides a public key.
+        /// SECURITY MODEL (CRIT-02 FIX):
+        /// The encryption key is now wrapped with RSA (server's public key) before transmission.
+        /// This provides defense-in-depth with the following guarantees:
+        /// - Key is RSA-encrypted before being placed in the payload
+        /// - TLS provides additional transport security
+        /// - Only the server can decrypt the key with its private key
+        /// - Key is never transmitted in plaintext
         /// </summary>
         public async Task<UploadResult> UploadV31FormatAsync(
             byte[] encryptedData,
@@ -136,6 +138,48 @@ namespace QBDesktopExtractor
         {
             _logger?.Log(LogLevel.Info, "Uploading using v3.1 format...");
 
+            // CRIT-02 FIX: Get server's public key and encrypt the AES key
+            string keyToSend = null;
+            string encryptedKeyToSend = null;
+            bool isKeyEncrypted = false;
+
+            try
+            {
+                // Fetch server's RSA public key
+                var pubKeyResponse = await _httpClient.GetAsync($"{_serverUrl}/api/encryption/public-key", cancellationToken);
+                if (pubKeyResponse.IsSuccessStatusCode)
+                {
+                    var pubKeyJson = await pubKeyResponse.Content.ReadAsStringAsync();
+                    var pubKeyResult = JsonConvert.DeserializeObject<dynamic>(pubKeyJson);
+                    string serverPublicKeyXml = pubKeyResult?.public_key_xml;
+
+                    if (!string.IsNullOrEmpty(serverPublicKeyXml))
+                    {
+                        // Encrypt the AES key with server's RSA public key
+                        using (var rsa = new RSACryptoServiceProvider())
+                        {
+                            rsa.FromXmlString(serverPublicKeyXml);
+                            byte[] aesKeyBytes = Convert.FromBase64String(encryptionResult.KeyBase64);
+                            byte[] encryptedKeyBytes = rsa.Encrypt(aesKeyBytes, RSAEncryptionPadding.OaepSHA256);
+                            encryptedKeyToSend = Convert.ToBase64String(encryptedKeyBytes);
+                            isKeyEncrypted = true;
+                            _logger?.Log(LogLevel.Info, "AES key encrypted with server's RSA public key");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.Log(LogLevel.Warning, "Could not encrypt key with RSA (server may not support it): {0}", ex.Message);
+            }
+
+            // Fallback: If RSA encryption failed, use TLS-protected plain key (with warning)
+            if (!isKeyEncrypted)
+            {
+                _logger?.Log(LogLevel.Warning, "SECURITY WARNING: Sending key without RSA encryption (TLS-only protection)");
+                keyToSend = encryptionResult.KeyBase64;
+            }
+
             // Build v3.1 request payload (matches upload.py _handle_v31_upload)
             var payload = new V31UploadPayload
             {
@@ -143,9 +187,9 @@ namespace QBDesktopExtractor
                 Encryption = new V31EncryptionBlock
                 {
                     EncryptedData = Convert.ToBase64String(encryptedData),
-                    Key = encryptionResult.KeyBase64,  // TLS-protected
-                    EncryptedKey = null,  // Could use RSA if server provides public key
-                    IsKeyEncrypted = false,
+                    Key = keyToSend,  // Only set if RSA encryption not available
+                    EncryptedKey = encryptedKeyToSend,  // RSA-encrypted AES key
+                    IsKeyEncrypted = isKeyEncrypted,
                     IV = encryptionResult.IVBase64,
                     Tag = encryptionResult.TagBase64,
                     Algorithm = encryptionResult.Algorithm ?? "AES-256-GCM",

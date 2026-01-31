@@ -44,18 +44,19 @@ export function Sidebar() {
     useEffect(() => {
         const authState = getAuthState();
         if (authState.user) {
+            // MED-36 FIX: Use proper typing from User interface (no 'as any' casts needed)
             // Handle both 'name' and 'first_name' formats from backend
             const displayName = authState.user.name ||
-                (authState.user as any).first_name ||
+                authState.user.first_name ||
                 authState.user.email?.split('@')[0] ||
                 "User";
-            const lastName = (authState.user as any).last_name || "";
+            const lastName = authState.user.last_name || "";
             const fullName = lastName ? `${displayName} ${lastName}` : displayName;
 
             setUserName(fullName);
             setUserCompany(
                 authState.user.company ||
-                (authState.user as any).company_name ||
+                authState.user.company_name ||
                 "ForensicBridge User"
             );
 
