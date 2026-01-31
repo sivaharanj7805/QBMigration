@@ -854,24 +854,26 @@ class QBDataTransformer:
         
         # Trial balance tracking
         # FIX #5: Handle negative balances correctly
+        # AUDIT FIX: Use lock for thread-safe trial balance updates
         balance = self.to_decimal(qbd.get('Balance', 0))
         abs_balance = abs(balance)
         is_debit_type = qbo['AccountType'] in {'Bank', 'Accounts Receivable', 'Other Current Assets',
                                    'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
                                    'Expense', 'Other Expense'}
-        
-        if is_debit_type:
-            if balance >= 0:
-                self.trial_balance['debits'] += abs_balance
+
+        with self._trial_balance_lock:
+            if is_debit_type:
+                if balance >= 0:
+                    self.trial_balance['debits'] += abs_balance
+                else:
+                    # Negative balance in debit account goes to credits
+                    self.trial_balance['credits'] += abs_balance
             else:
-                # Negative balance in debit account goes to credits
-                self.trial_balance['credits'] += abs_balance
-        else:
-            if balance >= 0:
-                self.trial_balance['credits'] += abs_balance
-            else:
-                # Negative balance in credit account goes to debits
-                self.trial_balance['debits'] += abs_balance
+                if balance >= 0:
+                    self.trial_balance['credits'] += abs_balance
+                else:
+                    # Negative balance in credit account goes to debits
+                    self.trial_balance['debits'] += abs_balance
         
         return qbo
     
