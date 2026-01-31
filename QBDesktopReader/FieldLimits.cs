@@ -304,9 +304,11 @@ namespace QBDesktopExtractor
             }
 
             // Try category default based on field name pattern
+            // Use word boundary matching to avoid false positives
+            // e.g., "name" should match "CustomerName" or "Name" but not "NameDescription" or "Unnamed"
             foreach (var category in CategoryDefaults)
             {
-                if (resolvedFieldName.IndexOf(category.Key, StringComparison.OrdinalIgnoreCase) >= 0)
+                if (MatchesCategoryPattern(resolvedFieldName, category.Key))
                 {
                     return new LimitResult
                     {
@@ -338,6 +340,48 @@ namespace QBDesktopExtractor
         {
             var result = GetLimit(entityType, fieldName);
             return result.Limit ?? defaultLimit;
+        }
+
+        /// <summary>
+        /// Check if field name matches a category pattern using word boundary logic.
+        /// Matches when:
+        /// - Field ends with the category (e.g., "CustomerName" matches "name")
+        /// - Field equals the category exactly (e.g., "Name" matches "name")
+        /// - Category appears at a camelCase boundary (e.g., "NameFirst" does NOT match "name")
+        /// </summary>
+        private static bool MatchesCategoryPattern(string fieldName, string category)
+        {
+            if (string.IsNullOrEmpty(fieldName) || string.IsNullOrEmpty(category))
+                return false;
+
+            // Case-insensitive comparison
+            string fieldLower = fieldName.ToLowerInvariant();
+            string categoryLower = category.ToLowerInvariant();
+
+            // Exact match
+            if (fieldLower == categoryLower)
+                return true;
+
+            // Check if field ends with category (most common pattern: CustomerName ends with name)
+            if (fieldLower.EndsWith(categoryLower))
+            {
+                // Verify it's at a word boundary (preceded by a different character class)
+                int boundaryIndex = fieldLower.Length - categoryLower.Length - 1;
+                if (boundaryIndex < 0)
+                    return true; // Category is the whole field
+
+                char precedingChar = fieldName[boundaryIndex];
+                // Word boundary: preceding char is lowercase followed by uppercase,
+                // or preceding char is not a letter
+                char firstCategoryChar = fieldName[boundaryIndex + 1];
+                if (!char.IsLetter(precedingChar) ||
+                    (char.IsLower(precedingChar) && char.IsUpper(firstCategoryChar)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -542,9 +586,9 @@ namespace QBDesktopExtractor
             {
                 return value.Normalize(NormalizationForm.FormC);
             }
-            catch
+            catch (ArgumentException)
             {
-                // If normalization fails, return original
+                // If normalization fails (invalid Unicode), return original
                 return value;
             }
         }

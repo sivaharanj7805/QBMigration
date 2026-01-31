@@ -484,18 +484,23 @@ namespace QBDesktopExtractor
 
         public void Decrypt(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] plaintext)
         {
-            // Verify authentication tag first
+            // Verify authentication tag first using constant-time comparison
+            // SECURITY FIX: Prevents timing attacks by comparing all bytes regardless of mismatches
             using (var hmac = new HMACSHA256(_key))
             {
                 byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
                 Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
                 Buffer.BlockCopy(ciphertext, 0, dataToMac, nonce.Length, ciphertext.Length);
                 byte[] fullHash = hmac.ComputeHash(dataToMac);
+
+                // Constant-time comparison: accumulate differences without early exit
+                int diff = 0;
                 for (int i = 0; i < tag.Length; i++)
                 {
-                    if (tag[i] != fullHash[i])
-                        throw new CryptographicException("Authentication tag mismatch");
+                    diff |= tag[i] ^ fullHash[i];
                 }
+                if (diff != 0)
+                    throw new CryptographicException("Authentication tag mismatch");
             }
 
             // Decrypt

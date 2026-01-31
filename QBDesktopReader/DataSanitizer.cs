@@ -276,11 +276,12 @@ namespace QBDesktopExtractor
                 result.Phone = digits;
             }
 
-            result.WasModified = result.Phone != value || result.Extension != null;
+            // Compare against original, not the modified value variable
+            result.WasModified = result.Phone != result.PhoneOriginal || result.Extension != null;
 
             if (result.WasModified)
             {
-                RecordAction(entityType, entityId, "Phone", value, result.Phone,
+                RecordAction(entityType, entityId, "Phone", result.PhoneOriginal, result.Phone,
                     new List<string> { "Normalized phone format" },
                     SanitizationSeverity.Info);
             }
@@ -667,8 +668,9 @@ namespace QBDesktopExtractor
                 var addr = new MailAddress(email);
                 return addr.Address == email;
             }
-            catch
+            catch (FormatException)
             {
+                // Invalid email format
                 return false;
             }
         }

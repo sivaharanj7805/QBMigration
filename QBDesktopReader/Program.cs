@@ -126,7 +126,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine($"  Cause: {ex.InnerException.Message}");
                     }
                 }
-                catch { /* Don't let error reporting crash */ }
+                catch (Exception) { /* Don't let error reporting crash */ }
                 exitCode = ExitCode.UnknownError;
             }
             finally
@@ -140,7 +140,7 @@ namespace QBDesktopExtractor
                         Console.WriteLine("Press any key to exit...");
                         Console.ReadKey(true);
                     }
-                    catch
+                    catch (InvalidOperationException)
                     {
                         // ReadKey throws if stdin is redirected; ignore
                     }
@@ -174,13 +174,29 @@ namespace QBDesktopExtractor
 
                     if (_provider != null)
                     {
-                        _provider.Disconnect();
-                        _provider.Dispose();
+                        try
+                        {
+                            _provider.Disconnect();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Log(LogLevel.Warning, "Error during disconnect: {0}", ex.Message);
+                        }
+
+                        try
+                        {
+                            _provider.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Log(LogLevel.Warning, "Error during dispose: {0}", ex.Message);
+                        }
+
                         _provider = null;
                     }
 
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
+                    // Note: GC.Collect() removed - COM cleanup is handled by Dispose()
+                    // Forcing GC is ineffective and masks resource management issues
 
                     _logger?.Log(LogLevel.Info, "Cleanup complete");
                 }
@@ -505,7 +521,11 @@ namespace QBDesktopExtractor
                         "Low RAM ({0}GB available). Recommend 4GB+ for large companies.", availableGB);
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Memory check is non-critical - log and continue
+                _logger?.Log(LogLevel.Debug, "Memory check skipped: {0}", ex.Message);
+            }
         }
 
         private static int CountTotalRecords(QBExtractedData data)
