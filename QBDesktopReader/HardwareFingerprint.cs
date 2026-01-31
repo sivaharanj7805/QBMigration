@@ -10,20 +10,65 @@ namespace QBDesktopExtractor
     /// <summary>
     /// Hardware Fingerprint Generator
     /// Creates a unique machine identifier for license binding
-    /// 
+    ///
     /// Uses combination of:
     /// - CPU ID
-    /// - Disk Serial Number  
+    /// - Disk Serial Number
     /// - Primary MAC Address
     /// - Windows Product ID
     /// </summary>
     public static class HardwareFingerprint
     {
+        // Cache the fingerprint to avoid expensive WMI calls
+        private static string _cachedFingerprint;
+        private static readonly object _cacheLock = new object();
+
+        // VM adapter indicators (case-insensitive)
+        private static readonly string[] VirtualAdapterKeywords = new[]
+        {
+            "virtual", "vmware", "hyper-v", "virtualbox", "vbox",
+            "xen", "qemu", "kvm", "docker", "parallels", "vpc"
+        };
+
         /// <summary>
-        /// Generate a unique hardware fingerprint for this machine
+        /// Generate a unique hardware fingerprint for this machine.
+        /// Results are cached for performance.
         /// </summary>
         /// <returns>Base64-encoded SHA256 hash of hardware identifiers</returns>
         public static string Generate()
+        {
+            // Return cached value if available
+            if (_cachedFingerprint != null)
+            {
+                return _cachedFingerprint;
+            }
+
+            lock (_cacheLock)
+            {
+                // Double-check after acquiring lock
+                if (_cachedFingerprint != null)
+                {
+                    return _cachedFingerprint;
+                }
+
+                _cachedFingerprint = GenerateInternal();
+                return _cachedFingerprint;
+            }
+        }
+
+        /// <summary>
+        /// Force regeneration of fingerprint (clears cache)
+        /// </summary>
+        public static string Regenerate()
+        {
+            lock (_cacheLock)
+            {
+                _cachedFingerprint = null;
+            }
+            return Generate();
+        }
+
+        private static string GenerateInternal()
         {
             var components = new StringBuilder();
             
@@ -115,28 +160,47 @@ namespace QBDesktopExtractor
         
         /// <summary>
         /// Get primary network adapter MAC address
+        /// Filters out virtual/VM adapters for more stable fingerprinting
         /// </summary>
         private static string GetPrimaryMacAddress()
         {
-            var networkInterface = NetworkInterface.GetAllNetworkInterfaces()
-                .Where(nic => nic.OperationalStatus == OperationalStatus.Up 
+            var allInterfaces = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up
                            && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback
-                           && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel
-                           && !nic.Description.ToLower().Contains("virtual")
-                           && !nic.Description.ToLower().Contains("vmware")
-                           && !nic.Description.ToLower().Contains("hyper-v"))
+                           && nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                .ToList();
+
+            // Filter function to check if adapter is virtual
+            bool IsVirtualAdapter(NetworkInterface nic)
+            {
+                string descLower = nic.Description.ToLowerInvariant();
+                return VirtualAdapterKeywords.Any(keyword => descLower.Contains(keyword));
+            }
+
+            // First try to find a non-virtual adapter
+            var physicalInterface = allInterfaces
+                .Where(nic => !IsVirtualAdapter(nic))
                 .OrderByDescending(nic => nic.Speed)
                 .FirstOrDefault();
-            
-            if (networkInterface != null)
+
+            // If all adapters are virtual (VM environment), use the fastest one
+            // This ensures VMs still get a fingerprint, just based on virtual adapter
+            if (physicalInterface == null)
             {
-                var macBytes = networkInterface.GetPhysicalAddress().GetAddressBytes();
+                physicalInterface = allInterfaces
+                    .OrderByDescending(nic => nic.Speed)
+                    .FirstOrDefault();
+            }
+
+            if (physicalInterface != null)
+            {
+                var macBytes = physicalInterface.GetPhysicalAddress().GetAddressBytes();
                 if (macBytes.Length > 0)
                 {
                     return BitConverter.ToString(macBytes).Replace("-", "");
                 }
             }
-            
+
             return "MAC_FALLBACK";
         }
         

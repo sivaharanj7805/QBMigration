@@ -174,13 +174,29 @@ namespace QBDesktopExtractor
 
                     if (_provider != null)
                     {
-                        _provider.Disconnect();
-                        _provider.Dispose();
+                        try
+                        {
+                            _provider.Disconnect();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Log(LogLevel.Warning, "Error during disconnect: {0}", ex.Message);
+                        }
+
+                        try
+                        {
+                            _provider.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Log(LogLevel.Warning, "Error during dispose: {0}", ex.Message);
+                        }
+
                         _provider = null;
                     }
 
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
+                    // Note: GC.Collect() removed - COM cleanup is handled by Dispose()
+                    // Forcing GC is ineffective and masks resource management issues
 
                     _logger?.Log(LogLevel.Info, "Cleanup complete");
                 }

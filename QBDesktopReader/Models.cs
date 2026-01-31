@@ -1634,4 +1634,73 @@ namespace QBDesktopExtractor
             ErrorCode = errorCode;
         }
     }
+
+    /// <summary>
+    /// JSON converter that replaces null lists with empty lists during deserialization.
+    /// This prevents null reference exceptions when JSON contains explicit null values
+    /// for list properties that have default initializers.
+    /// </summary>
+    public class NullToEmptyListConverter<T> : JsonConverter<List<T>>
+    {
+        public override List<T> ReadJson(JsonReader reader, Type objectType, List<T> existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            if (reader.TokenType == JsonToken.Null)
+            {
+                return new List<T>();
+            }
+
+            return serializer.Deserialize<List<T>>(reader) ?? new List<T>();
+        }
+
+        public override void WriteJson(JsonWriter writer, List<T> value, JsonSerializer serializer)
+        {
+            serializer.Serialize(writer, value);
+        }
+    }
+
+    /// <summary>
+    /// Contract resolver that applies NullToEmptyListConverter to all List&lt;T&gt; properties.
+    /// Use with JsonSerializerSettings to ensure lists are never null after deserialization.
+    /// </summary>
+    public class SafeListContractResolver : Newtonsoft.Json.Serialization.DefaultContractResolver
+    {
+        protected override Newtonsoft.Json.Serialization.JsonProperty CreateProperty(
+            System.Reflection.MemberInfo member,
+            Newtonsoft.Json.MemberSerialization memberSerialization)
+        {
+            var property = base.CreateProperty(member, memberSerialization);
+
+            // Check if property is a List<T>
+            if (property.PropertyType != null &&
+                property.PropertyType.IsGenericType &&
+                property.PropertyType.GetGenericTypeDefinition() == typeof(List<>))
+            {
+                // Set default value provider to return empty list for null
+                property.NullValueHandling = NullValueHandling.Include;
+                property.DefaultValue = Activator.CreateInstance(property.PropertyType);
+                property.DefaultValueHandling = DefaultValueHandling.Populate;
+            }
+
+            return property;
+        }
+    }
+
+    /// <summary>
+    /// Helper class with preconfigured JSON serializer settings for safe deserialization
+    /// </summary>
+    public static class SafeJsonSettings
+    {
+        /// <summary>
+        /// Gets JsonSerializerSettings that prevent null lists during deserialization
+        /// </summary>
+        public static JsonSerializerSettings GetSafeSettings()
+        {
+            return new JsonSerializerSettings
+            {
+                ContractResolver = new SafeListContractResolver(),
+                NullValueHandling = NullValueHandling.Ignore,
+                DateTimeZoneHandling = DateTimeZoneHandling.Utc
+            };
+        }
+    }
 }

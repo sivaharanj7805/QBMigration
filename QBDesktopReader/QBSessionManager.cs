@@ -682,11 +682,26 @@ namespace QBDesktopExtractor
             }
             finally
             {
-                // Stop STA thread
+                // Stop STA thread with proper timeout handling
                 _staThreadRunning = false;
                 _workAvailable.Set();
-                _staThread?.Join(1000);
-                
+
+                if (_staThread != null && _staThread.IsAlive)
+                {
+                    // Wait up to 5 seconds for graceful shutdown
+                    bool terminated = _staThread.Join(5000);
+
+                    if (!terminated)
+                    {
+                        _logger?.Log(LogLevel.Warning,
+                            "STA thread did not terminate gracefully within 5 seconds. " +
+                            "QuickBooks resources may not be fully released.");
+
+                        // Don't forcibly abort - just log and continue
+                        // The thread will eventually terminate or the process will exit
+                    }
+                }
+
                 _workAvailable?.Dispose();
                 _workComplete?.Dispose();
             }

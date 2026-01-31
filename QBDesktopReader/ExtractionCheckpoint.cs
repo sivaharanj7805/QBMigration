@@ -77,7 +77,11 @@ namespace QBDesktopExtractor
                 if (File.Exists(_checkpointPath))
                     File.Delete(_checkpointPath);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Log but don't fail - checkpoint cleanup is not critical
+                _logger?.Log(LogLevel.Debug, "Failed to clear checkpoint: {0}", ex.Message);
+            }
         }
 
         /// <summary>

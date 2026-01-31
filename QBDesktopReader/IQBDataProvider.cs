@@ -95,8 +95,6 @@ namespace QBDesktopExtractor
     /// </summary>
     public static class QBDataProviderFactory
     {
-        private static readonly IRedactingLogger _logger;
-
         /// <summary>
         /// Detect all available backends on the system
         /// </summary>
