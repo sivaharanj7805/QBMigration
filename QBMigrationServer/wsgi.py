@@ -1,0 +1,45 @@
+"""
+WSGI Entry Point for Production Deployment
+
+This file is the entry point for Gunicorn and other WSGI servers.
+Usage:
+    gunicorn wsgi:application --config gunicorn.conf.py
+
+For EC2 deployment:
+    1. Set FLASK_ENV=production
+    2. Set all required environment variables (see .env.example)
+    3. Run: gunicorn wsgi:application --config gunicorn.conf.py
+"""
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables before importing app
+load_dotenv()
+
+# Set production environment if not set
+if not os.getenv('FLASK_ENV'):
+    os.environ['FLASK_ENV'] = 'production'
+
+# Import the Flask application
+from app import app as application
+
+# Validate configuration at startup
+from config import validate_config
+
+if os.getenv('FLASK_ENV') == 'production':
+    try:
+        validate_config()
+    except RuntimeError as e:
+        import logging
+        logging.error(f"Configuration validation failed: {e}")
+        raise
+
+# For compatibility with some WSGI servers
+app = application
+
+if __name__ == '__main__':
+    # This block only runs if you execute wsgi.py directly (not recommended)
+    print("WARNING: Running wsgi.py directly is for testing only.")
+    print("Use 'gunicorn wsgi:application' for production.")
+    application.run(host='0.0.0.0', port=5000)

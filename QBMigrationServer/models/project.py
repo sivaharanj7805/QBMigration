@@ -19,14 +19,23 @@ def generate_session_id(max_retries: int = 10) -> str:
     - 8 random alphanumeric characters for uniqueness
 
     Uses retry logic to ensure uniqueness even with concurrent requests.
+
+    FIX HIGH-04: Improved race condition handling with longer random part
+    and microsecond precision timestamp.
     """
+    import time
+
     for attempt in range(max_retries):
-        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
-        # Use cryptographically secure random characters
-        random_part = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+        # FIX HIGH-04: Include microseconds for better uniqueness
+        now = datetime.utcnow()
+        timestamp = now.strftime('%Y%m%d%H%M%S') + f"{now.microsecond:06d}"[:4]
+
+        # FIX HIGH-04: Use 12 random characters for 62^12 combinations
+        random_part = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))
         session_id = f"FB-{timestamp}-{random_part}"
 
         # Check if this session ID already exists
+        # Note: The unique constraint on the database column provides the real guarantee
         existing = db.session.query(db.exists().where(
             Project.session_id == session_id
         )).scalar()
@@ -34,13 +43,12 @@ def generate_session_id(max_retries: int = 10) -> str:
         if not existing:
             return session_id
 
-        # If collision, add microseconds to timestamp for next attempt
+        # If collision, small delay before retry
         if attempt < max_retries - 1:
-            import time
-            time.sleep(0.001)  # Small delay to get different microsecond
+            time.sleep(0.001)
 
-    # Last resort: append extra random chars
-    extra = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+    # Last resort: append extra random chars (virtually impossible to reach)
+    extra = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     return f"FB-{timestamp}-{random_part}{extra}"
 
 

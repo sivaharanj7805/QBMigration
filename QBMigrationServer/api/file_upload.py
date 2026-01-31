@@ -50,9 +50,21 @@ def upload_qb_export():
         }), 400
     
     # Save file temporarily
+    # FIX HIGH-02: Add path traversal protection
     filename = secure_filename(file.filename)
+    if not filename or filename == '':
+        return jsonify({'error': 'Invalid filename'}), 400
+
     temp_dir = tempfile.mkdtemp()
     file_path = os.path.join(temp_dir, filename)
+
+    # Validate that the final path is within temp_dir (prevent path traversal)
+    real_temp_dir = os.path.realpath(temp_dir)
+    real_file_path = os.path.realpath(file_path)
+    if not real_file_path.startswith(real_temp_dir + os.sep):
+        os.rmdir(temp_dir)
+        return jsonify({'error': 'Invalid file path'}), 400
+
     file.save(file_path)
     
     # Get file size
@@ -99,11 +111,19 @@ def upload_qb_export():
         })
         
     except Exception as e:
-        # Clean up on error
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
+        # FIX MED-01: Improved temp file cleanup with shutil.rmtree for non-empty dirs
+        import shutil
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError:
+            pass  # File already removed or inaccessible
+
+        try:
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except OSError:
+            pass  # Directory already removed or inaccessible
 
         # FIX #34: Sanitize error message for security
         from utils.error_sanitizer import sanitize_error_message

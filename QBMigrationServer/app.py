@@ -99,7 +99,14 @@ def setup_logging(app):
     app.logger.info('=' * 80)
     app.logger.info(f'Environment: {os.getenv("FLASK_ENV", "development")}')
     app.logger.info(f'Debug Mode: {app.config.get("DEBUG", False)}')
-    app.logger.info(f'Database: {app.config.get("SQLALCHEMY_DATABASE_URI", "unknown")}')
+    # FIX: Never log database URI - may contain credentials
+    db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', 'unknown')
+    if db_uri and db_uri != 'unknown':
+        # Mask credentials in database URI for logging
+        if '@' in db_uri:
+            db_uri = db_uri.split('@')[-1]  # Only show host/database
+            db_uri = f"***@{db_uri}"
+    app.logger.info(f'Database: {db_uri}')
     app.logger.info(f'AWS S3 Bucket: {app.config.get("AWS_S3_BUCKET", "not configured")}')
     app.logger.info(f'AWS Region: {app.config.get("AWS_REGION", "not configured")}')
     app.logger.info(f'Rate Limiting: {app.config.get("RATELIMIT_ENABLED", False)}')
@@ -267,10 +274,8 @@ def create_app(config_name='development'):
     """Application factory pattern - creates and configures Flask app"""
     
     app = Flask(__name__)
-    
-    # Load configuration
-    app.config.from_object(config[config_name])
 
+    # Load configuration (FIX: removed duplicate config loading)
     config_class = config[config_name]
     app.config.from_object(config_class)
 
@@ -908,32 +913,41 @@ app = create_app(os.getenv('FLASK_ENV', 'development'))
 
 if __name__ == '__main__':
     """Run the development server"""
-    
+
     print("=" * 80)
     print("QB MIGRATION SERVER - AWS EPHEMERAL ARCHITECTURE")
     print("=" * 80)
     print("")
     print("Server: http://localhost:5000")
     print("")
-    print("✓ Security Features:")
-    print("  • Argon2id password hashing")
-    print("  • Rate limiting (auth & uploads)")
-    print("  • Account lockout (5 failed attempts)")
-    print("  • File validation")
-    print("  • Audit logging")
+    print("Security Features:")
+    print("  - Argon2id password hashing")
+    print("  - Rate limiting (auth & uploads)")
+    print("  - Account lockout (5 failed attempts)")
+    print("  - File validation")
+    print("  - Audit logging")
     print("")
-    print("✓ AWS Features:")
-    print("  • Upload to S3 (NOT local disk)")
-    print("  • Ephemeral EC2 instances")
-    print("  • Auto cleanup (15min intervals)")
-    print("  • Zero data persistence")
+    print("AWS Features:")
+    print("  - Upload to S3 (NOT local disk)")
+    print("  - Ephemeral EC2 instances")
+    print("  - Auto cleanup (15min intervals)")
+    print("  - Zero data persistence")
     print("")
     print("Press CTRL+C to stop")
     print("=" * 80)
     print("")
-    
+
+    # FIX: Bind to localhost only by default (consistent with run.py)
+    host = os.environ.get('DEV_HOST', '127.0.0.1')
+
+    if host == '0.0.0.0':
+        print("WARNING: Server is binding to all interfaces (0.0.0.0)")
+        print("This should ONLY be used in isolated development environments!")
+        print("=" * 80)
+        print("")
+
     try:
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host=host, port=5000, debug=True)
     except KeyboardInterrupt:
         print("\n\nServer stopped by user")
     except Exception as e:

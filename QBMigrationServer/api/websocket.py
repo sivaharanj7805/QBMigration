@@ -1,19 +1,95 @@
 """
 WebSocket API for real-time migration progress updates
 Uses Flask-SocketIO for bidirectional communication
+
+FIX CRIT-01: Added authentication to REST endpoints
+FIX CRIT-03: Configured proper CORS origins instead of wildcard
+FIX LOW-04: Replaced print statements with logging
 """
 
-from flask import Blueprint, request
+from flask import Blueprint, request, current_app
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from functools import wraps
 import jwt
+import hmac
+import hashlib
+import os
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Blueprint for REST endpoints related to WebSocket
 websocket_bp = Blueprint('websocket', __name__, url_prefix='/api/ws')
 
 # SocketIO instance - initialized in app.py
 socketio = None
+
+# Internal API key for worker authentication (CRIT-01 FIX)
+INTERNAL_API_KEY = os.getenv('INTERNAL_API_KEY')
+
+
+def require_internal_auth(f):
+    """
+    Decorator to require internal API authentication for WebSocket REST endpoints.
+    FIX CRIT-01: Prevents unauthorized users from spoofing migration status.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check for internal API key
+        api_key = request.headers.get('X-Internal-API-Key')
+
+        if not INTERNAL_API_KEY:
+            logger.error("INTERNAL_API_KEY not configured - WebSocket REST endpoints disabled")
+            return {'success': False, 'error': 'Server misconfiguration'}, 500
+
+        if not api_key:
+            logger.warning(f"WebSocket REST endpoint called without API key from {request.remote_addr}")
+            return {'success': False, 'error': 'Authentication required'}, 401
+
+        # Use constant-time comparison to prevent timing attacks
+        if not hmac.compare_digest(api_key, INTERNAL_API_KEY):
+            logger.warning(f"Invalid API key for WebSocket REST endpoint from {request.remote_addr}")
+            return {'success': False, 'error': 'Invalid API key'}, 403
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_allowed_cors_origins(app):
+    """
+    Get allowed CORS origins from configuration.
+    FIX CRIT-03: No more wildcard CORS - explicitly list allowed origins.
+    """
+    # Get from config or environment
+    allowed_origins = app.config.get('WEBSOCKET_CORS_ORIGINS')
+
+    if allowed_origins:
+        if isinstance(allowed_origins, str):
+            return [o.strip() for o in allowed_origins.split(',')]
+        return allowed_origins
+
+    # Fallback to SERVER_URL if configured
+    server_url = app.config.get('SERVER_URL')
+    if server_url:
+        origins = [server_url]
+        # Also allow www variant
+        if server_url.startswith('https://'):
+            domain = server_url.replace('https://', '')
+            if domain.startswith('www.'):
+                origins.append(f"https://{domain[4:]}")
+            else:
+                origins.append(f"https://www.{domain}")
+        return origins
+
+    # Development fallback
+    if app.config.get('ENV') == 'development' or app.config.get('DEBUG'):
+        logger.warning("Using development CORS origins for WebSocket")
+        return ['http://localhost:3000', 'http://localhost:5000', 'http://127.0.0.1:5000']
+
+    # Production without configuration - deny all
+    logger.error("No WEBSOCKET_CORS_ORIGINS configured for production!")
+    return []
 
 
 def init_socketio(app, secret_key):
@@ -31,13 +107,18 @@ def init_socketio(app, secret_key):
         except ImportError:
             async_mode = 'threading'
 
+    # FIX CRIT-03: Use explicit CORS origins instead of wildcard
+    allowed_origins = get_allowed_cors_origins(app)
+
     socketio = SocketIO(
         app,
-        cors_allowed_origins="*",
+        cors_allowed_origins=allowed_origins,
         async_mode=async_mode,
         logger=not app.config.get('TESTING'),
         engineio_logger=not app.config.get('TESTING')
     )
+
+    logger.info(f"WebSocket initialized with CORS origins: {allowed_origins}")
 
     register_handlers(socketio, secret_key)
     return socketio
@@ -45,17 +126,19 @@ def init_socketio(app, secret_key):
 
 def register_handlers(sio, secret_key):
     """Register SocketIO event handlers"""
-    
+
     @sio.on('connect')
     def handle_connect():
         """Handle client connection"""
-        print(f"[WebSocket] Client connected: {request.sid}")
+        # FIX LOW-04: Use logging instead of print
+        logger.debug(f"[WebSocket] Client connected: {request.sid}")
         emit('connected', {'status': 'connected', 'sid': request.sid})
-    
+
     @sio.on('disconnect')
     def handle_disconnect():
         """Handle client disconnect"""
-        print(f"[WebSocket] Client disconnected: {request.sid}")
+        # FIX LOW-04: Use logging instead of print
+        logger.debug(f"[WebSocket] Client disconnected: {request.sid}")
     
     @sio.on('authenticate')
     def handle_authenticate(data):
@@ -72,7 +155,8 @@ def register_handlers(sio, secret_key):
             # Join user-specific room
             join_room(f'user_{user_id}')
             emit('authenticated', {'user_id': user_id})
-            print(f"[WebSocket] User {user_id} authenticated")
+            # FIX LOW-04: Use logging instead of print
+            logger.info(f"[WebSocket] User {user_id} authenticated")
             
         except jwt.ExpiredSignatureError:
             emit('error', {'message': 'Token expired'})
@@ -89,7 +173,8 @@ def register_handlers(sio, secret_key):
         
         join_room(f'migration_{migration_id}')
         emit('subscribed', {'migration_id': migration_id})
-        print(f"[WebSocket] Client subscribed to migration: {migration_id}")
+        # FIX LOW-04: Use logging instead of print
+        logger.debug(f"[WebSocket] Client subscribed to migration: {migration_id}")
     
     @sio.on('unsubscribe_migration')
     def handle_unsubscribe_migration(data):
@@ -176,9 +261,11 @@ def emit_migration_failed(migration_id: str, error: str, error_code: str = None)
 
 
 # REST endpoints for manual progress updates (from Celery workers)
+# FIX CRIT-01: All REST endpoints now require internal API authentication
 @websocket_bp.route('/emit/progress', methods=['POST'])
+@require_internal_auth
 def emit_progress_rest():
-    """REST endpoint for Celery workers to emit progress"""
+    """REST endpoint for Celery workers to emit progress (requires internal auth)"""
     data = request.get_json()
     
     migration_id = data.get('migration_id')
@@ -193,8 +280,9 @@ def emit_progress_rest():
 
 
 @websocket_bp.route('/emit/completed', methods=['POST'])
+@require_internal_auth
 def emit_completed_rest():
-    """REST endpoint for completion notification"""
+    """REST endpoint for completion notification (requires internal auth)"""
     data = request.get_json()
     
     migration_id = data.get('migration_id')
@@ -206,8 +294,9 @@ def emit_completed_rest():
 
 
 @websocket_bp.route('/emit/failed', methods=['POST'])
+@require_internal_auth
 def emit_failed_rest():
-    """REST endpoint for failure notification"""
+    """REST endpoint for failure notification (requires internal auth)"""
     data = request.get_json()
     
     migration_id = data.get('migration_id')
