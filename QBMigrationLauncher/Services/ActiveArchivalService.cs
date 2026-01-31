@@ -104,6 +104,7 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Search archived transactions.
+        /// FIX: Added error handling for file I/O and JSON deserialization.
         /// </summary>
         public async Task<List<ArchivedTransaction>> SearchTransactionsAsync(TransactionSearchCriteria criteria)
         {
@@ -111,7 +112,7 @@ namespace QBMigrationLauncher.Services
 
             foreach (var entry in _index.Entries.Where(e => e.Status == ArchiveStatus.Active))
             {
-                if (!string.IsNullOrEmpty(criteria.CompanyName) && 
+                if (!string.IsNullOrEmpty(criteria.CompanyName) &&
                     !entry.CompanyName.Contains(criteria.CompanyName, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
@@ -120,33 +121,46 @@ namespace QBMigrationLauncher.Services
                 var txnIndexPath = Path.Combine(entry.ArchivePath, "transactions_index.json");
                 if (!File.Exists(txnIndexPath)) continue;
 
-                var json = await File.ReadAllTextAsync(txnIndexPath);
-                var transactions = JsonSerializer.Deserialize<List<ArchivedTransaction>>(json) ?? new List<ArchivedTransaction>();
+                try
+                {
+                    var json = await File.ReadAllTextAsync(txnIndexPath);
+                    var transactions = JsonSerializer.Deserialize<List<ArchivedTransaction>>(json) ?? new List<ArchivedTransaction>();
 
-                // Apply filters
-                var filtered = transactions.AsEnumerable();
+                    // Apply filters
+                    var filtered = transactions.AsEnumerable();
 
-                if (criteria.DateFrom.HasValue)
-                    filtered = filtered.Where(t => t.Date >= criteria.DateFrom.Value);
+                    if (criteria.DateFrom.HasValue)
+                        filtered = filtered.Where(t => t.Date >= criteria.DateFrom.Value);
 
-                if (criteria.DateTo.HasValue)
-                    filtered = filtered.Where(t => t.Date <= criteria.DateTo.Value);
+                    if (criteria.DateTo.HasValue)
+                        filtered = filtered.Where(t => t.Date <= criteria.DateTo.Value);
 
-                if (!string.IsNullOrEmpty(criteria.TransactionType))
-                    filtered = filtered.Where(t => t.Type.Equals(criteria.TransactionType, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(criteria.TransactionType))
+                        filtered = filtered.Where(t => t.Type.Equals(criteria.TransactionType, StringComparison.OrdinalIgnoreCase));
 
-                if (criteria.MinAmount.HasValue)
-                    filtered = filtered.Where(t => t.Amount >= criteria.MinAmount.Value);
+                    if (criteria.MinAmount.HasValue)
+                        filtered = filtered.Where(t => t.Amount >= criteria.MinAmount.Value);
 
-                if (criteria.MaxAmount.HasValue)
-                    filtered = filtered.Where(t => t.Amount <= criteria.MaxAmount.Value);
+                    if (criteria.MaxAmount.HasValue)
+                        filtered = filtered.Where(t => t.Amount <= criteria.MaxAmount.Value);
 
-                if (!string.IsNullOrEmpty(criteria.SearchText))
-                    filtered = filtered.Where(t => 
-                        t.Memo?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true ||
-                        t.EntityName?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true);
+                    if (!string.IsNullOrEmpty(criteria.SearchText))
+                        filtered = filtered.Where(t =>
+                            t.Memo?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true ||
+                            t.EntityName?.Contains(criteria.SearchText, StringComparison.OrdinalIgnoreCase) == true);
 
-                results.AddRange(filtered);
+                    results.AddRange(filtered);
+                }
+                catch (IOException ex)
+                {
+                    // Log and skip this archive if file can't be read
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Could not read archive {entry.ArchiveId}: {ex.Message}");
+                }
+                catch (JsonException ex)
+                {
+                    // Log and skip this archive if JSON is malformed
+                    System.Diagnostics.Debug.WriteLine($"[WARN] Malformed index in archive {entry.ArchiveId}: {ex.Message}");
+                }
             }
 
             return results.OrderByDescending(t => t.Date).Take(criteria.MaxResults).ToList();

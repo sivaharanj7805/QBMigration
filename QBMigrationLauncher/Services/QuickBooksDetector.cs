@@ -104,6 +104,7 @@ namespace QBMigrationLauncher.Services
 
         /// <summary>
         /// Load config from disk.
+        /// FIX: Added null checks for dynamic object deserialization.
         /// </summary>
         public bool Load()
         {
@@ -112,12 +113,27 @@ namespace QBMigrationLauncher.Services
             try
             {
                 var json = File.ReadAllText(_configPath);
-                dynamic config = JsonConvert.DeserializeObject(json)!;
-                ServerUrl = config.serverUrl;
+                var config = JsonConvert.DeserializeObject<dynamic>(json);
+
+                // FIX: Check for null before accessing properties
+                if (config == null)
+                {
+                    System.Diagnostics.Debug.WriteLine("[WARN] Config file deserialized to null");
+                    return false;
+                }
+
+                // Safely access serverUrl property
+                ServerUrl = config.serverUrl?.ToString();
                 return true;
             }
-            catch
+            catch (JsonException ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[WARN] Failed to parse config: {ex.Message}");
+                return false;
+            }
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WARN] Failed to read config file: {ex.Message}");
                 return false;
             }
         }

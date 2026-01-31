@@ -141,6 +141,7 @@ namespace QBMigrationLauncher
 
         /// <summary>
         /// Handle Purchase link click
+        /// FIX: Use specific exception types instead of bare catch
         /// </summary>
         private void PurchaseLink_Click(object sender, RoutedEventArgs e)
         {
@@ -152,8 +153,16 @@ namespace QBMigrationLauncher
                     UseShellExecute = true
                 });
             }
-            catch
+            catch (System.ComponentModel.Win32Exception ex)
             {
+                // No default browser configured or browser failed to start
+                System.Diagnostics.Debug.WriteLine($"[WARN] Could not open browser: {ex.Message}");
+                ShowStatus("Unable to open browser. Visit https://forensicbridge.ca/pricing", false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Process-related error
+                System.Diagnostics.Debug.WriteLine($"[WARN] Process start failed: {ex.Message}");
                 ShowStatus("Unable to open browser. Visit https://forensicbridge.ca/pricing", false);
             }
         }

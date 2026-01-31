@@ -276,10 +276,11 @@ namespace QBMigrationLauncher.ViewModels
                 // Generate Migration Certificate
                 var certData = new MigrationCertificateData
                 {
-                    CompanyName = SelectedFile ?? "Unknown",
+                    // FIX: Use Path.GetFileName to show just filename, not full path in certificate
+                    CompanyName = Path.GetFileName(SelectedFile ?? "") ?? "Unknown",
                     MigrationId = migrationId, // FIX WPF-01: Use the already-generated ID
-                    MigrationDate = DateTime.Now,
-                    SourceFileName = SelectedFile ?? "Unknown",
+                    MigrationDate = DateTime.UtcNow, // FIX: Use UtcNow for consistency
+                    SourceFileName = Path.GetFileName(SelectedFile ?? "") ?? "Unknown",
                     RealmId = "PENDING_QBO_VERIFICATION", // Clearer status message
                     SourceHash = sourceHash,
                     TrialBalanceDesktop = 0, // Will be populated from extraction results

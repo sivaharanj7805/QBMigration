@@ -20,6 +20,29 @@ namespace QBMigrationLauncher.Services
         }
 
         /// <summary>
+        /// FIX: Safely write file with error handling for disk full, permission denied, etc.
+        /// </summary>
+        private void SafeWriteFile(string filePath, string content)
+        {
+            try
+            {
+                File.WriteAllText(filePath, content, Encoding.UTF8);
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to write file '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Check disk space and file permissions.", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Permission denied writing '{Path.GetFileName(filePath)}': {ex.Message}. " +
+                    "Run as administrator or choose a different output directory.", ex);
+            }
+        }
+
+        /// <summary>
         /// Generates a comprehensive variance report comparing source and destination.
         /// </summary>
         public string GenerateVarianceReport(VarianceReportData data)
@@ -127,8 +150,8 @@ namespace QBMigrationLauncher.Services
 
             var fileName = $"VarianceReport_{data.MigrationId}.html";
             var filePath = Path.Combine(_outputDirectory, fileName);
-            File.WriteAllText(filePath, html, Encoding.UTF8);
-            
+            SafeWriteFile(filePath, html);  // FIX: Use safe write with error handling
+
             return filePath;
         }
 
