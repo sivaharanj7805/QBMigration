@@ -5,7 +5,11 @@ import pyotp
 import re
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
+import threading
+
+# AUDIT FIX: Module-level lock to prevent race condition in rate limiter initialization
+_rate_limit_init_lock = threading.Lock()
 
 class SecurityManager:
     """
@@ -128,16 +132,19 @@ class SecurityManager:
 
         # Fallback: In-memory rate limiting (DEVELOPMENT ONLY - single instance)
         import os
-        import threading
         if os.getenv('FLASK_ENV', 'development') == 'production':
             # CRIT-12 FIX: Never use in-memory fallback in production
             print("CRITICAL: In-memory rate limiting not allowed in production")
             return False
 
-        # AUDIT FIX: Thread-safe rate limit store initialization and access
+        # AUDIT FIX: Thread-safe rate limit store initialization with double-checked locking
+        # Use module-level lock to prevent race condition
         if not hasattr(SecurityManager, '_rate_limit_store'):
-            SecurityManager._rate_limit_store = {}
-            SecurityManager._rate_limit_lock = threading.Lock()
+            with _rate_limit_init_lock:
+                # Double-check after acquiring lock
+                if not hasattr(SecurityManager, '_rate_limit_store'):
+                    SecurityManager._rate_limit_store = {}
+                    SecurityManager._rate_limit_lock = threading.Lock()
 
         now = datetime.now()
         window_start = now - timedelta(minutes=window_minutes)
@@ -165,7 +172,7 @@ class SecurityManager:
     # ========================================================================
     
     @staticmethod
-    def pre_migration_scan(data: Dict) -> Dict[str, any]:
+    def pre_migration_scan(data: Dict) -> Dict[str, Any]:
         """
         CRITICAL: Scan source data before migration starts
         
