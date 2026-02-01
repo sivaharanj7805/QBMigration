@@ -487,9 +487,16 @@ class PremiumQBOClient:
             token = oauth_manager.get_access_token()
         else:
             token = self._base_access_token
-        
+
+        # CRITICAL FIX: Validate token is not None before creating Authorization header
+        if not token:
+            raise ValueError(
+                "No access token available. Either provide oauth_manager or "
+                "initialize PremiumQBOClient with access_token parameter."
+            )
+
         headers["Authorization"] = f"Bearer {token}"
-        
+
         return headers
     
     def _update_rate_limits(self, response: requests.Response):
@@ -847,32 +854,49 @@ class PremiumQBOClient:
             
             for i, batch_item in enumerate(batch_responses):
                 bid = batch_item.get("bId", f"bid_{i}")
-                
+
+                # CRITICAL FIX: Parse bId to get the correct original request index
+                # Response order is NOT guaranteed to match request order!
+                try:
+                    # bId format is "bid_N" where N is the original index
+                    req_index = int(bid.split("_")[1]) if "_" in bid else i
+                except (IndexError, ValueError):
+                    logger.warning(f"Could not parse bId '{bid}', using response index {i}")
+                    req_index = i
+
+                # Safely get original entity
+                original_entity = batch[req_index] if req_index < len(batch) else batch[i] if i < len(batch) else {}
+
                 if batch_item.get(entity_type):
                     # Success
                     created_entity = batch_item[entity_type]
                     succeeded.append(created_entity)
-                    
-                    # Record in database
-                    qbd_id = batch[i].get("Name", str(i))
+
+                    # Record in database - use more comprehensive ID extraction
+                    qbd_id = (
+                        original_entity.get("Name") or
+                        original_entity.get("DocNumber") or
+                        original_entity.get("Description") or
+                        f"index_{req_index}"
+                    )
                     qbo_id = created_entity.get("Id")
                     sync_token = created_entity.get("SyncToken", "0")
-                    
+
                     if qbo_id:
                         self.record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)
-                    
+
                 elif batch_item.get("Fault"):
                     # Failure
                     fault = batch_item["Fault"]
                     error_msg = fault.get("Error", [{}])[0].get("Message", "Unknown error")
-                    
+
                     failed_item = {
-                        "entity": batch[i],
+                        "entity": original_entity,
                         "error": error_msg,
                         "fault_code": fault.get("type")
                     }
                     failed.append(failed_item)
-                    
+
                     logger.error(f"Batch item {bid} failed: {error_msg}")
         
         except Exception as e:
@@ -917,7 +941,8 @@ class PremiumQBOClient:
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id))
         
-        print(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
+        # HIGH FIX: Use logger instead of print for production environments
+        logger.info(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
@@ -948,9 +973,8 @@ class PremiumQBOClient:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
         
-        print(f"✓ Batch processing complete:")
-        print(f"  Succeeded: {len(results['succeeded'])}")
-        print(f"  Failed: {len(results['failed'])}")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Batch processing complete: Succeeded={len(results['succeeded'])}, Failed={len(results['failed'])}")
         
         return results
     
@@ -1131,7 +1155,8 @@ class PremiumQBOClient:
                     "items": self.failed_items
                 }, f, indent=2)
             
-            print(f"✓ Exported {len(self.failed_items)} failed items to {filepath}")
+            # HIGH FIX: Use logger instead of print
+            logger.info(f"Exported {len(self.failed_items)} failed items to {filepath}")
     
     def query_count(
         self,
@@ -1239,8 +1264,8 @@ class PremiumQBOClient:
             entities = cursor.fetchall()
             conn.close()
         
-        print(f"\n🗑️  Rolling back migration {migration_id}...")
-        print(f"   Found {len(entities)} entities to delete")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Rolling back migration {migration_id}... Found {len(entities)} entities to delete")
         
         deleted = 0
         failed = 0
@@ -1251,9 +1276,8 @@ class PremiumQBOClient:
             else:
                 failed += 1
         
-        print(f"\n✅ Rollback complete:")
-        print(f"   Deleted: {deleted}")
-        print(f"   Failed: {failed}")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Rollback complete: Deleted={deleted}, Failed={failed}")
         
         return {
             "deleted": deleted,
