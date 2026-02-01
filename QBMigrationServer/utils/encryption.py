@@ -44,16 +44,13 @@ class EncryptionManager:
                     except Exception:
                         pass
 
-                # Legacy support: Try to read from password file (will be removed in future)
+                # CRITICAL SECURITY FIX: File-based password fallback REMOVED
+                # Never read secrets from plaintext files - use env vars or Secrets Manager only
                 if not key_password:
-                    password_path = os.path.join(key_dir, '.key_password')
-                    if os.path.exists(password_path):
-                        with open(password_path, 'r') as pf:
-                            key_password = pf.read().strip()
-                        logger.warning(
-                            "SECURITY: Reading RSA key password from file is deprecated. "
-                            "Please set RSA_KEY_PASSWORD environment variable or use Secrets Manager."
-                        )
+                    logger.warning(
+                        "RSA_KEY_PASSWORD not found in environment or Secrets Manager. "
+                        "Key may be unencrypted or use default password."
+                    )
 
                 with open(private_key_path, 'rb') as f:
                     self._private_key = serialization.load_pem_private_key(

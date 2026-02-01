@@ -371,11 +371,42 @@ def start_migration(migration_id):
                 'error': 'Migration file not found in cloud storage'
             }), 400
         
-        # SECURITY: Get QBO credentials from request
-        # WARNING: Credentials transmitted in plain JSON over HTTPS
-        # TODO: Implement client-side encryption with server public key
+        # SECURITY FIX: Get QBO credentials from request with encryption support
+        # Credentials can be sent in two formats:
+        # 1. encrypted_credentials: Base64-encoded encrypted JSON (recommended)
+        # 2. qbo_credentials: Plain JSON (only allowed if ALLOW_PLAINTEXT_CREDENTIALS=true in dev)
         data = request.get_json() or {}
-        qbo_credentials = data.get('qbo_credentials', {})
+
+        qbo_credentials = None
+
+        # PRIORITY 1: Check for encrypted credentials (production-recommended)
+        if data.get('encrypted_credentials'):
+            try:
+                from api.EncryptionManager import decrypt_client_credentials
+                qbo_credentials = decrypt_client_credentials(data['encrypted_credentials'])
+                logger.info(f"Migration {migration_id}: Using encrypted credentials")
+            except Exception as e:
+                logger.error(f"Failed to decrypt credentials for {migration_id}: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to decrypt credentials. Please re-encrypt and try again.'
+                }), 400
+        else:
+            # PRIORITY 2: Plaintext credentials (development only)
+            import os
+            allow_plaintext = os.getenv('ALLOW_PLAINTEXT_CREDENTIALS', 'false').lower() == 'true'
+            is_production = os.getenv('FLASK_ENV', 'development') == 'production'
+
+            if is_production and not allow_plaintext:
+                return jsonify({
+                    'success': False,
+                    'error': 'Plaintext credentials not allowed in production. Use encrypted_credentials field.'
+                }), 400
+
+            qbo_credentials = data.get('qbo_credentials', {})
+
+            if allow_plaintext and qbo_credentials:
+                logger.warning(f"Migration {migration_id}: Using PLAINTEXT credentials (not recommended)")
 
         if not qbo_credentials or not all(k in qbo_credentials for k in ['client_id', 'client_secret', 'refresh_token']):
             return jsonify({

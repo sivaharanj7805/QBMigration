@@ -18,6 +18,7 @@ import base64
 import hashlib
 import urllib.parse
 from typing import Optional, Dict, Tuple
+import re
 
 # For production, install: pip install python-saml3
 # For now, we implement the core SSO flow with configurable providers
@@ -25,6 +26,115 @@ from typing import Optional, Dict, Tuple
 logger = logging.getLogger(__name__)
 
 sso_bp = Blueprint('sso', __name__, url_prefix='/api/sso')
+
+
+# =============================================================================
+# SECURITY: OPEN REDIRECT PREVENTION
+# =============================================================================
+
+def validate_relay_state(relay_state: str) -> str:
+    """
+    CRITICAL SECURITY FIX: Validate relay_state to prevent open redirect attacks.
+
+    Only allows:
+    1. Relative paths starting with /
+    2. Explicitly whitelisted domains from ALLOWED_RELAY_DOMAINS
+
+    Args:
+        relay_state: The redirect URL from SSO flow
+
+    Returns:
+        str: Safe redirect path (defaults to '/' if invalid)
+    """
+    if not relay_state:
+        return '/'
+
+    # Strip whitespace
+    relay_state = relay_state.strip()
+
+    # SECURITY: Reject empty or whitespace-only values
+    if not relay_state:
+        return '/'
+
+    # SECURITY: Check for dangerous URL schemes
+    dangerous_schemes = ['javascript:', 'data:', 'vbscript:', 'file:']
+    lower_state = relay_state.lower().strip()
+    for scheme in dangerous_schemes:
+        if lower_state.startswith(scheme):
+            logger.warning(f"SSO open redirect attempt blocked: {relay_state[:50]}")
+            return '/'
+
+    # SECURITY: Check for protocol-relative URLs (//evil.com)
+    if relay_state.startswith('//'):
+        logger.warning(f"SSO open redirect attempt blocked (protocol-relative): {relay_state[:50]}")
+        return '/'
+
+    # CASE 1: Relative path (safe - starts with / but not //)
+    if relay_state.startswith('/') and not relay_state.startswith('//'):
+        # Additional check: no double-encoding or newlines
+        if '%0' in relay_state.lower() or '\n' in relay_state or '\r' in relay_state:
+            logger.warning(f"SSO open redirect attempt blocked (encoded newline): {relay_state[:50]}")
+            return '/'
+        return relay_state
+
+    # CASE 2: Absolute URL - must be in whitelist
+    try:
+        parsed = urllib.parse.urlparse(relay_state)
+
+        # Must have scheme and netloc for absolute URL
+        if not parsed.scheme or not parsed.netloc:
+            logger.warning(f"SSO invalid relay_state format: {relay_state[:50]}")
+            return '/'
+
+        # Only allow HTTPS in production
+        import os
+        if os.getenv('FLASK_ENV') == 'production' and parsed.scheme != 'https':
+            logger.warning(f"SSO non-HTTPS relay_state blocked: {relay_state[:50]}")
+            return '/'
+
+        # Check against whitelist from environment
+        allowed_domains = os.getenv('ALLOWED_RELAY_DOMAINS', '').split(',')
+        allowed_domains = [d.strip().lower() for d in allowed_domains if d.strip()]
+
+        # Add default allowed domains
+        server_url = current_app.config.get('SERVER_URL', '')
+        if server_url:
+            try:
+                server_parsed = urllib.parse.urlparse(server_url)
+                if server_parsed.netloc:
+                    allowed_domains.append(server_parsed.netloc.lower())
+            except Exception:
+                pass
+
+        # Always allow forensicbridge domains
+        allowed_domains.extend([
+            'forensicbridge.io',
+            'www.forensicbridge.io',
+            'app.forensicbridge.io',
+            'forensicbridge.ca',
+            'www.forensicbridge.ca',
+            'app.forensicbridge.ca',
+        ])
+
+        # Normalize the host for comparison
+        host = parsed.netloc.lower()
+
+        # Check if host matches any allowed domain (exact or subdomain)
+        is_allowed = False
+        for domain in allowed_domains:
+            if host == domain or host.endswith('.' + domain):
+                is_allowed = True
+                break
+
+        if not is_allowed:
+            logger.warning(f"SSO open redirect blocked (domain not whitelisted): {host}")
+            return '/'
+
+        return relay_state
+
+    except Exception as e:
+        logger.warning(f"SSO relay_state validation error: {e}")
+        return '/'
 
 
 class SSOProvider:
@@ -182,17 +292,18 @@ def list_providers():
 def initiate_sso():
     """
     Initiate SSO login flow
-    
+
     Request Body:
         org_id (str): Organization ID
         relay_state (str): Optional redirect URL after auth
-    
+
     Returns:
         redirect_url: URL to redirect user to IdP
     """
     data = request.get_json() or {}
     org_id = data.get('org_id')
-    relay_state = data.get('relay_state', '/')
+    # SECURITY FIX: Validate relay_state to prevent open redirect attacks
+    relay_state = validate_relay_state(data.get('relay_state', '/'))
     
     if not org_id:
         return jsonify({'error': 'org_id required'}), 400
@@ -225,7 +336,8 @@ def assertion_consumer_service():
     Receives SAML response from IdP after authentication
     """
     saml_response = request.form.get('SAMLResponse')
-    relay_state = request.form.get('RelayState', '/')
+    # SECURITY FIX: Validate relay_state to prevent open redirect attacks
+    relay_state = validate_relay_state(request.form.get('RelayState', '/'))
     
     if not saml_response:
         logger.warning("ACS received without SAML response")
@@ -258,11 +370,12 @@ def assertion_consumer_service():
         }
         
         session['sso_user'] = sso_user
-        
+
         logger.info(f"SSO authentication successful for org '{org_id}'")
-        
-        # Redirect to relay state or dashboard
-        return redirect(session.get('sso_relay_state', '/'))
+
+        # SECURITY FIX: Validate stored relay_state before redirect
+        safe_redirect = validate_relay_state(session.get('sso_relay_state', '/'))
+        return redirect(safe_redirect)
         
     except Exception as e:
         logger.exception(f"SAML ACS processing failed: {str(e)}")
@@ -308,10 +421,12 @@ def oauth_callback():
         }
         
         session['sso_user'] = sso_user
-        
+
         logger.info(f"OAuth callback successful for org '{org_id}'")
-        
-        return redirect(session.get('sso_relay_state', '/'))
+
+        # SECURITY FIX: Validate stored relay_state before redirect
+        safe_redirect = validate_relay_state(session.get('sso_relay_state', '/'))
+        return redirect(safe_redirect)
         
     except Exception as e:
         logger.exception(f"OAuth callback failed: {str(e)}")

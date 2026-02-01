@@ -10,6 +10,58 @@ using QBFC16Lib;
 
 namespace QBDesktopExtractor
 {
+    // =================================================================
+    // NULL-SAFE GetAt() HELPER METHODS
+    // CRITICAL FIX: Prevents NullReferenceException and ArgumentOutOfRangeException
+    // when accessing QBFC list elements
+    // =================================================================
+
+    /// <summary>
+    /// Static helpers for safe list access in QBFC operations
+    /// </summary>
+    public static class QBFCSafeAccessHelpers
+    {
+        /// <summary>
+        /// Safely get a response from ResponseList, returning null if index out of range
+        /// </summary>
+        public static IResponse SafeGetResponse(this IResponseList responseList, int index)
+        {
+            if (responseList == null) return null;
+            if (index < 0 || index >= responseList.Count) return null;
+            return responseList.GetAt(index);
+        }
+
+        /// <summary>
+        /// Safely get the first response, returning null if list is empty
+        /// </summary>
+        public static IResponse SafeGetFirstResponse(this IResponseList responseList)
+        {
+            return SafeGetResponse(responseList, 0);
+        }
+
+        /// <summary>
+        /// Check if response list has items and first response is successful (StatusCode == 0)
+        /// </summary>
+        public static bool HasSuccessfulResponse(this IResponseList responseList)
+        {
+            if (responseList == null || responseList.Count == 0) return false;
+            var first = responseList.GetAt(0);
+            return first != null && first.StatusCode == 0;
+        }
+
+        /// <summary>
+        /// Get response or throw with descriptive error message
+        /// </summary>
+        public static IResponse GetResponseOrThrow(this IResponseList responseList, int index, string context)
+        {
+            if (responseList == null)
+                throw new InvalidOperationException($"ResponseList is null ({context})");
+            if (index < 0 || index >= responseList.Count)
+                throw new InvalidOperationException($"ResponseList index {index} out of range (Count: {responseList.Count}) ({context})");
+            return responseList.GetAt(index);
+        }
+    }
+
     /// <summary>
     /// Query capability result for tracking unsupported features
     /// </summary>

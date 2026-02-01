@@ -130,7 +130,9 @@ class Config:
     # ============================================================================
     # SECURITY
     # ============================================================================
-    SESSION_COOKIE_SECURE = False
+    # SECURITY FIX: SESSION_COOKIE_SECURE should be True in production
+    # Set to True when FLASK_ENV=production to enforce HTTPS-only cookies
+    SESSION_COOKIE_SECURE = os.getenv('FLASK_ENV') == 'production'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=int(os.getenv('SESSION_TIMEOUT_HOURS', '24')))
@@ -223,7 +225,23 @@ class Config:
     # ============================================================================
     # WEBHOOKS
     # ============================================================================
-    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', secrets.token_hex(32))
+    # SECURITY FIX: WEBHOOK_SECRET must be persistent across restarts
+    # In production, this MUST be set via environment variable or Secrets Manager
+    # A generated secret would break webhook signature verification on restart
+    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET')
+    if not WEBHOOK_SECRET:
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError(
+                "CRITICAL: WEBHOOK_SECRET must be set in production! "
+                "This secret is used to sign webhook requests and must persist across restarts. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        else:
+            # Development only - generate ephemeral secret with warning
+            WEBHOOK_SECRET = secrets.token_hex(32)
+            print("⚠️  WARNING: Using generated WEBHOOK_SECRET for development. "
+                  "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence.")
+
     SERVER_URL = os.getenv('SERVER_URL', 'http://localhost:5000')
     
     # ============================================================================
@@ -247,7 +265,11 @@ class Config:
     # ============================================================================
     # FEATURE FLAGS
     # ============================================================================
-    ENABLE_2FA = os.getenv('ENABLE_2FA', 'false').lower() == 'true'
+    # MFA/2FA: Enabled by default in production for security compliance
+    # Users can optionally enable MFA; privileged operations may require it
+    ENABLE_2FA = os.getenv('ENABLE_2FA', 'true').lower() == 'true'
+    # Require MFA for privileged operations (account deletion, payment changes, etc.)
+    REQUIRE_MFA_FOR_PRIVILEGED_OPS = os.getenv('REQUIRE_MFA_FOR_PRIVILEGED_OPS', 'true').lower() == 'true'
     ENABLE_VIRUS_SCANNING = os.getenv('ENABLE_VIRUS_SCANNING', 'false').lower() == 'true'
     ENABLE_METRICS_DASHBOARD = os.getenv('ENABLE_METRICS_DASHBOARD', 'false').lower() == 'true'
     
@@ -291,7 +313,21 @@ class Config:
     # ============================================================================
     # LICENSING
     # ============================================================================
-    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY', secrets.token_hex(32))
+    # CRITICAL SECURITY FIX: LICENSE_SECRET_KEY must be persistent
+    # Generating a random key on each import would invalidate all existing license tokens
+    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY')
+    if not LICENSE_SECRET_KEY:
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError(
+                "CRITICAL: LICENSE_SECRET_KEY must be set in production! "
+                "This secret is used to sign license tokens and must persist across restarts. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        else:
+            # Development only - generate ephemeral secret with warning
+            LICENSE_SECRET_KEY = secrets.token_hex(32)
+            print("WARNING: Using generated LICENSE_SECRET_KEY for development. "
+                  "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence.")
     LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv('LICENSE_TOKEN_EXPIRY_HOURS', '24'))
     
     # License/Pricing tiers - Per-file pricing model
