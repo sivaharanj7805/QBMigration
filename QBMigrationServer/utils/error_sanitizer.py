@@ -506,3 +506,125 @@ def log_error_safely(error: Exception, context: str, user_id: Optional[int] = No
         },
         exc_info=not is_production()  # Include stack trace only in dev
     )
+
+
+# =============================================================================
+# QBO ERROR PARAMETER WHITELIST
+# =============================================================================
+
+# Allowed QBO error codes that can be passed to the frontend
+# Any error not in this list will be mapped to a generic message
+QBO_ERROR_WHITELIST = {
+    # OAuth errors from Intuit
+    'access_denied': 'Access was denied. Please try connecting again.',
+    'invalid_scope': 'Invalid permissions requested. Please contact support.',
+    'server_error': 'QuickBooks server error. Please try again later.',
+    'temporarily_unavailable': 'QuickBooks is temporarily unavailable. Please try again later.',
+    'invalid_grant': 'Session expired. Please reconnect to QuickBooks.',
+    'invalid_client': 'Configuration error. Please contact support.',
+    'unsupported_grant_type': 'Authentication error. Please contact support.',
+
+    # API errors
+    'rate_limit_exceeded': 'Too many requests to QuickBooks. Please wait and try again.',
+    'company_not_found': 'QuickBooks company not found. Please reconnect.',
+    'token_expired': 'QuickBooks session expired. Please reconnect.',
+    'unauthorized': 'QuickBooks authorization failed. Please reconnect.',
+    'forbidden': 'Access to QuickBooks resource denied.',
+    'not_found': 'Requested QuickBooks data not found.',
+    'validation_error': 'Invalid data format for QuickBooks.',
+    'duplicate': 'Duplicate entry detected in QuickBooks.',
+
+    # User-friendly generic errors
+    'connection_failed': 'Failed to connect to QuickBooks. Please try again.',
+    'sync_failed': 'Failed to sync with QuickBooks. Please try again.',
+    'import_failed': 'Failed to import data from QuickBooks.',
+    'export_failed': 'Failed to export data to QuickBooks.',
+}
+
+
+def sanitize_qbo_error(error_code: str, error_description: str = None) -> Dict[str, str]:
+    """
+    Sanitize QBO error parameters using a whitelist approach.
+
+    Only returns error codes and descriptions that are safe to display to users.
+    Unknown errors are mapped to generic messages to prevent information disclosure.
+
+    Args:
+        error_code: The error code from QuickBooks OAuth/API
+        error_description: Optional error description from QuickBooks
+
+    Returns:
+        Dict with 'code' and 'message' keys containing safe values
+
+    Example:
+        >>> sanitize_qbo_error('access_denied', 'User denied access')
+        {'code': 'access_denied', 'message': 'Access was denied. Please try connecting again.'}
+
+        >>> sanitize_qbo_error('secret_error_123', 'Internal schema leak')
+        {'code': 'connection_error', 'message': 'Failed to connect to QuickBooks. Please try again.'}
+    """
+    # Normalize error code
+    if not error_code:
+        return {
+            'code': 'unknown_error',
+            'message': 'An error occurred with QuickBooks. Please try again.'
+        }
+
+    # Sanitize: only allow alphanumeric, underscore, hyphen
+    safe_code = re.sub(r'[^a-zA-Z0-9_\-]', '', str(error_code).lower())[:50]
+
+    # Check whitelist
+    if safe_code in QBO_ERROR_WHITELIST:
+        return {
+            'code': safe_code,
+            'message': QBO_ERROR_WHITELIST[safe_code]
+        }
+
+    # Not in whitelist - use generic message
+    logger.warning(f"QBO error not in whitelist: {safe_code} (original: {error_code[:50] if error_code else 'None'})")
+
+    return {
+        'code': 'connection_error',
+        'message': 'Failed to connect to QuickBooks. Please try again.'
+    }
+
+
+def sanitize_qbo_error_for_url(error_code: str) -> str:
+    """
+    Sanitize a QBO error code for safe inclusion in a URL redirect.
+
+    This is specifically for OAuth callback error redirects where we need
+    to pass the error to the frontend via URL parameters.
+
+    Args:
+        error_code: Raw error code from QuickBooks
+
+    Returns:
+        URL-safe sanitized error code (max 50 chars, alphanumeric only)
+
+    Example:
+        >>> sanitize_qbo_error_for_url("access_denied<script>alert(1)</script>")
+        'access_denied'
+    """
+    if not error_code:
+        return 'unknown'
+
+    # Remove any HTML/script injection attempts and non-alphanumeric chars
+    safe = re.sub(r'[^a-zA-Z0-9_\-]', '', str(error_code))
+
+    # Truncate and lowercase
+    return safe[:50].lower() if safe else 'unknown'
+
+
+def get_qbo_user_message(error_code: str) -> str:
+    """
+    Get a user-friendly message for a QBO error code.
+
+    Args:
+        error_code: The sanitized error code
+
+    Returns:
+        User-friendly error message
+    """
+    sanitized = sanitize_qbo_error(error_code)
+    return sanitized['message']

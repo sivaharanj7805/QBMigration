@@ -293,53 +293,69 @@ def activate_session():
             'error': 'Invalid session code'
         }), 404
 
-    # Check for existing activation
-    existing = SessionActivation.query.filter_by(
-        session_id=session_id,
-        device_fingerprint=fingerprint_hash
-    ).first()
-
-    if existing:
-        # Update last used
-        existing.last_used_at = datetime.utcnow()
-        existing.status = 'active'
-        db.session.commit()
-
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'success',
-                              'Existing activation renewed')
-
-        return jsonify({
-            'success': True,
-            'message': 'Device already activated',
-            'activation_id': existing.id,
-            'extractions_used': existing.extraction_count
-        })
-
-    # Check device limit
-    active_count = SessionActivation.query.filter_by(
-        session_id=session_id,
-        status='active'
-    ).count()
-
-    if active_count >= MAX_DEVICES_PER_SESSION:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'failed',
-                              'Device limit reached')
-        return jsonify({
-            'success': False,
-            'error': f'Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session'
-        }), 403
-
-    # Create new activation
-    activation = SessionActivation(
-        session_id=session_id,
-        device_fingerprint=fingerprint_hash,
-        device_name=device_name[:255] if device_name else 'Unknown',
-        ip_address=ip_address,
-        user_agent=user_agent[:500] if user_agent else None,
-        status='active'
-    )
+    # RACE CONDITION FIX: Use database-level locking to prevent duplicate activations
+    # This ensures that concurrent requests don't both pass the device limit check
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
 
     try:
+        # Lock existing activations for this session to prevent race conditions
+        # This ensures only one request can check and create at a time
+        locked_activations = db.session.execute(
+            text("""
+                SELECT id, device_fingerprint, extraction_count, status
+                FROM session_activations
+                WHERE session_id = :session_id
+                FOR UPDATE
+            """),
+            {"session_id": session_id}
+        ).fetchall()
+
+        # Check for existing activation for this device
+        existing = None
+        active_count = 0
+        for row in locked_activations:
+            if row.device_fingerprint == fingerprint_hash:
+                existing = SessionActivation.query.get(row.id)
+            if row.status == 'active':
+                active_count += 1
+
+        if existing:
+            # Update last used
+            existing.last_used_at = datetime.utcnow()
+            existing.status = 'active'
+            db.session.commit()
+
+            log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'success',
+                                  'Existing activation renewed')
+
+            return jsonify({
+                'success': True,
+                'message': 'Device already activated',
+                'activation_id': existing.id,
+                'extractions_used': existing.extraction_count
+            })
+
+        # Check device limit (with lock held, this is race-safe)
+        if active_count >= MAX_DEVICES_PER_SESSION:
+            db.session.rollback()  # Release lock
+            log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'failed',
+                                  'Device limit reached')
+            return jsonify({
+                'success': False,
+                'error': f'Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session'
+            }), 403
+
+        # Create new activation (still holding lock)
+        activation = SessionActivation(
+            session_id=session_id,
+            device_fingerprint=fingerprint_hash,
+            device_name=device_name[:255] if device_name else 'Unknown',
+            ip_address=ip_address,
+            user_agent=user_agent[:500] if user_agent else None,
+            status='active'
+        )
+
         db.session.add(activation)
         db.session.commit()
 
@@ -358,6 +374,31 @@ def activate_session():
             'device_number': active_count + 1,
             'max_devices': MAX_DEVICES_PER_SESSION
         })
+
+    except IntegrityError as e:
+        # Unique constraint violation - device was activated by concurrent request
+        db.session.rollback()
+        logger.warning(f"Concurrent activation detected for session {session_id}: {e}")
+
+        # Fetch the existing activation
+        existing = SessionActivation.query.filter_by(
+            session_id=session_id,
+            device_fingerprint=fingerprint_hash
+        ).first()
+
+        if existing:
+            return jsonify({
+                'success': True,
+                'message': 'Device already activated (concurrent request)',
+                'activation_id': existing.id,
+                'extractions_used': existing.extraction_count
+            })
+
+        return jsonify({
+            'success': False,
+            'error': 'Activation conflict. Please try again.'
+        }), 409
+
     except Exception as e:
         db.session.rollback()
         logger.error(f"Activation failed: {e}")

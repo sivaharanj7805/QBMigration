@@ -6,6 +6,7 @@ load_dotenv()
 from flask import Flask, jsonify, request, redirect
 from flask_login import LoginManager
 from flask_cors import CORS
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from models.database import db, init_db
 from models.user import User
 from config import config  # Import config BEFORE dashboard_api to avoid path conflict
@@ -470,10 +471,40 @@ def create_app(config_name='development'):
         app.config.setdefault('RATELIMIT_STORAGE_URL', 'memory://')
         app.config.setdefault('RATELIMIT_STRATEGY', 'fixed-window')
         app.config.setdefault('RATELIMIT_HEADERS_ENABLED', True)
-        
+
         app.logger.info('Rate limiting enabled')
     else:
         app.logger.info('Rate limiting disabled')
+
+    # SECURITY FIX: Initialize CSRF protection
+    # For REST APIs using Bearer tokens, CSRF is exempt because:
+    # 1. CORS blocks cross-origin requests without proper headers
+    # 2. JWT tokens require explicit Authorization header (not auto-sent like cookies)
+    # 3. Webhook endpoints use HMAC signature verification instead
+    csrf = CSRFProtect()
+    csrf.init_app(app)
+
+    # Set WTF_CSRF_TIME_LIMIT for token validity (3600 seconds = 1 hour)
+    app.config.setdefault('WTF_CSRF_TIME_LIMIT', 3600)
+
+    # CSRF is automatically disabled for endpoints that:
+    # - Don't use session cookies for auth (JWT Bearer token endpoints)
+    # - Have their own verification (webhooks with HMAC signatures)
+    # Flask-WTF checks for CSRF on form submissions but not JSON API calls by default
+    # when WTF_CSRF_CHECK_DEFAULT is True (default behavior)
+
+    # CSRF error handler
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(e):
+        """Handle CSRF validation failures"""
+        app.logger.warning(f"CSRF validation failed from {request.remote_addr}: {e.description}")
+        return jsonify({
+            'success': False,
+            'error': 'CSRF token missing or invalid',
+            'message': 'Request validation failed. Please refresh and try again.'
+        }), 400
+
+    app.logger.info('CSRF protection enabled')
     
     # Setup Flask-Login
     login_manager = LoginManager()
