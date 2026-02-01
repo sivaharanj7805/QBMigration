@@ -1093,19 +1093,19 @@ def invite_team_member():
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'No data provided'}), 400
-    
+
     email = data.get('email', '').strip().lower()
     role = data.get('role', 'member')
-    
+
     if not email:
         return jsonify({'success': False, 'error': 'Email is required'}), 400
-    
+
     user_id = request.current_user['user_id']
     user = User.query.get(user_id)
-    
+
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
-    
+
     # Placeholder: In production, this would:
     # 1. Create invite record in database
     # 2. Send email invitation
@@ -1124,6 +1124,583 @@ def invite_team_member():
             'invited_by': user.email
         }
     })
+
+
+# =============================================================================
+# PASSWORD RESET (CRITICAL PRODUCTION FEATURE)
+# =============================================================================
+
+def _generate_password_reset_token(user_id: int, email: str) -> str:
+    """
+    Generate a secure password reset token.
+
+    Token expires in 1 hour for security.
+
+    Args:
+        user_id: User's database ID
+        email: User's email address
+
+    Returns:
+        JWT token for password reset
+    """
+    import secrets as secrets_module
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'purpose': 'password_reset',
+        'jti': secrets_module.token_hex(16),  # Unique token ID
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1),
+        'iat': datetime.datetime.utcnow()
+    }
+    return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
+
+
+def _verify_password_reset_token(token: str) -> Optional[dict]:
+    """
+    Verify a password reset token.
+
+    Args:
+        token: JWT token from reset link
+
+    Returns:
+        Token payload if valid, None otherwise
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            current_app.config['SECRET_KEY'],
+            algorithms=['HS256']
+        )
+        if payload.get('purpose') != 'password_reset':
+            return None
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.warning("Password reset token expired")
+        return None
+    except jwt.InvalidTokenError:
+        logger.warning("Invalid password reset token")
+        return None
+
+
+def _send_password_reset_email(email: str, reset_token: str) -> bool:
+    """
+    Send password reset email.
+
+    Args:
+        email: User's email address
+        reset_token: The reset token to include in the link
+
+    Returns:
+        True if email sent successfully
+    """
+    try:
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        reset_url = f"{frontend_url}/reset-password?token={reset_token}"
+
+        # Try to use Flask-Mail if configured
+        mail_server = current_app.config.get('MAIL_SERVER')
+        mail_username = current_app.config.get('MAIL_USERNAME')
+
+        if mail_server and mail_username:
+            try:
+                from flask_mail import Mail, Message
+                mail = Mail(current_app)
+
+                msg = Message(
+                    subject='Reset Your ForensicBridge Password',
+                    recipients=[email],
+                    sender=current_app.config.get('MAIL_DEFAULT_SENDER', 'noreply@forensicbridge.io'),
+                    body=f"""Hello,
+
+You requested a password reset for your ForensicBridge account.
+
+Click the link below to reset your password:
+{reset_url}
+
+This link will expire in 1 hour.
+
+If you didn't request this, please ignore this email or contact support.
+
+- ForensicBridge Security Team
+""",
+                    html=f"""<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+<h2 style="color: #1a365d;">Reset Your Password</h2>
+<p>You requested a password reset for your ForensicBridge account.</p>
+<p style="margin: 30px 0;">
+    <a href="{reset_url}" style="background-color: #3182ce; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+        Reset Password
+    </a>
+</p>
+<p style="color: #666; font-size: 14px;">This link will expire in 1 hour.</p>
+<p style="color: #666; font-size: 14px;">If you didn't request this, please ignore this email or contact support.</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+<p style="color: #999; font-size: 12px;">- ForensicBridge Security Team</p>
+</body>
+</html>"""
+                )
+                mail.send(msg)
+                logger.info(f"Password reset email sent to {hash_email(email)}")
+                return True
+            except ImportError:
+                logger.warning("Flask-Mail not installed, using fallback")
+            except Exception as e:
+                logger.error(f"Failed to send email via Flask-Mail: {e}")
+
+        # Fallback: Log the reset URL for development
+        if current_app.config.get('FLASK_ENV') != 'production':
+            logger.info(f"[DEV] Password reset URL for {hash_email(email)}: {reset_url}")
+            return True
+
+        logger.error("Email not configured in production")
+        return False
+
+    except Exception as e:
+        logger.exception(f"Failed to send password reset email: {e}")
+        return False
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+@limiter.limit("3 per hour")  # Strict rate limiting to prevent enumeration
+def forgot_password():
+    """
+    Request a password reset link.
+
+    SECURITY: Always returns success to prevent email enumeration.
+    The same response is returned whether or not the email exists.
+
+    Request body:
+    {
+        "email": "user@example.com"
+    }
+
+    Response:
+    {
+        "success": true,
+        "message": "If an account exists with that email, a reset link has been sent."
+    }
+    """
+    import time
+    start_time = time.time()
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    email = data.get('email', '').strip().lower()
+
+    if not email or not validate_email(email):
+        # Still return generic message to prevent enumeration
+        return jsonify({
+            'success': True,
+            'message': 'If an account exists with that email, a reset link has been sent.'
+        }), 200
+
+    # Look up user
+    user = User.query.filter_by(email=email).first()
+
+    if user and user.is_active:
+        # Generate reset token
+        reset_token = _generate_password_reset_token(user.id, user.email)
+
+        # Store token JTI in user record for one-time use validation
+        # This would require a database field, so for now we rely on JWT expiry
+
+        # Send reset email
+        _send_password_reset_email(email, reset_token)
+
+        logger.info(f"Password reset requested for {hash_email(email)}")
+    else:
+        # User doesn't exist - still perform timing-consistent operations
+        import os
+        from argon2 import PasswordHasher
+        ph = PasswordHasher()
+        # Perform fake hash to match timing
+        try:
+            fake_password = os.urandom(16).hex()
+            _ = ph.hash(fake_password)
+        except Exception:
+            pass
+
+    # Ensure constant response time to prevent timing attacks
+    elapsed = time.time() - start_time
+    min_response_time = 0.3  # 300ms minimum
+    if elapsed < min_response_time:
+        time.sleep(min_response_time - elapsed)
+
+    return jsonify({
+        'success': True,
+        'message': 'If an account exists with that email, a reset link has been sent.'
+    }), 200
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+@limiter.limit("5 per hour")
+def reset_password():
+    """
+    Reset password using token from email.
+
+    Request body:
+    {
+        "token": "jwt-token-from-email",
+        "password": "NewSecurePassword123!"
+    }
+
+    Response:
+    {
+        "success": true,
+        "message": "Password reset successfully. Please log in with your new password."
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    token = data.get('token', '').strip()
+    new_password = data.get('password', '')
+
+    if not token:
+        return jsonify({'success': False, 'error': 'Reset token is required'}), 400
+
+    if not new_password:
+        return jsonify({'success': False, 'error': 'New password is required'}), 400
+
+    # Validate password strength
+    valid, msg = validate_password(new_password)
+    if not valid:
+        return jsonify({'success': False, 'error': msg}), 400
+
+    # Verify token
+    payload = _verify_password_reset_token(token)
+    if not payload:
+        return jsonify({
+            'success': False,
+            'error': 'Invalid or expired reset token. Please request a new one.'
+        }), 400
+
+    # Get user
+    user_id = payload.get('user_id')
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    if not user.is_active:
+        return jsonify({'success': False, 'error': 'Account is disabled'}), 403
+
+    # Verify email matches
+    if user.email.lower() != payload.get('email', '').lower():
+        logger.warning(f"Password reset token email mismatch for user {user_id}")
+        return jsonify({'success': False, 'error': 'Invalid reset token'}), 400
+
+    # Set new password
+    try:
+        user.set_password(new_password)
+        user.must_change_password = False  # Clear any forced reset flag
+        db.session.commit()
+
+        logger.info(f"Password reset completed for user {hash_email(user.email)}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Password reset successfully. Please log in with your new password.'
+        }), 200
+
+    except ValueError as e:
+        # Password validation error (e.g., recently used)
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Password reset failed: {e}")
+        return jsonify({'success': False, 'error': 'Failed to reset password'}), 500
+
+
+# =============================================================================
+# EMAIL VERIFICATION (CRITICAL PRODUCTION FEATURE)
+# =============================================================================
+
+def _generate_email_verification_token(user_id: int, email: str) -> str:
+    """
+    Generate a secure email verification token.
+
+    Token expires in 24 hours.
+
+    Args:
+        user_id: User's database ID
+        email: Email to verify
+
+    Returns:
+        JWT token for email verification
+    """
+    import secrets as secrets_module
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'purpose': 'email_verification',
+        'jti': secrets_module.token_hex(16),
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24),
+        'iat': datetime.datetime.utcnow()
+    }
+    return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
+
+
+def _verify_email_verification_token(token: str) -> Optional[dict]:
+    """
+    Verify an email verification token.
+
+    Args:
+        token: JWT token from verification link
+
+    Returns:
+        Token payload if valid, None otherwise
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            current_app.config['SECRET_KEY'],
+            algorithms=['HS256']
+        )
+        if payload.get('purpose') != 'email_verification':
+            return None
+        return payload
+    except jwt.ExpiredSignatureError:
+        logger.warning("Email verification token expired")
+        return None
+    except jwt.InvalidTokenError:
+        logger.warning("Invalid email verification token")
+        return None
+
+
+def _send_verification_email(email: str, verification_token: str) -> bool:
+    """
+    Send email verification email.
+
+    Args:
+        email: User's email address
+        verification_token: The verification token
+
+    Returns:
+        True if email sent successfully
+    """
+    try:
+        frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        verify_url = f"{frontend_url}/verify-email?token={verification_token}"
+
+        mail_server = current_app.config.get('MAIL_SERVER')
+        mail_username = current_app.config.get('MAIL_USERNAME')
+
+        if mail_server and mail_username:
+            try:
+                from flask_mail import Mail, Message
+                mail = Mail(current_app)
+
+                msg = Message(
+                    subject='Verify Your ForensicBridge Email',
+                    recipients=[email],
+                    sender=current_app.config.get('MAIL_DEFAULT_SENDER', 'noreply@forensicbridge.io'),
+                    body=f"""Welcome to ForensicBridge!
+
+Please verify your email address by clicking the link below:
+{verify_url}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, please ignore this email.
+
+- ForensicBridge Team
+""",
+                    html=f"""<html>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+<h2 style="color: #1a365d;">Welcome to ForensicBridge!</h2>
+<p>Please verify your email address to complete your registration.</p>
+<p style="margin: 30px 0;">
+    <a href="{verify_url}" style="background-color: #38a169; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+        Verify Email
+    </a>
+</p>
+<p style="color: #666; font-size: 14px;">This link will expire in 24 hours.</p>
+<p style="color: #666; font-size: 14px;">If you didn't create an account, please ignore this email.</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+<p style="color: #999; font-size: 12px;">- ForensicBridge Team</p>
+</body>
+</html>"""
+                )
+                mail.send(msg)
+                logger.info(f"Verification email sent to {hash_email(email)}")
+                return True
+            except ImportError:
+                logger.warning("Flask-Mail not installed")
+            except Exception as e:
+                logger.error(f"Failed to send email via Flask-Mail: {e}")
+
+        # Fallback for development
+        if current_app.config.get('FLASK_ENV') != 'production':
+            logger.info(f"[DEV] Verification URL for {hash_email(email)}: {verify_url}")
+            return True
+
+        logger.error("Email not configured in production")
+        return False
+
+    except Exception as e:
+        logger.exception(f"Failed to send verification email: {e}")
+        return False
+
+
+@auth_bp.route('/send-verification', methods=['POST'])
+@require_auth
+@limiter.limit("3 per hour")
+def send_verification_email():
+    """
+    Send or resend email verification link.
+
+    Request body (optional):
+    {
+        "email": "new-email@example.com"  // Only if changing email
+    }
+
+    Response:
+    {
+        "success": true,
+        "message": "Verification email sent."
+    }
+    """
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    data = request.get_json() or {}
+    new_email = data.get('email', '').strip().lower()
+
+    # If new email provided, validate and update
+    if new_email and new_email != user.email:
+        if not validate_email(new_email):
+            return jsonify({'success': False, 'error': 'Invalid email format'}), 400
+
+        # Check if email is already taken
+        existing = User.query.filter_by(email=new_email).first()
+        if existing:
+            return jsonify({'success': False, 'error': 'Email already in use'}), 409
+
+        # Store pending email change (don't update until verified)
+        user.email_verification_token = _generate_email_verification_token(user_id, new_email)
+        email_to_verify = new_email
+    else:
+        email_to_verify = user.email
+        user.email_verification_token = _generate_email_verification_token(user_id, user.email)
+
+    db.session.commit()
+
+    # Send verification email
+    if _send_verification_email(email_to_verify, user.email_verification_token):
+        return jsonify({
+            'success': True,
+            'message': 'Verification email sent.'
+        }), 200
+    else:
+        return jsonify({
+            'success': False,
+            'error': 'Failed to send verification email. Please try again.'
+        }), 500
+
+
+@auth_bp.route('/verify-email', methods=['POST'])
+@limiter.limit("10 per hour")
+def verify_email():
+    """
+    Verify email address using token from email.
+
+    Request body:
+    {
+        "token": "jwt-token-from-email"
+    }
+
+    Response:
+    {
+        "success": true,
+        "message": "Email verified successfully."
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    token = data.get('token', '').strip()
+
+    if not token:
+        return jsonify({'success': False, 'error': 'Verification token is required'}), 400
+
+    # Verify token
+    payload = _verify_email_verification_token(token)
+    if not payload:
+        return jsonify({
+            'success': False,
+            'error': 'Invalid or expired verification link. Please request a new one.'
+        }), 400
+
+    # Get user
+    user_id = payload.get('user_id')
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    # Check if this token is for an email change
+    token_email = payload.get('email', '').lower()
+
+    if token_email != user.email.lower():
+        # This is an email change verification
+        # Check if new email is still available
+        existing = User.query.filter_by(email=token_email).first()
+        if existing:
+            return jsonify({
+                'success': False,
+                'error': 'Email is no longer available.'
+            }), 409
+
+        # Update email
+        old_email = user.email
+        user.email = token_email
+        logger.info(f"Email changed from {hash_email(old_email)} to {hash_email(token_email)}")
+
+    # Mark email as verified
+    user.email_verified = True
+    user.email_verification_token = None
+    db.session.commit()
+
+    logger.info(f"Email verified for user {hash_email(user.email)}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Email verified successfully.'
+    }), 200
+
+
+@auth_bp.route('/verification-status', methods=['GET'])
+@require_auth
+def get_verification_status():
+    """
+    Get current email verification status.
+
+    Response:
+    {
+        "success": true,
+        "email_verified": false,
+        "email": "user@example.com"
+    }
+    """
+    user_id = request.current_user['user_id']
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    return jsonify({
+        'success': True,
+        'email_verified': user.email_verified or False,
+        'email': user.email
+    }), 200
 
 @auth_bp.route('/captcha-config', methods=['GET'])
 def get_captcha_configuration():
