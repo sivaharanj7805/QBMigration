@@ -781,10 +781,30 @@ class PremiumQBOClient:
             oauth_manager=oauth_manager
         )
         
-        # Check for fault response
+        # Check for fault response - CRITICAL FIX: Complete fault parsing
         if "Fault" in response:
-            error_msg = response.get("Fault", {}).get("Error", [{}])[0].get("Message", "Unknown error")
-            raise Exception(f"QBO API Error: {error_msg}")
+            fault = response.get("Fault", {})
+            fault_type = fault.get("type", "Unknown")
+            errors = fault.get("Error", [])
+
+            # Build comprehensive error message from all errors
+            error_details = []
+            for i, error in enumerate(errors if errors else [{}]):
+                error_code = error.get("code", "N/A")
+                error_message = error.get("Message", "Unknown error")
+                error_detail = error.get("Detail", "")
+                error_element = error.get("element", "")
+
+                detail_str = f"[{error_code}] {error_message}"
+                if error_detail:
+                    detail_str += f" - {error_detail}"
+                if error_element:
+                    detail_str += f" (element: {error_element})"
+
+                error_details.append(detail_str)
+
+            full_error_msg = "; ".join(error_details) if error_details else "Unknown error"
+            raise Exception(f"QBO API {fault_type}: {full_error_msg}")
         
         # Return the created entity
         if entity_type in response:

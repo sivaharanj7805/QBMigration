@@ -118,6 +118,10 @@ class Migration(db.Model):
     # Webhook tracking (prevent replay attacks)
     webhook_processed_ids = db.Column(db.Text)  # JSON array of processed webhook IDs
     last_webhook_at = db.Column(db.DateTime)
+
+    # CRITICAL FIX: Add verification_results field for trial balance verification
+    # This stores the complete verification data including trial balance, hash verification, etc.
+    verification_results = db.Column(db.Text)  # JSON: Full verification results
     
     def __init__(self, **kwargs):
         super(Migration, self).__init__(**kwargs)
@@ -437,21 +441,47 @@ class Migration(db.Model):
             return False
     
     def mark_webhook_processed(self, webhook_id):
-        """Mark webhook as processed"""
+        """
+        Mark webhook as processed with proper race condition handling.
+
+        CRITICAL FIX: Uses SELECT FOR UPDATE to prevent race conditions where
+        two concurrent webhooks could both pass the is_webhook_processed check
+        and both get processed.
+        """
+        from sqlalchemy import text
+
+        try:
+            # RACE CONDITION FIX: Use database-level locking
+            # This prevents two concurrent requests from both processing the same webhook
+            db.session.execute(
+                text("SELECT id FROM migrations WHERE id = :id FOR UPDATE NOWAIT"),
+                {"id": self.id}
+            )
+        except Exception as lock_error:
+            # Another transaction has the lock - webhook is being processed
+            logger.warning(f"Webhook {webhook_id} - migration {self.id} is locked by another transaction: {lock_error}")
+            db.session.rollback()
+            return False
+
         try:
             processed = json.loads(self.webhook_processed_ids) if self.webhook_processed_ids else []
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"Failed to parse webhook_processed_ids, resetting: {e}")
             processed = []
-        
-        if webhook_id not in processed:
-            processed.append(webhook_id)
-            # Keep only last N webhook IDs to prevent unbounded growth
-            processed = processed[-WEBHOOK_ID_LIMIT:]
-            self.webhook_processed_ids = json.dumps(processed)
-        
+
+        # Double-check after acquiring lock (another process may have added it)
+        if webhook_id in processed:
+            logger.info(f"Webhook {webhook_id} already processed (detected after lock)")
+            return False
+
+        processed.append(webhook_id)
+        # Keep only last N webhook IDs to prevent unbounded growth
+        processed = processed[-WEBHOOK_ID_LIMIT:]
+        self.webhook_processed_ids = json.dumps(processed)
+
         self.last_webhook_at = datetime.utcnow()
         db.session.commit()
+        return True
     
     # ============================================================================
     # EXPIRATION & HEALTH CHECKS

@@ -679,8 +679,17 @@ namespace QBDesktopExtractor
 
         private async Task ExtractItemsFromTableAsync(string tableName, List<QBItem> items, DateTime? modifiedSince, CancellationToken ct)
         {
+            // SQL INJECTION FIX: Validate table name against whitelist
+            // This uses the same AllowedTableNames hashset defined in ExtractSimpleTransactionAsync
+            if (string.IsNullOrWhiteSpace(tableName) || !AllowedTableNames.Contains(tableName))
+            {
+                _logger?.Log(LogLevel.Error, "SECURITY: Blocked attempt to query non-whitelisted item table: {0}", tableName);
+                return; // Silently return - callers expect graceful handling of missing tables
+            }
+
             try
             {
+                // Table name is now validated against whitelist - safe to use
                 string sql = $@"
                     SELECT
                         ListID, Name, FullName, IsActive,
@@ -1185,12 +1194,33 @@ namespace QBDesktopExtractor
             return await ExtractSimpleTransactionAsync<QBSalesOrder>("SalesOrder", modifiedSince, ct);
         }
 
+        // SQL INJECTION FIX: Whitelist of allowed table names
+        // CRITICAL: Never interpolate user input directly into SQL queries
+        private static readonly HashSet<string> AllowedTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Bill", "Check", "JournalEntry", "Deposit", "CreditMemo",
+            "SalesReceipt", "Estimate", "PurchaseOrder", "SalesOrder",
+            "Invoice", "InvoiceLine", "BillLine", "Customer", "Vendor",
+            "Employee", "Account", "Item", "Class", "PaymentMethod",
+            "Terms", "SalesTaxCode", "CustomerType", "VendorType", "Currency",
+            "ItemInventory", "ItemService", "ItemNonInventory", "ItemOtherCharge", "ItemDiscount",
+            "Company"
+        };
+
         private async Task<List<T>> ExtractSimpleTransactionAsync<T>(string tableName, DateTime? modifiedSince, CancellationToken ct) where T : class, new()
         {
             var results = new List<T>();
 
+            // SQL INJECTION FIX: Validate table name against whitelist
+            if (string.IsNullOrWhiteSpace(tableName) || !AllowedTableNames.Contains(tableName))
+            {
+                _logger?.Log(LogLevel.Error, "SECURITY: Blocked attempt to query non-whitelisted table: {0}", tableName);
+                throw new ArgumentException($"Table name '{tableName}' is not allowed", nameof(tableName));
+            }
+
             try
             {
+                // Table name is now validated against whitelist - safe to use
                 string sql = $"SELECT * FROM {tableName}";
                 if (modifiedSince.HasValue)
                 {

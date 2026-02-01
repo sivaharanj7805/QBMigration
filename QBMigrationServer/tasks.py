@@ -54,33 +54,67 @@ celery.conf.update(
 )
 
 
-def update_migration_status(migration_id: str, status: str, progress: int = None, 
+def update_migration_status(migration_id: str, status: str, progress: int = None,
                            message: str = None, error: str = None):
-    """Update migration status in database and notify via webhook."""
+    """
+    Update migration status in database and notify via webhook.
+
+    CRITICAL FIX: Use correct field names from Migration model:
+    - progress_percent (not progress)
+    - current_step (not status_message)
+    - Use set_error_message() for encrypted error storage
+    - Migration model has no updated_at - use db timestamp
+
+    Args:
+        migration_id: UUID of migration (string, not int primary key)
+        status: New status value
+        progress: Progress percentage (0-100)
+        message: Current step/status message
+        error: Error message (will be encrypted)
+    """
     from app import create_app
     from models.database import db
     from models.migration import Migration
-    
+
     app = create_app()
     with app.app_context():
-        migration = Migration.query.get(migration_id)
+        # FIX: Use filter_by with migration_id (UUID string), not query.get (primary key)
+        migration = Migration.query.filter_by(migration_id=migration_id).first()
+
         if migration:
             migration.status = status
+
+            # FIX: Use correct field name progress_percent
             if progress is not None:
-                migration.progress = progress
+                migration.progress_percent = progress
+
+            # FIX: Use correct field name current_step
             if message:
-                migration.status_message = message
+                migration.current_step = message
+
+            # FIX: Use set_error_message() for encrypted storage
             if error:
-                migration.error_message = error
-            migration.updated_at = datetime.utcnow()
+                try:
+                    migration.set_error_message(error)
+                except Exception as e:
+                    logger.warning(f"Could not encrypt error message: {e}")
+                    # Fallback: set error_code at minimum
+                    migration.error_code = 'TASK_ERROR'
+
+            # NOTE: Migration model doesn't have updated_at - removed
+            # Timestamps are handled by created_at, started_at, completed_at
+
             db.session.commit()
-            
+            logger.info(f"Migration {migration_id} status updated to {status}")
+
             # Trigger webhook if configured
             try:
                 from api.webhooks import trigger_webhook
                 trigger_webhook(migration, status)
             except Exception as e:
                 logger.warning(f"Failed to trigger webhook: {e}")
+        else:
+            logger.error(f"Migration {migration_id} not found for status update")
 
 
 @celery.task(bind=True, name='tasks.run_migration')
