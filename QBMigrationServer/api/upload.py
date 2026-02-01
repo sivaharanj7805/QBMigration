@@ -14,6 +14,7 @@ from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
 import hashlib
+import hmac
 import logging
 import uuid
 import base64
@@ -858,11 +859,13 @@ def upload_chunk():
 
         # Verify chunk hash (base64-encoded SHA-256)
         computed_hash = base64.b64encode(hashlib.sha256(chunk_data).digest()).decode('utf-8')
-        if chunk_hash and computed_hash != chunk_hash:
+        # SECURITY FIX: Use constant-time comparison to prevent timing attacks
+        # The != operator returns early on mismatch, leaking information about valid hash
+        if chunk_hash and not hmac.compare_digest(computed_hash, chunk_hash):
             logger.warning(f"Chunk {chunk_index} hash mismatch for upload {upload_id}")
             return jsonify({
                 'success': False,
-                'error': f'Chunk hash mismatch: expected {chunk_hash}, got {computed_hash}'
+                'error': 'Chunk hash mismatch'  # Don't reveal expected/actual hashes
             }), 400
 
         # Store chunk in S3

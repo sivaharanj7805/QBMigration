@@ -54,27 +54,31 @@ celery.conf.update(
 )
 
 
-def update_migration_status(migration_id: str, status: str, progress: int = None, 
+def update_migration_status(migration_id: str, status: str, progress: int = None,
                            message: str = None, error: str = None):
     """Update migration status in database and notify via webhook."""
     from app import create_app
     from models.database import db
     from models.migration import Migration
-    
+
     app = create_app()
     with app.app_context():
-        migration = Migration.query.get(migration_id)
+        # FIX: Use filter_by instead of get() since migration_id is UUID string, not integer PK
+        migration = Migration.query.filter_by(migration_id=migration_id).first()
         if migration:
             migration.status = status
             if progress is not None:
-                migration.progress = progress
-            if message:
-                migration.status_message = message
+                # FIX: Correct field name is progress_percent, not progress
+                migration.progress_percent = progress
+            # FIX: status_message field doesn't exist - removed
+            # Status updates are tracked via status field
             if error:
-                migration.error_message = error
-            migration.updated_at = datetime.utcnow()
+                # FIX: Use set_error_message() method for proper encryption
+                migration.set_error_message(error)
+            # FIX: updated_at field doesn't exist - removed
+            # Model uses created_at and timestamps on status change methods
             db.session.commit()
-            
+
             # Trigger webhook if configured
             try:
                 from api.webhooks import trigger_webhook

@@ -61,16 +61,23 @@ def get_presigned_url():
     """
     data = request.get_json()
     user_id = request.current_user['user_id']
-    
+
     session_id = data.get('session_id')
     file_name = data.get('file_name', 'data.enc')
     file_size = data.get('file_size', 0)
     content_type = data.get('content_type', 'application/octet-stream')
     sha256_hash = data.get('sha256_hash')
-    
+
     if not session_id:
         return jsonify({'error': 'session_id required'}), 400
-    
+
+    # SECURITY FIX: Sanitize file_name to prevent S3 key poisoning/path traversal
+    # Only allow alphanumeric, dots, hyphens, underscores
+    import re
+    file_name = re.sub(r'[^a-zA-Z0-9._-]', '', file_name)
+    if not file_name or file_name.startswith('.'):
+        file_name = 'data.enc'
+
     # Generate S3 key
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
@@ -214,14 +221,20 @@ def init_multipart_upload():
     """
     data = request.get_json()
     user_id = request.current_user['user_id']
-    
+
     session_id = data.get('session_id')
     file_name = data.get('file_name', 'data.enc')
     file_size = data.get('file_size', 0)
-    
+
     if not session_id:
         return jsonify({'error': 'session_id required'}), 400
-    
+
+    # SECURITY FIX: Sanitize file_name to prevent S3 key poisoning/path traversal
+    import re
+    file_name = re.sub(r'[^a-zA-Z0-9._-]', '', file_name)
+    if not file_name or file_name.startswith('.'):
+        file_name = 'data.enc'
+
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
     bucket = os.getenv('AWS_S3_BUCKET', 'forensicbridge-migrations')
@@ -337,7 +350,13 @@ def complete_multipart_upload():
         
         # Update migration status
         if migration_id:
-            migration = Migration.query.filter_by(migration_id=migration_id).first()
+            # SECURITY FIX: Add user_id filter to prevent authorization bypass
+            # Without this check, any authenticated user could complete any migration
+            user_id = request.current_user.get('user_id') if hasattr(request, 'current_user') else None
+            migration = Migration.query.filter_by(
+                migration_id=migration_id,
+                user_id=user_id
+            ).first()
             if migration:
                 migration.mark_as_uploaded(
                     s3_uri=f"s3://{bucket}/{s3_key}",

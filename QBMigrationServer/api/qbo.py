@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 # Intuit OAuth endpoints
 INTUIT_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2"
 INTUIT_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-INTUIT_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
+# FIX: Correct revoke URL - must use same OAuth domain as token endpoint
+INTUIT_REVOKE_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/revoke"
 
 
 @qbo_bp.route('/connect')
