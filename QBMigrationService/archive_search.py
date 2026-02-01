@@ -26,7 +26,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -681,7 +681,8 @@ class ArchiveSearchService:
             return value
         try:
             return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-        except:
+        except (ValueError, TypeError, AttributeError):
+            # CRITICAL FIX: Specific exceptions instead of bare except
             return None
 
     def _parse_decimal(self, value: Any) -> Optional[Decimal]:
@@ -690,7 +691,8 @@ class ArchiveSearchService:
             return None
         try:
             return Decimal(str(value))
-        except:
+        except (ValueError, TypeError, InvalidOperation):
+            # CRITICAL FIX: Specific exceptions instead of bare except
             return None
 
     def _find_candidates(

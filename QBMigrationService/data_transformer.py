@@ -1425,7 +1425,8 @@ class QBDataTransformer:
     
         for component in bom_components:
             component_ref = component.get('ItemRef') or component.get('ItemName')
-            quantity = float(component.get('Quantity', 1.0))
+            # CRITICAL FIX: Use Decimal instead of float for financial precision
+            quantity = Decimal(str(component.get('Quantity', '1')))
         
             # Map to QBO item ID
             qbo_item_id = self.id_mapping['items'].get(component_ref)

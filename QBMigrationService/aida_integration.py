@@ -363,8 +363,11 @@ class AiDAIntegrationService:
                         'date': txn.date,
                         'day': date_obj.strftime('%A')
                     }
-        except:
-            pass
+        except (ValueError, TypeError, AttributeError) as e:
+            # CRITICAL FIX: Specific exceptions instead of bare except
+            # Log the error instead of silently ignoring
+            import logging
+            logging.getLogger(__name__).debug(f"Could not parse transaction date for anomaly detection: {e}")
 
     def _compute_anomaly_summary(self, package: AiDADataPackage) -> None:
         """Compute anomaly summary statistics."""
