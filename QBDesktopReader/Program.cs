@@ -126,7 +126,11 @@ namespace QBDesktopExtractor
                         Console.WriteLine($"  Cause: {ex.InnerException.Message}");
                     }
                 }
-                catch (Exception) { /* Don't let error reporting crash */ }
+                catch (Exception reportEx)
+                {
+                    // Don't let error reporting crash - but log for debugging
+                    System.Diagnostics.Debug.WriteLine($"Error reporting failed: {reportEx.Message}");
+                }
                 exitCode = ExitCode.UnknownError;
             }
             finally

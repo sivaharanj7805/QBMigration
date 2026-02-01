@@ -29,6 +29,59 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 
+# SESSION BINDING: User-Agent validation for session security
+def _get_user_agent_fingerprint() -> str:
+    """
+    Get a fingerprint of the User-Agent for session binding.
+
+    This helps detect session hijacking attempts where an attacker
+    uses a stolen session cookie from a different browser/device.
+
+    We hash the User-Agent to avoid storing potentially long strings
+    and for consistent comparison.
+    """
+    user_agent = request.headers.get('User-Agent', '')
+    if not user_agent:
+        return 'unknown'
+    # Hash the User-Agent for consistent length and privacy
+    return hashlib.sha256(user_agent.encode()).hexdigest()[:16]
+
+
+def _validate_session_binding() -> Tuple[bool, str]:
+    """
+    Validate that the current request matches the session binding.
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if 'user_id' not in session:
+        return True, ''  # No session to validate
+
+    # Check User-Agent binding
+    stored_ua_fp = session.get('_ua_fingerprint')
+    if stored_ua_fp:
+        current_ua_fp = _get_user_agent_fingerprint()
+        if stored_ua_fp != current_ua_fp:
+            # Potential session hijacking attempt
+            user_id = session.get('user_id')
+            logger.warning(
+                f"SECURITY: Session User-Agent mismatch for user {user_id}. "
+                f"Expected: {stored_ua_fp[:8]}..., Got: {current_ua_fp[:8]}..."
+            )
+            return False, 'Session validation failed - browser fingerprint changed'
+
+    return True, ''
+
+
+def _bind_session():
+    """
+    Bind the current session to browser fingerprints for security.
+    Call this when creating a new authenticated session.
+    """
+    session['_ua_fingerprint'] = _get_user_agent_fingerprint()
+    session['_created_at'] = datetime.datetime.utcnow().isoformat()
+
+
 # FIX #37: Constant-time string comparison for security
 def constant_time_compare(a: str, b: str) -> bool:
     """
@@ -117,6 +170,17 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
 
         # Check for session-based auth
         if 'user_id' in session:
+            # SECURITY FIX: Validate session binding (User-Agent check)
+            is_valid, error_msg = _validate_session_binding()
+            if not is_valid:
+                # Session may be hijacked - invalidate it
+                session.clear()
+                return jsonify({
+                    'success': False,
+                    'error': 'Session expired. Please log in again.',
+                    'session_invalid': True
+                }), 401
+
             request.current_user = {
                 'user_id': session['user_id'],
                 'email': session.get('email', '')
@@ -264,7 +328,10 @@ def register():
         session['user_id'] = user.id
         session['email'] = user.email
         session['_fresh'] = True  # Mark session as freshly authenticated
-        
+
+        # SECURITY FIX: Bind session to browser fingerprint to detect hijacking
+        _bind_session()
+
         # Generate token
         token = create_token(user.id, user.email)
 
@@ -402,6 +469,9 @@ def login():
     session['user_id'] = user.id
     session['email'] = user.email
     session['_fresh'] = True  # Mark session as freshly authenticated
+
+    # SECURITY FIX: Bind session to browser fingerprint to detect hijacking
+    _bind_session()
 
     # Generate token
     token = create_token(user.id, user.email)

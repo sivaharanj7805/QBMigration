@@ -3215,8 +3215,16 @@ namespace QBDesktopExtractor
                             preferences.IsUsingMultiCurrency = pref.MultiCurrencyPreferences.IsMultiCurrencyOn?.GetValue() ?? false;
                         }
                     }
-                    catch (System.Runtime.InteropServices.COMException) { /* Multi-currency not in all QB versions */ }
-                    catch (NullReferenceException) { /* Property not available */ }
+                    catch (System.Runtime.InteropServices.COMException comEx)
+                    {
+                        // Multi-currency feature not available in all QuickBooks versions - this is expected
+                        _logger?.Log(LogLevel.Debug, "Multi-currency not available in this QB version: {0}", comEx.Message);
+                    }
+                    catch (NullReferenceException nullEx)
+                    {
+                        // Property accessor returned null - expected for some QB configurations
+                        _logger?.Log(LogLevel.Debug, "Multi-currency property not available: {0}", nullEx.Message);
+                    }
                 }
                 
                 Console.WriteLine($"    Extracted Preferences");

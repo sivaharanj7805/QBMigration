@@ -91,11 +91,11 @@ def qbo_callback():
         if error:
             logger.warning(f"QBO OAuth error: {error}")
             frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-            # CRITICAL FIX: URL encode error parameter to prevent XSS attacks
-            # Sanitize the error to only allow alphanumeric and safe characters
-            import re
-            safe_error = re.sub(r'[^a-zA-Z0-9_\-\s]', '', str(error))[:100]
-            return redirect(f"{frontend_url}/settings?qbo=error&message={urllib.parse.quote(safe_error)}")
+            # CRITICAL FIX: Use whitelist-based sanitization to prevent XSS and information disclosure
+            from utils.error_sanitizer import sanitize_qbo_error_for_url, get_qbo_user_message
+            safe_error = sanitize_qbo_error_for_url(error)
+            user_message = urllib.parse.quote(get_qbo_user_message(error))
+            return redirect(f"{frontend_url}/settings?qbo=error&code={safe_error}&message={user_message}")
         
         # Verify state for CSRF protection
         stored_state = session.pop('qbo_oauth_state', None)
