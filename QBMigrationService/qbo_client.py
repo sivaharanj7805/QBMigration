@@ -487,9 +487,16 @@ class PremiumQBOClient:
             token = oauth_manager.get_access_token()
         else:
             token = self._base_access_token
-        
+
+        # CRITICAL FIX: Validate token is not None before creating Authorization header
+        if not token:
+            raise ValueError(
+                "No access token available. Either provide oauth_manager or "
+                "initialize PremiumQBOClient with access_token parameter."
+            )
+
         headers["Authorization"] = f"Bearer {token}"
-        
+
         return headers
     
     def _update_rate_limits(self, response: requests.Response):
@@ -847,32 +854,49 @@ class PremiumQBOClient:
             
             for i, batch_item in enumerate(batch_responses):
                 bid = batch_item.get("bId", f"bid_{i}")
-                
+
+                # CRITICAL FIX: Parse bId to get the correct original request index
+                # Response order is NOT guaranteed to match request order!
+                try:
+                    # bId format is "bid_N" where N is the original index
+                    req_index = int(bid.split("_")[1]) if "_" in bid else i
+                except (IndexError, ValueError):
+                    logger.warning(f"Could not parse bId '{bid}', using response index {i}")
+                    req_index = i
+
+                # Safely get original entity
+                original_entity = batch[req_index] if req_index < len(batch) else batch[i] if i < len(batch) else {}
+
                 if batch_item.get(entity_type):
                     # Success
                     created_entity = batch_item[entity_type]
                     succeeded.append(created_entity)
-                    
-                    # Record in database
-                    qbd_id = batch[i].get("Name", str(i))
+
+                    # Record in database - use more comprehensive ID extraction
+                    qbd_id = (
+                        original_entity.get("Name") or
+                        original_entity.get("DocNumber") or
+                        original_entity.get("Description") or
+                        f"index_{req_index}"
+                    )
                     qbo_id = created_entity.get("Id")
                     sync_token = created_entity.get("SyncToken", "0")
-                    
+
                     if qbo_id:
                         self.record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)
-                    
+
                 elif batch_item.get("Fault"):
                     # Failure
                     fault = batch_item["Fault"]
                     error_msg = fault.get("Error", [{}])[0].get("Message", "Unknown error")
-                    
+
                     failed_item = {
-                        "entity": batch[i],
+                        "entity": original_entity,
                         "error": error_msg,
                         "fault_code": fault.get("type")
                     }
                     failed.append(failed_item)
-                    
+
                     logger.error(f"Batch item {bid} failed: {error_msg}")
         
         except Exception as e:
@@ -917,7 +941,8 @@ class PremiumQBOClient:
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id))
         
-        print(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
+        # HIGH FIX: Use logger instead of print for production environments
+        logger.info(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
@@ -948,9 +973,8 @@ class PremiumQBOClient:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
         
-        print(f"✓ Batch processing complete:")
-        print(f"  Succeeded: {len(results['succeeded'])}")
-        print(f"  Failed: {len(results['failed'])}")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Batch processing complete: Succeeded={len(results['succeeded'])}, Failed={len(results['failed'])}")
         
         return results
     
@@ -1131,7 +1155,8 @@ class PremiumQBOClient:
                     "items": self.failed_items
                 }, f, indent=2)
             
-            print(f"✓ Exported {len(self.failed_items)} failed items to {filepath}")
+            # HIGH FIX: Use logger instead of print
+            logger.info(f"Exported {len(self.failed_items)} failed items to {filepath}")
     
     def query_count(
         self,
@@ -1239,8 +1264,8 @@ class PremiumQBOClient:
             entities = cursor.fetchall()
             conn.close()
         
-        print(f"\n🗑️  Rolling back migration {migration_id}...")
-        print(f"   Found {len(entities)} entities to delete")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Rolling back migration {migration_id}... Found {len(entities)} entities to delete")
         
         deleted = 0
         failed = 0
@@ -1251,9 +1276,8 @@ class PremiumQBOClient:
             else:
                 failed += 1
         
-        print(f"\n✅ Rollback complete:")
-        print(f"   Deleted: {deleted}")
-        print(f"   Failed: {failed}")
+        # HIGH FIX: Use logger instead of print
+        logger.info(f"Rollback complete: Deleted={deleted}, Failed={failed}")
         
         return {
             "deleted": deleted,
@@ -1340,6 +1364,157 @@ class PremiumQBOClient:
         except Exception:
             # FIX SVC-04: Catch specific Exception instead of bare except
             pass
+
+    def batch_upload(
+        self,
+        entities_by_type: Dict[str, List[Dict]],
+        migration_id: str,
+        oauth_manager: Optional[Any] = None,
+        use_optimized: bool = True
+    ) -> Dict:
+        """
+        CRITICAL FIX: Orchestrate upload of all entity types to QBO.
+
+        This method was called from MigrationOrchestrator.run_migration() but was
+        missing, causing AttributeError at runtime.
+
+        Args:
+            entities_by_type: Dict mapping entity_type -> list of entities
+                Example: {'Customer': [...], 'Invoice': [...], 'Account': [...]}
+            migration_id: Migration ID for tracking and rollback
+            oauth_manager: Optional OAuth manager for token refresh
+            use_optimized: If True, use batch_create_optimized for large batches
+
+        Returns:
+            Dict with:
+                - 'successful': Total count of successfully created entities
+                - 'failed': Total count of failed entities
+                - 'errors': List of error messages (max 100)
+                - 'results': Dict of entity_type -> {succeeded: [], failed: []}
+                - 'entity_counts': Dict of entity_type -> count created
+        """
+        start_time = time.time()
+
+        total_successful = 0
+        total_failed = 0
+        all_errors: List[str] = []
+        results_by_type: Dict[str, Dict] = {}
+        entity_counts: Dict[str, int] = {}
+
+        # Entity upload order matters - dependencies must be created first
+        # This order ensures referenced entities exist before referencing entities
+        ENTITY_ORDER = [
+            # Master data (no dependencies)
+            'Account', 'Class', 'Department', 'TaxCode', 'Term', 'PaymentMethod',
+            # Parties (depend on nothing)
+            'Customer', 'Vendor', 'Employee',
+            # Items (may depend on accounts)
+            'Item',
+            # Transactions (depend on parties, items, accounts)
+            'Invoice', 'SalesReceipt', 'Estimate', 'CreditMemo', 'RefundReceipt',
+            'Bill', 'VendorCredit', 'Purchase', 'PurchaseOrder',
+            'Payment', 'BillPayment',
+            'JournalEntry', 'Deposit', 'Transfer',
+            'TimeActivity', 'InventoryAdjustment',
+            # Other
+            'Attachable', 'CompanyCurrency', 'TaxPayment', 'CreditCardPayment'
+        ]
+
+        # Sort entities by dependency order
+        sorted_types = []
+        for entity_type in ENTITY_ORDER:
+            if entity_type in entities_by_type:
+                sorted_types.append(entity_type)
+
+        # Add any remaining types not in our order list
+        for entity_type in entities_by_type:
+            if entity_type not in sorted_types:
+                sorted_types.append(entity_type)
+
+        logger.info(f"BATCH_UPLOAD: Starting migration {migration_id}")
+        logger.info(f"  Entity types to process: {sorted_types}")
+        logger.info(f"  Total entities: {sum(len(v) for v in entities_by_type.values())}")
+
+        for entity_type in sorted_types:
+            entities = entities_by_type[entity_type]
+
+            if not entities:
+                continue
+
+            self._check_shutdown()
+
+            logger.info(f"  Processing {len(entities)} {entity_type}...")
+
+            try:
+                # Choose processing method based on size and flag
+                if use_optimized and len(entities) > 100:
+                    # Use optimized batch processing for large datasets
+                    result = self.batch_create_optimized(
+                        entities=entities,
+                        entity_type=entity_type,
+                        oauth_manager=oauth_manager,
+                        migration_id=migration_id
+                    )
+                else:
+                    # Use parallel processing for smaller batches
+                    result = self.batch_create_parallel(
+                        entities=entities,
+                        entity_type=entity_type,
+                        oauth_manager=oauth_manager,
+                        migration_id=migration_id
+                    )
+
+                succeeded_count = len(result.get('succeeded', []))
+                failed_items = result.get('failed', [])
+                failed_count = len(failed_items)
+
+                total_successful += succeeded_count
+                total_failed += failed_count
+                entity_counts[entity_type] = succeeded_count
+
+                # Collect errors (limit to prevent memory bloat)
+                for failed_item in failed_items[:20]:
+                    error_msg = f"{entity_type}: {failed_item.get('error', 'Unknown error')}"
+                    if len(all_errors) < 100:
+                        all_errors.append(error_msg)
+
+                results_by_type[entity_type] = {
+                    'succeeded': result.get('succeeded', []),
+                    'failed': failed_items,
+                    'succeeded_count': succeeded_count,
+                    'failed_count': failed_count
+                }
+
+                logger.info(f"    ✓ {entity_type}: {succeeded_count} succeeded, {failed_count} failed")
+
+            except Exception as e:
+                error_msg = f"{entity_type}: Batch processing failed - {str(e)}"
+                logger.error(f"    ✗ {error_msg}")
+                all_errors.append(error_msg)
+                total_failed += len(entities)
+
+                results_by_type[entity_type] = {
+                    'succeeded': [],
+                    'failed': [{'error': str(e)} for _ in entities],
+                    'succeeded_count': 0,
+                    'failed_count': len(entities)
+                }
+
+        elapsed = time.time() - start_time
+
+        logger.info(f"BATCH_UPLOAD COMPLETE for migration {migration_id}")
+        logger.info(f"  Total successful: {total_successful}")
+        logger.info(f"  Total failed: {total_failed}")
+        logger.info(f"  Duration: {elapsed:.1f}s")
+
+        return {
+            'successful': total_successful,
+            'failed': total_failed,
+            'errors': all_errors,
+            'results': results_by_type,
+            'entity_counts': entity_counts,
+            'duration_seconds': round(elapsed, 2)
+        }
 
 
 # Alias for backward compatibility

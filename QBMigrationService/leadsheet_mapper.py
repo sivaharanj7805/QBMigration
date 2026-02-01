@@ -112,7 +112,7 @@ class LeadSheetMapper:
         # Assets - General (Canadian notation: CA, CB, etc.)
         'Bank': 'CA',
         'Accounts Receivable': 'CB',
-        'Other Current Assets': 'CC',
+        'Other Current Assets': 'OCA',  # CRITICAL FIX: Changed from 'CC' to avoid collision with Credit Card
         'Fixed Assets': 'FA',
         'Other Assets': 'OA',
         'Inventory': 'INV',
@@ -144,7 +144,7 @@ class LeadSheetMapper:
         'Software Development': 'SD',
         'Oil & Gas Equipment': 'OG',
         'Mining Assets': 'MIN',
-        'Real Estate Held for Sale': 'RE',
+        'Real Estate Held for Sale': 'REHFS',  # CRITICAL FIX: Changed from 'RE' to avoid collision with Retained Earnings
 
         # Liabilities (Canadian notation: CL, LTL)
         'Accounts Payable': 'AP',
@@ -437,20 +437,25 @@ class LeadSheetMapper:
         return code
 
 
-# Singleton instance for global use
+# CRITICAL FIX: Thread-safe singleton pattern
+import threading
 _mapper_instance: Optional[LeadSheetMapper] = None
+_mapper_lock = threading.Lock()
 
 
 def get_mapper() -> LeadSheetMapper:
     """
-    Get singleton LeadSheetMapper instance.
+    Get singleton LeadSheetMapper instance (thread-safe).
 
     Returns:
         Global LeadSheetMapper instance
     """
     global _mapper_instance
     if _mapper_instance is None:
-        _mapper_instance = LeadSheetMapper()
+        with _mapper_lock:
+            # Double-checked locking pattern
+            if _mapper_instance is None:
+                _mapper_instance = LeadSheetMapper()
     return _mapper_instance
 
 

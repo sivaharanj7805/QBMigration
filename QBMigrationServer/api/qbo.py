@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import requests
 import logging
 import secrets
+import urllib.parse
 
 qbo_bp = Blueprint('qbo', __name__, url_prefix='/api/qbo')
 logger = logging.getLogger(__name__)
@@ -48,15 +49,16 @@ def connect_qbo():
                 'error': 'QuickBooks integration not configured'
             }), 500
         
-        # Build authorization URL
-        auth_url = (
-            f"{INTUIT_AUTH_URL}"
-            f"?client_id={client_id}"
-            f"&redirect_uri={redirect_uri}"
-            f"&response_type=code"
-            f"&scope=com.intuit.quickbooks.accounting"
-            f"&state={state}"
-        )
+        # Build authorization URL with proper URL encoding
+        # CRITICAL FIX: URL encode all parameters to prevent injection attacks
+        auth_params = urllib.parse.urlencode({
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+            'response_type': 'code',
+            'scope': 'com.intuit.quickbooks.accounting',
+            'state': state
+        })
+        auth_url = f"{INTUIT_AUTH_URL}?{auth_params}"
         
         logger.info(f"User {current_user.id} initiating QBO OAuth flow")
         
@@ -89,7 +91,11 @@ def qbo_callback():
         if error:
             logger.warning(f"QBO OAuth error: {error}")
             frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-            return redirect(f"{frontend_url}/settings?qbo=error&message={error}")
+            # CRITICAL FIX: URL encode error parameter to prevent XSS attacks
+            # Sanitize the error to only allow alphanumeric and safe characters
+            import re
+            safe_error = re.sub(r'[^a-zA-Z0-9_\-\s]', '', str(error))[:100]
+            return redirect(f"{frontend_url}/settings?qbo=error&message={urllib.parse.quote(safe_error)}")
         
         # Verify state for CSRF protection
         stored_state = session.pop('qbo_oauth_state', None)
