@@ -284,8 +284,10 @@ class CasewareExporter:
                 'AsOfDate': as_of_date
             }
             integrity_hash = self.compute_sha256_hash(hash_data)
-            self.stats['hashes_generated'] += 1
-            
+            # CRITICAL FIX: Thread-safe stats update
+            with self._stats_lock:
+                self.stats['hashes_generated'] += 1
+
             rows.append([
                 acct_num,
                 acct_name,
@@ -297,8 +299,10 @@ class CasewareExporter:
                 f"{credit:.2f}",
                 integrity_hash
             ])
-            
-            self.stats['accounts_exported'] += 1
+
+            # CRITICAL FIX: Thread-safe stats update
+            with self._stats_lock:
+                self.stats['accounts_exported'] += 1
         
         # Add totals row
         rows.append([
@@ -1115,12 +1119,15 @@ if __name__ == "__main__":
     
     # FIX #9: Load QB data with encoding detection
     try:
-        # Try to detect encoding first
-        with open(input_file, 'rb') as f_raw:
-            raw_data = f_raw.read(10000)  # Read first 10KB for detection
-            detected = chardet.detect(raw_data)
-            encoding = detected.get('encoding', 'utf-8') or 'utf-8'
-        
+        # CRITICAL FIX: Check if chardet is available before using
+        encoding = 'utf-8'  # Default encoding
+        if chardet is not None:
+            # Try to detect encoding first
+            with open(input_file, 'rb') as f_raw:
+                raw_data = f_raw.read(10000)  # Read first 10KB for detection
+                detected = chardet.detect(raw_data)
+                encoding = detected.get('encoding', 'utf-8') or 'utf-8'
+
         with open(input_file, 'r', encoding=encoding) as f:
             qb_data = json.load(f)
     except UnicodeDecodeError as e:
