@@ -1,0 +1,843 @@
+openapi: 3.0.3
+info:
+  title: ForensicBridge API
+  description: |
+    ForensicBridge is an enterprise-grade QuickBooks Desktop to QuickBooks Online migration platform
+    with forensic audit trail capabilities.
+
+    ## Authentication
+    All API endpoints (except /health and /legal/*) require authentication via:
+    - **JWT Bearer Token**: Include `Authorization: Bearer <token>` header
+    - **Session Cookie**: For browser-based access
+
+    ## Rate Limiting
+    All endpoints are rate-limited. See headers:
+    - `X-RateLimit-Limit`: Maximum requests per window
+    - `X-RateLimit-Remaining`: Remaining requests
+    - `X-RateLimit-Reset`: Unix timestamp when limit resets
+
+    ## Error Handling
+    All errors follow RFC 7807 Problem Details format with custom error codes.
+    See `/docs/ERROR_CODES.md` for complete error code reference.
+
+  version: 1.0.0
+  contact:
+    name: ForensicBridge Support
+    email: support@forensicbridge.io
+    url: https://forensicbridge.io/support
+  license:
+    name: Proprietary
+    url: https://forensicbridge.io/legal/eula
+  x-logo:
+    url: https://forensicbridge.io/logo.png
+
+servers:
+  - url: https://api.forensicbridge.io/api/v1
+    description: Production (Canada)
+  - url: https://api-staging.forensicbridge.io/api/v1
+    description: Staging
+  - url: http://localhost:5000/api/v1
+    description: Development
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Migrations
+    description: QuickBooks migration operations
+  - name: Uploads
+    description: File upload and encryption
+  - name: QBO
+    description: QuickBooks Online OAuth integration
+  - name: Health
+    description: System health and monitoring
+  - name: Legal
+    description: Legal documents and compliance
+
+paths:
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register new user account
+      description: Create a new user account with email verification
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user
+      description: Login with email and password, returns JWT token
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '423':
+          description: Account locked (too many failed attempts)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout and revoke tokens
+      description: Invalidate session and revoke OAuth tokens
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+
+  /auth/forgot-password:
+    post:
+      tags: [Authentication]
+      summary: Request password reset
+      description: |
+        Send password reset email. Always returns success to prevent email enumeration.
+      operationId: forgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Reset email sent (if account exists)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "If an account exists with that email, a reset link has been sent."
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /auth/reset-password:
+    post:
+      tags: [Authentication]
+      summary: Reset password with token
+      description: Complete password reset using token from email
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                  description: JWT token from reset email
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+      responses:
+        '200':
+          description: Password reset successful
+        '400':
+          description: Invalid or expired token
+
+  /auth/verify-email:
+    post:
+      tags: [Authentication]
+      summary: Verify email address
+      description: Verify email using token from verification email
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Email verified successfully
+        '400':
+          description: Invalid or expired token
+
+  /migrations:
+    get:
+      tags: [Migrations]
+      summary: List user migrations
+      description: Get paginated list of migrations for authenticated user
+      operationId: listMigrations
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, uploading, processing, completed, failed]
+      responses:
+        '200':
+          description: List of migrations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  migrations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Migration'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /migrations/{migrationId}:
+    get:
+      tags: [Migrations]
+      summary: Get migration details
+      description: Get detailed information about a specific migration
+      operationId: getMigration
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: migrationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Migration details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Migration'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /migrations/{migrationId}/live-status:
+    get:
+      tags: [Migrations]
+      summary: Get real-time migration status
+      description: |
+        Get real-time status for Pizza Tracker UI polling.
+        Returns phase information, percentage, and integrity verification status.
+      operationId: getMigrationLiveStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: migrationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Live migration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveStatus'
+
+  /upload/public-key:
+    get:
+      tags: [Uploads]
+      summary: Get RSA public key
+      description: Get server's RSA public key for hybrid encryption
+      operationId: getPublicKey
+      responses:
+        '200':
+          description: RSA public key in XML format
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  public_key:
+                    type: string
+                    description: RSA public key in XML format (C# compatible)
+                  key_id:
+                    type: string
+                    description: Key version identifier
+                  algorithm:
+                    type: string
+                    example: "RSA-4096-OAEP-SHA256"
+
+  /upload:
+    post:
+      tags: [Uploads]
+      summary: Upload encrypted QB data
+      description: |
+        Upload encrypted QuickBooks data file. Supports v3.1 hybrid encryption format.
+        Files are encrypted with AES-256-GCM, key wrapped with RSA-4096-OAEP.
+      operationId: uploadFile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, company_name]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Encrypted .qbdata file
+                company_name:
+                  type: string
+                  maxLength: 255
+                qb_file_name:
+                  type: string
+                  maxLength: 255
+                encryption_key:
+                  type: string
+                  description: RSA-encrypted AES key (v3.1 format)
+      responses:
+        '200':
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  migration_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                  message:
+                    type: string
+        '413':
+          description: File too large
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+
+  /qbo/connect:
+    get:
+      tags: [QBO]
+      summary: Initiate QBO OAuth flow
+      description: |
+        Start OAuth 2.0 authorization flow with Intuit.
+        Returns redirect URL to Intuit login page.
+      operationId: connectQBO
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OAuth URL generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  auth_url:
+                    type: string
+                    format: uri
+                  state:
+                    type: string
+                    description: CSRF state token
+
+  /qbo/callback:
+    get:
+      tags: [QBO]
+      summary: QBO OAuth callback
+      description: OAuth callback endpoint - handles token exchange
+      operationId: qboCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: realmId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to dashboard on success
+        '400':
+          description: OAuth error
+
+  /qbo/disconnect:
+    post:
+      tags: [QBO]
+      summary: Disconnect QBO account
+      description: Revoke OAuth tokens and disconnect QBO
+      operationId: disconnectQBO
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: QBO disconnected successfully
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Basic health check
+      description: |
+        Basic health check for load balancers.
+        Returns 200 if service is running.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Service unhealthy
+
+  /health/detailed:
+    get:
+      tags: [Health]
+      summary: Detailed health check
+      description: |
+        Comprehensive health check including database, S3, Redis status.
+        Requires admin authentication.
+      operationId: healthCheckDetailed
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Detailed health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetailedHealthStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /legal/api/documents:
+    get:
+      tags: [Legal]
+      summary: List legal documents
+      description: Get metadata for all legal documents
+      operationId: listLegalDocuments
+      responses:
+        '200':
+          description: Legal documents list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  documents:
+                    type: object
+                  compliance:
+                    type: object
+                    properties:
+                      gdpr:
+                        type: boolean
+                      pipeda:
+                        type: boolean
+                      ccpa:
+                        type: boolean
+
+  /legal/api/privacy:
+    get:
+      tags: [Legal]
+      summary: Get Privacy Policy
+      description: Get Privacy Policy summary in JSON format
+      operationId: getPrivacyPolicy
+      responses:
+        '200':
+          description: Privacy Policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalDocument'
+
+  /legal/api/eula:
+    get:
+      tags: [Legal]
+      summary: Get EULA
+      description: Get End User License Agreement summary in JSON format
+      operationId: getEULA
+      responses:
+        '200':
+          description: EULA
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalDocument'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [email, password, first_name, last_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Must contain uppercase, lowercase, and digit
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        company_name:
+          type: string
+          maxLength: 255
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        mfa_token:
+          type: string
+          description: TOTP token if MFA enabled
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        token:
+          type: string
+          description: JWT access token
+        expires_in:
+          type: integer
+          description: Token expiry in seconds
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        company_name:
+          type: string
+        email_verified:
+          type: boolean
+        mfa_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    Migration:
+      type: object
+      properties:
+        id:
+          type: integer
+        migration_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, uploading, uploaded, provisioning, processing, completed, failed]
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        company_name:
+          type: string
+        qb_file_name:
+          type: string
+        file_size:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    LiveStatus:
+      type: object
+      properties:
+        migration_id:
+          type: string
+        phase:
+          type: string
+          enum: [EXTRACTION, TRANSIT, TRANSFORMATION, VERIFICATION]
+        phase_number:
+          type: integer
+        percentage:
+          type: integer
+        status_message:
+          type: string
+        integrity_verified:
+          type: boolean
+        phases:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+              percentage:
+                type: integer
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+
+    DetailedHealthStatus:
+      allOf:
+        - $ref: '#/components/schemas/HealthStatus'
+        - type: object
+          properties:
+            database:
+              type: object
+              properties:
+                status:
+                  type: string
+                pool_size:
+                  type: integer
+            s3:
+              type: object
+              properties:
+                status:
+                  type: string
+                bucket:
+                  type: string
+            redis:
+              type: object
+              properties:
+                status:
+                  type: string
+
+    LegalDocument:
+      type: object
+      properties:
+        success:
+          type: boolean
+        document:
+          type: string
+        metadata:
+          type: object
+          properties:
+            title:
+              type: string
+            version:
+              type: string
+            effective_date:
+              type: string
+            last_updated:
+              type: string
+        summary:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          description: Human-readable error message
+        error_code:
+          type: string
+          description: Machine-readable error code
+        details:
+          type: object
+          description: Additional error details (development only)
+
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            success: false
+            error: "Validation failed"
+            error_code: "VALIDATION_ERROR"
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            success: false
+            error: "Authentication required"
+            error_code: "AUTHENTICATION_ERROR"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            success: false
+            error: "Resource not found"
+            error_code: "NOT_FOUND"
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per window
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            success: false
+            error: "Rate limit exceeded. Please wait before retrying."
+            error_code: "RATE_LIMIT_EXCEEDED"
