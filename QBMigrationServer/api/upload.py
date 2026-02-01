@@ -77,10 +77,13 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 @upload_bp.route('/public-key', methods=['GET'])
+@limiter.limit("30 per minute")  # SECURITY FIX: Rate limit public key endpoint
 def get_public_key():
     """
     Get server's RSA public key for hybrid encryption (v3.1 feature)
-    
+
+    Rate limited to prevent key enumeration attacks and resource exhaustion.
+
     Returns:
         200: Public key in XML format
         500: Key generation failed
