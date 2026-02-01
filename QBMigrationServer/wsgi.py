@@ -17,9 +17,15 @@ from dotenv import load_dotenv
 # Load environment variables before importing app
 load_dotenv()
 
-# Set production environment if not set
+# CRITICAL SECURITY FIX: Require explicit FLASK_ENV configuration
+# Auto-setting to production is dangerous - could cause unexpected behavior
 if not os.getenv('FLASK_ENV'):
-    os.environ['FLASK_ENV'] = 'production'
+    raise RuntimeError(
+        "FLASK_ENV must be explicitly set. "
+        "For production: export FLASK_ENV=production "
+        "For development: export FLASK_ENV=development "
+        "For testing: export FLASK_ENV=testing"
+    )
 
 # Import the Flask application
 from app import app as application

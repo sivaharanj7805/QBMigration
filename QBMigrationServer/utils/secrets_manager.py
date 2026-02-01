@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Cache TTL for secret rotation support
 # Secrets are cached for this duration before being re-fetched
+# SECURITY NOTE: 300 seconds (5 minutes) balances performance with timely secret rotation.
+# For security-critical secrets, consider using force_refresh=True or reducing TTL.
+# In high-security environments, set SECRETS_CACHE_TTL_SECONDS=60 for faster revocation.
 SECRETS_CACHE_TTL_SECONDS = int(os.getenv('SECRETS_CACHE_TTL_SECONDS', '300'))  # Default: 5 minutes
 
 # Global cache storage with TTL support

@@ -110,11 +110,29 @@ def trigger_processing():
         # Find the migration by session_id
         from models.migration import Migration
         from models.database import db
+        import re
+
+        # SECURITY FIX: Validate session_id format (UUID) to prevent injection
+        uuid_pattern = r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$'
+        if not re.match(uuid_pattern, session_id):
+            logger.warning(f"Invalid session_id format from internal API: {session_id[:50]}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid session_id format'
+            }), 400
+
+        # SECURITY FIX: Validate s3_key doesn't contain path traversal
+        if '..' in s3_key or s3_key.startswith('/'):
+            logger.warning(f"Invalid s3_key from internal API: {s3_key[:100]}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid s3_key format'
+            }), 400
 
         migration = Migration.query.filter_by(migration_id=session_id).first()
 
         if not migration:
-            # Session ID might be in a different format
+            # Session ID might be in a different format - use parameterized query
             migration = Migration.query.filter(
                 Migration.s3_key == s3_key
             ).first()
@@ -125,6 +143,15 @@ def trigger_processing():
                 'success': False,
                 'error': 'Migration not found'
             }), 404
+
+        # AUTHORIZATION FIX: Verify migration is in expected state
+        # Only pending/uploading migrations can be triggered
+        if migration.status not in ['pending', 'uploading']:
+            logger.warning(f"Migration {session_id} in unexpected state {migration.status} for trigger")
+            return jsonify({
+                'success': False,
+                'error': f'Migration cannot be triggered from state: {migration.status}'
+            }), 400
 
         # Update migration with S3 details if not already set
         if not migration.s3_bucket:

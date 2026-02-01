@@ -187,8 +187,16 @@ namespace QBDesktopExtractor
                         }
                     }
                 }
-                catch (System.Security.SecurityException) { /* Registry access denied - continue */ }
-                catch (UnauthorizedAccessException) { /* Registry access denied - continue */ }
+                catch (System.Security.SecurityException secEx)
+                {
+                    // Registry access denied - expected in some environments, continue with other methods
+                    logger?.Log(LogLevel.Debug, "Registry access denied (64-bit ODBC): {0}", secEx.Message);
+                }
+                catch (UnauthorizedAccessException authEx)
+                {
+                    // Registry access denied - expected in some environments, continue with other methods
+                    logger?.Log(LogLevel.Debug, "Registry unauthorized (64-bit ODBC): {0}", authEx.Message);
+                }
 
                 // Method 2: Check 32-bit ODBC drivers (for 32-bit apps)
                 if (!found)
@@ -213,8 +221,16 @@ namespace QBDesktopExtractor
                             }
                         }
                     }
-                    catch (System.Security.SecurityException) { /* Registry access denied - continue */ }
-                    catch (UnauthorizedAccessException) { /* Registry access denied - continue */ }
+                    catch (System.Security.SecurityException secEx)
+                    {
+                        // Registry access denied - expected in some environments
+                        logger?.Log(LogLevel.Debug, "Registry access denied (32-bit ODBC): {0}", secEx.Message);
+                    }
+                    catch (UnauthorizedAccessException authEx)
+                    {
+                        // Registry access denied - expected in some environments
+                        logger?.Log(LogLevel.Debug, "Registry unauthorized (32-bit ODBC): {0}", authEx.Message);
+                    }
                 }
 
                 if (found)
