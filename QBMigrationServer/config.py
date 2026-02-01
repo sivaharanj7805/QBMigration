@@ -265,7 +265,11 @@ class Config:
     # ============================================================================
     # FEATURE FLAGS
     # ============================================================================
-    ENABLE_2FA = os.getenv('ENABLE_2FA', 'false').lower() == 'true'
+    # MFA/2FA: Enabled by default in production for security compliance
+    # Users can optionally enable MFA; privileged operations may require it
+    ENABLE_2FA = os.getenv('ENABLE_2FA', 'true').lower() == 'true'
+    # Require MFA for privileged operations (account deletion, payment changes, etc.)
+    REQUIRE_MFA_FOR_PRIVILEGED_OPS = os.getenv('REQUIRE_MFA_FOR_PRIVILEGED_OPS', 'true').lower() == 'true'
     ENABLE_VIRUS_SCANNING = os.getenv('ENABLE_VIRUS_SCANNING', 'false').lower() == 'true'
     ENABLE_METRICS_DASHBOARD = os.getenv('ENABLE_METRICS_DASHBOARD', 'false').lower() == 'true'
     

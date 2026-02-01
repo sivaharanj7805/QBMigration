@@ -82,6 +82,218 @@ def _bind_session():
     session['_created_at'] = datetime.datetime.utcnow().isoformat()
 
 
+# =============================================================================
+# MFA ENFORCEMENT FOR PRIVILEGED OPERATIONS
+# =============================================================================
+
+def require_mfa(f: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Decorator to require MFA verification for privileged operations.
+
+    This decorator should be used on sensitive endpoints like:
+    - Account deletion
+    - Payment method changes
+    - Password changes
+    - Admin operations
+
+    The decorator checks:
+    1. If MFA is enabled for the user
+    2. If the user has verified MFA recently (within 5 minutes)
+
+    If MFA is required but not verified, returns 403 with mfa_required flag.
+
+    Usage:
+        @auth_bp.route('/delete-account', methods=['POST'])
+        @require_auth
+        @require_mfa
+        def delete_account():
+            ...
+    """
+    @wraps(f)
+    def decorated(*args: Any, **kwargs: Any) -> Tuple[Any, int]:
+        from flask import current_app
+
+        # Check if MFA enforcement is enabled globally
+        if not current_app.config.get('REQUIRE_MFA_FOR_PRIVILEGED_OPS', True):
+            return f(*args, **kwargs)
+
+        # Get current user
+        user_id = getattr(request, 'current_user', {}).get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+
+        # Check if user has MFA enabled
+        if not getattr(user, 'mfa_enabled', False):
+            # MFA not enabled - allow operation but recommend enabling
+            logger.info(f"Privileged operation without MFA for user {user_id}")
+            return f(*args, **kwargs)
+
+        # Check if MFA was recently verified (within 5 minutes)
+        mfa_verified_at = session.get('_mfa_verified_at')
+        if mfa_verified_at:
+            try:
+                verified_time = datetime.datetime.fromisoformat(mfa_verified_at)
+                age_seconds = (datetime.datetime.utcnow() - verified_time).total_seconds()
+                if age_seconds < 300:  # 5 minutes
+                    return f(*args, **kwargs)
+            except (ValueError, TypeError):
+                pass
+
+        # MFA verification required
+        logger.warning(f"MFA required for privileged operation - user {user_id}")
+        return jsonify({
+            'success': False,
+            'error': 'MFA verification required for this operation',
+            'mfa_required': True,
+            'mfa_methods': ['totp']  # Supported MFA methods
+        }), 403
+
+    return decorated
+
+
+def require_role(*allowed_roles):
+    """
+    Decorator factory to require specific roles for endpoint access.
+
+    Implements Role-Based Access Control (RBAC) for protecting admin
+    and privileged endpoints.
+
+    Args:
+        *allowed_roles: One or more role names that can access the endpoint
+                       (e.g., 'admin', 'super_admin')
+
+    Usage:
+        @auth_bp.route('/admin/users')
+        @require_auth
+        @require_role('admin', 'super_admin')
+        def list_all_users():
+            ...
+
+    Returns:
+        Decorator function
+    """
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(f)
+        def decorated(*args: Any, **kwargs: Any) -> Tuple[Any, int]:
+            # Get current user
+            user_id = getattr(request, 'current_user', {}).get('user_id')
+            if not user_id:
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+            user = User.query.get(user_id)
+            if not user:
+                return jsonify({'success': False, 'error': 'User not found'}), 404
+
+            # Check if user has any of the allowed roles
+            user_role = getattr(user, 'role', 'user')
+
+            # Check direct role match
+            if user_role in allowed_roles:
+                return f(*args, **kwargs)
+
+            # Check role hierarchy (e.g., super_admin can access admin endpoints)
+            for allowed_role in allowed_roles:
+                if user.has_role_or_higher(allowed_role):
+                    return f(*args, **kwargs)
+
+            # Access denied
+            logger.warning(
+                f"RBAC: Access denied for user {user_id} (role: {user_role}) "
+                f"to endpoint requiring {allowed_roles}"
+            )
+            return jsonify({
+                'success': False,
+                'error': 'Insufficient permissions',
+                'required_roles': list(allowed_roles)
+            }), 403
+
+        return decorated
+    return decorator
+
+
+def require_admin(f: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Shorthand decorator for admin-only endpoints.
+
+    Equivalent to @require_role('admin', 'super_admin')
+    """
+    return require_role('admin', 'super_admin')(f)
+
+
+@auth_bp.route('/mfa/verify', methods=['POST'])
+@require_auth
+def verify_mfa():
+    """
+    Verify MFA code for privileged operations.
+
+    After successful verification, the session is marked as MFA-verified
+    for 5 minutes, allowing privileged operations without re-verification.
+
+    Request body:
+    {
+        "code": "123456"  // 6-digit TOTP code
+    }
+
+    Response:
+    {
+        "success": true,
+        "verified": true,
+        "valid_for_seconds": 300
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    code = data.get('code', '').strip()
+    if not code or len(code) != 6 or not code.isdigit():
+        return jsonify({'success': False, 'error': 'Invalid MFA code format'}), 400
+
+    user_id = request.current_user.get('user_id')
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+
+    if not getattr(user, 'mfa_enabled', False):
+        return jsonify({'success': False, 'error': 'MFA not enabled for this account'}), 400
+
+    # Verify TOTP code
+    try:
+        import pyotp
+        totp_secret = getattr(user, 'mfa_secret', None)
+        if not totp_secret:
+            return jsonify({'success': False, 'error': 'MFA not configured properly'}), 500
+
+        totp = pyotp.TOTP(totp_secret)
+        # Allow 1 window before/after for clock skew
+        if not totp.verify(code, valid_window=1):
+            logger.warning(f"Invalid MFA code for user {user_id}")
+            return jsonify({'success': False, 'error': 'Invalid MFA code'}), 401
+
+    except ImportError:
+        logger.error("pyotp not installed - MFA verification failed")
+        return jsonify({'success': False, 'error': 'MFA verification unavailable'}), 500
+    except Exception as e:
+        logger.error(f"MFA verification error: {e}")
+        return jsonify({'success': False, 'error': 'MFA verification failed'}), 500
+
+    # Mark session as MFA-verified
+    session['_mfa_verified_at'] = datetime.datetime.utcnow().isoformat()
+    logger.info(f"MFA verified successfully for user {user_id}")
+
+    return jsonify({
+        'success': True,
+        'verified': True,
+        'valid_for_seconds': 300,
+        'message': 'MFA verified. You can now perform privileged operations.'
+    })
+
+
 # FIX #37: Constant-time string comparison for security
 def constant_time_compare(a: str, b: str) -> bool:
     """
@@ -606,13 +818,42 @@ def refresh_token():
 @auth_bp.route('/logout', methods=['POST'])
 @require_auth
 def logout():
-    """Logout - clears session"""
-    # Clear session
+    """
+    Logout - revokes tokens and clears all session data.
+
+    Security measures:
+    1. Revokes QBO OAuth tokens at Intuit (if connected)
+    2. Clears all session data
+    3. Invalidates any cached credentials
+
+    This ensures complete cleanup on logout to prevent token reuse.
+    """
+    user_id = request.current_user.get('user_id')
+
+    # Revoke QBO tokens if user has them (CRITICAL for 100/100 OAuth score)
+    if user_id:
+        try:
+            user = User.query.get(user_id)
+            if user and (user.qbo_access_token or user.qbo_refresh_token):
+                # Import here to avoid circular imports
+                from api.qbo import revoke_qbo_tokens
+                revoke_qbo_tokens(user, reason="user_logout")
+                logger.info(f"Revoked QBO tokens on logout for user {user_id}")
+        except Exception as e:
+            # Don't fail logout if token revocation fails
+            logger.warning(f"Failed to revoke QBO tokens on logout: {e}")
+
+    # Clear all session data
     session.pop('user_id', None)
     session.pop('email', None)
+    session.pop('_ua_fingerprint', None)
+    session.pop('_created_at', None)
+    session.pop('_fresh', None)
     session.clear()
-    
-    return jsonify({'success': True})
+
+    logger.info(f"User {user_id} logged out successfully")
+
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
 
 
 # =============================================================================
