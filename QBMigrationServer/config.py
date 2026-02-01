@@ -313,7 +313,21 @@ class Config:
     # ============================================================================
     # LICENSING
     # ============================================================================
-    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY', secrets.token_hex(32))
+    # CRITICAL SECURITY FIX: LICENSE_SECRET_KEY must be persistent
+    # Generating a random key on each import would invalidate all existing license tokens
+    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY')
+    if not LICENSE_SECRET_KEY:
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError(
+                "CRITICAL: LICENSE_SECRET_KEY must be set in production! "
+                "This secret is used to sign license tokens and must persist across restarts. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        else:
+            # Development only - generate ephemeral secret with warning
+            LICENSE_SECRET_KEY = secrets.token_hex(32)
+            print("WARNING: Using generated LICENSE_SECRET_KEY for development. "
+                  "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence.")
     LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv('LICENSE_TOKEN_EXPIRY_HOURS', '24'))
     
     # License/Pricing tiers - Per-file pricing model
