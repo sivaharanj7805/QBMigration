@@ -329,3 +329,58 @@ def get_encryption_manager():
     if _encryption_manager is None:
         _encryption_manager = EncryptionManager()
     return _encryption_manager
+
+
+def decrypt_client_credentials(encrypted_payload: str) -> dict:
+    """
+    Decrypt client-side encrypted OAuth credentials.
+
+    SECURITY: This allows clients to encrypt credentials before sending them over HTTPS,
+    providing defense-in-depth against credential interception.
+
+    The client encrypts credentials using the server's public key (from /api/encryption/public-key).
+    Format: Base64-encoded JSON with { encrypted_data, iv, tag, encrypted_key, is_key_encrypted }
+
+    Args:
+        encrypted_payload: Base64-encoded JSON string with encrypted credentials
+
+    Returns:
+        dict: Decrypted credentials { client_id, client_secret, refresh_token }
+
+    Raises:
+        ValueError: If decryption fails or payload is invalid
+    """
+    try:
+        # Decode the base64 payload
+        payload_json = base64.b64decode(encrypted_payload).decode('utf-8')
+        payload = json.loads(payload_json)
+
+        # Validate required fields
+        required_fields = ['encrypted_data', 'iv', 'tag']
+        for field in required_fields:
+            if field not in payload:
+                raise ValueError(f"Missing required field: {field}")
+
+        # Get encryption manager
+        mgr = get_encryption_manager()
+
+        # Decrypt the credentials
+        decrypted_json = mgr.decrypt_qb_data(payload)
+
+        # Parse and validate the credentials
+        credentials = json.loads(decrypted_json)
+
+        required_cred_fields = ['client_id', 'client_secret', 'refresh_token']
+        for field in required_cred_fields:
+            if field not in credentials:
+                raise ValueError(f"Missing credential field: {field}")
+
+        logger.info("Successfully decrypted client credentials")
+        return credentials
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in encrypted credentials: {e}")
+        raise ValueError("Invalid encrypted credentials format")
+    except Exception as e:
+        logger.error(f"Failed to decrypt client credentials: {e}")
+        raise ValueError(f"Credential decryption failed: {str(e)}")

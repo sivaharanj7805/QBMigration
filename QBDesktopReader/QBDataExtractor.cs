@@ -281,13 +281,17 @@ namespace QBDesktopExtractor
         private string ComputeCompanyFingerprint(QBCompanyInfo company)
         {
             if (company == null) return "unknown";
-            
+
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {
                 var data = System.Text.Encoding.UTF8.GetBytes(
                     $"{company.CompanyName}|{company.LegalCompanyName}|{company.FirstMonthFiscalYear}");
                 var hash = sha.ComputeHash(data);
-                return Convert.ToBase64String(hash).Substring(0, 16);
+                var base64 = Convert.ToBase64String(hash);
+                // BUFFER OVERFLOW FIX: Check length before Substring to prevent ArgumentOutOfRangeException
+                // SHA256 produces 32 bytes = 44 Base64 chars (with padding), so this should always work,
+                // but defensive coding prevents edge cases.
+                return base64.Length >= 16 ? base64.Substring(0, 16) : base64;
             }
         }
 

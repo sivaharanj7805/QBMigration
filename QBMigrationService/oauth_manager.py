@@ -374,8 +374,17 @@ class OAuthManager:
         """Get valid access token (refresh if needed)"""
         if self.is_token_expired():
             self.refresh_access_token()
-        
+
         return self.access_token
+
+    def get_valid_access_token(self) -> str:
+        """
+        Alias for get_access_token() for API compatibility.
+
+        CRITICAL FIX: orchestrator.py calls oauth_mgr.get_valid_access_token()
+        but this method was named get_access_token(). This alias ensures both names work.
+        """
+        return self.get_access_token()
     
     # ========================================================================
     # SCOPE VERIFICATION
