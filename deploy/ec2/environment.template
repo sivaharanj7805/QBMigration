@@ -1,0 +1,150 @@
+# =============================================================================
+# QBMigration Environment Configuration Template
+# =============================================================================
+# Copy this file to /etc/qbmigration/environment and configure all values.
+#
+# IMPORTANT: This file contains sensitive credentials. Ensure:
+#   - File permissions: chmod 600 /etc/qbmigration/environment
+#   - Owner: chown root:qbmigration /etc/qbmigration/environment
+#
+# Generate secrets:
+#   - SECRET_KEY: openssl rand -base64 32
+#   - BACKUP_ENCRYPTION_KEY: python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+#   - POSTGRES_PASSWORD: openssl rand -base64 24
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Flask Configuration
+# -----------------------------------------------------------------------------
+FLASK_APP=app.py
+FLASK_ENV=production
+FLASK_DEBUG=0
+
+# -----------------------------------------------------------------------------
+# Security Keys (REQUIRED - generate unique values for each environment!)
+# -----------------------------------------------------------------------------
+# JWT signing and session encryption key (min 32 characters)
+SECRET_KEY=REPLACE_WITH_OUTPUT_OF_openssl_rand_base64_32
+
+# Fernet key for encrypting OAuth tokens (must be valid Fernet key)
+BACKUP_ENCRYPTION_KEY=REPLACE_WITH_OUTPUT_OF_fernet_generate_key
+
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
+# Option 1: AWS RDS PostgreSQL (recommended for production)
+DATABASE_URL=postgresql://qbmigration:YOUR_PASSWORD@your-rds-instance.region.rds.amazonaws.com:5432/qbmigration
+
+# Option 2: Local PostgreSQL
+# DATABASE_URL=postgresql://qbmigration:YOUR_PASSWORD@localhost:5432/qbmigration
+
+# PostgreSQL credentials (used if running local PostgreSQL)
+POSTGRES_USER=qbmigration
+POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
+POSTGRES_DB=qbmigration
+
+# -----------------------------------------------------------------------------
+# Redis Configuration
+# -----------------------------------------------------------------------------
+# Local Redis (default)
+REDIS_URL=redis://localhost:6379/0
+
+# With password (recommended for production)
+# REDIS_URL=redis://:YOUR_REDIS_PASSWORD@localhost:6379/0
+
+# AWS ElastiCache
+# REDIS_URL=redis://your-elasticache-endpoint.region.cache.amazonaws.com:6379/0
+
+REDIS_PASSWORD=
+
+# -----------------------------------------------------------------------------
+# AWS Configuration
+# -----------------------------------------------------------------------------
+# AWS Region (use region closest to your users, respecting data sovereignty)
+AWS_REGION=ca-central-1
+
+# S3 Bucket for file storage
+AWS_S3_BUCKET=your-qbmigration-bucket
+
+# AWS Credentials
+# Option 1: IAM Instance Role (recommended - leave these empty)
+# The EC2 instance should have an IAM role with S3 access
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+
+# Option 2: Access Keys (not recommended for production)
+# AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+# AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# EC2 AMI for region (used for spawning ephemeral instances)
+# Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/
+AWS_EC2_AMI_ID=ami-0c55b159cbfafe1f0
+
+# -----------------------------------------------------------------------------
+# QuickBooks Online OAuth Configuration
+# -----------------------------------------------------------------------------
+# Get credentials from: https://developer.intuit.com/app/developer/qbo/docs/get-started
+QBO_CLIENT_ID=
+QBO_CLIENT_SECRET=
+QBO_ENVIRONMENT=production
+QBO_REDIRECT_URI=https://your-domain.com/api/qbo/callback
+
+# -----------------------------------------------------------------------------
+# CORS Configuration (REQUIRED for production)
+# -----------------------------------------------------------------------------
+# Comma-separated list of allowed origins (no trailing slashes)
+ALLOWED_ORIGINS=https://your-domain.com,https://www.your-domain.com
+
+# -----------------------------------------------------------------------------
+# Rate Limiting
+# -----------------------------------------------------------------------------
+RATELIMIT_ENABLED=true
+RATELIMIT_STORAGE_URL=redis://localhost:6379/1
+
+# -----------------------------------------------------------------------------
+# Error Tracking (optional but recommended)
+# -----------------------------------------------------------------------------
+# Sentry DSN from: https://sentry.io/
+SENTRY_DSN=
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0.1
+
+# -----------------------------------------------------------------------------
+# Email Configuration (optional)
+# -----------------------------------------------------------------------------
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=true
+MAIL_USERNAME=
+MAIL_PASSWORD=
+
+# Email sender (for notifications)
+MAIL_DEFAULT_SENDER=noreply@your-domain.com
+
+# -----------------------------------------------------------------------------
+# Next.js Frontend Configuration
+# -----------------------------------------------------------------------------
+# API URL that the frontend will use (should match your domain)
+NEXT_PUBLIC_API_URL=https://your-domain.com
+NEXT_PUBLIC_APP_URL=https://your-domain.com
+
+# -----------------------------------------------------------------------------
+# Backup Configuration
+# -----------------------------------------------------------------------------
+BACKUP_ENABLED=true
+BACKUP_INTERVAL_HOURS=24
+BACKUP_RETENTION_DAYS=30
+
+# -----------------------------------------------------------------------------
+# Cleanup Configuration
+# -----------------------------------------------------------------------------
+AUTO_CLEANUP_ENABLED=true
+CLEANUP_INTERVAL_MINUTES=15
+MIGRATION_DATA_RETENTION_HOURS=24
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+LOG_LEVEL=INFO
+LOG_MAX_BYTES=10485760
+LOG_BACKUP_COUNT=10
