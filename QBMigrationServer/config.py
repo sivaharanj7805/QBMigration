@@ -130,7 +130,9 @@ class Config:
     # ============================================================================
     # SECURITY
     # ============================================================================
-    SESSION_COOKIE_SECURE = False
+    # SECURITY FIX: SESSION_COOKIE_SECURE should be True in production
+    # Set to True when FLASK_ENV=production to enforce HTTPS-only cookies
+    SESSION_COOKIE_SECURE = os.getenv('FLASK_ENV') == 'production'
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=int(os.getenv('SESSION_TIMEOUT_HOURS', '24')))
@@ -223,7 +225,23 @@ class Config:
     # ============================================================================
     # WEBHOOKS
     # ============================================================================
-    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', secrets.token_hex(32))
+    # SECURITY FIX: WEBHOOK_SECRET must be persistent across restarts
+    # In production, this MUST be set via environment variable or Secrets Manager
+    # A generated secret would break webhook signature verification on restart
+    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET')
+    if not WEBHOOK_SECRET:
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError(
+                "CRITICAL: WEBHOOK_SECRET must be set in production! "
+                "This secret is used to sign webhook requests and must persist across restarts. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            )
+        else:
+            # Development only - generate ephemeral secret with warning
+            WEBHOOK_SECRET = secrets.token_hex(32)
+            print("⚠️  WARNING: Using generated WEBHOOK_SECRET for development. "
+                  "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence.")
+
     SERVER_URL = os.getenv('SERVER_URL', 'http://localhost:5000')
     
     # ============================================================================

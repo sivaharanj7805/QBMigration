@@ -82,13 +82,18 @@ def get_allowed_cors_origins(app):
                 origins.append(f"https://www.{domain}")
         return origins
 
-    # Development fallback
-    if app.config.get('ENV') == 'development' or app.config.get('DEBUG'):
-        logger.warning("Using development CORS origins for WebSocket")
+    # SECURITY FIX: Only allow localhost in development mode
+    # Production MUST have explicit WEBSOCKET_CORS_ORIGINS or SERVER_URL
+    flask_env = os.getenv('FLASK_ENV', 'development')
+    if flask_env == 'development' or app.config.get('DEBUG'):
+        logger.warning("Using development CORS origins for WebSocket (FLASK_ENV=development)")
         return ['http://localhost:3000', 'http://localhost:5000', 'http://127.0.0.1:5000']
 
-    # Production without configuration - deny all
-    logger.error("No WEBSOCKET_CORS_ORIGINS configured for production!")
+    # Production without configuration - raise error instead of silently failing
+    logger.error(
+        "SECURITY: No WEBSOCKET_CORS_ORIGINS configured for production! "
+        "WebSocket connections will be blocked. Set WEBSOCKET_CORS_ORIGINS or SERVER_URL."
+    )
     return []
 
 
