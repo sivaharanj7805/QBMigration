@@ -160,35 +160,95 @@ def qbo_callback():
         }), 500
 
 
+def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
+    """
+    Revoke all QBO OAuth tokens for a user at the Intuit server.
+
+    This is a standalone function so it can be called from:
+    - /api/qbo/disconnect endpoint
+    - /api/auth/logout endpoint (full session cleanup)
+    - Account deletion flows
+
+    Args:
+        user: User model instance with QBO tokens
+        reason: Reason for revocation (for logging)
+
+    Returns:
+        bool: True if revocation succeeded or no tokens to revoke
+    """
+    if not user:
+        return True
+
+    client_id = current_app.config.get('QBO_CLIENT_ID')
+    client_secret = current_app.config.get('QBO_CLIENT_SECRET')
+
+    if not client_id or not client_secret:
+        logger.warning("QBO client credentials not configured - skipping token revocation")
+        return True
+
+    tokens_revoked = 0
+    errors = []
+
+    # Revoke access token first (if present)
+    access_token = getattr(user, 'qbo_access_token', None)
+    if access_token:
+        try:
+            response = requests.post(
+                INTUIT_REVOKE_URL,
+                data={'token': access_token},
+                auth=(client_id, client_secret),
+                headers={'Accept': 'application/json'},
+                timeout=(10, 30)
+            )
+            if response.status_code in (200, 204):
+                tokens_revoked += 1
+                logger.info(f"Revoked QBO access token for user {user.id} ({reason})")
+            else:
+                logger.warning(f"QBO access token revocation returned {response.status_code}")
+        except Exception as e:
+            errors.append(f"access_token: {str(e)}")
+            logger.warning(f"Failed to revoke QBO access token: {e}")
+
+    # Revoke refresh token (if present)
+    refresh_token = getattr(user, 'qbo_refresh_token', None)
+    if refresh_token:
+        try:
+            response = requests.post(
+                INTUIT_REVOKE_URL,
+                data={'token': refresh_token},
+                auth=(client_id, client_secret),
+                headers={'Accept': 'application/json'},
+                timeout=(10, 30)
+            )
+            if response.status_code in (200, 204):
+                tokens_revoked += 1
+                logger.info(f"Revoked QBO refresh token for user {user.id} ({reason})")
+            else:
+                logger.warning(f"QBO refresh token revocation returned {response.status_code}")
+        except Exception as e:
+            errors.append(f"refresh_token: {str(e)}")
+            logger.warning(f"Failed to revoke QBO refresh token: {e}")
+
+    if errors:
+        logger.warning(f"QBO token revocation had errors for user {user.id}: {errors}")
+
+    return len(errors) == 0
+
+
 @qbo_bp.route('/disconnect', methods=['POST'])  # MED-14 FIX: Remove GET method for state-changing operation
 @login_required
 def disconnect_qbo():
     """
     Disconnect from QuickBooks Online
 
-    Revokes OAuth tokens and clears stored credentials.
+    Revokes OAuth tokens at Intuit AND clears stored credentials locally.
     Required by Intuit for App Store listing.
 
     MED-14 FIX: Changed from POST+GET to POST only to prevent CSRF via GET requests.
     """
     try:
-        # Revoke token at Intuit if we have one
-        if current_user.qbo_refresh_token:
-            client_id = current_app.config.get('QBO_CLIENT_ID')
-            client_secret = current_app.config.get('QBO_CLIENT_SECRET')
-            
-            try:
-                # MED-08 FIX: Add timeout to external HTTP calls
-                requests.post(
-                    INTUIT_REVOKE_URL,
-                    data={'token': current_user.qbo_refresh_token},
-                    auth=(client_id, client_secret),
-                    headers={'Accept': 'application/json'},
-                    timeout=(10, 30)  # (connect timeout, read timeout)
-                )
-            except Exception as revoke_error:
-                # Log but don't fail - we'll clear locally anyway
-                logger.warning(f"Failed to revoke QBO token: {str(revoke_error)}")
+        # Revoke tokens at Intuit (both access and refresh)
+        revoke_qbo_tokens(current_user, reason="user_disconnect")
         
         # Clear stored tokens
         realm_id = current_user.qbo_realm_id  # Save for logging

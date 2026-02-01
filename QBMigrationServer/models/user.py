@@ -64,6 +64,10 @@ class User(UserMixin, db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     email_verified = db.Column(db.Boolean, default=False)
     email_verification_token = db.Column(db.String(255))
+
+    # RBAC - Role-Based Access Control (100/100 FIX)
+    # Roles: 'user' (default), 'admin', 'super_admin'
+    role = db.Column(db.String(50), default='user', nullable=False, index=True)
     
     # Security - Account Lockout
     failed_login_attempts = db.Column(db.Integer, default=0)
@@ -157,7 +161,67 @@ class User(UserMixin, db.Model):
     
     # Relationships
     migrations = db.relationship('Migration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
-    
+
+    # ========================================================================
+    # RBAC - ROLE-BASED ACCESS CONTROL (100/100 FIX)
+    # ========================================================================
+
+    # Define role hierarchy (higher = more permissions)
+    ROLE_HIERARCHY = {
+        'user': 0,
+        'support': 1,
+        'admin': 2,
+        'super_admin': 3
+    }
+
+    def has_role(self, role: str) -> bool:
+        """
+        Check if user has a specific role.
+
+        Args:
+            role: Role to check (e.g., 'admin', 'user')
+
+        Returns:
+            bool: True if user has the role
+        """
+        return self.role == role
+
+    def has_role_or_higher(self, required_role: str) -> bool:
+        """
+        Check if user has a role at or above the required level.
+
+        Uses role hierarchy to determine if user has sufficient privileges.
+
+        Args:
+            required_role: Minimum required role
+
+        Returns:
+            bool: True if user has sufficient role level
+        """
+        user_level = self.ROLE_HIERARCHY.get(self.role, 0)
+        required_level = self.ROLE_HIERARCHY.get(required_role, 0)
+        return user_level >= required_level
+
+    def is_admin(self) -> bool:
+        """Check if user is an admin or super_admin."""
+        return self.has_role_or_higher('admin')
+
+    def is_super_admin(self) -> bool:
+        """Check if user is a super_admin."""
+        return self.role == 'super_admin'
+
+    def can_manage_users(self) -> bool:
+        """Check if user can manage other users."""
+        return self.is_admin()
+
+    def can_view_all_migrations(self) -> bool:
+        """Check if user can view all migrations (not just their own)."""
+        return self.is_admin()
+
+    def can_access_admin_dashboard(self) -> bool:
+        """Check if user can access admin dashboard."""
+        return self.has_role_or_higher('support')
+
     def __repr__(self):
         return f'<User {self.email}>'
     

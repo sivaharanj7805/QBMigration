@@ -60,18 +60,97 @@ namespace QBDesktopExtractor
         public RuntimeCapabilities Capabilities { get; internal set; } = new RuntimeCapabilities();
 
         /// <summary>
+        /// Validate a file path for security issues (path traversal, symlinks, etc.)
+        /// </summary>
+        private static string ValidateAndNormalizePath(string filePath, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                throw new ConfigurationException($"{paramName} cannot be empty");
+            }
+
+            // Get the full path to resolve any relative components
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(filePath);
+            }
+            catch (Exception ex)
+            {
+                throw new ConfigurationException($"Invalid {paramName}: {ex.Message}");
+            }
+
+            // SECURITY: Check for path traversal attempts
+            // Detect ".." in the original path (before normalization)
+            if (filePath.Contains(".."))
+            {
+                throw new ConfigurationException(
+                    $"SECURITY: Path traversal detected in {paramName}. " +
+                    "Relative path components (..) are not allowed for security reasons.");
+            }
+
+            // SECURITY: Check for symlinks on Windows
+            try
+            {
+                var fileInfo = new FileInfo(fullPath);
+                if (fileInfo.Exists)
+                {
+                    // Check if it's a reparse point (symlink, junction, etc.)
+                    if ((fileInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new ConfigurationException(
+                            $"SECURITY: {paramName} points to a symbolic link or junction. " +
+                            "Symlinks are not allowed for security reasons.");
+                    }
+                }
+            }
+            catch (ConfigurationException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // If we can't check attributes, continue (file may not exist yet)
+            }
+
+            // SECURITY: Ensure path doesn't escape to system directories
+            string[] forbiddenPaths = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                Environment.GetFolderPath(Environment.SpecialFolder.System),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+            };
+
+            foreach (var forbidden in forbiddenPaths)
+            {
+                if (!string.IsNullOrEmpty(forbidden) &&
+                    fullPath.StartsWith(forbidden, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ConfigurationException(
+                        $"SECURITY: {paramName} cannot point to system directories.");
+                }
+            }
+
+            return fullPath;
+        }
+
+        /// <summary>
         /// Load configuration from file with comprehensive validation
         /// </summary>
         public static ExtractionConfig LoadFromFile(string filePath)
         {
-            if (!File.Exists(filePath))
+            // SECURITY FIX: Validate path before any file operations
+            string validatedPath = ValidateAndNormalizePath(filePath, "Configuration file path");
+
+            if (!File.Exists(validatedPath))
             {
-                throw new ConfigurationException($"Configuration file not found: {filePath}");
+                throw new ConfigurationException($"Configuration file not found: {validatedPath}");
             }
 
             try
             {
-                string json = File.ReadAllText(filePath);
+                string json = File.ReadAllText(validatedPath);
                 
                 // Parse with settings that detect unknown fields
                 var settings = new JsonSerializerSettings

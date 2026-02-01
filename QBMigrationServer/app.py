@@ -505,6 +505,63 @@ def create_app(config_name='development'):
         }), 400
 
     app.logger.info('CSRF protection enabled')
+
+    # ==========================================================================
+    # SECURITY HEADERS MIDDLEWARE (CRITICAL FOR 100/100)
+    # ==========================================================================
+    # These headers protect against XSS, clickjacking, MIME sniffing, and more
+    @app.after_request
+    def add_security_headers(response):
+        """Add comprehensive security headers to all responses."""
+        # Content Security Policy - Prevents XSS attacks
+        # Configurable via environment for different deployment scenarios
+        csp_policy = os.getenv('CSP_POLICY', (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://js.stripe.com https://www.google.com https://www.gstatic.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' https://api.stripe.com https://oauth.platform.intuit.com https://appcenter.intuit.com; "
+            "frame-src 'self' https://js.stripe.com https://www.google.com; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "upgrade-insecure-requests"
+        ))
+        response.headers['Content-Security-Policy'] = csp_policy
+
+        # Strict Transport Security - Forces HTTPS for 1 year, includes subdomains
+        # Only set in production to avoid development issues
+        if os.getenv('FLASK_ENV') == 'production':
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+
+        # Prevent clickjacking attacks
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # XSS Protection (legacy but still useful for older browsers)
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+
+        # Referrer Policy - Don't leak URLs to third parties
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Permissions Policy - Restrict browser features
+        response.headers['Permissions-Policy'] = (
+            'accelerometer=(), camera=(), geolocation=(), gyroscope=(), '
+            'magnetometer=(), microphone=(), payment=(self), usb=()'
+        )
+
+        # Cache control for sensitive endpoints
+        if request.path.startswith('/api/auth') or request.path.startswith('/api/qbo'):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+
+        return response
+
+    app.logger.info('Security headers middleware enabled (CSP, HSTS, X-Frame-Options, etc.)')
     
     # Setup Flask-Login
     login_manager = LoginManager()
