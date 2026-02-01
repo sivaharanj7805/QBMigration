@@ -200,77 +200,86 @@ class QBDataTransformer:
         
         # Phase 3: Master Lists (PARALLEL with shared state)
         logger.info(f"Phase 3: Master Lists (parallel with {max_workers} workers)")
-        
+
         # Create shared state using Manager
+        # CRITICAL FIX: Use context manager to ensure Manager() process is properly shutdown
         manager = Manager()
-        shared_names = manager.dict()
-        shared_id_mapping = manager.dict()
-        
-        # Initialize shared state from current state
-        for name in self.used_display_names:
-            shared_names[name] = True
-        
-        for entity_type, mappings in self.id_mapping.items():
-            shared_id_mapping[entity_type] = manager.dict(mappings)
-        
-        # Entity types that can be processed in parallel
-        master_list_types = ['Customer', 'Vendor', 'Employee', 'Item', 'Class', 'Department']
-        
-        # Prepare batches for parallel processing
-        batches = []
-        for entity_type in master_list_types:
-            if entity_type in qb_data:
-                batches.append((
-                    qb_data[entity_type],
-                    entity_type,
-                    shared_names,
-                    shared_id_mapping,
-                    self.region
-                ))
-        
-        # Process in parallel
-        # AUDIT FIX: Use ThreadPoolExecutor instead of ProcessPoolExecutor
-        # Manager() proxy objects cannot be pickled for ProcessPoolExecutor
-        if batches:
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_type = {
-                    executor.submit(
-                        self._parallel_transform_batch,
-                        entities,
+        try:
+            shared_names = manager.dict()
+            shared_id_mapping = manager.dict()
+
+            # Initialize shared state from current state
+            for name in self.used_display_names:
+                shared_names[name] = True
+
+            for entity_type, mappings in self.id_mapping.items():
+                shared_id_mapping[entity_type] = manager.dict(mappings)
+
+            # Entity types that can be processed in parallel
+            master_list_types = ['Customer', 'Vendor', 'Employee', 'Item', 'Class', 'Department']
+
+            # Prepare batches for parallel processing
+            batches = []
+            for entity_type in master_list_types:
+                if entity_type in qb_data:
+                    batches.append((
+                        qb_data[entity_type],
                         entity_type,
                         shared_names,
                         shared_id_mapping,
-                        region
-                    ): entity_type
-                    for entities, entity_type, shared_names, shared_id_mapping, region in batches
-                }
-                
-                for future in as_completed(future_to_type):
-                    entity_type = future_to_type[future]
-                    try:
-                        transformed_entities, type_stats = future.result()
-                        result['entities'][entity_type] = transformed_entities
-                        
-                        # Update stats
-                        self.stats['total_processed'] += type_stats['processed']
-                        self.stats['total_skipped'] += type_stats['skipped']
-                        self.stats['by_entity_type'][entity_type] = type_stats['processed']
-                        self.stats['errors'].extend(type_stats['errors'])
-                        
-                        logger.info(f"{entity_type}: {len(transformed_entities)} entities transformed")
-                    except Exception as e:
-                        logger.error(f"{entity_type}: {e}")
-                        self.stats['errors'].append({
-                            'entity': entity_type,
-                            'error': str(e)
-                        })
-        
-        # Update main process state from shared state
-        self.used_display_names = set(shared_names.keys())
-        for entity_type, mappings in shared_id_mapping.items():
-            self.id_mapping[entity_type] = dict(mappings)
-        
+                        self.region
+                    ))
+
+            # Process in parallel
+            # AUDIT FIX: Use ThreadPoolExecutor instead of ProcessPoolExecutor
+            # Manager() proxy objects cannot be pickled for ProcessPoolExecutor
+            if batches:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_type = {
+                        executor.submit(
+                            self._parallel_transform_batch,
+                            entities,
+                            entity_type,
+                            shared_names,
+                            shared_id_mapping,
+                            region
+                        ): entity_type
+                        for entities, entity_type, shared_names, shared_id_mapping, region in batches
+                    }
+
+                    for future in as_completed(future_to_type):
+                        entity_type = future_to_type[future]
+                        try:
+                            transformed_entities, type_stats = future.result()
+                            result['entities'][entity_type] = transformed_entities
+
+                            # Update stats
+                            self.stats['total_processed'] += type_stats['processed']
+                            self.stats['total_skipped'] += type_stats['skipped']
+                            self.stats['by_entity_type'][entity_type] = type_stats['processed']
+                            self.stats['errors'].extend(type_stats['errors'])
+
+                            logger.info(f"{entity_type}: {len(transformed_entities)} entities transformed")
+                        except Exception as e:
+                            logger.error(f"{entity_type}: {e}")
+                            self.stats['errors'].append({
+                                'entity': entity_type,
+                                'error': str(e)
+                            })
+
+            # Update main process state from shared state
+            self.used_display_names = set(shared_names.keys())
+            for entity_type, mappings in shared_id_mapping.items():
+                self.id_mapping[entity_type] = dict(mappings)
+        finally:
+            # CRITICAL FIX: Always shutdown Manager() to prevent resource leak
+            try:
+                manager.shutdown()
+                logger.debug("Manager process shutdown successfully")
+            except Exception as e:
+                logger.warning(f"Error shutting down Manager: {e}")
+
         # Phase 4: Transactions (Sequential - heavy id_mapping usage, safer sequential)
         logger.info("Phase 4: Transactions (sequential)")
         transaction_types = [
@@ -1177,13 +1186,32 @@ class QBDataTransformer:
             'Active': qbd.get('IsActive', True)
         }
     
-    def transform_creditcardpayment(self, qbd: Dict) -> Dict:
+    def transform_creditcardpayment(self, qbd: Dict) -> Optional[Dict]:
         """Transform CreditCardPayment."""
+        # CRITICAL FIX: Validate required refs before creating entity
+        vendor_id = self.map_id('vendors', qbd.get('VendorRef'))
+        cc_account_id = self.map_id('accounts', qbd.get('CreditCardAccountRef'))
+
+        missing_refs = []
+        if not vendor_id:
+            missing_refs.append("VendorRef")
+        if not cc_account_id:
+            missing_refs.append("CreditCardAccountRef")
+
+        if missing_refs:
+            self.add_manual_review(
+                entity_type='CreditCardPayment',
+                name=f"CreditCardPayment {qbd.get('TxnDate', 'Unknown Date')}",
+                reason=f"Missing required refs: {', '.join(missing_refs)}"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
         qbo = {
-            'VendorRef': {'value': self.map_id('vendors', qbd.get('VendorRef'))},
+            'VendorRef': {'value': vendor_id},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Amount': self.to_decimal(qbd.get('Amount', 0)),
-            'CreditCardAccountRef': {'value': self.map_id('accounts', qbd.get('CreditCardAccountRef'))}
+            'CreditCardAccountRef': {'value': cc_account_id}
         }
         return qbo
     
@@ -1574,9 +1602,18 @@ class QBDataTransformer:
         if qbd.get('Phone'):
             qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
     
-        # SSN - WILL BE MASKED in response
+        # SSN - MUST BE MASKED for privacy
+        # CRITICAL FIX: Actually mask SSN instead of just commenting about it
         if qbd.get('SSN'):
-            qbo['SSN'] = qbd['SSN']  # Will show as XXX-XX-XXXX
+            ssn = str(qbd['SSN']).replace('-', '').replace(' ', '')
+            if len(ssn) >= 4:
+                # Mask all but last 4 digits: XXX-XX-1234
+                qbo['SSN'] = f"XXX-XX-{ssn[-4:]}"
+            else:
+                # Invalid SSN format - mask completely
+                qbo['SSN'] = "XXX-XX-XXXX"
+            # Log for audit trail (without actual SSN)
+            logger.debug(f"Masked SSN for employee record")
     
         return qbo
 
@@ -2018,20 +2055,47 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_transfer(self, qbd: Dict) -> Dict:
+    def transform_transfer(self, qbd: Dict) -> Optional[Dict]:
         """Transform Transfer."""
+        # CRITICAL FIX: Validate required account refs before creating transfer
+        from_account_id = self.map_id('accounts', qbd.get('FromAccountRef'))
+        to_account_id = self.map_id('accounts', qbd.get('ToAccountRef'))
+
+        if not from_account_id or not to_account_id:
+            # Transfer requires both accounts - add to manual review
+            self.add_manual_review(
+                entity_type='Transfer',
+                name=f"Transfer {qbd.get('TxnDate', 'Unknown Date')}",
+                reason=f"Missing account reference: From={from_account_id}, To={to_account_id}"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
         return {
-            'FromAccountRef': {'value': self.map_id('accounts', qbd.get('FromAccountRef'))},
-            'ToAccountRef': {'value': self.map_id('accounts', qbd.get('ToAccountRef'))},
+            'FromAccountRef': {'value': from_account_id},
+            'ToAccountRef': {'value': to_account_id},
             'Amount': self.to_decimal(qbd.get('Amount', 0)),
             'TxnDate': self.format_date(qbd.get('TxnDate'))
         }
 
 
-    def transform_taxpayment(self, qbd: Dict) -> Dict:
+    def transform_taxpayment(self, qbd: Dict) -> Optional[Dict]:
         """Transform TaxPayment."""
+        # CRITICAL FIX: Validate required account ref before creating tax payment
+        payment_account_id = self.map_id('accounts', qbd.get('PaymentAccountRef'))
+
+        if not payment_account_id:
+            # Tax payment requires an account
+            self.add_manual_review(
+                entity_type='TaxPayment',
+                name=f"TaxPayment {qbd.get('PaymentDate', 'Unknown Date')}",
+                reason="Missing PaymentAccountRef"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
         return {
-            'PaymentAccountRef': {'value': self.map_id('accounts', qbd.get('PaymentAccountRef'))},
+            'PaymentAccountRef': {'value': payment_account_id},
             'PaymentAmount': self.to_decimal(qbd.get('PaymentAmount', 0)),
             'PaymentDate': self.format_date(qbd.get('PaymentDate'))
         }

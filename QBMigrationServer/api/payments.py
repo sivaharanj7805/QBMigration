@@ -37,7 +37,11 @@ def token_required(f):
             return jsonify({'success': False, 'error': 'Token is missing'}), 401
         
         try:
-            secret_key = current_app.config.get('SECRET_KEY', 'dev-secret-key')
+            # CRITICAL FIX: Never use fallback for SECRET_KEY - fail if not set
+            secret_key = current_app.config.get('SECRET_KEY')
+            if not secret_key:
+                logger.error("SECRET_KEY not configured - rejecting authentication")
+                return jsonify({'success': False, 'error': 'Server configuration error'}), 500
             data = jwt.decode(token, secret_key, algorithms=['HS256'])
             current_user = User.query.get(data['user_id'])
             
