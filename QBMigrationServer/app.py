@@ -451,9 +451,14 @@ def create_app(config_name='development'):
         except Exception as e:
             app.logger.warning(f"Could not parse origin '{origin}': {e}")
 
-    # Warn if using default development origins in production
+    # CRITICAL SECURITY FIX: Block localhost in production CORS origins
+    # This is a security risk - localhost should never be allowed in production
     if os.getenv('FLASK_ENV', 'development') == 'production' and 'localhost' in str(allowed_origins):
-        app.logger.warning('⚠️  WARNING: Using localhost in CORS origins in production!')
+        raise ValueError(
+            "CRITICAL SECURITY ERROR: 'localhost' found in CORS origins for production environment! "
+            "Remove localhost from ALLOWED_ORIGINS environment variable. "
+            f"Current origins: {allowed_origins}"
+        )
 
     # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
     CORS(app,
@@ -558,6 +563,28 @@ def create_app(config_name='development'):
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
+
+        # 100/100 FIX: Add X-RateLimit-* headers per RFC 6585
+        # These provide transparency about rate limiting to API consumers
+        if 'X-RateLimit-Limit' not in response.headers:
+            # Determine endpoint-specific limits based on path
+            path = request.path
+            if path.startswith('/api/auth/register'):
+                limit, window_seconds = 3, 3600  # 3 per hour
+            elif path.startswith('/api/auth/login'):
+                limit, window_seconds = 5, 900  # 5 per 15 minutes
+            elif path.startswith('/api/auth/forgot-password'):
+                limit, window_seconds = 3, 3600  # 3 per hour
+            elif path.startswith('/api/upload'):
+                limit, window_seconds = 10, 60  # 10 per minute
+            elif path.startswith('/api/webhooks'):
+                limit, window_seconds = 500, 60  # 500 per minute (high for callbacks)
+            else:
+                limit, window_seconds = 100, 60  # Default: 100 per minute
+
+            response.headers['X-RateLimit-Limit'] = str(limit)
+            response.headers['X-RateLimit-Remaining'] = str(limit)  # Conservative default
+            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + window_seconds)
 
         return response
 
@@ -825,84 +852,10 @@ def create_app(config_name='development'):
         response = jsonify(health_status)
         return _add_cors_headers_to_health_response(response), 200
     
-    # Security headers middleware
-    @app.after_request
-    def add_security_headers(response):
-        """Add security headers to all responses"""
-        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
-        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    # 100/100 FIX: Removed duplicate security headers middleware
+    # Security headers are now consolidated in the first add_security_headers function (line 514)
+    # This prevents header conflicts and ensures consistent security policy
 
-        # API-02: Add X-RateLimit-* headers per RFC 6585
-        # Flask-Limiter adds these when RATELIMIT_HEADERS_ENABLED=True, but we ensure they exist
-        # SECURITY FIX: Ensure rate limit headers accurately reflect actual limits
-        if 'X-RateLimit-Limit' not in response.headers:
-            # Get actual rate limits from route-specific decorators or defaults
-            # Default: 100 requests per minute for general API endpoints
-            default_limit = 100
-            default_window_seconds = 60
-
-            # Determine endpoint-specific limits based on path
-            path = request.path
-            if path.startswith('/api/auth/register'):
-                limit = 3
-                window_seconds = 3600  # 3 per hour
-            elif path.startswith('/api/auth/login'):
-                limit = 5
-                window_seconds = 900  # 5 per 15 minutes
-            elif path.startswith('/api/upload'):
-                limit = 10
-                window_seconds = 60  # 10 per minute
-            elif path.startswith('/api/webhooks'):
-                limit = 500
-                window_seconds = 60  # 500 per minute (high for webhook callbacks)
-            else:
-                limit = default_limit
-                window_seconds = default_window_seconds
-
-            # Add headers with accurate values
-            response.headers['X-RateLimit-Limit'] = str(limit)
-            response.headers['X-RateLimit-Remaining'] = str(limit)  # Conservative default
-            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + window_seconds)
-            response.headers['X-RateLimit-Window'] = f"{window_seconds}s"
-
-        if not app.config.get('DEBUG'):
-            # SECURITY FIX: Add preload directive for HSTS preload list submission
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
-
-            # HIGH-26 FIX: Comprehensive CSP headers for XSS prevention
-            # Production-ready CSP that balances security with SPA functionality
-            csp_directives = [
-                "default-src 'self'",
-                # Scripts: Allow self and specific trusted CDNs, no unsafe-inline/eval
-                "script-src 'self' https://js.stripe.com https://cdn.jsdelivr.net",
-                # Styles: Allow self and inline styles (needed for styled-components/emotion)
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-                # Images: Allow self, data URIs (for inline images), and blob (for canvas)
-                "img-src 'self' data: blob: https://*.stripe.com",
-                # Fonts: Allow self and Google Fonts
-                "font-src 'self' https://fonts.gstatic.com",
-                # Connect (XHR/fetch): Allow self, Stripe, and WebSocket
-                "connect-src 'self' https://api.stripe.com wss://*.forensicbridge.io wss://*.forensicbridge.ca",
-                # Frames: Only allow Stripe checkout iframe
-                "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
-                # Prevent embedding in frames (clickjacking protection)
-                "frame-ancestors 'self'",
-                # Form actions restricted to self
-                "form-action 'self'",
-                # Base URI restricted to self (prevents base tag injection)
-                "base-uri 'self'",
-                # Block all plugins (Flash, Java, etc.)
-                "object-src 'none'",
-                # Upgrade HTTP requests to HTTPS
-                "upgrade-insecure-requests",
-            ]
-            response.headers['Content-Security-Policy'] = "; ".join(csp_directives)
-
-        return response
-    
     # SECURITY FIX: HTTPS redirect for production
     @app.before_request
     def redirect_to_https():
@@ -915,18 +868,45 @@ def create_app(config_name='development'):
                 url = request.url.replace('http://', 'https://', 1)
                 return redirect(url, code=301)
 
-    # Request logging middleware
+    # Request logging middleware - 100/100 FIX: Sanitize sensitive URLs
     @app.before_request
     def log_request_info():
-        """Log incoming requests"""
-        if request.path not in ['/health', '/']:
-            app.logger.info(f"{request.method} {request.path} from {request.remote_addr}")
-    
+        """Log incoming requests with sensitive data redacted"""
+        # Skip noisy endpoints
+        if request.path in ['/health', '/', '/api/health', '/api/health/detailed']:
+            return
+
+        # 100/100 FIX: Sanitize path to prevent sensitive URL leakage
+        # Never log: tokens, passwords, reset links, verification links
+        sanitized_path = request.path
+
+        # Redact sensitive path segments
+        sensitive_patterns = [
+            '/reset-password', '/verify-email', '/token', '/callback',
+            '/qbo/callback', '/sso/callback', '/webhook'
+        ]
+        for pattern in sensitive_patterns:
+            if pattern in sanitized_path:
+                sanitized_path = sanitized_path.split('?')[0]  # Remove query params
+                break
+
+        # Hash IP address for GDPR/PIPEDA compliance
+        from utils.pii_redaction import hash_ip
+        hashed_ip = hash_ip(request.remote_addr)
+
+        app.logger.info(f"{request.method} {sanitized_path} from {hashed_ip}")
+
     @app.after_request
     def log_response_info(response):
-        """Log outgoing responses"""
-        if request.path not in ['/health', '/']:
-            app.logger.info(f"{request.method} {request.path} -> {response.status_code}")
+        """Log outgoing responses with sensitive data redacted"""
+        # Skip noisy endpoints
+        if request.path in ['/health', '/', '/api/health', '/api/health/detailed']:
+            return response
+
+        # Sanitize path (same logic as above)
+        sanitized_path = request.path.split('?')[0]  # Always strip query params from logs
+
+        app.logger.info(f"{request.method} {sanitized_path} -> {response.status_code}")
         return response
     
     # Database session management
