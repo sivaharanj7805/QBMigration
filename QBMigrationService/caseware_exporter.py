@@ -284,8 +284,10 @@ class CasewareExporter:
                 'AsOfDate': as_of_date
             }
             integrity_hash = self.compute_sha256_hash(hash_data)
-            self.stats['hashes_generated'] += 1
-            
+            # CRITICAL FIX: Thread-safe stats update
+            with self._stats_lock:
+                self.stats['hashes_generated'] += 1
+
             rows.append([
                 acct_num,
                 acct_name,
@@ -297,8 +299,10 @@ class CasewareExporter:
                 f"{credit:.2f}",
                 integrity_hash
             ])
-            
-            self.stats['accounts_exported'] += 1
+
+            # CRITICAL FIX: Thread-safe stats update
+            with self._stats_lock:
+                self.stats['accounts_exported'] += 1
         
         # Add totals row
         rows.append([
@@ -314,20 +318,31 @@ class CasewareExporter:
         ])
         
         # FIX #4: Write CSV with proper error handling
+        # CRITICAL FIX: Caseware requires header row FIRST (row 1), data starting row 2
+        # Previous code put comment rows before header which broke Caseware import wizard
         try:
-            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            # Use UTF-8-BOM for better Excel/Caseware compatibility with special chars
+            with open(output_file, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
-                
-                # Header comment with metadata
-                f.write(f"# Caseware Audit Trial Balance\n")
+
+                # CASEWARE FORMAT: Header row MUST be row 1
+                writer.writerow(headers)
+
+                # Write data rows (row 2 onwards) - exclude TOTALS row for Caseware
+                # TOTALS row would be imported as an account and fail validation
+                for row in rows[:-1]:  # Exclude last row (TOTALS)
+                    writer.writerow(row)
+
+                # Write metadata as trailing comments (Caseware ignores rows after data)
+                f.write(f"\n")
+                f.write(f"# === METADATA (not imported) ===\n")
                 f.write(f"# Company: {self.company_name}\n")
                 f.write(f"# As Of Date: {as_of_date}\n")
                 f.write(f"# Generated: {datetime.now().isoformat()}\n")
                 f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-                f.write(f"#\n")
-                
-                writer.writerow(headers)
-                writer.writerows(rows)
+                f.write(f"# Total Debits: {total_debits:.2f}\n")
+                f.write(f"# Total Credits: {total_credits:.2f}\n")
+                f.write(f"# Accounting Standard: {self.leadsheet_mapper.detected_standard}\n")
         except IOError as e:
             logger.error(f"Failed to write Trial Balance file: {e}")
             raise IOError(f"Cannot write to {output_file}: {e}") from e
@@ -447,30 +462,31 @@ class CasewareExporter:
 
         
         # FIX #4: Write CSV with proper error handling
+        # CRITICAL FIX: Caseware requires header row FIRST (row 1), data starting row 2
+        # Moved metadata to trailing comments at end of file
         try:
-            with open(output_file, 'w', newline='', encoding='utf-8') as f:
+            # Use UTF-8-BOM for better Excel/Caseware compatibility
+            with open(output_file, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
-                
-                # Header comment with GLOBAL FILE HASH (Integrity Summary)
-                f.write(f"# Caseware Audit General Ledger\n")
+
+                # CASEWARE FORMAT: Header row MUST be row 1
+                writer.writerow(headers)
+
+                # Write data rows starting at row 2
+                writer.writerows(rows)
+
+                # Write metadata as trailing comments (after data, not imported by Caseware)
+                f.write(f"\n")
+                f.write(f"# === INTEGRITY METADATA (not imported) ===\n")
                 f.write(f"# Company: {self.company_name}\n")
                 if start_date:
                     f.write(f"# Period: {start_date} to {end_date or 'present'}\n")
                 f.write(f"# Generated: {datetime.now().isoformat()}\n")
                 f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-                f.write(f"#\n")
-                f.write(f"# ============ INTEGRITY SUMMARY ============\n")
                 f.write(f"# GLOBAL_FILE_HASH (SHA-256): {global_file_hash}\n")
                 f.write(f"# Total Transactions: {len(rows)}\n")
-                f.write(f"# Verify: This hash covers ALL transaction rows below.\n")
-                f.write(f"# If this hash matches, the entire file is untampered.\n")
-                f.write(f"# ============================================\n")
-                f.write(f"#\n")
-                f.write(f"# Row-level: Each row has its own Forensic_Integrity_Hash for per-transaction verification.\n")
-                f.write(f"#\n")
-                
-                writer.writerow(headers)
-                writer.writerows(rows)
+                f.write(f"# Verify: Recompute SHA-256 of all data rows to verify integrity.\n")
+                f.write(f"# Row-level: Each row has Forensic_Integrity_Hash for per-transaction verification.\n")
         except IOError as e:
             logger.error(f"Failed to write General Ledger file: {e}")
             raise IOError(f"Cannot write to {output_file}: {e}") from e
@@ -492,79 +508,189 @@ class CasewareExporter:
     
     def export_mapping_file(self) -> str:
         """
-        Generate Audit_Mapping.cvw - Caseware column configuration.
-        
-        This file tells Caseware exactly which column is Account, Debit, Credit, etc.
-        
-        Returns:
-            Path to generated .cvw file
-        """
-        output_file = self.output_dir / "Audit_Mapping.cvw"
-        
-        mapping_config = {
-            "FormatVersion": "1.0",
-            "Generator": f"ForensicBridge CasewareExporter v{self.VERSION}",
-            "GeneratedAt": datetime.now().isoformat(),
-            "Company": self.company_name,
-            
-            "TrialBalance": {
-                "File": "Audit_TB.csv",
-                "SkipRows": 6,  # Skip header comments
-                "Delimiter": ",",
-                "TextQualifier": "\"",
-                "ColumnMapping": {
-                    "AccountNumber": 0,
-                    "AccountDescription": 1,
-                    "AccountType": 2,
-                    "LeadSheetCode": 3,
-                    "PriorYearBalance": 4,
-                    "CurrentYearBalance": 5,
-                    "Debit": 6,
-                    "Credit": 7,
-                    "ForensicHash": 8
-                }
-            },
-            
-            "GeneralLedger": {
-                "File": "Audit_GL.csv",
-                "SkipRows": 11,  # FIX #6: Correct count - 10 comment lines + 1 blank + header
-                "Delimiter": ",",
-                "TextQualifier": "\"",
-                "ColumnMapping": {
-                    "AccountNumber": 0,
-                    "AccountDescription": 1,
-                    "TransactionType": 2,
-                    "TransactionDate": 3,
-                    "Reference": 4,
-                    "Description": 5,
-                    "Amount": 6,
-                    "Debit": 7,
-                    "Credit": 8,
-                    "ForensicHash": 9
-                },
-                "DateFormat": "YYYY-MM-DD"
-            },
-            
-            "HashVerification": {
-                "Algorithm": "SHA-256",
-                "Encoding": "UTF-8",
-                "OutputFormat": "lowercase_hex",
-                "Description": "Each row contains a cryptographic hash that auditors can use to verify the digital fingerprint of individual transactions."
-            },
+        Generate IMPORT_INSTRUCTIONS.txt - Human-readable import guide for Caseware.
 
-            # FIX #33: Use locale-aware lead sheet codes
-            "AccountingStandard": self.leadsheet_mapper.detected_standard,
-            "LeadSheetCodes": self.leadsheet_mapper.get_lead_sheet_codes()
-        }
-        
+        NOTE: Previous versions generated a fake .cvw file (JSON format), but .cvw is
+        actually a proprietary CaseView binary format. This caused import errors.
+
+        The new format is a plain text README with:
+        1. Step-by-step Caseware import instructions
+        2. Column mapping reference
+        3. Hash verification instructions
+
+        Returns:
+            Path to generated instructions file
+        """
+        # Generate human-readable instructions file (NOT fake .cvw)
+        output_file = self.output_dir / "IMPORT_INSTRUCTIONS.txt"
+
+        instructions = f"""
+================================================================================
+                     CASEWARE WORKING PAPERS IMPORT GUIDE
+================================================================================
+
+Company: {self.company_name}
+Generated: {datetime.now().isoformat()}
+Generator: ForensicBridge CasewareExporter v{self.VERSION}
+Accounting Standard: {self.leadsheet_mapper.detected_standard}
+
+================================================================================
+                           FILE CONTENTS
+================================================================================
+
+This bundle contains:
+
+1. Audit_TB.csv  - Trial Balance with Lead Sheet codes
+2. Audit_GL.csv  - General Ledger with SHA-256 integrity hashes
+3. IMPORT_INSTRUCTIONS.txt - This file
+
+================================================================================
+                     STEP 1: IMPORT TRIAL BALANCE
+================================================================================
+
+In Caseware Working Papers:
+
+1. Go to: Engagement > Import > ASCII Text File
+2. Select: Audit_TB.csv
+3. Component: "Trial Balance (Chart of Accounts & General Ledger Balances)"
+4. Delimiter: Comma
+5. Text qualifier: Double quote (")
+
+COLUMN MAPPING:
+   Column 0: Account Number     -> Map to: Account Number
+   Column 1: Account Description -> Map to: Account Description
+   Column 2: Type               -> Map to: (Ignore - for reference)
+   Column 3: Lead Sheet Code    -> Map to: Lead Sheet
+   Column 4: Prior Year Balance -> Map to: Prior Year Balance
+   Column 5: Current Year Balance -> Map to: Current Balance
+   Column 6: Debit              -> Map to: Debit
+   Column 7: Credit             -> Map to: Credit
+   Column 8: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
+
+================================================================================
+                     STEP 2: IMPORT GENERAL LEDGER
+================================================================================
+
+1. Go to: Engagement > Import > ASCII Text File
+2. Select: Audit_GL.csv
+3. Component: "Transactions (General Ledger Details)"
+4. Delimiter: Comma
+5. Text qualifier: Double quote (")
+
+COLUMN MAPPING:
+   Column 0: Account Number     -> Map to: Account Number
+   Column 1: Account Description -> Map to: (Ignore)
+   Column 2: Type               -> Map to: (Ignore)
+   Column 3: Transaction Date   -> Map to: Transaction Date (YYYY-MM-DD)
+   Column 4: Reference          -> Map to: Reference/Document Number
+   Column 5: Description        -> Map to: Description/Memo
+   Column 6: Amount             -> Map to: Amount
+   Column 7: Debit              -> Map to: Debit
+   Column 8: Credit             -> Map to: Credit
+   Column 9: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
+
+================================================================================
+                     LEAD SHEET CODE REFERENCE
+================================================================================
+
+Accounting Standard: {self.leadsheet_mapper.detected_standard}
+
+Lead sheet codes are pre-mapped based on your company's locale:
+"""
+
+        # Add lead sheet codes
+        codes = self.leadsheet_mapper.get_lead_sheet_codes()
+        for account_type, code in sorted(codes.items(), key=lambda x: x[1]):
+            instructions += f"   {code:8} = {account_type}\n"
+
+        instructions += """
+================================================================================
+                     HASH VERIFICATION (OPTIONAL)
+================================================================================
+
+Each row contains a SHA-256 cryptographic hash in the last column.
+This allows auditors to verify data integrity.
+
+To verify a row's hash:
+1. Concatenate key fields: "field1:value1|field2:value2|..."
+2. Key fields in order: txnId, listId, refNumber, txnDate, amount, balance, name
+3. Then remaining fields alphabetically
+4. Numbers: 2 decimal places (e.g., "1234.56")
+5. Dates: YYYY-MM-DD format
+6. Compute SHA-256 and compare to Forensic_Integrity_Hash column
+
+The General Ledger file also contains a GLOBAL_FILE_HASH at the end (in comments)
+that covers all transaction rows for file-level integrity verification.
+
+================================================================================
+                           SUPPORT
+================================================================================
+
+If you encounter import issues, verify:
+- CSV files use UTF-8 encoding (with BOM)
+- Date format is YYYY-MM-DD
+- Decimal separator is period (.)
+- No trailing commas in rows
+
+For technical support: support@forensicbridge.com
+"""
+
         try:
             with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(mapping_config, f, indent=2)
+                f.write(instructions)
         except IOError as e:
-            logger.error(f"Failed to write mapping file: {e}")
+            logger.error(f"Failed to write instructions file: {e}")
             raise IOError(f"Cannot write to {output_file}: {e}") from e
-        
-        logger.info(f"Mapping file exported: {output_file}")
+
+        # Also generate a JSON metadata file for programmatic access
+        metadata_file = self.output_dir / "bundle_metadata.json"
+        metadata = {
+            "format_version": "2.0",
+            "generator": f"ForensicBridge CasewareExporter v{self.VERSION}",
+            "generated_at": datetime.now().isoformat(),
+            "company": self.company_name,
+            "accounting_standard": self.leadsheet_mapper.detected_standard,
+            "files": {
+                "trial_balance": {
+                    "filename": "Audit_TB.csv",
+                    "encoding": "utf-8-sig",
+                    "delimiter": ",",
+                    "has_header": True,
+                    "columns": [
+                        "Account Number", "Account Description", "Type",
+                        "Lead Sheet Code", "Prior Year Balance",
+                        "Current Year Balance", "Debit", "Credit",
+                        "Forensic_Integrity_Hash"
+                    ]
+                },
+                "general_ledger": {
+                    "filename": "Audit_GL.csv",
+                    "encoding": "utf-8-sig",
+                    "delimiter": ",",
+                    "has_header": True,
+                    "date_format": "YYYY-MM-DD",
+                    "columns": [
+                        "Account Number", "Account Description", "Type",
+                        "Transaction Date", "Reference", "Description",
+                        "Amount", "Debit", "Credit", "Forensic_Integrity_Hash"
+                    ]
+                }
+            },
+            "hash_verification": {
+                "algorithm": "SHA-256",
+                "encoding": "UTF-8",
+                "output_format": "lowercase_hex"
+            },
+            "lead_sheet_codes": self.leadsheet_mapper.get_lead_sheet_codes()
+        }
+
+        try:
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+        except IOError:
+            pass  # Metadata file is optional
+
+        logger.info(f"Import instructions exported: {output_file}")
         return str(output_file)
     
     # ========================================================================
@@ -993,12 +1119,15 @@ if __name__ == "__main__":
     
     # FIX #9: Load QB data with encoding detection
     try:
-        # Try to detect encoding first
-        with open(input_file, 'rb') as f_raw:
-            raw_data = f_raw.read(10000)  # Read first 10KB for detection
-            detected = chardet.detect(raw_data)
-            encoding = detected.get('encoding', 'utf-8') or 'utf-8'
-        
+        # CRITICAL FIX: Check if chardet is available before using
+        encoding = 'utf-8'  # Default encoding
+        if chardet is not None:
+            # Try to detect encoding first
+            with open(input_file, 'rb') as f_raw:
+                raw_data = f_raw.read(10000)  # Read first 10KB for detection
+                detected = chardet.detect(raw_data)
+                encoding = detected.get('encoding', 'utf-8') or 'utf-8'
+
         with open(input_file, 'r', encoding=encoding) as f:
             qb_data = json.load(f)
     except UnicodeDecodeError as e:

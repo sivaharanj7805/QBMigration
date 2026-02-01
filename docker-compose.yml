@@ -98,7 +98,8 @@ services:
     volumes:
       - redis-data:/data
     # SECURITY FIX: Add password authentication to Redis
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-}
+    # CRITICAL FIX: Require REDIS_PASSWORD - no empty default allowed in production
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required for Redis authentication}
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
       interval: 10s
@@ -123,9 +124,10 @@ services:
       - qbmigration-data:/app/data
       - qbmigration-logs:/app/logs
     environment:
-      - DATABASE_URL=postgresql://qbmigration:qbmigration@postgres:5432/qbmigration
-      - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      # SECURITY FIX: Use environment variables - never hardcode credentials
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - AWS_REGION=${AWS_REGION:-ca-central-1}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
       - QBO_CLIENT_ID=${QBO_CLIENT_ID:-}
@@ -150,8 +152,9 @@ services:
       - ./QBMigrationServer:/app/QBMigrationServer:ro
       - celery-schedule:/app/celerybeat-schedule
     environment:
-      - DATABASE_URL=postgresql://qbmigration:qbmigration@postgres:5432/qbmigration
-      - REDIS_URL=redis://redis:6379/0
+      # SECURITY FIX: Use environment variables - never hardcode credentials
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
     depends_on:
       - postgres
       - redis

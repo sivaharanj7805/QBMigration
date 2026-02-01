@@ -211,73 +211,150 @@ class MigrationOrchestrator:
             # Step 4: Upload to QB Online
             print("\n☁️  STEP 4: Uploading to QuickBooks Online...")
             print("   This may take several minutes...")
-            
-            # $25M FIX: Pass QBO plan for dynamic worker scaling
+
+            # CRITICAL FIX: Validate QBO credentials before upload
             qbo_plan = os.getenv('QBO_PLAN', 'Plus')
-            qbo_client = QBOClient(qbo_plan=qbo_plan)
-            upload_result = qbo_client.batch_upload(
-                transformed_data['entities'],
-                self.migration_id
+            access_token = os.getenv('QBO_ACCESS_TOKEN')
+            realm_id = os.getenv('QBO_REALM_ID')
+
+            if not access_token:
+                raise ValueError("QBO_ACCESS_TOKEN environment variable not set. Cannot upload to QBO.")
+            if not realm_id:
+                raise ValueError("QBO_REALM_ID environment variable not set. Cannot upload to QBO.")
+
+            # CRITICAL FIX: Initialize QBOClient with access_token and base_url
+            base_url = f"https://quickbooks.api.intuit.com/v3/company/{realm_id}"
+            qbo_client = QBOClient(
+                access_token=access_token,
+                base_url=base_url,
+                qbo_plan=qbo_plan
             )
-            
+
+            # CRITICAL FIX: Wrap batch_upload in try/except
+            try:
+                upload_result = qbo_client.batch_upload(
+                    transformed_data['entities'],
+                    self.migration_id,
+                    oauth_manager=None,  # TODO: Add OAuth manager for token refresh
+                    use_optimized=True
+                )
+            except Exception as upload_error:
+                print(f"\n❌ Upload failed: {upload_error}")
+                self.logger.log_security_event("UPLOAD_FAILED", {
+                    "migration_id": self.migration_id,
+                    "error": str(upload_error)
+                })
+                raise RuntimeError(f"QBO upload failed: {upload_error}") from upload_error
+
             print(f"\n✅ Upload complete!")
             print(f"   Successful: {upload_result['successful']}")
             print(f"   Failed: {upload_result['failed']}")
-            
+
+            # CRITICAL FIX: Fail migration if failure rate exceeds threshold
+            total_entities = upload_result['successful'] + upload_result['failed']
+            if total_entities > 0:
+                failure_rate = upload_result['failed'] / total_entities
+                if failure_rate > 0.10:  # More than 10% failure = migration failed
+                    print(f"\n❌ MIGRATION FAILED: {failure_rate*100:.1f}% of entities failed to upload")
+                    print(f"   This exceeds the 10% failure threshold.")
+                    for error in upload_result.get('errors', [])[:10]:
+                        print(f"   • {error}")
+                    success = False
+                    # Log the failure
+                    self.logger.log_security_event("MIGRATION_HIGH_FAILURE_RATE", {
+                        "migration_id": self.migration_id,
+                        "failure_rate": failure_rate,
+                        "successful": upload_result['successful'],
+                        "failed": upload_result['failed']
+                    })
+                    return False
+
             if upload_result['failed'] > 0:
-                print(f"\n⚠️  Some entities failed to upload:")
-                for error in upload_result.get('errors', [])[:5]:
+                print(f"\n⚠️  Some entities failed to upload ({upload_result['failed']} of {total_entities}):")
+                for error in upload_result.get('errors', [])[:10]:
                     print(f"   • {error}")
-            
+
             # Step 5: Verify migration
             print("\n✔️ STEP 5: Verifying migration...")
-            verifier = MigrationVerifier(qbo_client)
-            verification = verifier.verify_migration(
-                transformed_data['entities'],
-                upload_result,
-                source_hash=source_hash  # $25M FIX: Include hash in verification
-            )
-            
+
+            # CRITICAL FIX: Wrap verification in try/except
+            try:
+                verifier = MigrationVerifier(qbo_client)
+                verification = verifier.verify_migration(
+                    transformed_data['entities'],
+                    upload_result,
+                    source_hash=source_hash
+                )
+            except Exception as verify_error:
+                print(f"\n⚠️  Verification failed: {verify_error}")
+                # Continue - verification failure shouldn't block successful upload
+                verification = {'passed': False, 'issues': [str(verify_error)]}
+
             if verification['passed']:
                 print("✅ Verification PASSED - All data migrated correctly!")
                 success = True
             else:
-                print(f"⚠️  Verification found {len(verification['issues'])} issue(s):")
-                for issue in verification['issues'][:5]:
+                print(f"⚠️  Verification found {len(verification.get('issues', []))} issue(s):")
+                for issue in verification.get('issues', [])[:5]:
                     print(f"   • {issue}")
-                
-                # Still consider it a success if most data migrated
-                if upload_result['successful'] > 0:
+
+                # CRITICAL FIX: Only mark success if BOTH upload succeeded AND failure rate is low
+                if upload_result['successful'] > 0 and upload_result['failed'] == 0:
                     success = True
-            
+                elif upload_result['successful'] > 0 and failure_rate <= 0.05:
+                    # Allow up to 5% failure for partial success
+                    success = True
+                    print("   Migration marked as partial success (< 5% failures)")
+                else:
+                    success = False
+
             # Step 6: Save results
             print("\n💾 STEP 6: Saving migration results...")
-            results_file = self._save_results(
-                transformed_data, 
-                upload_result, 
-                verification,
-                source_hash
-            )
-            print(f"✅ Results saved to: {results_file.name}")
+
+            # CRITICAL FIX: Wrap save in try/except
+            try:
+                results_file = self._save_results(
+                    transformed_data,
+                    upload_result,
+                    verification,
+                    source_hash
+                )
+                print(f"✅ Results saved to: {results_file.name}")
+            except Exception as save_error:
+                print(f"\n⚠️  Failed to save results: {save_error}")
+                # Don't fail migration just because results couldn't be saved
+                results_file = None
             
-            # Step 7: Schedule deletion
-            print("\n🗑️  STEP 7: Scheduling secure deletion...")
-            files_to_delete = [
-                decrypted_file,
-                encrypted_file_path,
-                str(results_file)
-            ]
-            
-            self.retention.schedule_deletion(
-                self.migration_id,
-                files_to_delete,
-                delay_hours=DATA_RETENTION_HOURS
-            )
-            
-            print(f"✅ All files scheduled for secure deletion in {DATA_RETENTION_HOURS} hour(s)")
-            print(f"   • Encrypted QB data")
-            print(f"   • Decrypted temporary data")
-            print(f"   • Migration results")
+            # Step 7: Schedule deletion of TEMPORARY files only
+            # CRITICAL FIX: Do NOT delete user's original encrypted source file
+            # Only delete files WE created during migration
+            print("\n🗑️  STEP 7: Scheduling secure deletion of temporary files...")
+            files_to_delete = [decrypted_file]  # Only the decrypted temp file
+
+            # Only delete results file if user explicitly requests
+            delete_results = os.getenv('DELETE_MIGRATION_RESULTS', 'false').lower() == 'true'
+            if delete_results and results_file:
+                files_to_delete.append(str(results_file))
+
+            # Filter out None values
+            files_to_delete = [f for f in files_to_delete if f]
+
+            if files_to_delete:
+                self.retention.schedule_deletion(
+                    self.migration_id,
+                    files_to_delete,
+                    delay_hours=DATA_RETENTION_HOURS
+                )
+
+                print(f"✅ Temporary files scheduled for secure deletion in {DATA_RETENTION_HOURS} hour(s)")
+                print(f"   • Decrypted temporary data")
+                if delete_results:
+                    print(f"   • Migration results (per DELETE_MIGRATION_RESULTS setting)")
+            else:
+                print("   No temporary files to delete")
+
+            # NOTE: User's original encrypted file is NOT deleted
+            # User retains their source backup
             
         except FileNotFoundError as e:
             print(f"\n❌ File error: {e}")
