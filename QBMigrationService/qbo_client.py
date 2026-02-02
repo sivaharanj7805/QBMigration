@@ -215,7 +215,12 @@ class PremiumQBOClient:
 
             # AUDIT FIX: Enable WAL mode for better concurrent read/write
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute(f"PRAGMA busy_timeout={busy_timeout}")
+            # CRITICAL FIX: Validate busy_timeout as integer to prevent SQL injection
+            # PRAGMA statements don't support parameterization, so we must validate the input
+            validated_timeout = int(busy_timeout)  # Raises ValueError if not an integer
+            if validated_timeout < 0 or validated_timeout > 300000:  # Max 5 minutes
+                validated_timeout = 30000  # Default to 30 seconds
+            cursor.execute(f"PRAGMA busy_timeout={validated_timeout}")
             
             # Create entities table
             cursor.execute('''

@@ -21,7 +21,26 @@ MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    """
+    Validate that a filename has an allowed extension.
+
+    HIGH FIX: Enhanced validation to prevent double-extension bypass attacks.
+    Example attack: "malware.exe.csv" would pass the old check but is dangerous.
+    """
+    if not filename or '.' not in filename:
+        return False
+
+    # HIGH FIX: Reject files with multiple extensions (common attack vector)
+    # Count extensions by looking for patterns like ".xxx" (dot followed by alphanumeric)
+    import re
+    extensions = re.findall(r'\.[a-zA-Z0-9]+', filename)
+    if len(extensions) > 1:
+        # Multiple extensions detected - potential bypass attempt
+        return False
+
+    # Get the last extension and validate
+    ext = filename.rsplit('.', 1)[1].lower()
+    return ext in ALLOWED_EXTENSIONS
 
 
 @file_upload_bp.route('/upload', methods=['POST'])

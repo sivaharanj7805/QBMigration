@@ -6,15 +6,66 @@ This is the backend for the "Data Museum" feature.
 
 import json
 import os
+import re
+import logging
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
 from functools import wraps
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
 # Configuration
 ARCHIVE_DIR = os.environ.get('ARCHIVE_DIR', './archives')
-API_KEY = os.environ.get('ARCHIVE_API_KEY', 'dev-key-changeme')
+
+# CRITICAL FIX: Fail-closed if API key is not configured or is the insecure default
+# This prevents accidental production deployments with weak credentials
+_api_key = os.environ.get('ARCHIVE_API_KEY', '')
+if not _api_key or _api_key == 'dev-key-changeme':
+    _is_production = os.environ.get('FLASK_ENV', 'development') == 'production'
+    if _is_production:
+        raise RuntimeError(
+            "CRITICAL: ARCHIVE_API_KEY environment variable must be set to a strong value in production. "
+            "Do not use the default 'dev-key-changeme' value."
+        )
+    else:
+        logger.warning(
+            "ARCHIVE_API_KEY not configured - using insecure default for development. "
+            "Set ARCHIVE_API_KEY environment variable for production."
+        )
+        _api_key = 'dev-key-changeme'  # Only allowed in development
+
+API_KEY = _api_key
+
+
+# CRITICAL FIX: Archive ID validation to prevent path traversal attacks
+def validate_archive_id(archive_id: str) -> bool:
+    """
+    Validate archive_id format to prevent path traversal attacks.
+
+    Only allows alphanumeric characters, underscores, and hyphens.
+    Maximum length of 100 characters.
+
+    Args:
+        archive_id: The archive ID to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not archive_id or not isinstance(archive_id, str):
+        return False
+
+    # Maximum length check
+    if len(archive_id) > 100:
+        return False
+
+    # Only allow alphanumeric, underscores, hyphens
+    # This prevents path traversal (../, /, etc.)
+    if not re.match(r'^[a-zA-Z0-9_-]+$', archive_id):
+        return False
+
+    return True
 
 # Simple API key authentication
 def require_api_key(f):
@@ -98,6 +149,11 @@ def list_archives():
 @require_api_key
 def get_archive(archive_id):
     """Get details of a specific archive."""
+    # CRITICAL FIX: Validate archive_id to prevent path traversal attacks
+    if not validate_archive_id(archive_id):
+        logger.warning(f"Invalid archive_id attempted: {archive_id[:50] if archive_id else 'None'}")
+        return jsonify({'error': 'Invalid archive ID format'}), 400
+
     index = load_index()
     entry = next((e for e in index['Entries'] if e['ArchiveId'] == archive_id), None)
     
@@ -121,6 +177,11 @@ def get_archive(archive_id):
 @require_api_key
 def search_transactions(archive_id):
     """Search transactions in an archive."""
+    # CRITICAL FIX: Validate archive_id to prevent path traversal attacks
+    if not validate_archive_id(archive_id):
+        logger.warning(f"Invalid archive_id in transactions search: {archive_id[:50] if archive_id else 'None'}")
+        return jsonify({'error': 'Invalid archive ID format'}), 400
+
     transactions = load_transactions(archive_id)
     
     if not transactions:
@@ -184,6 +245,15 @@ def search_transactions(archive_id):
 @require_api_key
 def get_transaction(archive_id, txn_id):
     """Get a specific transaction with full details."""
+    # CRITICAL FIX: Validate archive_id to prevent path traversal attacks
+    if not validate_archive_id(archive_id):
+        logger.warning(f"Invalid archive_id in transaction get: {archive_id[:50] if archive_id else 'None'}")
+        return jsonify({'error': 'Invalid archive ID format'}), 400
+
+    # Also validate txn_id
+    if not txn_id or not isinstance(txn_id, str) or len(txn_id) > 100:
+        return jsonify({'error': 'Invalid transaction ID format'}), 400
+
     transactions = load_transactions(archive_id)
     txn = next((t for t in transactions if t.get('Id') == txn_id), None)
     

@@ -513,17 +513,25 @@ namespace QBDesktopExtractor
         /// </summary>
         private static string TruncateWithHashSuffix(string value, int limit)
         {
+            // CRITICAL FIX: Validate inputs to prevent IndexOutOfRangeException
+            if (string.IsNullOrEmpty(value))
+            {
+                return value ?? string.Empty;
+            }
+
             // Reserve space for "-" and 6-char hash = 7 chars
             const int hashSuffixLength = 7;
-            
+
             if (limit <= hashSuffixLength)
             {
                 // Too short for hash suffix - just truncate
-                return value.Substring(0, limit);
+                // CRITICAL FIX: Use Math.Min to prevent IndexOutOfRangeException
+                return value.Substring(0, Math.Min(limit, value.Length));
             }
 
             int prefixLength = limit - hashSuffixLength;
-            string prefix = value.Substring(0, prefixLength);
+            // CRITICAL FIX: Use Math.Min to prevent IndexOutOfRangeException
+            string prefix = value.Substring(0, Math.Min(prefixLength, value.Length));
             
             // Compute deterministic hash of original value
             string hash = ComputeShortHash(value);

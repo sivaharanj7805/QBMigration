@@ -417,8 +417,11 @@ class EncryptionManager:
                 
         except (ValueError, KeyError) as e:
             raise ValueError(f"Decryption failed: {e}")
-        except Exception:
-            # Don't leak details about decryption failures
+        except Exception as e:
+            # HIGH FIX: Log the actual error for debugging, but don't leak details to caller
+            # This helps with troubleshooting while maintaining security
+            logger.error(f"Decryption failed with unexpected error: {type(e).__name__}", exc_info=True)
+            # Don't leak details about decryption failures to caller
             raise ValueError("Decryption failed: invalid format or corrupted data")
     
     @staticmethod
