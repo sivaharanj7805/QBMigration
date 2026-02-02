@@ -11,7 +11,7 @@ import base64
 import json
 import shutil
 from datetime import datetime
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -60,7 +60,7 @@ class EncryptionManager:
         self.public_key = self.private_key.public_key()
 
         # Cache of archived keys for decrypting old data
-        self._archived_keys: Dict[str, any] = {}
+        self._archived_keys: Dict[str, Any] = {}
     
     def _load_key_metadata(self) -> Dict:
         """Load key metadata from JSON file."""

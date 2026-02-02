@@ -426,8 +426,9 @@ namespace QBMigrationLauncher
             // FIX MEDIUM: Add UI loading timeout to prevent indefinite waiting
             if (show)
             {
-                // Cancel any existing timeout
+                // Cancel and dispose any existing timeout to prevent resource leak
                 _loadingTimeoutCts?.Cancel();
+                _loadingTimeoutCts?.Dispose();
                 _loadingTimeoutCts = new CancellationTokenSource();
 
                 // Start timeout task
@@ -456,8 +457,10 @@ namespace QBMigrationLauncher
             }
             else
             {
-                // Loading complete - cancel the timeout
+                // Loading complete - cancel the timeout and dispose the CancellationTokenSource
+                // FIX: Dispose CTS to prevent resource leak
                 _loadingTimeoutCts?.Cancel();
+                _loadingTimeoutCts?.Dispose();
                 _loadingTimeoutCts = null;
             }
         }
