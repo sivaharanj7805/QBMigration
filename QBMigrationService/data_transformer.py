@@ -44,6 +44,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 import threading
 
+# Import data normalizer for C# → Python format conversion
+from data_normalizer import QBDataNormalizer, normalize_qbd_data
+
 # MEDIUM FIX: Set proper decimal context for QB rounding
 # QuickBooks uses specific rounding rules that we must match exactly
 # to prevent penny discrepancies in financial data
@@ -132,7 +135,54 @@ class QBDataTransformer:
         self._init_account_mapping()
         
         logger.info(f"QBDataTransformer v{self.VERSION} initialized (Region: {self.region})")
-    
+
+    # ========================================================================
+    # DATA NORMALIZATION (C# extraction format → Python expected format)
+    # ========================================================================
+
+    def _auto_normalize(self, qb_data: Dict) -> Dict:
+        """
+        Auto-detect and normalize C# extraction format to Python expected format.
+
+        This method handles the format mismatch between:
+        - C# QBDesktopReader output: camelCase fields, plural entity keys
+          (e.g., {"accounts": [{"vendorRefListId": "123"}]})
+        - Python transformer expected: PascalCase fields, singular entity keys
+          (e.g., {"Account": [{"VendorRef": "123"}]})
+
+        Detection: If data has 'accounts' (lowercase) key, normalize it.
+        If data already has 'Account' (PascalCase) key, return as-is.
+        """
+        if not qb_data:
+            return qb_data
+
+        # Detection heuristic: Check for C# format markers
+        csharp_markers = ['accounts', 'customers', 'vendors', 'invoices', 'bills']
+        python_markers = ['Account', 'Customer', 'Vendor', 'Invoice', 'Bill']
+
+        has_csharp_format = any(key in qb_data for key in csharp_markers)
+        has_python_format = any(key in qb_data for key in python_markers)
+
+        if has_python_format and not has_csharp_format:
+            # Already in Python expected format
+            logger.debug("Data already in Python format - skipping normalization")
+            return qb_data
+
+        if has_csharp_format:
+            logger.info("Detected C# extraction format - normalizing to Python format")
+            try:
+                normalized = normalize_qbd_data(qb_data)
+                logger.info("Data normalization complete")
+                return normalized
+            except Exception as e:
+                logger.error(f"Normalization failed: {e}")
+                logger.warning("Proceeding with original data format")
+                return qb_data
+
+        # Unknown format - return as-is
+        logger.debug("Unknown data format - proceeding without normalization")
+        return qb_data
+
     # ========================================================================
     # $25M FIX: PARALLEL TRANSFORMATION (Phase-Based, Production-Grade)
     # ========================================================================
@@ -140,24 +190,27 @@ class QBDataTransformer:
     def transform_parallel(self, qb_data: Dict, max_workers: int = None) -> Dict:
         """
         PRODUCTION-GRADE parallel transformation with shared state.
-        
+
         Strategy:
         - Phase 1 (Foundation): Sequential - fast anyway (~100 entities)
         - Phase 2 (Accounts): Sequential - MUST accumulate trial_balance
         - Phase 3 (Master Lists): PARALLEL with Manager() - 50-70% of entities
         - Phase 4 (Transactions): Sequential - safe, correct
-        
+
         Expected speedup: 2.5-3x on Phase 3, 1.3x overall
-        
+
         Uses multiprocessing.Manager() to share:
         - used_display_names (for uniqueness)
         - id_mapping (for foreign keys)
-        
+
         Trial balance accumulated sequentially (no race conditions).
         """
+        # AUTO-NORMALIZE: Convert C# extraction format to Python expected format
+        qb_data = self._auto_normalize(qb_data)
+
         if max_workers is None:
             max_workers = max(1, mp.cpu_count() - 1)
-        
+
         # FIX SVC-02: Use logger instead of print
         logger.info(f"Smart parallel transformation ({max_workers} workers)")
         
@@ -587,17 +640,21 @@ class QBDataTransformer:
     def transform(self, qb_data: Dict) -> Dict:
         """
         Main transformation method.
-        
+
         Args:
-            qb_data: QB Desktop data (v3.1 or original format)
-            
+            qb_data: QB Desktop data (v3.1 or original format, or C# extraction format)
+
         Returns:
             Dict with transformed QB Online data and summary
         """
         logger.info("="*60)
         logger.info("STARTING QB DESKTOP → ONLINE TRANSFORMATION")
         logger.info("="*60)
-        
+
+        # AUTO-NORMALIZE: Convert C# extraction format to Python expected format
+        # This handles both camelCase→PascalCase and plural→singular entity keys
+        qb_data = self._auto_normalize(qb_data)
+
         result = {
             'metadata': {
                 'version': self.VERSION,
@@ -2144,11 +2201,441 @@ class QBDataTransformer:
                 })
 
         return qbo
-    
+
+    # ========================================================================
+    # BATCH 6: MISSING ENTITY TRANSFORMS (100/100 Coverage)
+    # Added to support all entity types from C# extraction
+    # ========================================================================
+
+    def transform_vendortype(self, qbd: Dict) -> Dict:
+        """
+        Transform VendorType.
+        QBO doesn't have VendorType as a separate entity - store for reference.
+        """
+        return {
+            '_qbd_entity': 'VendorType',
+            'Name': qbd.get('Name', ''),
+            'FullName': qbd.get('FullName', qbd.get('Name', '')),
+            'IsActive': qbd.get('IsActive', True),
+            'ListID': qbd.get('ListID', ''),
+            '_migration_note': 'VendorType stored for reference - apply to Vendors manually in QBO'
+        }
+
+    def transform_jobtype(self, qbd: Dict) -> Dict:
+        """
+        Transform JobType.
+        QBO doesn't have JobType - store for reference, use Projects in QBO.
+        """
+        return {
+            '_qbd_entity': 'JobType',
+            'Name': qbd.get('Name', ''),
+            'FullName': qbd.get('FullName', qbd.get('Name', '')),
+            'IsActive': qbd.get('IsActive', True),
+            'ListID': qbd.get('ListID', ''),
+            'ParentRef': qbd.get('ParentRef', ''),
+            '_migration_note': 'JobType stored for reference - use Projects in QBO'
+        }
+
+    def transform_customermessage(self, qbd: Dict) -> Dict:
+        """
+        Transform CustomerMessage (invoice footer messages).
+        Maps to: QBO CustomerMsgs (available in QBO API).
+        """
+        return {
+            'Name': qbd.get('Name', ''),
+            'Active': qbd.get('IsActive', True)
+        }
+
+    def transform_shipmethod(self, qbd: Dict) -> Dict:
+        """
+        Transform ShipMethod.
+        Maps directly to QBO ShipMethod entity.
+        """
+        return {
+            'Name': qbd.get('Name', ''),
+            'Active': qbd.get('IsActive', True)
+        }
+
+    def transform_salestaxgroup(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform SalesTaxGroup.
+        QBO handles tax differently - convert to TaxCode with combined rate.
+        """
+        return {
+            'Name': qbd.get('Name', ''),
+            'Description': f"Combined tax group: {qbd.get('Description', '')}",
+            'Active': qbd.get('IsActive', True),
+            'TaxGroup': True,
+            '_migration_note': 'SalesTaxGroup converted to single TaxCode - verify rates in QBO'
+        }
+
+    def transform_itemreceipt(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform ItemReceipt (receiving inventory without a bill).
+        Maps to: QBO Bill (can be matched to PO later).
+        """
+        vendor_id = self.map_id('vendors', qbd.get('VendorRef'))
+
+        if not vendor_id:
+            self.add_manual_review(
+                entity_type='ItemReceipt',
+                name=f"ItemReceipt {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing VendorRef"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'VendorRef': {'value': vendor_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'PrivateNote': f"Converted from QBD ItemReceipt (RefNumber: {qbd.get('RefNumber', 'N/A')})",
+            'Line': []
+        }
+
+        # Add item lines
+        for line in qbd.get('Lines', []):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'DetailType': 'ItemBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'ItemBasedExpenseLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Cost', 0))
+                    }
+                })
+
+        return qbo
+
+    def transform_inventorytransfer(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform InventoryTransfer (between sites/locations).
+        QBO doesn't have multi-location inventory in all plans.
+        """
+        from_site = qbd.get('FromInventorySiteRef', 'Unknown')
+        to_site = qbd.get('ToInventorySiteRef', 'Unknown')
+
+        qbo = {
+            '_qbd_entity': 'InventoryTransfer',
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'PrivateNote': f"Inventory transfer: {from_site} -> {to_site}",
+            'Line': []
+        }
+
+        for line in qbd.get('Lines', []):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'ItemRef': {'value': item_id},
+                    'Qty': self.to_decimal(line.get('Quantity', 0)),
+                    'FromSite': from_site,
+                    'ToSite': to_site
+                })
+
+        # Add to manual review since QBO location support varies by plan
+        self.add_manual_review(
+            entity_type='InventoryTransfer',
+            name=f"Transfer {qbd.get('TxnDate', 'Unknown')}: {from_site} -> {to_site}",
+            reason="QBO location support varies by plan - verify inventory quantities"
+        )
+
+        return qbo
+
+    def transform_creditcardcharge(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform CreditCardCharge.
+        Maps to: QBO Purchase with PaymentType='CreditCard'.
+        """
+        account_id = self.map_id('accounts', qbd.get('AccountRef'))
+
+        if not account_id:
+            self.add_manual_review(
+                entity_type='CreditCardCharge',
+                name=f"CC Charge {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing AccountRef (credit card account)"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'PaymentType': 'CreditCard',
+            'AccountRef': {'value': account_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'TotalAmt': self.to_decimal(qbd.get('Amount', 0)),
+            'PrivateNote': qbd.get('Memo', ''),
+            'Line': []
+        }
+
+        # Add vendor if present
+        if qbd.get('PayeeEntityRef'):
+            vendor_id = self.map_id('vendors', qbd['PayeeEntityRef'])
+            if vendor_id:
+                qbo['EntityRef'] = {'Type': 'Vendor', 'value': vendor_id}
+
+        # Add expense lines
+        for line in qbd.get('ExpenseLines', []):
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if acct_id:
+                qbo['Line'].append({
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'Description': line.get('Memo', ''),
+                    'AccountBasedExpenseLineDetail': {
+                        'AccountRef': {'value': acct_id}
+                    }
+                })
+
+        # Add item lines
+        for line in qbd.get('ItemLines', []):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'DetailType': 'ItemBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'ItemBasedExpenseLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Cost', 0))
+                    }
+                })
+
+        return qbo
+
+    def transform_creditcardcredit(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform CreditCardCredit (refund/return on credit card).
+        Maps to: QBO VendorCredit.
+        """
+        account_id = self.map_id('accounts', qbd.get('AccountRef'))
+
+        if not account_id:
+            self.add_manual_review(
+                entity_type='CreditCardCredit',
+                name=f"CC Credit {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing AccountRef (credit card account)"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'PrivateNote': f"CC Credit: {qbd.get('Memo', '')}",
+            'Line': []
+        }
+
+        # Add vendor if present
+        if qbd.get('PayeeEntityRef'):
+            vendor_id = self.map_id('vendors', qbd['PayeeEntityRef'])
+            if vendor_id:
+                qbo['VendorRef'] = {'value': vendor_id}
+
+        # Add expense lines
+        for line in qbd.get('ExpenseLines', []):
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if acct_id:
+                qbo['Line'].append({
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'AccountBasedExpenseLineDetail': {
+                        'AccountRef': {'value': acct_id}
+                    }
+                })
+
+        return qbo
+
+    def transform_charge(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform Charge (customer charge for reimbursable expenses).
+        Maps to: QBO DelayedCharge.
+        """
+        customer_id = self.map_id('customers', qbd.get('CustomerRef'))
+
+        if not customer_id:
+            self.add_manual_review(
+                entity_type='Charge',
+                name=f"Charge {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing CustomerRef"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'CustomerRef': {'value': customer_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'PrivateNote': qbd.get('Description', ''),
+            'Line': [{
+                'DetailType': 'SalesItemLineDetail',
+                'Amount': self.to_decimal(qbd.get('Amount', 0)),
+                'SalesItemLineDetail': {
+                    'Qty': self.to_decimal(qbd.get('Quantity', 1)),
+                    'UnitPrice': self.to_decimal(qbd.get('Rate', qbd.get('Amount', 0)))
+                }
+            }]
+        }
+
+        # Add item reference if present
+        if qbd.get('ItemRef'):
+            item_id = self.map_id('items', qbd['ItemRef'])
+            if item_id:
+                qbo['Line'][0]['SalesItemLineDetail']['ItemRef'] = {'value': item_id}
+
+        return qbo
+
+    def transform_salesorder(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform SalesOrder.
+        QBO doesn't have Sales Orders - convert to Estimate (closest equivalent).
+        """
+        customer_id = self.map_id('customers', qbd.get('CustomerRef'))
+
+        if not customer_id:
+            self.add_manual_review(
+                entity_type='SalesOrder',
+                name=f"SO# {qbd.get('RefNumber', 'Unknown')}",
+                reason="Missing CustomerRef"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'CustomerRef': {'value': customer_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'ExpirationDate': self.format_date(qbd.get('ShipDate')),
+            'PrivateNote': f"Converted from Sales Order #{qbd.get('RefNumber', 'N/A')}. {qbd.get('Memo', '')}",
+            'Line': []
+        }
+
+        # Add ship address if present
+        if qbd.get('ShipAddress'):
+            qbo['ShipAddr'] = self._transform_address(qbd['ShipAddress'])
+
+        # Add line items
+        for line in qbd.get('Lines', []):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'Description': line.get('Description', ''),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
+        logger.info(f"SalesOrder #{qbd.get('RefNumber', 'N/A')} converted to Estimate (QBO limitation)")
+
+        return qbo
+
+    def transform_pricelevel(self, qbd: Dict) -> Dict:
+        """
+        Transform PriceLevel.
+        QBO doesn't support per-item price levels like QBD.
+        Store for reference and manual application.
+        """
+        price_level = {
+            '_qbd_entity': 'PriceLevel',
+            'Name': qbd.get('Name', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'PriceLevelType': qbd.get('PriceLevelType', 'FixedPercentage'),
+            'ListID': qbd.get('ListID', ''),
+            '_migration_note': 'QBO uses customer-level Price Rules instead of item-level Price Levels'
+        }
+
+        # Add to manual review for setup in QBO
+        self.add_manual_review(
+            entity_type='PriceLevel',
+            name=qbd.get('Name', 'Unknown'),
+            reason="QBO uses Price Rules (Plus/Advanced) - configure manually"
+        )
+
+        return price_level
+
+    def transform_arrefundcreditcard(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform ARRefundCreditCard (refund to customer's credit card).
+        Maps to: QBO RefundReceipt.
+        """
+        customer_id = self.map_id('customers', qbd.get('CustomerRef'))
+
+        if not customer_id:
+            self.add_manual_review(
+                entity_type='ARRefundCreditCard',
+                name=f"AR Refund {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing CustomerRef"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'CustomerRef': {'value': customer_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'PrivateNote': f"AR CC Refund: {qbd.get('Memo', '')}",
+            'TotalAmt': self.to_decimal(qbd.get('Amount', 0)),
+            'Line': []
+        }
+
+        # Add deposit account if present
+        if qbd.get('ARAccountRef'):
+            ar_id = self.map_id('accounts', qbd['ARAccountRef'])
+            if ar_id:
+                qbo['DepositToAccountRef'] = {'value': ar_id}
+
+        return qbo
+
+    def transform_billpaymentcreditcard(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform BillPaymentCreditCard (paying bill with credit card).
+        Maps to: QBO BillPayment with PayType='CreditCard'.
+        """
+        vendor_id = self.map_id('vendors', qbd.get('PayeeEntityRef'))
+
+        if not vendor_id:
+            self.add_manual_review(
+                entity_type='BillPaymentCreditCard',
+                name=f"CC Bill Payment {qbd.get('TxnDate', 'Unknown')}",
+                reason="Missing PayeeEntityRef (vendor)"
+            )
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'VendorRef': {'value': vendor_id},
+            'PayType': 'CreditCard',
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'TotalAmt': self.to_decimal(qbd.get('Amount', 0)),
+            'PrivateNote': qbd.get('Memo', ''),
+            'Line': []
+        }
+
+        # Add credit card account
+        if qbd.get('CreditCardAccountRef'):
+            cc_id = self.map_id('accounts', qbd['CreditCardAccountRef'])
+            if cc_id:
+                qbo['CreditCardPayment'] = {
+                    'CCAccountRef': {'value': cc_id}
+                }
+
+        # Link to bills being paid
+        for applied in qbd.get('AppliedToBills', []):
+            bill_id = self.map_id('bills', applied.get('BillRef'))
+            if bill_id:
+                qbo['Line'].append({
+                    'Amount': self.to_decimal(applied.get('Amount', 0)),
+                    'LinkedTxn': [{
+                        'TxnId': bill_id,
+                        'TxnType': 'Bill'
+                    }]
+                })
+
+        return qbo
+
     # ========================================================================
     # CASEWARE MODE: AUDIT BUNDLE GENERATION
     # ========================================================================
-    
+
     def transform_for_caseware(self, qb_data: Dict, output_dir: str,
                                 as_of_date: str = None,
                                 start_date: str = None,
