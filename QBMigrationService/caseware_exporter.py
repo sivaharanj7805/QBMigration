@@ -1130,8 +1130,8 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 3:
-        print("Usage: python caseware_exporter.py <input_json> <output_dir>")
-        print("\nGenerates Caseware Audit Bundle from QB Desktop extraction data.")
+        logger.info("Usage: python caseware_exporter.py <input_json> <output_dir>")
+        logger.info("\nGenerates Caseware Audit Bundle from QB Desktop extraction data.")
         sys.exit(1)
     
     input_file = sys.argv[1]
@@ -1151,13 +1151,13 @@ if __name__ == "__main__":
         with open(input_file, 'r', encoding=encoding) as f:
             qb_data = json.load(f)
     except UnicodeDecodeError as e:
-        print(f"❌ Encoding error: {e}. Try specifying encoding explicitly.")
+        logger.info(f"❌ Encoding error: {e}. Try specifying encoding explicitly.")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON: {e}")
+        logger.info(f"❌ Invalid JSON: {e}")
         sys.exit(1)
     except IOError as e:
-        print(f"❌ Cannot read file: {e}")
+        logger.info(f"❌ Cannot read file: {e}")
         sys.exit(1)
     
     # FIX #33: Generate bundle with company data for locale detection
@@ -1166,5 +1166,5 @@ if __name__ == "__main__":
     exporter = CasewareExporter(output_dir, company_name, company_data)
     result = exporter.generate_audit_bundle(qb_data)
     
-    print(f"\n✅ Caseware Audit Bundle generated in: {output_dir}")
-    print(f"   Files: {list(result['files'].keys())}")
+    logger.info(f"\n✅ Caseware Audit Bundle generated in: {output_dir}")
+    logger.info(f"   Files: {list(result['files'].keys())}")

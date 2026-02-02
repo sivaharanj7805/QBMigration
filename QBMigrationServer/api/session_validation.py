@@ -14,7 +14,7 @@ import os
 import logging
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import Blueprint, request, jsonify, current_app
 
@@ -92,7 +92,7 @@ def log_validation_attempt(session_id, device_fingerprint, ip_address, action, r
 
 def check_rate_limit(session_id, ip_address):
     """Check if the request is rate limited"""
-    window_start = datetime.utcnow() - timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
+    window_start = datetime.now(timezone.utc) - timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
 
     attempt_count = SessionValidationLog.query.filter(
         SessionValidationLog.session_id == session_id,
@@ -159,7 +159,7 @@ def validate_session():
         }), 400
 
     # Hash the fingerprint for storage
-    fingerprint_hash = hash_fingerprint(device_fingerprint)
+    logger.info(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -275,7 +275,7 @@ def activate_session():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    fingerprint_hash = hash_fingerprint(device_fingerprint)
+    logger.info(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -322,7 +322,7 @@ def activate_session():
 
         if existing:
             # Update last used
-            existing.last_used_at = datetime.utcnow()
+            existing.last_used_at = datetime.now(timezone.utc)
             existing.status = 'active'
             db.session.commit()
 
@@ -364,7 +364,7 @@ def activate_session():
         # Update project status
         if project.status == 'pending':
             project.status = 'active'
-            project.updated_at = datetime.utcnow()
+            project.updated_at = datetime.now(timezone.utc)
             db.session.commit()
 
         return jsonify({
@@ -439,7 +439,7 @@ def start_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    fingerprint_hash = hash_fingerprint(device_fingerprint)
+    logger.info(device_fingerprint)
 
     # Verify session and device
     project = Project.query.filter_by(session_id=session_id).first()
@@ -501,8 +501,8 @@ def start_extraction():
 
     # Update activation tracking
     activation.extraction_count += 1
-    activation.last_extraction_at = datetime.utcnow()
-    activation.last_used_at = datetime.utcnow()
+    activation.last_extraction_at = datetime.now(timezone.utc)
+    activation.last_used_at = datetime.now(timezone.utc)
 
     try:
         db.session.commit()
@@ -565,7 +565,7 @@ def complete_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    fingerprint_hash = hash_fingerprint(device_fingerprint)
+    logger.info(device_fingerprint)
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()
@@ -591,7 +591,7 @@ def complete_extraction():
         }), 403
 
     # Generate a migration ID for tracking
-    migration_id = f"MIG-{session_id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    migration_id = f"MIG-{session_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
     # Record the transactions against the project
     if project.record_transactions(transaction_count):
@@ -602,7 +602,7 @@ def complete_extraction():
         if remaining == 0:
             project.status = 'completed'
 
-        project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
         return jsonify({

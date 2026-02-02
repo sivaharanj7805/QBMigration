@@ -15,7 +15,7 @@ FIX HIGH-01: Added authentication to all webhook log endpoints
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from models.database import db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 import logging
 import hmac
@@ -148,7 +148,7 @@ class WebhookLogger:
             webhook_type=webhook_type,
             source_ip=source_ip,
             instance_id=instance_id,
-            received_at=datetime.utcnow(),
+            received_at=datetime.now(timezone.utc),
             status='received'
         )
         
@@ -188,7 +188,7 @@ class WebhookLogger:
         try:
             log_entry = WebhookDeliveryLog.query.filter_by(webhook_id=webhook_id).first()
             if log_entry:
-                log_entry.processed_at = datetime.utcnow()
+                log_entry.processed_at = datetime.now(timezone.utc)
                 log_entry.processing_time_ms = int(
                     (log_entry.processed_at - log_entry.received_at).total_seconds() * 1000
                 )
@@ -217,7 +217,7 @@ class WebhookLogger:
         """
         Get recent webhook logs across all migrations.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         logs = WebhookDeliveryLog.query.filter(
             WebhookDeliveryLog.received_at >= cutoff
         ).order_by(WebhookDeliveryLog.received_at.desc()).limit(limit).all()
@@ -228,7 +228,7 @@ class WebhookLogger:
         """
         Get delivery statistics for monitoring dashboard.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         logs = WebhookDeliveryLog.query.filter(
             WebhookDeliveryLog.received_at >= cutoff

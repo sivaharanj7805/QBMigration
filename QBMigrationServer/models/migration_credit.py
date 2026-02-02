@@ -3,7 +3,7 @@ MigrationCredit model - tracks individual purchased migrations by type.
 Each purchase creates one credit that can be used for one migration.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from models.database import db
 
 
@@ -135,7 +135,7 @@ class MigrationCredit(db.Model):
             self.payment_status = 'paid'
             self.status = 'available'
             self.stripe_payment_intent_id = payment_intent_id
-            self.paid_at = datetime.utcnow()
+            self.paid_at = datetime.now(timezone.utc)
 
             if auto_commit:
                 db.session.commit()
@@ -174,7 +174,7 @@ class MigrationCredit(db.Model):
         self.status = 'used'
         self.migration_id = migration_id
         self.transactions_used = transactions_count
-        self.used_at = datetime.utcnow()
+        self.used_at = datetime.now(timezone.utc)
         db.session.commit()
         return True
     

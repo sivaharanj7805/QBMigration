@@ -12,6 +12,7 @@ Enterprise firms (BDO, MNP, Big 4) require SSO for firm-managed accounts.
 from flask import Blueprint, request, jsonify, redirect, session, current_app, url_for
 from functools import wraps
 import datetime
+from datetime import timezone
 import logging
 import secrets
 import base64
@@ -365,7 +366,7 @@ def assertion_consumer_service():
         sso_user = {
             'org_id': org_id,
             'provider': provider.provider_type,
-            'authenticated_at': datetime.datetime.utcnow().isoformat(),
+            'authenticated_at': datetime.datetime.now(timezone.utc).isoformat(),
             'session_index': secrets.token_urlsafe(16)
         }
         
@@ -417,7 +418,7 @@ def oauth_callback():
         sso_user = {
             'org_id': org_id,
             'provider': provider.provider_type,
-            'authenticated_at': datetime.datetime.utcnow().isoformat()
+            'authenticated_at': datetime.datetime.now(timezone.utc).isoformat()
         }
         
         session['sso_user'] = sso_user

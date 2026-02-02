@@ -1,6 +1,6 @@
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -462,7 +462,7 @@ class BackupManager:
                     'ServerSideEncryption': 'AES256',
                     'StorageClass': 'STANDARD_IA',
                     'Metadata': {
-                        'created-at': datetime.utcnow().isoformat(),
+                        'created-at': datetime.now(timezone.utc).isoformat(),
                         'type': 'database-backup'
                     }
                 }

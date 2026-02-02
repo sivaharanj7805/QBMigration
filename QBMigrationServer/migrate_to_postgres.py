@@ -4,6 +4,10 @@ Migrates from SQLite to PostgreSQL and updates schema
 """
 import os
 from dotenv import load_dotenv
+import logging
+
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 
 from app import create_app, db
@@ -20,7 +24,7 @@ def migrate_database():
     app = create_app()
     
     with app.app_context():
-        print("Creating database tables...")
+        logger.info("Creating database tables...")
         
         # Drop all tables (if migrating)
         db.drop_all()
@@ -28,8 +32,8 @@ def migrate_database():
         # Create all tables
         db.create_all()
         
-        print("Database migration completed successfully!")
-        print(f"Database URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
+        logger.info("Database migration completed successfully!")
+        logger.info(f"Database URI: {app.config['SQLALCHEMY_DATABASE_URI']}")
 
 if __name__ == '__main__':
     migrate_database()

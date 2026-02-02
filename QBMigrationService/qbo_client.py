@@ -1170,7 +1170,7 @@ class PremiumQBOClient:
         """
         with self.failed_items_lock:
             if not self.failed_items:
-                print("No failed items to export")
+                logger.info("No failed items to export")
                 return
             
             with open(filepath, 'w') as f:

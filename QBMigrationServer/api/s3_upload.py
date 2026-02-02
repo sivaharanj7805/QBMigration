@@ -6,7 +6,7 @@ Enables direct uploads from C# client to S3
 from flask import Blueprint, request, jsonify
 import boto3
 from botocore.config import Config
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import os
 
@@ -72,7 +72,7 @@ def get_presigned_url():
         return jsonify({'error': 'session_id required'}), 400
     
     # Generate S3 key
-    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
     
     bucket = os.getenv('AWS_S3_BUCKET', 'forensicbridge-migrations')
@@ -222,7 +222,7 @@ def init_multipart_upload():
     if not session_id:
         return jsonify({'error': 'session_id required'}), 400
     
-    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
     bucket = os.getenv('AWS_S3_BUCKET', 'forensicbridge-migrations')
     

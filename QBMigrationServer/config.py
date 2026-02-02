@@ -18,7 +18,7 @@ class Config:
             raise ValueError("SECRET_KEY must be set in production!")
         else:
             SECRET_KEY = 'dev-secret-key-CHANGE-IN-PRODUCTION-' + secrets.token_hex(16)
-            print("⚠️  WARNING: Using generated SECRET_KEY for development")
+            logger.info("⚠️  WARNING: Using generated SECRET_KEY for development")
     
     if len(SECRET_KEY) < 32:
         raise ValueError("SECRET_KEY must be at least 32 characters!")
@@ -31,7 +31,7 @@ class Config:
     # ============================================================================
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
     if not SQLALCHEMY_DATABASE_URI:
-        print("❌ ERROR: DATABASE_URL not found in environment!")
+        logger.info("❌ ERROR: DATABASE_URL not found in environment!")
     
     # Fix Heroku/Railway postgres:// URLs
 

@@ -6,7 +6,7 @@ Handles checkout session creation and webhook verification.
 import os
 import stripe
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from functools import wraps
 import jwt
@@ -131,7 +131,7 @@ def create_checkout(current_user):
             },
             success_url=success_url,
             cancel_url=cancel_url,
-            expires_at=int(datetime.utcnow().timestamp()) + 1800  # 30 minutes
+            expires_at=int(datetime.now(timezone.utc).timestamp()) + 1800  # 30 minutes
         )
         
         # Create pending credit (will be activated by webhook)
@@ -271,7 +271,7 @@ def handle_successful_payment(session):
                 # Always update tier to reflect most recent purchase
                 if not user.subscription_tier:
                     user.subscription_tier = credit.tier_type
-                    user.tier_purchased_at = datetime.utcnow()
+                    user.tier_purchased_at = datetime.now(timezone.utc)
 
                 # CRITICAL FIX: Sync User.migrations_purchased with MigrationCredit count
                 # This ensures backwards compatibility with code that reads from User model

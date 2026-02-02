@@ -11,10 +11,14 @@ Allows CPA firms to rebrand the migration tool with:
 import json
 import hashlib
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
 import base64
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class WhitelabelConfig:
@@ -115,8 +119,8 @@ class LicenseManager:
         license_data = {
             "company": company_name,
             "tier": tier,
-            "issued": datetime.utcnow().isoformat(),
-            "expires": (datetime.utcnow() + timedelta(days=valid_days)).isoformat(),
+            "issued": datetime.now(timezone.utc).isoformat(),
+            "expires": (datetime.now(timezone.utc) + timedelta(days=valid_days)).isoformat(),
             "features": self.LICENSE_TIERS[tier]
         }
         
@@ -170,7 +174,7 @@ class LicenseManager:
             
             # Check expiration
             expires = datetime.fromisoformat(license_data["expires"])
-            if datetime.utcnow() > expires:
+            if datetime.now(timezone.utc) > expires:
                 return {"valid": False, "error": "License expired", "details": license_data}
             
             return {"valid": True, "details": license_data}
@@ -249,13 +253,13 @@ if __name__ == "__main__":
     lm = LicenseManager()
     reseller = lm.generate_license_key("Big CPA Firm", "RESELLER", 365)
     # AUDIT FIX: Removed debug print of license key
-    print("Reseller License: [generated]")
+    logger.info("Reseller License: [generated]")
     
     # Validate it
     validation = lm.validate_license(reseller["license_key"])
-    print("Valid:", validation["valid"])
-    print("Company:", validation["details"]["company"])
-    print("Tier:", validation["details"]["tier"])
+    logger.info("Valid:", validation["valid"])
+    logger.info("Company:", validation["details"]["company"])
+    logger.info("Tier:", validation["details"]["tier"])
     
     # Create whitelabel config
     config = WhitelabelConfig()
@@ -264,5 +268,5 @@ if __name__ == "__main__":
         "primary_color": "#86BC25",  # Deloitte green
         "product_name": "Deloitte Migration Accelerator"
     })
-    print("\nCSS Variables:")
-    print(config.to_css_variables())
+    logger.info("\nCSS Variables:")
+    logger.info(config.to_css_variables())

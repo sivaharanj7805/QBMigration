@@ -14,7 +14,7 @@ import base64
 import json
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 import hashlib
 import hmac
@@ -82,13 +82,13 @@ class AWSMigrationManager:
                 return None
             
             # Generate S3 key (organized by date for better management)
-            timestamp = datetime.utcnow().strftime('%Y/%m/%d')
+            timestamp = datetime.now(timezone.utc).strftime('%Y/%m/%d')
             object_key = f"migrations/{timestamp}/{migration_id}/encrypted_data.bin"
             
             # Prepare metadata
             upload_metadata = {
                 'migration-id': migration_id,
-                'uploaded-at': datetime.utcnow().isoformat(),
+                'uploaded-at': datetime.now(timezone.utc).isoformat(),
                 'content-type': 'application/octet-stream'
             }
             
@@ -262,7 +262,7 @@ class AWSMigrationManager:
                 return False
             
             # Generate metadata key
-            timestamp = datetime.utcnow().strftime('%Y/%m/%d')
+            timestamp = datetime.now(timezone.utc).strftime('%Y/%m/%d')
             metadata_key = f"migrations/{timestamp}/{migration_id}/encryption_metadata.json"
             
             # Convert to JSON
@@ -423,7 +423,7 @@ class AWSMigrationManager:
                     SecretString=json.dumps(qbo_credentials),
                     Tags=[
                         {'Key': 'MigrationId', 'Value': migration_id},
-                        {'Key': 'CreatedAt', 'Value': datetime.utcnow().isoformat()}
+                        {'Key': 'CreatedAt', 'Value': datetime.now(timezone.utc).isoformat()}
                     ]
                 )
                 logger.info(f"Stored credentials in Secrets Manager: {secret_name}")
@@ -469,7 +469,7 @@ class AWSMigrationManager:
                             {'Key': 'MigrationId', 'Value': migration_id},
                             {'Key': 'Purpose', 'Value': 'ephemeral-migration'},
                             {'Key': 'AutoTerminate', 'Value': 'true'},
-                            {'Key': 'CreatedAt', 'Value': datetime.utcnow().isoformat()}
+                            {'Key': 'CreatedAt', 'Value': datetime.now(timezone.utc).isoformat()}
                         ]
                     }
                 ],
@@ -549,7 +549,7 @@ class AWSMigrationManager:
                 Description=f'Webhook secret for migration {migration_id}',
                 Tags=[
                     {'Key': 'migration_id', 'Value': migration_id},
-                    {'Key': 'expiry', 'Value': (datetime.utcnow() + timedelta(hours=24)).isoformat()}
+                    {'Key': 'expiry', 'Value': (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()}
                 ]
             )
             logger.info(f"Stored webhook secret in Parameter Store: {webhook_param_name}")
@@ -875,7 +875,7 @@ exit $EXIT_CODE
                         'MetricName': metric_name,
                         'Value': value,
                         'Unit': unit,
-                        'Timestamp': datetime.utcnow()
+                        'Timestamp': datetime.now(timezone.utc)
                     }
                 ]
             )

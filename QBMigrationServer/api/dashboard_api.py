@@ -18,7 +18,7 @@ import logging
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import sys
 
@@ -196,7 +196,7 @@ def get_live_status(migration_id):
             'phases': phases,
             'company_name': migration.company_name,
             'started_at': migration.created_at.isoformat() if migration.created_at else None,
-            'elapsed_seconds': (datetime.utcnow() - migration.created_at).total_seconds() if migration.created_at else 0
+            'elapsed_seconds': (datetime.now(timezone.utc) - migration.created_at).total_seconds() if migration.created_at else 0
         }
         
         # Add completion data if done
@@ -343,7 +343,7 @@ def get_dashboard_overview():
         avg_duration_minutes = (avg_duration_result / 60.0) if avg_duration_result else 0
         
         # Recent activity (last 24 hours)
-        yesterday = datetime.utcnow() - timedelta(hours=24)
+        yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_completed = Migration.query.filter(
             Migration.user_id == current_user.id,
             Migration.status == 'completed',
@@ -873,7 +873,7 @@ def export_caseware_bundle(migration_id):
                 writer = csv.writer(f)
                 writer.writerow(['# Caseware Audit Trial Balance'])
                 writer.writerow([f'# Company: {migration.company_name}'])
-                writer.writerow([f'# Generated: {datetime.utcnow().isoformat()}'])
+                writer.writerow([f'# Generated: {datetime.now(timezone.utc).isoformat()}'])
                 if mapper:
                     writer.writerow([f'# Accounting Standard: {mapper.detected_standard}'])
                 writer.writerow([])
