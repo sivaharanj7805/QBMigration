@@ -7,7 +7,10 @@ import os
 import json
 import ctypes
 import hashlib
+import logging
 from typing import Dict, Optional, Union, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class EncryptionManager:
