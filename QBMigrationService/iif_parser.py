@@ -50,12 +50,35 @@ class IIFParser:
     
     def parse_file(self, file_path: str) -> Dict[str, Any]:
         """Parse an IIF file and return structured data
-        AUDIT FIX: Added basic path validation
+        AUDIT FIX: Added robust path validation with proper containment check
         """
-        # Basic path security check
+        # Security: Robust path traversal prevention
+        # 1. Normalize the path to resolve any relative components
         real_path = os.path.realpath(file_path)
-        if '..' in file_path or not os.path.isfile(real_path):
-            raise ValueError(f"Invalid file path: {file_path}")
+
+        # 2. Define allowed base directories (current working directory or explicit data dir)
+        allowed_base_dirs = [
+            os.path.realpath(os.getcwd()),
+            os.path.realpath(os.path.dirname(__file__)),
+        ]
+
+        # Add DATA_DIR from environment if configured
+        data_dir = os.environ.get('DATA_DIR')
+        if data_dir:
+            allowed_base_dirs.append(os.path.realpath(data_dir))
+
+        # 3. Check that the resolved path is within one of the allowed directories
+        is_path_allowed = any(
+            real_path.startswith(base_dir + os.sep) or real_path == base_dir
+            for base_dir in allowed_base_dirs
+        )
+
+        if not is_path_allowed:
+            raise ValueError(f"Security: File path is outside allowed directories: {file_path}")
+
+        # 4. Verify the file exists and is a regular file (not symlink to outside)
+        if not os.path.isfile(real_path):
+            raise ValueError(f"Invalid file path (not a file): {file_path}")
 
         with open(real_path, 'r', encoding='utf-8', errors='replace') as f:
             return self.parse_content(f.read())
