@@ -168,13 +168,15 @@ class OAuthManager:
                 print(f"⚠️  Azure Key Vault failed: {e}")
                 print("   Falling back to derived key")
         
-        # HIGH-11 FIX: Fail in production mode - key derivation from client_secret is insecure
-        flask_env = os.getenv('FLASK_ENV', 'development')
-        if flask_env == 'production':
+        # SECURITY FIX: Default to 'production' (fail-safe) when FLASK_ENV is not set
+        # This ensures that unset environments don't silently use insecure key derivation
+        flask_env = os.getenv('FLASK_ENV', 'production')
+        if flask_env != 'development':
             raise RuntimeError(
-                "CRITICAL: No KMS configured for token encryption in production mode. "
-                "Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption. "
-                "Key derivation from client_secret is not secure for production use."
+                "CRITICAL: No KMS configured for token encryption. "
+                "Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for secure encryption. "
+                "Key derivation from client_secret is only allowed when FLASK_ENV=development. "
+                f"Current FLASK_ENV={flask_env!r}"
             )
 
         # Fallback: Derive from client_secret (development only)

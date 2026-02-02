@@ -430,7 +430,11 @@ class User(UserMixin, db.Model):
     
     def is_locked(self):
         """
-        Check if account is currently locked
+        Check if account is currently locked.
+
+        DESIGN FIX: This is a pure query method - no side effects.
+        If lock is expired, returns False but does NOT modify database.
+        Call clear_expired_lock() explicitly to persist the unlock.
 
         Returns:
             bool: True if account is locked, False otherwise
@@ -440,14 +444,30 @@ class User(UserMixin, db.Model):
 
         # Check if lock has expired
         if datetime.utcnow() > self.account_locked_until:
-            # Lock expired, reset
-            self.account_locked_until = None
-            self.failed_login_attempts = 0
-            # FIX: Commit the lock reset to persist the change
-            db.session.commit()
-            return False
+            return False  # Lock expired, but don't modify DB here
 
         return True
+
+    def clear_expired_lock(self):
+        """
+        Clear an expired account lock and persist to database.
+
+        Call this AFTER is_locked() returns False to clean up expired lock state.
+        Separates the query (is_locked) from the command (clear_expired_lock).
+
+        Returns:
+            bool: True if lock was cleared, False if no lock existed
+        """
+        if not self.account_locked_until:
+            return False
+
+        if datetime.utcnow() > self.account_locked_until:
+            self.account_locked_until = None
+            self.failed_login_attempts = 0
+            db.session.commit()
+            return True
+
+        return False
     
     def record_failed_login(self):
         """
