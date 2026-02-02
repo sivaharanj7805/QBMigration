@@ -336,8 +336,12 @@ def complete_multipart_upload():
         )
         
         # Update migration status
+        # SECURITY FIX: Add user_id filter to prevent unauthorized access to other users' migrations
         if migration_id:
-            migration = Migration.query.filter_by(migration_id=migration_id).first()
+            migration = Migration.query.filter_by(
+                migration_id=migration_id,
+                user_id=request.current_user['user_id']  # CRITICAL: Verify ownership
+            ).first()
             if migration:
                 migration.mark_as_uploaded(
                     s3_uri=f"s3://{bucket}/{s3_key}",
