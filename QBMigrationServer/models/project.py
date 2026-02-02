@@ -4,7 +4,7 @@ Manages migration projects for clients
 """
 
 from models.database import db
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import string
 
@@ -27,7 +27,7 @@ def generate_session_id(max_retries: int = 10) -> str:
 
     for attempt in range(max_retries):
         # FIX HIGH-04: Include microseconds for better uniqueness
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         timestamp = now.strftime('%Y%m%d%H%M%S') + f"{now.microsecond:06d}"[:4]
 
         # FIX HIGH-04: Use 12 random characters for 62^12 combinations
@@ -133,7 +133,7 @@ class Project(db.Model):
         if not self.can_extract_transactions(count):
             return False
         self.transactions_used += count
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         return True
 
     def get_tier_name(self):

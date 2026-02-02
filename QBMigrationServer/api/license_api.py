@@ -11,7 +11,7 @@ Endpoints:
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 import os
 import logging
@@ -72,8 +72,8 @@ def generate_license_token(license_obj, hardware_fingerprint):
         'hardware_fingerprint': hardware_fingerprint,
         'migrations_remaining': license_obj.get_migrations_remaining(),
         'expires_at': license_obj.expires_at.isoformat() if license_obj.expires_at else None,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(hours=24)  # Token valid for 24 hours
+        'iat': datetime.now(timezone.utc),
+        'exp': datetime.now(timezone.utc) + timedelta(hours=24)  # Token valid for 24 hours
     }
     
     return jwt.encode(payload, get_license_secret(), algorithm='HS256')
@@ -235,7 +235,7 @@ def activate_license():
         if license_obj.is_revoked:
             return jsonify({'success': False, 'error': 'License has been revoked'}), 403
         
-        if license_obj.expires_at and datetime.utcnow() > license_obj.expires_at:
+        if license_obj.expires_at and datetime.now(timezone.utc) > license_obj.expires_at:
             return jsonify({'success': False, 'error': 'License has expired'}), 403
         
         # Try to activate

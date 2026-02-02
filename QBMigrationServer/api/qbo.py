@@ -11,7 +11,7 @@ Handles OAuth2 flow for connecting to QuickBooks Online:
 from flask import Blueprint, request, redirect, jsonify, session, current_app, url_for
 from flask_login import login_required, current_user
 from models.database import db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import logging
 import secrets
@@ -132,7 +132,7 @@ def qbo_callback():
 
         # Calculate token expiration
         expires_in = tokens.get('expires_in', 3600)
-        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
         # CRITICAL FIX: Store tokens securely using encrypted setter
         # Direct assignment bypasses encryption - must use set_qbo_tokens() method
@@ -289,7 +289,7 @@ def qbo_status():
         is_expired = False
         
         if current_user.qbo_token_expires_at:
-            is_expired = datetime.utcnow() > current_user.qbo_token_expires_at
+            is_expired = datetime.now(timezone.utc) > current_user.qbo_token_expires_at
         
         return jsonify({
             'success': True,
@@ -349,7 +349,7 @@ def refresh_qbo_token():
 
         # Calculate token expiration
         expires_in = tokens.get('expires_in', 3600)
-        token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
         # CRITICAL FIX: Update tokens using encrypted setter
         # Direct assignment bypasses encryption - must use set_qbo_tokens() method

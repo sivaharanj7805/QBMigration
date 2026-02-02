@@ -8,7 +8,7 @@ User Model with Enterprise Security
 
 from models.database import db
 from flask_login import UserMixin
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
 import pyotp
@@ -118,7 +118,7 @@ class User(UserMixin, db.Model):
             self.qbo_refresh_token = f.encrypt(refresh_token.encode()).decode() if refresh_token else None
             self.qbo_realm_id = realm_id
             self.qbo_token_expires_at = expires_at
-            self.qbo_connected_at = datetime.utcnow()
+            self.qbo_connected_at = datetime.now(timezone.utc)
         except Exception as e:
             from flask import current_app
             current_app.logger.error(f"Failed to encrypt QBO tokens: {str(e)}")
@@ -254,7 +254,7 @@ class User(UserMixin, db.Model):
         
         # Set new password
         self.password_hash = password_hash
-        self.password_changed_at = datetime.utcnow()
+        self.password_changed_at = datetime.now(timezone.utc)
     
     def check_password(self, password):
         """
@@ -439,7 +439,7 @@ class User(UserMixin, db.Model):
             return False
 
         # Check if lock has expired
-        if datetime.utcnow() > self.account_locked_until:
+        if datetime.now(timezone.utc) > self.account_locked_until:
             # Lock expired, reset
             self.account_locked_until = None
             self.failed_login_attempts = 0
@@ -456,11 +456,11 @@ class User(UserMixin, db.Model):
         Locks account after 5 failed attempts
         """
         self.failed_login_attempts += 1
-        self.last_failed_login = datetime.utcnow()
+        self.last_failed_login = datetime.now(timezone.utc)
         
         # Lock account after 5 failures
         if self.failed_login_attempts >= 5:
-            self.account_locked_until = datetime.utcnow() + timedelta(minutes=15)
+            self.account_locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
     
     def record_successful_login(self):
         """
@@ -471,7 +471,7 @@ class User(UserMixin, db.Model):
         self.failed_login_attempts = 0
         self.last_failed_login = None
         self.account_locked_until = None
-        self.last_login = datetime.utcnow()
+        self.last_login = datetime.now(timezone.utc)
     
     # ========================================================================
     # MULTI-FACTOR AUTHENTICATION
@@ -631,7 +631,7 @@ class User(UserMixin, db.Model):
         self.migrations_purchased = (self.migrations_purchased or 0) + count
         if tier:
             self.subscription_tier = tier
-            self.tier_purchased_at = datetime.utcnow()
+            self.tier_purchased_at = datetime.now(timezone.utc)
     
     def get_tier_info(self):
         """

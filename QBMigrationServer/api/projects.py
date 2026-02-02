@@ -7,7 +7,7 @@ Each project is tied to a specific tier that determines transaction limits.
 """
 
 from flask import Blueprint, request, jsonify
-from datetime import datetime
+from datetime import datetime, timezone
 
 from models import db, Project, Migration
 from models.project import generate_session_id
@@ -137,7 +137,7 @@ def create_project():
 
         # Mark the credit as used for this project (within the locked transaction)
         credit.status = 'used'
-        credit.used_at = datetime.utcnow()
+        credit.used_at = datetime.now(timezone.utc)
 
         # Sync User.migrations_used with MigrationCredit status
         # This ensures backwards compatibility with code that reads from User model
@@ -238,7 +238,7 @@ def update_project(project_id):
     if 'notes' in data:
         project.notes = data['notes'].strip()
     
-    project.updated_at = datetime.utcnow()
+    project.updated_at = datetime.now(timezone.utc)
     
     try:
         db.session.commit()

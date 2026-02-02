@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, current_app, session
 from functools import wraps
 import jwt
 import datetime
+from datetime import timezone
 import re
 import hmac
 import hashlib
@@ -60,7 +61,7 @@ def _validate_session_binding() -> Tuple[bool, str]:
     # Check User-Agent binding
     stored_ua_fp = session.get('_ua_fingerprint')
     if stored_ua_fp:
-        current_ua_fp = _get_user_agent_fingerprint()
+        logger.info()
         if stored_ua_fp != current_ua_fp:
             # Potential session hijacking attempt
             user_id = session.get('user_id')
@@ -78,8 +79,8 @@ def _bind_session():
     Bind the current session to browser fingerprints for security.
     Call this when creating a new authenticated session.
     """
-    session['_ua_fingerprint'] = _get_user_agent_fingerprint()
-    session['_created_at'] = datetime.datetime.utcnow().isoformat()
+    logger.info()
+    session['_created_at'] = datetime.datetime.now(timezone.utc).isoformat()
 
 
 # =============================================================================
@@ -137,7 +138,7 @@ def require_mfa(f: Callable[..., Any]) -> Callable[..., Any]:
         if mfa_verified_at:
             try:
                 verified_time = datetime.datetime.fromisoformat(mfa_verified_at)
-                age_seconds = (datetime.datetime.utcnow() - verified_time).total_seconds()
+                age_seconds = (datetime.datetime.now(timezone.utc) - verified_time).total_seconds()
                 if age_seconds < 300:  # 5 minutes
                     return f(*args, **kwargs)
             except (ValueError, TypeError):
@@ -283,7 +284,7 @@ def verify_mfa():
         return jsonify({'success': False, 'error': 'MFA verification failed'}), 500
 
     # Mark session as MFA-verified
-    session['_mfa_verified_at'] = datetime.datetime.utcnow().isoformat()
+    session['_mfa_verified_at'] = datetime.datetime.now(timezone.utc).isoformat()
     logger.info(f"MFA verified successfully for user {user_id}")
 
     return jsonify({
@@ -327,8 +328,8 @@ def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
     payload = {
         'user_id': user_id,
         'email': email,
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=expires_hours),
-        'iat': datetime.datetime.utcnow()
+        'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=expires_hours),
+        'iat': datetime.datetime.now(timezone.utc)
     }
     return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -739,11 +740,11 @@ def get_current_user():
                         tier_type=tier,
                         transaction_limit=credit_config.get('transaction_limit', 5000),
                         price_cents=0,
-                        stripe_checkout_session_id=f'auto-sync-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+                        stripe_checkout_session_id=f'auto-sync-{user_id}-{i}-{datetime.datetime.now(timezone.utc).timestamp()}',
                         payment_status='paid',
                         status='available'
                     )
-                    credit.paid_at = datetime.datetime.utcnow()
+                    credit.paid_at = datetime.datetime.now(timezone.utc)
                     db.session.add(credit)
 
                 db.session.commit()  # Commit the savepoint
@@ -951,11 +952,11 @@ def select_tier():
             tier_type=tier_id,
             transaction_limit=credit_config.get('transaction_limit', 5000),
             price_cents=0,  # Free tier selection
-            stripe_checkout_session_id=f'free-tier-{tier_id}-{user_id}-{datetime.datetime.utcnow().timestamp()}',
+            stripe_checkout_session_id=f'free-tier-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
             payment_status='paid',
             status='available'
         )
-        credit.paid_at = datetime.datetime.utcnow()
+        credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
     # Also update legacy User fields for backwards compatibility
@@ -1010,11 +1011,11 @@ def upgrade_tier():
             tier_type=tier_id,
             transaction_limit=credit_config.get('transaction_limit', 5000),
             price_cents=0,  # Upgrade (may have different pricing in production)
-            stripe_checkout_session_id=f'upgrade-{tier_id}-{user_id}-{datetime.datetime.utcnow().timestamp()}',
+            stripe_checkout_session_id=f'upgrade-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
             payment_status='paid',
             status='available'
         )
-        credit.paid_at = datetime.datetime.utcnow()
+        credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
     # Also update legacy User fields for backwards compatibility
@@ -1149,8 +1150,8 @@ def _generate_password_reset_token(user_id: int, email: str) -> str:
         'email': email,
         'purpose': 'password_reset',
         'jti': secrets_module.token_hex(16),  # Unique token ID
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1),
-        'iat': datetime.datetime.utcnow()
+        'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=1),
+        'iat': datetime.datetime.now(timezone.utc)
     }
     return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -1438,8 +1439,8 @@ def _generate_email_verification_token(user_id: int, email: str) -> str:
         'email': email,
         'purpose': 'email_verification',
         'jti': secrets_module.token_hex(16),
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24),
-        'iat': datetime.datetime.utcnow()
+        'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=24),
+        'iat': datetime.datetime.now(timezone.utc)
     }
     return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -1842,11 +1843,11 @@ def sync_credits():
             tier_type=tier,
             transaction_limit=credit_config.get('transaction_limit', 5000),
             price_cents=0,
-            stripe_checkout_session_id=f'sync-available-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+            stripe_checkout_session_id=f'sync-available-{user_id}-{i}-{datetime.datetime.now(timezone.utc).timestamp()}',
             payment_status='paid',
             status='available'
         )
-        credit.paid_at = datetime.datetime.utcnow()
+        credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
         credits_created += 1
 
@@ -1857,12 +1858,12 @@ def sync_credits():
             tier_type=tier,
             transaction_limit=credit_config.get('transaction_limit', 5000),
             price_cents=0,
-            stripe_checkout_session_id=f'sync-used-{user_id}-{i}-{datetime.datetime.utcnow().timestamp()}',
+            stripe_checkout_session_id=f'sync-used-{user_id}-{i}-{datetime.datetime.now(timezone.utc).timestamp()}',
             payment_status='paid',
             status='used'
         )
-        credit.paid_at = datetime.datetime.utcnow()
-        credit.used_at = datetime.datetime.utcnow()
+        credit.paid_at = datetime.datetime.now(timezone.utc)
+        credit.used_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
         credits_created += 1
 

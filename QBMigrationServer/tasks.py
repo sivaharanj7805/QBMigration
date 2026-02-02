@@ -168,7 +168,7 @@ def run_migration_task(self, migration_id: str, encrypted_file_path: str,
             return {
                 'success': True,
                 'migration_id': migration_id,
-                'completed_at': datetime.utcnow().isoformat()
+                'completed_at': datetime.now(timezone.utc).isoformat()
             }
         else:
             update_migration_status(migration_id, 'failed', progress=0,

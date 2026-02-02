@@ -24,7 +24,7 @@ Version: 1.0.0
 import re
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass, field
@@ -119,7 +119,7 @@ class ArchiveSearchService:
         Returns:
             Indexing statistics
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         indexed_count = 0
 
         # Index transactions
@@ -156,11 +156,11 @@ class ArchiveSearchService:
                 self._entity_counts[entity_type] = count
                 indexed_count += count
 
-        elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         return {
             "archive_id": archive_id,
-            "indexed_at": datetime.utcnow().isoformat(),
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
             "total_indexed": indexed_count,
             "entity_counts": self._entity_counts,
             "indexing_time_ms": elapsed
@@ -176,7 +176,7 @@ class ArchiveSearchService:
         Returns:
             SearchResponse with matching results
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         results: List[SearchResult] = []
 
         query_terms = self._tokenize(filters.query.lower())
@@ -237,7 +237,7 @@ class ArchiveSearchService:
         # Build facets
         facets = self._build_facets(all_results)
 
-        elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         return SearchResponse(
             query=filters.query,

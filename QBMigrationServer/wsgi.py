@@ -14,6 +14,9 @@ For EC2 deployment:
 import os
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+
+
 # Load environment variables before importing app
 load_dotenv()
 
@@ -46,8 +49,8 @@ app = application
 
 if __name__ == '__main__':
     # This block only runs if you execute wsgi.py directly (not recommended)
-    print("WARNING: Running wsgi.py directly is for testing only.")
-    print("Use 'gunicorn wsgi:application' for production.")
+    logger.info("WARNING: Running wsgi.py directly is for testing only.")
+    logger.info("Use 'gunicorn wsgi:application' for production.")
     # HIGH FIX: Bind to localhost only to prevent accidental exposure
     # In production, use a proper WSGI server (gunicorn/uWSGI) with a reverse proxy
     application.run(host='127.0.0.1', port=5000)

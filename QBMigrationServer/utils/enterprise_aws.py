@@ -12,7 +12,7 @@ Version: 1.0
 
 import boto3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 from typing import Optional, Dict, List, Tuple
 import json
@@ -174,7 +174,7 @@ class S3ObjectLocking:
             legal_hold: Enable legal hold (prevents deletion even after retention)
         """
         if retain_until is None:
-            retain_until = datetime.utcnow() + timedelta(days=2555)  # 7 years
+            retain_until = datetime.now(timezone.utc) + timedelta(days=2555)  # 7 years
         
         try:
             put_params = {
@@ -212,7 +212,7 @@ class S3ObjectLocking:
         Provides cryptographic proof of migration integrity.
         """
         key = f"forensic/{migration_id}/run_manifest.json"
-        retain_until = datetime.utcnow() + timedelta(days=retain_years * 365)
+        retain_until = datetime.now(timezone.utc) + timedelta(days=retain_years * 365)
         
         body = json.dumps(manifest_data, indent=2, default=str).encode('utf-8')
         
@@ -230,9 +230,9 @@ class S3ObjectLocking:
         """
         Store forensic log with WORM protection.
         """
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         key = f"forensic/{migration_id}/logs/{log_type}_{timestamp}.log"
-        retain_until = datetime.utcnow() + timedelta(days=retain_years * 365)
+        retain_until = datetime.now(timezone.utc) + timedelta(days=retain_years * 365)
         
         return self.put_object_with_lock(
             bucket_name=self.bucket_name,
@@ -402,7 +402,7 @@ class CustomerManagedKeys:
                 KeyId=key_id,
                 GranteePrincipal=grantee_principal,
                 Operations=operations,
-                Name=f"ForensicBridge-Access-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+                Name=f"ForensicBridge-Access-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             )
             
             return {

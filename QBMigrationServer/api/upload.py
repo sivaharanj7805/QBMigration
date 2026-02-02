@@ -21,7 +21,7 @@ import re
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 
 
@@ -1089,7 +1089,7 @@ def commit_chunked_upload():
                     for k, v in received_chunks.items()
                 },
                 'total_size_bytes': total_size,
-                'committed_at': datetime.utcnow().isoformat() + 'Z'
+                'committed_at': datetime.now(timezone.utc).isoformat() + 'Z'
             }
 
             # Store commit manifest

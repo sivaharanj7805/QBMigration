@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from models.database import db
 from models.migration import Migration
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import hmac
 import hashlib
@@ -40,7 +40,7 @@ def verify_webhook_signature(migration_id, signature, timestamp):
             return False, "Invalid timestamp format"
         
         # Check timestamp is recent (prevent replay attacks)
-        age = datetime.utcnow() - webhook_time.replace(tzinfo=None)
+        age = datetime.now(timezone.utc) - webhook_time.replace(tzinfo=None)
         max_age = timedelta(minutes=current_app.config.get('WEBHOOK_REPLAY_WINDOW_MINUTES', 5))
         
         if age > max_age:
@@ -164,7 +164,7 @@ def migration_started():
             migration.mark_as_processing(instance_id)
         else:
             migration.status = 'processing'
-            migration.started_at = datetime.utcnow()
+            migration.started_at = datetime.now(timezone.utc)
             db.session.commit()
         
         logger.info(f"Migration {migration_id} started on instance {instance_id}")
@@ -455,5 +455,5 @@ def webhook_health():
     """Health check for webhook endpoint"""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat() + 'Z'
+        'timestamp': datetime.now(timezone.utc).isoformat() + 'Z'
     }), 200

@@ -1,7 +1,7 @@
 from celery import Celery
 from models.database import db
 from models.migration import Migration
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import sys
 import json
@@ -53,7 +53,7 @@ def process_migration(self, db_id):
         try:
             # Mark as processing
             migration.status = 'processing'
-            migration.started_at = datetime.utcnow()
+            migration.started_at = datetime.now(timezone.utc)
             db.session.commit()
             
             # Progress callback for orchestrator
@@ -81,7 +81,7 @@ def process_migration(self, db_id):
             
             if result['success']:
                 migration.status = 'completed'
-                migration.completed_at = datetime.utcnow()
+                migration.completed_at = datetime.now(timezone.utc)
                 migration.progress_percent = 100
             else:
                 migration.status = 'failed'

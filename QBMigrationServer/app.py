@@ -21,7 +21,7 @@ from utils.cleanup_scheduler import init_cleanup_scheduler
 from utils.error_sanitizer import sanitize_error_message, create_error_response, is_production
 from sqlalchemy import text
 from logging.handlers import RotatingFileHandler
-from datetime import datetime
+from datetime import datetime, timezone
 from api.health import health_bp
 from api.projects import projects_bp
 from api.health_check import health_check_bp
@@ -584,7 +584,7 @@ def create_app(config_name='development'):
 
             response.headers['X-RateLimit-Limit'] = str(limit)
             response.headers['X-RateLimit-Remaining'] = str(limit)  # Conservative default
-            response.headers['X-RateLimit-Reset'] = str(int(datetime.utcnow().timestamp()) + window_seconds)
+            response.headers['X-RateLimit-Reset'] = str(int(datetime.now(timezone.utc).timestamp()) + window_seconds)
 
         return response
 
@@ -772,7 +772,7 @@ def create_app(config_name='development'):
         # Continue with actual health check for GET requests
         health_status = {
             'status': 'healthy',
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(timezone.utc).isoformat() + 'Z',
             'checks': {}
         }
         
@@ -1021,42 +1021,42 @@ app = create_app(os.getenv('FLASK_ENV', 'development'))
 if __name__ == '__main__':
     """Run the development server"""
 
-    print("=" * 80)
-    print("QB MIGRATION SERVER - AWS EPHEMERAL ARCHITECTURE")
-    print("=" * 80)
-    print("")
-    print("Server: http://localhost:5000")
-    print("")
-    print("Security Features:")
-    print("  - Argon2id password hashing")
-    print("  - Rate limiting (auth & uploads)")
-    print("  - Account lockout (5 failed attempts)")
-    print("  - File validation")
-    print("  - Audit logging")
-    print("")
-    print("AWS Features:")
-    print("  - Upload to S3 (NOT local disk)")
-    print("  - Ephemeral EC2 instances")
-    print("  - Auto cleanup (15min intervals)")
-    print("  - Zero data persistence")
-    print("")
-    print("Press CTRL+C to stop")
-    print("=" * 80)
-    print("")
+    logger.info("=" * 80)
+    logger.info("QB MIGRATION SERVER - AWS EPHEMERAL ARCHITECTURE")
+    logger.info("=" * 80)
+    logger.info("")
+    logger.info("Server: http://localhost:5000")
+    logger.info("")
+    logger.info("Security Features:")
+    logger.info("  - Argon2id password hashing")
+    logger.info("  - Rate limiting (auth & uploads)")
+    logger.info("  - Account lockout (5 failed attempts)")
+    logger.info("  - File validation")
+    logger.info("  - Audit logging")
+    logger.info("")
+    logger.info("AWS Features:")
+    logger.info("  - Upload to S3 (NOT local disk)")
+    logger.info("  - Ephemeral EC2 instances")
+    logger.info("  - Auto cleanup (15min intervals)")
+    logger.info("  - Zero data persistence")
+    logger.info("")
+    logger.info("Press CTRL+C to stop")
+    logger.info("=" * 80)
+    logger.info("")
 
     # FIX: Bind to localhost only by default (consistent with run.py)
     host = os.environ.get('DEV_HOST', '127.0.0.1')
 
     if host == '0.0.0.0':
-        print("WARNING: Server is binding to all interfaces (0.0.0.0)")
-        print("This should ONLY be used in isolated development environments!")
-        print("=" * 80)
-        print("")
+        logger.info("WARNING: Server is binding to all interfaces (0.0.0.0)")
+        logger.info("This should ONLY be used in isolated development environments!")
+        logger.info("=" * 80)
+        logger.info("")
 
     try:
         app.run(host=host, port=5000, debug=True)
     except KeyboardInterrupt:
-        print("\n\nServer stopped by user")
+        logger.info("\n\nServer stopped by user")
     except Exception as e:
-        print(f"\n\nFailed to start server: {str(e)}")
+        logger.info(f"\n\nFailed to start server: {str(e)}")
         sys.exit(1)
