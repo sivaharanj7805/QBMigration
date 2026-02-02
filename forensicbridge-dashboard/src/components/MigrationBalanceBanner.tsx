@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { AlertCircle, Package, ArrowRight, RefreshCw, Zap, Building2, Shield, Crown, Scale } from 'lucide-react';
+import { authFetch } from '@/lib/auth';
 
 // API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -40,20 +41,10 @@ export function MigrationBalanceBanner() {
         try {
             if (showRefresh) setRefreshing(true);
 
-            const token = localStorage.getItem('token');
-            if (!token) {
-                // FIX: Check if mounted before setting state
-                if (isMountedRef.current) {
-                    setLoading(false);
-                }
-                return;
-            }
-
-            const response = await fetch(`${API_URL}/api/auth/me`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+            // SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage token
+            // This prevents XSS attacks from stealing auth tokens
+            // authFetch automatically includes credentials: 'include' for httpOnly cookies
+            const response = await authFetch(`${API_URL}/api/auth/me`);
 
             // FIX: Check if mounted before setting state after async operation
             if (!isMountedRef.current) return;

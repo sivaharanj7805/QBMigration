@@ -887,20 +887,40 @@ For technical support: support@forensicbridge.com
     
     def _sanitize_csv_value(self, value: Any) -> str:
         """
-        FIX #10: Protect against CSV injection attacks.
-        
-        Prefixes cell values starting with =, +, -, @ with a single quote
-        to prevent formula interpretation in Excel/Google Sheets.
+        SECURITY FIX: Comprehensive CSV injection protection.
+
+        Protects against formula injection attacks that could execute when
+        opening in Excel, Google Sheets, or Caseware.
+
+        Attack vectors prevented:
+        - Direct formula: =cmd|'/C calc'
+        - Prefixed formula: " =cmd|'/C calc'" (space prefix bypass)
+        - Tab/newline injection: "\t=cmd|'/C calc'"
+
+        Reference: OWASP CSV Injection guidelines
         """
         if value is None:
             return ''
-        
+
         value_str = str(value)
-        
-        # CSV injection protection
-        if value_str and value_str[0] in ('=', '+', '-', '@', '\t', '\r', '\n'):
+
+        if not value_str:
+            return ''
+
+        # SECURITY FIX: Define dangerous characters that trigger formula evaluation
+        DANGEROUS_CHARS = ('=', '+', '-', '@', '\t', '\r', '\n')
+
+        # SECURITY FIX: Check both the original string AND after stripping whitespace
+        # This prevents bypass via " =cmd" (space prefix) attacks
+        stripped = value_str.lstrip()
+
+        # Check if first character (or first non-space character) is dangerous
+        if value_str[0] in DANGEROUS_CHARS:
             return "'" + value_str
-        
+        elif stripped and stripped[0] in DANGEROUS_CHARS:
+            # Space-prefixed formula injection attempt - sanitize the whole string
+            return "'" + value_str
+
         return value_str
     
     def _create_gl_row(self, txn: Dict, line_item: Optional[Dict], txn_date: str) -> Optional[List]:

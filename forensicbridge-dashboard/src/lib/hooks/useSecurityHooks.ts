@@ -119,24 +119,33 @@ export function useAbortController(): AbortController {
 
 /**
  * Abort Signal Hook
- * Returns a fresh AbortSignal for each render cycle
- * Automatically cancels previous requests
+ * PERFORMANCE FIX: Creates AbortController once per mount, not on every render
+ * Automatically aborts on unmount to prevent memory leaks
+ *
+ * Note: If you need to abort/refresh mid-lifecycle, use useAbortController instead
+ * and call controller.abort() manually when needed.
  */
 export function useAbortSignal(): AbortSignal {
+    // PERFORMANCE FIX: Use lazy initialization to create controller only once
     const controllerRef = useRef<AbortController | null>(null);
 
-    // Abort previous request on each call
-    if (controllerRef.current) {
-        controllerRef.current.abort();
+    // Only create controller once (lazy initialization)
+    if (controllerRef.current === null) {
+        controllerRef.current = new AbortController();
     }
-    controllerRef.current = new AbortController();
 
     useEffect(() => {
+        // Create fresh controller on mount
+        const controller = new AbortController();
+        controllerRef.current = controller;
+
         return () => {
-            controllerRef.current?.abort();
+            // Abort on unmount to prevent memory leaks
+            controller.abort();
         };
     }, []);
 
+    // Return signal from the controller (safe because it's lazily initialized)
     return controllerRef.current.signal;
 }
 
