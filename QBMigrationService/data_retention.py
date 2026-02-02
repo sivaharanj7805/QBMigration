@@ -2,9 +2,13 @@ import os
 import time
 import threading
 import json
+import logging
 from datetime import datetime, timedelta
 from encryption import EncryptionManager
 from audit_logger import AuditLogger
+
+# Initialize logger at module level
+logger = logging.getLogger(__name__)
 
 # $25M FIX: Try to import Celery for production job queue
 try:
