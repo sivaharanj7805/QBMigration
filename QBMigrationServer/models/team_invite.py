@@ -2,7 +2,7 @@
 TeamInvite model - tracks team member invitations and team membership.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models.database import db
 import secrets
 
@@ -62,7 +62,7 @@ class TeamInvite(db.Model):
             role=role,
             invite_token=secrets.token_urlsafe(32),
             status='pending',
-            expires_at=datetime.utcnow() + timedelta(days=expiry_days)
+            expires_at=datetime.now(timezone.utc) + timedelta(days=expiry_days)
         )
         db.session.add(invite)
 
@@ -81,7 +81,7 @@ class TeamInvite(db.Model):
         return cls.query.filter_by(
             owner_user_id=owner_user_id,
             status='pending'
-        ).filter(cls.expires_at > datetime.utcnow()).all()
+        ).filter(cls.expires_at > datetime.now(timezone.utc)).all()
     
     @classmethod
     def get_team_members(cls, owner_user_id):
@@ -117,14 +117,14 @@ class TeamInvite(db.Model):
         if self.status != 'pending':
             return False, "Invite is no longer valid"
         
-        if datetime.utcnow() > self.expires_at:
+        if datetime.now(timezone.utc) > self.expires_at:
             self.status = 'expired'
             db.session.commit()
             return False, "Invite has expired"
         
         self.status = 'accepted'
         self.accepted_user_id = user_id
-        self.accepted_at = datetime.utcnow()
+        self.accepted_at = datetime.now(timezone.utc)
         db.session.commit()
         return True, "Invite accepted"
     
@@ -153,7 +153,7 @@ class TeamInvite(db.Model):
         Returns:
             int: Number of invites marked as expired
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_count = cls.query.filter(
             cls.status == 'pending',
             cls.expires_at < now

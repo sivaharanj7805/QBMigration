@@ -8,7 +8,7 @@ Features:
 """
 
 from models.database import db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
 import hashlib
 import json
@@ -141,7 +141,7 @@ class License(db.Model):
         )
         
         if expires_in_days:
-            license.expires_at = datetime.utcnow() + timedelta(days=expires_in_days)
+            license.expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
         
         return license
     
@@ -172,9 +172,9 @@ class License(db.Model):
                 return False  # Already activated on different machine
         
         self.hardware_fingerprint = hardware_fingerprint
-        self.fingerprint_set_at = datetime.utcnow()
+        self.fingerprint_set_at = datetime.now(timezone.utc)
         self.is_activated = True
-        self.activation_date = datetime.utcnow()
+        self.activation_date = datetime.now(timezone.utc)
         
         if user_id:
             self.user_id = user_id
@@ -208,7 +208,7 @@ class License(db.Model):
             return False, f"License has been revoked: {self.revocation_reason}"
         
         # Check expiry
-        if self.expires_at and datetime.utcnow() > self.expires_at:
+        if self.expires_at and datetime.now(timezone.utc) > self.expires_at:
             return False, "License has expired"
         
         # Check hardware fingerprint (if activated)
@@ -221,7 +221,7 @@ class License(db.Model):
             return False, "No migrations remaining on license"
         
         # Update last validated timestamp
-        self.last_validated = datetime.utcnow()
+        self.last_validated = datetime.now(timezone.utc)
         
         return True, None
     
@@ -258,7 +258,7 @@ class License(db.Model):
         """
         self.is_revoked = True
         self.revocation_reason = reason
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         self.revoked_by = revoked_by
         self.is_active = False
         

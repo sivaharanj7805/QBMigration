@@ -10,7 +10,7 @@ import os
 import base64
 import json
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple, Any
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -143,7 +143,7 @@ class EncryptionManager:
             ))
 
         # Update metadata
-        now = datetime.utcnow().isoformat() + 'Z'
+        now = datetime.now(timezone.utc).isoformat() + 'Z'
         new_metadata = {
             'current_version': new_version,
             'created_at': now,
@@ -170,7 +170,7 @@ class EncryptionManager:
 
         try:
             created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            age_days = (datetime.utcnow().replace(tzinfo=created_date.tzinfo) - created_date).days
+            age_days = (datetime.now(timezone.utc).replace(tzinfo=created_date.tzinfo) - created_date).days
 
             if age_days >= KEY_ROTATION_DAYS:
                 logger.warning(
@@ -204,7 +204,7 @@ class EncryptionManager:
         # Archive current keys
         archive_path = None
         if os.path.exists(self.private_key_path):
-            timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
             archive_name = f"rsa_private_{old_version}_{timestamp}.pem"
             archive_path = os.path.join(self.archive_dir, archive_name)
 
@@ -231,7 +231,7 @@ class EncryptionManager:
             'old_version': old_version,
             'new_version': self.key_version,
             'archived_path': archive_path,
-            'timestamp': datetime.utcnow().isoformat() + 'Z'
+            'timestamp': datetime.now(timezone.utc).isoformat() + 'Z'
         }
 
         logger.info(f"Key rotation complete: {old_version} -> {self.key_version}")
@@ -277,7 +277,7 @@ class EncryptionManager:
         if created_at != 'unknown':
             try:
                 created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                age_days = (datetime.utcnow().replace(tzinfo=created_date.tzinfo) - created_date).days
+                age_days = (datetime.now(timezone.utc).replace(tzinfo=created_date.tzinfo) - created_date).days
                 rotation_needed = age_days >= KEY_ROTATION_DAYS
             except Exception:
                 pass

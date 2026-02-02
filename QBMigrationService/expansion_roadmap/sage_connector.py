@@ -16,7 +16,7 @@ Author: ForensicBridge Security Team
 
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
@@ -123,7 +123,7 @@ class SageConnector(BaseAccountingConnector):
 
         return ExtractionResult(
             status=ExtractionStatus.FAILED,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             errors=["Sage connector not yet implemented - roadmap Q3 2026"]
         )
 

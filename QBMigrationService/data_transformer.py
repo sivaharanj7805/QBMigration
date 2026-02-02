@@ -29,8 +29,8 @@ USAGE:
     result = transformer.transform(qb_desktop_data)
     
     # Check results
-    print(result['summary'])
-    print(f"Trial Balance: {result['trial_balance']}")
+    logger.info(result['summary'])
+    logger.info(f"Trial Balance: {result['trial_balance']}")
 """
 
 import re

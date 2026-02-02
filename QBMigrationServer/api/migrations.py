@@ -844,12 +844,12 @@ def get_migration_stats():
     """
     try:
         from sqlalchemy import func
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         
         user_id = current_user.id
         
         # Get current month's migrations
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
         # Total migrations this month

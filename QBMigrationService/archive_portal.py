@@ -448,6 +448,9 @@ def portal():
 
 
 if __name__ == '__main__':
-    print("Starting Active Archival Web Portal...")
-    print(f"Archive directory: {ARCHIVE_DIR}")
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # FIX: Use logging instead of print for production-ready code
+    logger.info("Starting Active Archival Web Portal...")
+    logger.info(f"Archive directory: {ARCHIVE_DIR}")
+    # FIX: Bind to localhost only to prevent accidental network exposure
+    # In production, use a proper WSGI server (gunicorn) with reverse proxy
+    app.run(host='127.0.0.1', port=5001, debug=False)

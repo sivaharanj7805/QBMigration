@@ -12,7 +12,7 @@ Usage:
         qbo_client_secret="...",
         qbo_refresh_token="...",
         realm_id="...",
-        progress_callback=lambda pct, msg: print(f"{pct}%: {msg}")
+        logger.info(f"{pct}%: {msg}")
     )
     
     result = orchestrator.run_migration(encrypted_data, encryption_metadata)
@@ -25,7 +25,7 @@ import logging
 import time
 import uuid
 from typing import Dict, Any, Callable, Optional, List, Tuple, TYPE_CHECKING
-from datetime import datetime
+from datetime import datetime, timezone
 
 # FIX #35: TYPE_CHECKING for forward references without circular imports
 if TYPE_CHECKING:
@@ -167,7 +167,7 @@ class MigrationOrchestrator:
                 'duration_seconds': float
             }
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         migration_id = f"mig_{start_time.strftime('%Y%m%d_%H%M%S')}"
         
         logger.info(f"Starting migration {migration_id} for {company_name}")
@@ -243,7 +243,7 @@ class MigrationOrchestrator:
             # Step 6: Complete (100%)
             self._report_progress(100, "Migration complete")
             
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             
             result = {
                 'success': True,
@@ -252,7 +252,7 @@ class MigrationOrchestrator:
                 'entities_migrated': entities_migrated,
                 'verification': verification_result,
                 'duration_seconds': duration,
-                'completed_at': datetime.utcnow().isoformat()
+                'completed_at': datetime.now(timezone.utc).isoformat()
             }
             
             logger.info(f"Migration {migration_id} completed in {duration:.1f}s")
@@ -261,14 +261,14 @@ class MigrationOrchestrator:
         except Exception as e:
             logger.exception(f"Migration {migration_id} failed: {str(e)}")
             
-            duration = (datetime.utcnow() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             
             return {
                 'success': False,
                 'migration_id': migration_id,
                 'error': str(e),
                 'duration_seconds': duration,
-                'failed_at': datetime.utcnow().isoformat()
+                'failed_at': datetime.now(timezone.utc).isoformat()
             }
     
     def _migrate_entity(
@@ -413,7 +413,7 @@ if __name__ == '__main__':
 
     # SECURITY FIX: Align signature algorithm with server expectations
     # Server expects: HMAC-SHA256(migration_id:timestamp)
-    webhook_timestamp = datetime.utcnow().isoformat() + 'Z'
+    webhook_timestamp = datetime.now(timezone.utc).isoformat() + 'Z'
     message = f"{args.migration_id}:{webhook_timestamp}"
 
     signature = hmac.new(

@@ -17,7 +17,7 @@ Usage:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask
 from models.migration import Migration
 from models import db
@@ -41,7 +41,7 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
             'dry_run': bool
         }
     """
-    cutoff_time = datetime.utcnow() - timedelta(hours=retention_hours)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
     errors = []
     cleaned_count = 0
 
@@ -130,7 +130,7 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
     import os
     from botocore.exceptions import ClientError
 
-    cutoff_time = datetime.utcnow() - timedelta(hours=retention_hours)
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
     errors = []
     deleted_count = 0
     bytes_freed = 0
@@ -280,7 +280,7 @@ if __name__ == '__main__':
         logger.info("=" * 80)
 
         # Print JSON result for programmatic consumption
-        print(json.dumps(result, indent=2))
+        logger.info(json.dumps(result, indent=2))
 
         # Exit with appropriate code
         sys.exit(0 if result['success'] else 1)

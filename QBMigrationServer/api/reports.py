@@ -19,7 +19,7 @@ import logging
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
@@ -461,7 +461,7 @@ def _generate_variance_report(migration, output_path):
         story.append(Paragraph("Variance Analysis Report", title_style))
         story.append(Paragraph(f"<b>Company:</b> {migration.company_name}", styles['Normal']))
         story.append(Paragraph(f"<b>Migration ID:</b> {migration.migration_id}", styles['Normal']))
-        story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}", styles['Normal']))
+        story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", styles['Normal']))
         story.append(Spacer(1, 20))
 
         # Get verification data
@@ -564,7 +564,7 @@ def _generate_discrepancy_report(migration, output_path):
         story.append(Paragraph("Discrepancy Analysis Report", title_style))
         story.append(Paragraph(f"<b>Company:</b> {migration.company_name}", styles['Normal']))
         story.append(Paragraph(f"<b>Migration ID:</b> {migration.migration_id}", styles['Normal']))
-        story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}", styles['Normal']))
+        story.append(Paragraph(f"<b>Generated:</b> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}", styles['Normal']))
         story.append(Spacer(1, 20))
 
         # Get discrepancy data

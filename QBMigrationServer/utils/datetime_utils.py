@@ -3,13 +3,13 @@ DateTime Utilities
 ==================
 Future-proof datetime utilities that avoid deprecated functions.
 
-Python 3.12+ deprecates datetime.utcnow() in favor of datetime.now(timezone.utc).
+Python 3.12+ deprecates datetime.now(timezone.utc) in favor of datetime.now(timezone.utc).
 This module provides drop-in replacements that work across Python versions.
 
 Usage:
     from utils.datetime_utils import utcnow, utcnow_iso, make_aware
 
-    # Instead of datetime.utcnow()
+    # Instead of datetime.now(timezone.utc)
     now = utcnow()
 
     # ISO format string
@@ -34,7 +34,7 @@ def utcnow() -> datetime:
     """
     Get current UTC time as a timezone-aware datetime.
 
-    This is the replacement for the deprecated datetime.utcnow().
+    This is the replacement for the deprecated datetime.now(timezone.utc).
 
     Returns:
         Timezone-aware datetime in UTC
@@ -249,10 +249,10 @@ def get_utc_now() -> datetime:
 
 # Deprecation warning for old usage patterns
 def _warn_deprecated_utcnow():
-    """Issue deprecation warning for datetime.utcnow() usage."""
+    """Issue deprecation warning for datetime.now(timezone.utc) usage."""
     warnings.warn(
-        "datetime.utcnow() is deprecated in Python 3.12+. "
-        "Use utils.datetime_utils.utcnow() instead.",
+        "datetime.now(timezone.utc) is deprecated in Python 3.12+. "
+        "Use utils.datetime_utils.now(timezone.utc) instead.",
         DeprecationWarning,
         stacklevel=3
     )

@@ -15,7 +15,7 @@ This satisfies legal retention requirements without storing sensitive data.
 import boto3
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 from typing import Optional, Dict, List
 
@@ -73,8 +73,8 @@ class ForensicArchivalService:
         # Create archive record
         archive_record = {
             'migration_id': migration_id,
-            'archived_at': datetime.utcnow().isoformat(),
-            'retention_until': (datetime.utcnow() + timedelta(days=GLACIER_RETENTION_DAYS)).isoformat(),
+            'archived_at': datetime.now(timezone.utc).isoformat(),
+            'retention_until': (datetime.now(timezone.utc) + timedelta(days=GLACIER_RETENTION_DAYS)).isoformat(),
             'retention_years': GLACIER_RETENTION_YEARS,
             'metadata': sanitized
         }
@@ -117,12 +117,12 @@ class ForensicArchivalService:
             migration_id: Migration ID
             audit_entries: List of audit log entries
         """
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         key = f"{self.archive_prefix}audit-logs/{migration_id}/{timestamp}.json"
         
         archive_record = {
             'migration_id': migration_id,
-            'archived_at': datetime.utcnow().isoformat(),
+            'archived_at': datetime.now(timezone.utc).isoformat(),
             'entry_count': len(audit_entries),
             'entries': audit_entries
         }
@@ -154,7 +154,7 @@ class ForensicArchivalService:
         
         archive_record = {
             'migration_id': migration_id,
-            'archived_at': datetime.utcnow().isoformat(),
+            'archived_at': datetime.now(timezone.utc).isoformat(),
             'report_type': 'hash_verification',
             'report': report
         }

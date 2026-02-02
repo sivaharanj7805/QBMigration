@@ -16,7 +16,7 @@ Version: 1.0.0
 
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 import hashlib
@@ -88,7 +88,7 @@ def detect_rapid_login_attempts(user_id: int, window_hours: int = 1) -> Tuple[bo
     """
     try:
         # Query login attempts in the time window
-        window_start = datetime.utcnow() - timedelta(hours=window_hours)
+        window_start = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
         result = db.session.execute(text("""
             SELECT COUNT(*) as login_count
@@ -142,7 +142,7 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
             AND last_login_at >= :window_start
         """), {
             'user_id': user_id,
-            'window_start': datetime.utcnow() - timedelta(hours=1)
+            'window_start': datetime.now(timezone.utc) - timedelta(hours=1)
         })
 
         row = result.fetchone()
@@ -158,7 +158,7 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
             curr_prefix = '.'.join(current_ip.split('.')[:2])
 
             if prev_prefix != curr_prefix:
-                time_diff = datetime.utcnow() - prev_login
+                time_diff = datetime.now(timezone.utc) - prev_login
                 if time_diff < timedelta(hours=1):
                     return True, f"Impossible travel: IP changed from {prev_ip} to {current_ip} in {time_diff.seconds // 60} minutes"
 
@@ -212,7 +212,7 @@ def detect_large_file_upload(file_size_bytes: int, user_id: int) -> Tuple[bool, 
             AND created_at >= :window_start
         """), {
             'user_id': user_id,
-            'window_start': datetime.utcnow() - timedelta(days=1)
+            'window_start': datetime.now(timezone.utc) - timedelta(days=1)
         })
 
         row = result.fetchone()
@@ -243,7 +243,7 @@ def detect_rapid_migrations(user_id: int) -> Tuple[bool, str]:
         (is_suspicious: bool, reason: str)
     """
     try:
-        window_start = datetime.utcnow() - timedelta(
+        window_start = datetime.now(timezone.utc) - timedelta(
             minutes=ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']
         )
 
@@ -282,13 +282,13 @@ def check_login_anomalies(user_id: int, ip_address: str) -> List[Dict]:
     anomalies = []
 
     # Check login time
-    is_unusual, reason = is_unusual_login_time(datetime.utcnow())
+    is_unusual, reason = is_unusual_login_time(datetime.now(timezone.utc))
     if is_unusual:
         anomalies.append({
             'type': 'unusual_login_time',
             'severity': 'low',
             'reason': reason,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     # Check rapid login attempts
@@ -298,7 +298,7 @@ def check_login_anomalies(user_id: int, ip_address: str) -> List[Dict]:
             'type': 'rapid_login_attempts',
             'severity': 'high',
             'reason': reason,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     # Check impossible travel
@@ -308,7 +308,7 @@ def check_login_anomalies(user_id: int, ip_address: str) -> List[Dict]:
             'type': 'impossible_travel',
             'severity': 'critical',
             'reason': reason,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     # Check suspicious IP
@@ -318,7 +318,7 @@ def check_login_anomalies(user_id: int, ip_address: str) -> List[Dict]:
             'type': 'suspicious_ip',
             'severity': 'medium',
             'reason': reason,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     return anomalies
@@ -346,7 +346,7 @@ def check_upload_anomalies(user_id: int, file_size_bytes: int) -> List[Dict]:
             'severity': severity,
             'reason': reason,
             'file_size_mb': file_size_bytes / (1024 * 1024),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     return anomalies
@@ -371,7 +371,7 @@ def check_migration_anomalies(user_id: int) -> List[Dict]:
             'type': 'rapid_migrations',
             'severity': 'high',
             'reason': reason,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
 
     return anomalies

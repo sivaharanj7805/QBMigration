@@ -104,8 +104,8 @@ def health_check():
             health_status['data_residency_warning'] = f"Region '{aws_region}' does not meet Canadian data residency requirements. Must use '{REQUIRED_REGION}'."
     
     # Add timestamp
-    from datetime import datetime
-    health_status['timestamp'] = datetime.utcnow().isoformat()
+    from datetime import datetime, timezone
+    health_status['timestamp'] = datetime.now(timezone.utc).isoformat()
     
     # Return appropriate status code
     status_code = 200 if health_status['status'] == 'healthy' else 503
@@ -127,7 +127,7 @@ def detailed_health_check():
     
     health_status = {
         'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'checks': {}
     }
     
@@ -434,7 +434,7 @@ def compliance_check():
     from datetime import datetime
     
     compliance = {
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'data_residency': {
             'requirement': 'Canadian Data Residency',
             'region': current_app.config.get('AWS_REGION', 'not_configured'),

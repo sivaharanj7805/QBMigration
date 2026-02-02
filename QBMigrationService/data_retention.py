@@ -26,12 +26,12 @@ try:
     )
     
     CELERY_AVAILABLE = True
-    print("✅ Celery available - using production job queue")
+    logger.info("✅ Celery available - using production job queue")
     
 except ImportError:
     CELERY_AVAILABLE = False
     celery_app = None
-    print("⚠️  Celery not available - using fallback threading")
+    logger.info("⚠️  Celery not available - using fallback threading")
 
 
 # Celery task for deletion (only defined if Celery available)
@@ -57,7 +57,7 @@ if CELERY_AVAILABLE:
                     )
                     deleted_count += 1
                 except Exception as e:
-                    print(f"❌ Failed to delete {file_path}: {e}")
+                    logger.info(f"❌ Failed to delete {file_path}: {e}")
                     failed_count += 1
         
         return {
@@ -110,10 +110,10 @@ class DataRetentionManager:
                             # Job overdue, delete immediately
                             self._execute_deletion(job_data)
                 
-                print(f"✓ Resumed {len(self.deletion_jobs)} scheduled deletion jobs")
+                logger.info(f"✓ Resumed {len(self.deletion_jobs)} scheduled deletion jobs")
                 
             except Exception as e:
-                print(f"Warning: Could not load deletion jobs: {e}")
+                logger.info(f"Warning: Could not load deletion jobs: {e}")
     
     def _save_jobs(self):
         """Save deletion jobs to disk"""
@@ -132,7 +132,7 @@ class DataRetentionManager:
                 json.dump(jobs_data, f, indent=2)
                 
         except Exception as e:
-            print(f"Warning: Could not save deletion jobs: {e}")
+            logger.info(f"Warning: Could not save deletion jobs: {e}")
     
     def schedule_deletion(self, migration_id, file_paths, delay_hours=None):
         """
@@ -170,12 +170,12 @@ class DataRetentionManager:
                 task_id=f"deletion_{migration_id}"
             )
             
-            print(f"✓ Scheduled deletion via Celery in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
+            logger.info(f"✓ Scheduled deletion via Celery in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
         else:
             # Fallback to threading
             delay_seconds = delay_hours * 3600
             self._start_deletion_thread(job, delay_seconds)
-            print(f"✓ Scheduled deletion via threading in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
+            logger.info(f"✓ Scheduled deletion via threading in {delay_hours} hour(s) for {len(job['file_paths'])} file(s)")
         
         self.logger.log_security_event("DELETION_SCHEDULED", {
             "migration_id": migration_id,
@@ -221,7 +221,7 @@ class DataRetentionManager:
                     deleted_count += 1
                     
                 except Exception as e:
-                    print(f"❌ Failed to delete {file_path}: {e}")
+                    logger.info(f"❌ Failed to delete {file_path}: {e}")
                     failed_count += 1
                     
                     self.logger.log_security_event("DELETION_FAILED", {
@@ -237,10 +237,10 @@ class DataRetentionManager:
         
         self._save_jobs()
         
-        print(f"\n✓ Auto-deletion completed for migration {job['migration_id']}")
-        print(f"  Deleted: {deleted_count} files")
+        logger.info(f"\n✓ Auto-deletion completed for migration {job['migration_id']}")
+        logger.info(f"  Deleted: {deleted_count} files")
         if failed_count > 0:
-            print(f"  Failed: {failed_count} files")
+            logger.info(f"  Failed: {failed_count} files")
     
     def delete_immediately(self, migration_id, file_paths):
         """Delete files immediately (no delay)"""
@@ -254,10 +254,10 @@ class DataRetentionManager:
                 try:
                     EncryptionManager.secure_delete(file_path)
                     self.logger.log_deletion(migration_id, file_path)
-                    print(f"✓ Deleted: {os.path.basename(file_path)}")
+                    logger.info(f"✓ Deleted: {os.path.basename(file_path)}")
                     deleted_count += 1
                 except Exception as e:
-                    print(f"❌ Failed to delete {file_path}: {e}")
+                    logger.info(f"❌ Failed to delete {file_path}: {e}")
         
         return deleted_count
     
@@ -273,7 +273,7 @@ class DataRetentionManager:
         self._save_jobs()
         
         if cancelled_count > 0:
-            print(f"✓ Cancelled {cancelled_count} deletion job(s) for migration {migration_id}")
+            logger.info(f"✓ Cancelled {cancelled_count} deletion job(s) for migration {migration_id}")
             
             self.logger.log_security_event("DELETION_CANCELLED", {
                 "migration_id": migration_id,
@@ -318,6 +318,6 @@ class DataRetentionManager:
         
         if removed_count > 0:
             self._save_jobs()
-            print(f"✓ Cleaned up {removed_count} old deletion records")
+            logger.info(f"✓ Cleaned up {removed_count} old deletion records")
         
         return removed_count

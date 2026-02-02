@@ -1,7 +1,7 @@
 import logging
 from flask import current_app
 from flask_mail import Mail, Message
-from datetime import datetime
+from datetime import datetime, timezone
 from markupsafe import escape as html_escape
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ Security Alert: New Device Login
 We detected a login to your QB Migration account from a new device.
 
 IP Address: {safe_ip}
-Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC
 
 If this was you, you can safely ignore this email.
 
@@ -147,7 +147,7 @@ QB Migration Security Team
     <p>We detected a login to your QB Migration account from a new device.</p>
     <div style="background-color: #f3f4f6; padding: 15px; border-radius: 4px; margin: 20px 0;">
         <p style="margin: 5px 0;"><strong>IP Address:</strong> {safe_ip}</p>
-        <p style="margin: 5px 0;"><strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+        <p style="margin: 5px 0;"><strong>Time:</strong> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
     </div>
     <p><strong>If this was you,</strong> you can safely ignore this email.</p>
     <p><strong>If this wasn't you,</strong> please take immediate action:</p>
