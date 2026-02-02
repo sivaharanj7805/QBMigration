@@ -305,8 +305,19 @@ PORTAL_HTML = """
         <p>QuickBooks Archive Portal v1.0 | Data is read-only and audited</p>
     </div>
     <script>
-        const API_KEY = 'dev-key-changeme'; // Would be configurable in production
-        
+        // FIX CRIT-02: API key is now injected from server-side environment variable
+        // This prevents hardcoded credentials in frontend code
+        const API_KEY = '{{ api_key }}';
+
+        // FIX CRIT-03: HTML escaping function to prevent XSS attacks
+        // All user-controlled data must be escaped before inserting into DOM
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
+        }
+
         async function loadArchives() {
             const res = await fetch('/api/archives', { headers: { 'X-API-Key': API_KEY } });
             const data = await res.json();
@@ -339,14 +350,15 @@ PORTAL_HTML = """
                 return;
             }
             
+            // FIX CRIT-03: Use escapeHtml to prevent XSS from user-controlled data
             tbody.innerHTML = data.transactions.map(t => `
                 <tr>
-                    <td><span class="badge badge-${(t.type || '').toLowerCase()}">${t.type}</span></td>
-                    <td>${t.number || '-'}</td>
+                    <td><span class="badge badge-${escapeHtml((t.type || '').toLowerCase())}">${escapeHtml(t.type)}</span></td>
+                    <td>${escapeHtml(t.number) || '-'}</td>
                     <td>${t.date ? new Date(t.date).toLocaleDateString() : '-'}</td>
-                    <td>${t.entity || '-'}</td>
-                    <td>${t.memo || '-'}</td>
-                    <td class="amount">$${(t.amount || 0).toFixed(2)}</td>
+                    <td>${escapeHtml(t.entity) || '-'}</td>
+                    <td>${escapeHtml(t.memo) || '-'}</td>
+                    <td class="amount">$${(parseFloat(t.amount) || 0).toFixed(2)}</td>
                 </tr>
             `).join('');
         }
@@ -360,7 +372,9 @@ PORTAL_HTML = """
 @app.route('/')
 def portal():
     """Render the web portal."""
-    return render_template_string(PORTAL_HTML)
+    # FIX CRIT-02: Pass API key from environment variable to template
+    # This prevents hardcoded credentials and allows configuration per environment
+    return render_template_string(PORTAL_HTML, api_key=API_KEY)
 
 
 if __name__ == '__main__':
