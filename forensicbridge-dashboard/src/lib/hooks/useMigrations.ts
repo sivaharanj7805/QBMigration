@@ -64,8 +64,9 @@ export function useMigrations() {
 export function useBulkStatus(migrationIds?: string[]) {
     return useQuery({
         queryKey: ["bulk-status", migrationIds],
-        queryFn: async () => {
-            const result = await api.getBulkStatus(migrationIds);
+        // FIX: Accept signal parameter from React Query for proper abort handling on unmount
+        queryFn: async ({ signal }) => {
+            const result = await api.getBulkStatus(migrationIds, signal);
             if (!result.success) throw new Error(result.error);
             return result.data;
         },

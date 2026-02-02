@@ -123,9 +123,20 @@ def migration_started():
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
         # This ensures only one webhook handler can process the same migration at a time
-        migration = db.session.query(Migration).filter_by(
-            migration_id=migration_id
-        ).with_for_update(nowait=False).first()
+        # FIX: Use nowait=True to prevent indefinite blocking, with retry logic
+        try:
+            migration = db.session.query(Migration).filter_by(
+                migration_id=migration_id
+            ).with_for_update(nowait=True).first()
+        except Exception as lock_error:
+            # Row is locked by another process - this is expected under high concurrency
+            logger.warning(f"Migration {migration_id} is locked by another webhook handler, retrying...")
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': 'Migration is being processed by another request. Please retry.',
+                'retry_after': 1
+            }), 503
 
         if not migration:
             logger.error(f"Migration not found: {migration_id}")
@@ -216,9 +227,19 @@ def migration_progress():
         current_step = data.get('current_step', '')
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
-        migration = db.session.query(Migration).filter_by(
-            migration_id=migration_id
-        ).with_for_update(nowait=False).first()
+        # FIX: Use nowait=True to prevent indefinite blocking
+        try:
+            migration = db.session.query(Migration).filter_by(
+                migration_id=migration_id
+            ).with_for_update(nowait=True).first()
+        except Exception as lock_error:
+            logger.warning(f"Migration {migration_id} is locked, retrying...")
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': 'Migration is being processed by another request. Please retry.',
+                'retry_after': 1
+            }), 503
 
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
@@ -230,7 +251,7 @@ def migration_progress():
 
         # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
-        
+
         # Update progress
         migration.progress_percent = progress_percent
         migration.current_step = current_step[:255]
@@ -286,9 +307,19 @@ def migration_completed():
         results = data.get('results', {})
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
-        migration = db.session.query(Migration).filter_by(
-            migration_id=migration_id
-        ).with_for_update(nowait=False).first()
+        # FIX: Use nowait=True to prevent indefinite blocking
+        try:
+            migration = db.session.query(Migration).filter_by(
+                migration_id=migration_id
+            ).with_for_update(nowait=True).first()
+        except Exception as lock_error:
+            logger.warning(f"Migration {migration_id} is locked, retrying...")
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': 'Migration is being processed by another request. Please retry.',
+                'retry_after': 1
+            }), 503
 
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
@@ -300,7 +331,7 @@ def migration_completed():
 
         # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
-        
+
         # Mark as completed
         migration.mark_as_completed(results)
         
@@ -365,9 +396,19 @@ def migration_failed():
         error_code = data.get('error_code', 'UNKNOWN_ERROR')
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
-        migration = db.session.query(Migration).filter_by(
-            migration_id=migration_id
-        ).with_for_update(nowait=False).first()
+        # FIX: Use nowait=True to prevent indefinite blocking
+        try:
+            migration = db.session.query(Migration).filter_by(
+                migration_id=migration_id
+            ).with_for_update(nowait=True).first()
+        except Exception as lock_error:
+            logger.warning(f"Migration {migration_id} is locked, retrying...")
+            db.session.rollback()
+            return jsonify({
+                'success': False,
+                'error': 'Migration is being processed by another request. Please retry.',
+                'retry_after': 1
+            }), 503
 
         if not migration:
             return jsonify({'success': False, 'error': 'Migration not found'}), 404
@@ -379,7 +420,7 @@ def migration_failed():
 
         # Mark processed (atomic with the lock)
         migration.mark_webhook_processed(webhook_id)
-        
+
         # Mark as failed
         migration.mark_as_failed(error_message, error_code)
         

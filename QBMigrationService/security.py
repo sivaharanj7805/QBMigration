@@ -4,9 +4,13 @@ import secrets
 import pyotp
 import re
 import time
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 import threading
+
+# FIX: Use proper logging instead of print statements
+logger = logging.getLogger(__name__)
 
 # AUDIT FIX: Module-level lock to prevent race condition in rate limiter initialization
 _rate_limit_init_lock = threading.Lock()
@@ -122,19 +126,19 @@ class SecurityManager:
                 flask_env = os.getenv('FLASK_ENV', 'development')
 
                 if flask_env == 'production':
-                    print(f"CRITICAL: Redis rate limiting failed in production: {e}")
-                    print("   Denying request - fail-closed security policy")
+                    logger.critical(f"Redis rate limiting failed in production: {e}")
+                    logger.critical("Denying request - fail-closed security policy")
                     return False  # Fail-closed in production
 
                 # Development only: fallback to local store
-                print(f"⚠️  Redis rate limiting failed: {e}")
-                print("   Falling back to local rate limiting (development only)")
+                logger.warning(f"Redis rate limiting failed: {e}")
+                logger.warning("Falling back to local rate limiting (development only)")
 
         # Fallback: In-memory rate limiting (DEVELOPMENT ONLY - single instance)
         import os
         if os.getenv('FLASK_ENV', 'development') == 'production':
             # CRIT-12 FIX: Never use in-memory fallback in production
-            print("CRITICAL: In-memory rate limiting not allowed in production")
+            logger.critical("In-memory rate limiting not allowed in production")
             return False
 
         # AUDIT FIX: Thread-safe rate limit store initialization with double-checked locking
@@ -186,9 +190,9 @@ class SecurityManager:
         Returns:
             Dict with 'warnings', 'errors', 'should_proceed'
         """
-        print("\n" + "=" * 80)
-        print("  PRE-MIGRATION SCAN")
-        print("=" * 80)
+        logger.info("=" * 80)
+        logger.info("  PRE-MIGRATION SCAN")
+        logger.info("=" * 80)
         
         scan_result = {
             'warnings': [],
@@ -198,99 +202,99 @@ class SecurityManager:
         }
         
         # Check 1: DisplayName uniqueness across entities
-        print("\n[1/6] Checking for naming collisions...")
+        logger.info("[1/6] Checking for naming collisions...")
         name_collisions = SecurityManager._check_name_collisions(data)
-        
+
         if name_collisions:
             scan_result['errors'].append(
                 f"Found {len(name_collisions)} naming collisions that will cause migration to fail"
             )
             scan_result['should_proceed'] = False
-            
-            print(f"  ❌ Found {len(name_collisions)} naming collisions:")
+
+            logger.error(f"Found {len(name_collisions)} naming collisions:")
             for collision in name_collisions[:5]:
-                print(f"     - {collision}")
-            
+                logger.error(f"  - {collision}")
+
             if len(name_collisions) > 5:
-                print(f"     ... and {len(name_collisions) - 5} more")
+                logger.error(f"  ... and {len(name_collisions) - 5} more")
         else:
-            print("  ✅ No naming collisions")
+            logger.info("No naming collisions")
         
         # Check 2: Duplicate DocNumbers
-        print("\n[2/6] Checking for duplicate DocNumbers...")
+        logger.info("[2/6] Checking for duplicate DocNumbers...")
         duplicate_docs = SecurityManager._check_duplicate_doc_numbers(data)
-        
+
         if duplicate_docs:
             scan_result['warnings'].append(
                 f"Found {len(duplicate_docs)} duplicate invoice numbers"
             )
-            print(f"  ⚠️  Found {len(duplicate_docs)} duplicate DocNumbers")
+            logger.warning(f"Found {len(duplicate_docs)} duplicate DocNumbers")
         else:
-            print("  ✅ No duplicate DocNumbers")
-        
+            logger.info("No duplicate DocNumbers")
+
         # Check 3: Invalid characters
-        print("\n[3/6] Checking for invalid characters...")
+        logger.info("[3/6] Checking for invalid characters...")
         invalid_chars = SecurityManager._check_invalid_characters(data)
-        
+
         if invalid_chars:
             scan_result['warnings'].append(
                 f"Found {len(invalid_chars)} names with invalid characters (will be sanitized)"
             )
-            print(f"  ⚠️  Found {len(invalid_chars)} names with invalid characters")
+            logger.warning(f"Found {len(invalid_chars)} names with invalid characters")
         else:
-            print("  ✅ No invalid characters")
-        
+            logger.info("No invalid characters")
+
         # Check 4: Data size warnings
-        print("\n[4/6] Checking data volume...")
+        logger.info("[4/6] Checking data volume...")
         size_warnings = SecurityManager._check_data_size(data)
-        
+
         for warning in size_warnings:
             scan_result['warnings'].append(warning)
-            print(f"  ⚠️  {warning}")
-        
+            logger.warning(warning)
+
         if not size_warnings:
-            print("  ✅ Data volume is reasonable")
-        
+            logger.info("Data volume is reasonable")
+
         # Check 5: Inactive records with zero balances
-        print("\n[5/6] Checking for cleanable records...")
+        logger.info("[5/6] Checking for cleanable records...")
         cleanable = SecurityManager._check_cleanable_records(data)
-        
+
         if cleanable['count'] > 0:
             scan_result['recommendations'].append(
                 f"Consider removing {cleanable['count']} inactive records with zero balances to speed up migration"
             )
-            print(f"  💡 Found {cleanable['count']} inactive records that could be removed")
+            logger.info(f"Found {cleanable['count']} inactive records that could be removed")
         else:
-            print("  ✅ No unnecessary records found")
-        
+            logger.info("No unnecessary records found")
+
         # Check 6: Multi-user mode detection
-        print("\n[6/6] Checking file status...")
+        logger.info("[6/6] Checking file status...")
         if data.get('IsMultiUserMode'):
             scan_result['errors'].append(
                 "QuickBooks file is in Multi-user mode. Close all other connections before migration."
             )
             scan_result['should_proceed'] = False
-            print("  ❌ File is in Multi-user mode")
+            logger.error("File is in Multi-user mode")
         else:
-            print("  ✅ File is in single-user mode")
-        
-        # Print summary
-        print("\n" + "=" * 80)
-        print("  SCAN SUMMARY")
-        print("=" * 80)
-        print(f"  Errors: {len(scan_result['errors'])}")
-        print(f"  Warnings: {len(scan_result['warnings'])}")
-        print(f"  Recommendations: {len(scan_result['recommendations'])}")
-        
+            logger.info("File is in single-user mode")
+
+        # Log summary
+        logger.info("=" * 80)
+        logger.info("  SCAN SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Errors: {len(scan_result['errors'])}")
+        logger.info(f"Warnings: {len(scan_result['warnings'])}")
+        logger.info(f"Recommendations: {len(scan_result['recommendations'])}")
+
         if scan_result['should_proceed']:
-            print("\n  ✅ PRE-MIGRATION SCAN PASSED")
+            logger.info("PRE-MIGRATION SCAN PASSED")
         else:
-            print("\n  ❌ PRE-MIGRATION SCAN FAILED")
-            print("\n  Please fix the following errors before proceeding:")
+            logger.error("PRE-MIGRATION SCAN FAILED")
+            logger.error("Please fix the following errors before proceeding:")
             for error in scan_result['errors']:
-                print(f"    - {error}")
-        
-        print("=" * 80 + "\n")
+                logger.error(f"  - {error}")
+
+        logger.info("=" * 80)
         
         return scan_result
     
@@ -470,8 +474,8 @@ class SecurityManager:
                 has_required = required in actual_scopes
                 
                 if not has_required:
-                    print(f"❌ Missing required OAuth scope: {required}")
-                    print(f"   Available scopes: {actual_scopes}")
+                    logger.error(f"Missing required OAuth scope: {required}")
+                    logger.error(f"Available scopes: {actual_scopes}")
                 
                 return has_required, actual_scopes
             
