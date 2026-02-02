@@ -971,11 +971,28 @@ class QBDataTransformer:
         # Trial balance tracking
         # FIX #5: Handle negative balances correctly
         # AUDIT FIX: Use lock for thread-safe trial balance updates
+        # AUDIT FIX: Added all QB account types to ensure correct trial balance calculation
         balance = self.to_decimal(qbd.get('Balance', 0))
         abs_balance = abs(balance)
-        is_debit_type = qbo['AccountType'] in {'Bank', 'Accounts Receivable', 'Other Current Assets',
-                                   'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
-                                   'Expense', 'Other Expense'}
+
+        # COMPREHENSIVE: All QB debit-normal account types per accounting standards
+        # Assets: Increase with debits, decrease with credits
+        # Expenses: Increase with debits, decrease with credits
+        DEBIT_NORMAL_ACCOUNT_TYPES = {
+            'Bank',
+            'Accounts Receivable',
+            'Other Current Assets',
+            'Fixed Assets',
+            'Other Assets',
+            'Cost of Goods Sold',
+            'Expense',
+            'Other Expense',
+            # AUDIT FIX: Missing account types that are debit-normal
+            'Inventory',              # Asset - debit normal
+            'Prepaid Expenses',       # Asset - debit normal (non-standard but used)
+            'Undeposited Funds',      # Asset - debit normal
+        }
+        is_debit_type = qbo['AccountType'] in DEBIT_NORMAL_ACCOUNT_TYPES
 
         with self._trial_balance_lock:
             if is_debit_type:
