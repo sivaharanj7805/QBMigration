@@ -68,11 +68,15 @@ export function useDebouncedValue<T>(value: T, delay: number = 300): T {
 /**
  * Debounced Callback Hook
  * Creates a debounced version of a callback function
+ *
+ * MEDIUM FIX: Corrected generic type signature to avoid circular reference
+ * Original: T extends (...args: Parameters<T>) => ReturnType<T> (circular)
+ * Fixed: Use explicit Args and R generic parameters
  */
-export function useDebouncedCallback<T extends (...args: Parameters<T>) => ReturnType<T>>(
-    callback: T,
+export function useDebouncedCallback<Args extends unknown[], R>(
+    callback: (...args: Args) => R,
     delay: number = 300
-): (...args: Parameters<T>) => void {
+): (...args: Args) => void {
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
@@ -84,7 +88,7 @@ export function useDebouncedCallback<T extends (...args: Parameters<T>) => Retur
     }, []);
 
     return useCallback(
-        (...args: Parameters<T>) => {
+        (...args: Args) => {
             if (timeoutRef.current) {
                 clearTimeout(timeoutRef.current);
             }
