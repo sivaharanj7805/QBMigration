@@ -81,7 +81,7 @@ class EncryptionManager:
             logger.error(f"Failed to save key metadata: {e}")
             raise
 
-    def _load_or_generate_keys(self) -> Tuple[any, str]:
+    def _load_or_generate_keys(self) -> Tuple[Any, str]:
         """Load existing RSA keys or generate new ones with versioning."""
         metadata = self._load_key_metadata()
 
@@ -109,7 +109,7 @@ class EncryptionManager:
         # Generate new keys with versioning
         return self._generate_new_keypair()
 
-    def _generate_new_keypair(self, is_rotation: bool = False) -> Tuple[any, str]:
+    def _generate_new_keypair(self, is_rotation: bool = False) -> Tuple[Any, str]:
         """Generate a new RSA-4096 key pair with versioning."""
         logger.info("Generating new RSA-4096 key pair (this may take a moment)...")
 

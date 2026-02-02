@@ -234,27 +234,32 @@ class MigrationCredit(db.Model):
         Returns the smallest credit that can handle the transaction count,
         or None if no suitable credit is available.
 
-        CRIT-01 FIX: Added lock_for_update parameter to prevent race conditions
-        during credit consumption. When True, uses SELECT FOR UPDATE to ensure
-        atomic credit allocation.
+        RACE CONDITION FIX: When lock_for_update=True, locks rows BEFORE filtering
+        to prevent TOCTOU race conditions where another transaction could change
+        the status between check and use.
 
         Args:
             user_id: User ID
             transaction_count: Number of transactions to process
             lock_for_update: If True, lock the row for update (use within transaction)
         """
-        # Build base query
-        query = cls.query.filter_by(
-            user_id=user_id,
-            status='available',
-            payment_status='paid'
-        )
-
-        # CRIT-01 FIX: Apply row-level lock if requested
         if lock_for_update:
-            query = query.with_for_update(skip_locked=True)
+            # RACE CONDITION FIX: Lock ALL user's credits first, then filter
+            # This prevents another transaction from grabbing the same credit
+            # between our SELECT and UPDATE
+            query = cls.query.filter_by(user_id=user_id).with_for_update(skip_locked=True)
+            all_credits = query.all()
 
-        available = query.all()
+            # Now filter to available/paid credits (already locked)
+            available = [c for c in all_credits
+                         if c.status == 'available' and c.payment_status == 'paid']
+        else:
+            # No locking - simple query
+            available = cls.query.filter_by(
+                user_id=user_id,
+                status='available',
+                payment_status='paid'
+            ).all()
 
         # Filter to credits that can handle the transaction count
         suitable = [c for c in available if c.can_handle_transactions(transaction_count)]

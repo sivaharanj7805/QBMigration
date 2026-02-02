@@ -846,7 +846,146 @@ class QBDataTransformer:
             # FIX #1: Specific exceptions instead of bare except
             logger.warning(f"Could not convert '{value}' to Decimal: {e}")
             return Decimal('0')
-    
+
+    def to_positive_decimal(self, value: Any, field_name: str, precision: int = 2) -> Decimal:
+        """
+        Convert to Decimal and validate that it's non-negative.
+
+        AUDIT FIX SVC-01: Validates quantities and amounts are not negative.
+
+        Args:
+            value: Value to convert
+            field_name: Name of field (for logging)
+            precision: Decimal places
+
+        Returns:
+            Decimal (non-negative, defaults to 0 if negative)
+        """
+        result = self.to_decimal(value, precision)
+        if result < 0:
+            logger.warning(
+                f"Negative value '{value}' in {field_name} - using absolute value. "
+                f"Negative quantities/amounts may indicate data issues."
+            )
+            return abs(result)
+        return result
+
+    def validate_quantity(self, value: Any, entity_type: str, entity_name: str) -> Decimal:
+        """
+        Validate and convert quantity, rejecting truly invalid values.
+
+        AUDIT FIX SVC-01: Proper quantity validation.
+
+        Args:
+            value: Quantity value
+            entity_type: Type of entity (for logging)
+            entity_name: Name of entity (for logging)
+
+        Returns:
+            Valid Decimal quantity (defaults to 1 if invalid)
+        """
+        qty = self.to_decimal(value, precision=4)
+
+        if qty == 0:
+            # Zero quantity is suspicious for line items
+            logger.warning(
+                f"Zero quantity in {entity_type} '{entity_name}' - defaulting to 1"
+            )
+            return Decimal('1')
+
+        if qty < 0:
+            # Negative quantities are only valid for credit memos/refunds
+            if entity_type.lower() in ('creditmemo', 'refundreceipt', 'vendorcredit'):
+                return qty  # Allow negative for credit transactions
+            else:
+                logger.warning(
+                    f"Negative quantity {qty} in {entity_type} '{entity_name}' - "
+                    f"using absolute value"
+                )
+                self.add_manual_review(
+                    entity_type=entity_type,
+                    name=entity_name,
+                    reason=f"Negative quantity ({qty}) converted to positive"
+                )
+                return abs(qty)
+
+        return qty
+
+    def validate_payment_amount(self, value: Any, entity_type: str, entity_name: str) -> Decimal:
+        """
+        Validate payment amount is positive.
+
+        AUDIT FIX SVC-05: Payment amounts should always be positive.
+        Negative payments should be credit memos or refunds instead.
+
+        Args:
+            value: Payment amount
+            entity_type: Type of payment entity
+            entity_name: Name/reference for logging
+
+        Returns:
+            Valid positive Decimal amount
+        """
+        amount = self.to_decimal(value)
+
+        if amount < 0:
+            logger.warning(
+                f"Negative payment amount {amount} in {entity_type} '{entity_name}' - "
+                f"this may need to be a CreditMemo or RefundReceipt instead"
+            )
+            self.add_manual_review(
+                entity_type=entity_type,
+                name=entity_name,
+                reason=f"Negative payment amount ({amount}) - verify if this should be a credit/refund"
+            )
+            # Convert to positive for processing, but flag for review
+            return abs(amount)
+
+        if amount == 0:
+            logger.warning(
+                f"Zero payment amount in {entity_type} '{entity_name}' - "
+                f"payment will be recorded but may need review"
+            )
+
+        return amount
+
+    def validate_tax_code(self, tax_code_ref: Any, line_description: str) -> str:
+        """
+        Validate and map tax code reference.
+
+        AUDIT FIX SVC-03: Proper tax code validation instead of defaulting to 'NON'.
+
+        Args:
+            tax_code_ref: Tax code reference from source
+            line_description: Description of line item (for logging)
+
+        Returns:
+            Valid tax code string
+        """
+        if not tax_code_ref:
+            # No tax code provided - default to NON (non-taxable)
+            return 'NON'
+
+        # Try to map the tax code
+        mapped_code = self.map_id('tax_codes', tax_code_ref)
+
+        if mapped_code:
+            return mapped_code
+
+        # Tax code not found in mapping - log warning and add to manual review
+        logger.warning(
+            f"Unknown tax code '{tax_code_ref}' for line '{line_description}' - "
+            f"defaulting to 'TAX'. Verify tax configuration in QBO."
+        )
+        self.add_manual_review(
+            entity_type='TaxCode',
+            name=str(tax_code_ref),
+            reason=f"Tax code not mapped - used for line: {line_description}"
+        )
+        # Default to 'TAX' (taxable) rather than 'NON' to be conservative
+        # This ensures tax is collected when there's ambiguity
+        return 'TAX'
+
     def map_id(self, entity_type: str, qbd_id: Any) -> Optional[str]:
         """Map QB Desktop ID to QB Online ID."""
         if not qbd_id:
@@ -1348,13 +1487,17 @@ class QBDataTransformer:
         for line in qbd.get('InvoiceLines', []):
             item_id = self.map_id('items', line.get('ItemRef'))
             if item_id:  # Only add lines with valid item refs
-                tax_code = self.map_id('tax_codes', line.get('TaxCodeRef')) or 'NON'
+                # AUDIT FIX SVC-03: Better tax code validation
+                line_desc = line.get('Description', f'Invoice {doc_number} line')
+                tax_code = self.validate_tax_code(line.get('TaxCodeRef'), line_desc)
+                # AUDIT FIX SVC-01: Validate quantity
+                validated_qty = self.validate_quantity(line.get('Quantity', 1), 'Invoice', doc_number)
                 qbo_line = {
                     'DetailType': 'SalesItemLineDetail',
                     'Amount': self.to_decimal(line.get('Amount', 0)),
                     'SalesItemLineDetail': {
                         'ItemRef': {'value': item_id},
-                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'Qty': validated_qty,
                         'UnitPrice': self.to_decimal(line.get('Rate', 0)),
                         'TaxCodeRef': {'value': tax_code}
                     }
@@ -1733,9 +1876,10 @@ class QBDataTransformer:
             self.stats['total_skipped'] += 1
             return None
 
+        # AUDIT FIX SVC-05: Validate payment amount is positive
         qbo = {
             'CustomerRef': {'value': customer_id},
-            'TotalAmt': self.to_decimal(qbd.get('TotalAmount', 0)),
+            'TotalAmt': self.validate_payment_amount(qbd.get('TotalAmount', 0), 'Payment', ref_number),
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
