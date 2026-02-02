@@ -273,12 +273,35 @@ def auto_migrate_database(app):
 
 def create_app(config_name='development'):
     """Application factory pattern - creates and configures Flask app"""
-    
+
     app = Flask(__name__)
 
     # Load configuration (FIX: removed duplicate config loading)
     config_class = config[config_name]
     app.config.from_object(config_class)
+
+    # PRODUCTION FIX: Add ProxyFix middleware for proper handling behind ALB/nginx
+    # This ensures Flask correctly interprets X-Forwarded-* headers from the proxy:
+    # - X-Forwarded-For: Original client IP
+    # - X-Forwarded-Proto: Original protocol (https)
+    # - X-Forwarded-Host: Original host header
+    # Without this, SESSION_COOKIE_SECURE=True fails because Flask thinks requests are HTTP
+    if config_name == 'production' or os.getenv('BEHIND_PROXY', 'false').lower() == 'true':
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        # x_for=1: Trust 1 proxy for X-Forwarded-For (client IP)
+        # x_proto=1: Trust 1 proxy for X-Forwarded-Proto (https detection)
+        # x_host=1: Trust 1 proxy for X-Forwarded-Host
+        # x_port=1: Trust 1 proxy for X-Forwarded-Port
+        # x_prefix=1: Trust 1 proxy for X-Forwarded-Prefix
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=1,
+            x_proto=1,
+            x_host=1,
+            x_port=1,
+            x_prefix=1
+        )
+        logger.info("ProxyFix middleware enabled for production (trusting proxy headers)")
 
     # Initialize config-specific setup
     if hasattr(config_class, 'init_app'):
@@ -464,7 +487,8 @@ def create_app(config_name='development'):
     CORS(app,
          supports_credentials=True,
          origins=allowed_origins,
-         allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature'],
+         allow_headers=['Content-Type', 'Authorization', 'X-Migration-Id', 'X-Webhook-Signature', 'X-CSRF-Token'],
+         expose_headers=['X-CSRF-Token'],  # Allow frontend to read CSRF token from response headers
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
          max_age=3600)  # Cache preflight for 1 hour (reduces OPTIONS requests)
     app.logger.info(f'CORS enabled for origins: {allowed_origins}')
