@@ -163,7 +163,9 @@ export default function MigrationDetailPage() {
                     try {
                         const errorData = await response.json();
                         if (errorData.error) {
-                            errorMessage = errorData.error;
+                            // SECURITY FIX: Sanitize error messages from API to prevent XSS
+                            // API errors could be user-influenced or from compromised server
+                            errorMessage = sanitize.text(String(errorData.error));
                         }
                     } catch {
                         // Response wasn't JSON

@@ -5,6 +5,7 @@ Provides RSA key management for hybrid encryption with QBDesktopReader v3.1+
 
 import os
 import logging
+import threading
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
@@ -13,6 +14,8 @@ import base64
 logger = logging.getLogger(__name__)
 
 _encryption_manager = None
+# THREAD SAFETY FIX: Add lock for singleton initialization
+_encryption_manager_lock = threading.Lock()
 
 
 class EncryptionManager:
@@ -160,8 +163,23 @@ class EncryptionManager:
 
 
 def get_encryption_manager():
-    """Get or create singleton encryption manager"""
+    """
+    Get or create singleton encryption manager (thread-safe)
+
+    THREAD SAFETY FIX: Uses double-check locking pattern to ensure
+    thread-safe singleton initialization in multi-threaded environments
+    (Gunicorn workers, uWSGI, etc.)
+    """
     global _encryption_manager
-    if _encryption_manager is None:
-        _encryption_manager = EncryptionManager()
+
+    # Fast path: check without lock (most common case)
+    if _encryption_manager is not None:
+        return _encryption_manager
+
+    # Slow path: acquire lock and double-check
+    with _encryption_manager_lock:
+        # Double-check inside lock (another thread may have initialized)
+        if _encryption_manager is None:
+            _encryption_manager = EncryptionManager()
+
     return _encryption_manager

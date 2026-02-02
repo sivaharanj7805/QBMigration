@@ -57,7 +57,8 @@ namespace QBDesktopExtractor
 
             // Calculate hash
             string fileHash = await CalculateHashAsync(filePath, cancellationToken);
-            _logger?.Log(LogLevel.Info, "File hash: {0}", fileHash.Substring(0, 16) + "...");
+            // SECURITY FIX: Use Math.Min to prevent IndexOutOfRangeException on short hashes
+            _logger?.Log(LogLevel.Info, "File hash: {0}", fileHash.Substring(0, Math.Min(16, fileHash.Length)) + "...");
 
             // Use multipart for files > 100MB
             if (fileInfo.Length > 100 * 1024 * 1024)
