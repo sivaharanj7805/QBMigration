@@ -30,6 +30,8 @@ class Migration(db.Model):
         db.Index('idx_migration_user_status_created', 'user_id', 'status', 'created_at'),
         db.Index('idx_migration_cleanup', 'cleanup_completed', 'status'),
         db.Index('idx_migration_file_hash', 'user_id', 'file_hash'),
+        # FIX CRIT-01: Index for session_id to support project-migration queries
+        db.Index('idx_migration_session_id', 'session_id'),
     )
 
     # Primary identifiers
@@ -37,7 +39,12 @@ class Migration(db.Model):
     migration_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
     # FIX #48: CASCADE delete migrations when user is deleted (GDPR compliance)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
-    
+
+    # Project linkage - session_id links to Project.session_id
+    # FIX CRIT-01: Added session_id column to link migrations to projects
+    # This field is used by api/projects.py and api/file_upload.py to associate migrations with projects
+    session_id = db.Column(db.String(50), index=True)  # References Project.session_id (not FK for flexibility)
+
     # Company info (metadata only)
     company_name = db.Column(db.String(255))
     qb_file_name = db.Column(db.String(255))
