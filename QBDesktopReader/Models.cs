@@ -1253,12 +1253,49 @@ namespace QBDesktopExtractor
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("payeeEntityRefFullName")] public string PayeeEntityRefFullName { get; set; }
         [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("accountRefFullName")] public string AccountRefFullName { get; set; }
         [JsonProperty("amount")] public decimal? Amount { get; set; }
         [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("clearedStatus")] public string ClearedStatus { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("expenseLines")] public List<QBCreditCardCreditExpenseLine> ExpenseLines { get; set; } = new List<QBCreditCardCreditExpenseLine>();
+        [JsonProperty("itemLines")] public List<QBCreditCardCreditItemLine> ItemLines { get; set; } = new List<QBCreditCardCreditItemLine>();
+    }
+
+    public class QBCreditCardCreditExpenseLine
+    {
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("accountRefFullName")] public string AccountRefFullName { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("classRefFullName")] public string ClassRefFullName { get; set; }
+        [JsonProperty("billableStatus")] public string BillableStatus { get; set; }
+    }
+
+    public class QBCreditCardCreditItemLine
+    {
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("desc")] public string Desc { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("cost")] public decimal? Cost { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("classRefFullName")] public string ClassRefFullName { get; set; }
+        [JsonProperty("billableStatus")] public string BillableStatus { get; set; }
     }
 
     public class QBCharge
@@ -1301,13 +1338,43 @@ namespace QBDesktopExtractor
     public class QBItemReceipt
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
         [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
         [JsonProperty("apAccountRefListId")] public string APAccountRefListID { get; set; }
-        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("apAccountRefFullName")] public string APAccountRefFullName { get; set; }
         [JsonProperty("memo")] public string Memo { get; set; }
+        [JsonProperty("subtotal")] public decimal? Subtotal { get; set; }
+        [JsonProperty("salesTaxTotal")] public decimal? SalesTaxTotal { get; set; }
+        [JsonProperty("totalAmount")] public decimal? TotalAmount { get; set; }
+        [JsonProperty("linkToTxnId")] public string LinkToTxnID { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("expenseLines")] public List<QBItemReceiptLine> ExpenseLines { get; set; } = new List<QBItemReceiptLine>();
+        [JsonProperty("itemLines")] public List<QBItemReceiptLine> ItemLines { get; set; } = new List<QBItemReceiptLine>();
+    }
+
+    public class QBItemReceiptLine
+    {
+        [JsonProperty("txnLineId")] public string TxnLineID { get; set; }
+        [JsonProperty("itemRefListId")] public string ItemRefListID { get; set; }
+        [JsonProperty("itemRefFullName")] public string ItemRefFullName { get; set; }
+        [JsonProperty("accountRefListId")] public string AccountRefListID { get; set; }
+        [JsonProperty("accountRefFullName")] public string AccountRefFullName { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+        [JsonProperty("quantity")] public decimal? Quantity { get; set; }
+        [JsonProperty("unitOfMeasure")] public string UnitOfMeasure { get; set; }
+        [JsonProperty("cost")] public decimal? Cost { get; set; }
+        [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("customerRefListId")] public string CustomerRefListID { get; set; }
+        [JsonProperty("customerRefFullName")] public string CustomerRefFullName { get; set; }
+        [JsonProperty("classRefListId")] public string ClassRefListID { get; set; }
+        [JsonProperty("classRefFullName")] public string ClassRefFullName { get; set; }
+        [JsonProperty("billableStatus")] public string BillableStatus { get; set; }
+        [JsonProperty("lotNumber")] public string LotNumber { get; set; }
+        [JsonProperty("serialNumber")] public string SerialNumber { get; set; }
     }
 
     public class QBBuildAssembly
@@ -1377,12 +1444,22 @@ namespace QBDesktopExtractor
     public class QBBillPaymentCreditCard
     {
         [JsonProperty("txnId")] public string TxnID { get; set; }
+        [JsonProperty("refNumber")] public string RefNumber { get; set; }
         [JsonProperty("txnDate")] public DateTime? TxnDate { get; set; }
-        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get; set; }
+        [JsonProperty("vendorRefListId")] public string VendorRefListID { get; set; }
+        [JsonProperty("vendorRefFullName")] public string VendorRefFullName { get; set; }
+        // PayeeEntityRef is same as VendorRef for bill payments
+        [JsonProperty("payeeEntityRefListId")] public string PayeeEntityRefListID { get => VendorRefListID; set => VendorRefListID = value; }
+        [JsonProperty("apAccountRefListId")] public string APAccountRefListID { get; set; }
+        [JsonProperty("apAccountRefFullName")] public string APAccountRefFullName { get; set; }
         [JsonProperty("creditCardAccountRefListId")] public string CreditCardAccountRefListID { get; set; }
+        [JsonProperty("creditCardAccountRefFullName")] public string CreditCardAccountRefFullName { get; set; }
         [JsonProperty("amount")] public decimal? Amount { get; set; }
+        [JsonProperty("memo")] public string Memo { get; set; }
         [JsonProperty("timeCreated")] public DateTime? TimeCreated { get; set; }
         [JsonProperty("timeModified")] public DateTime? TimeModified { get; set; }
+        [JsonProperty("editSequence")] public string EditSequence { get; set; }
+        [JsonProperty("linkedTransactions")] public List<QBLinkedTxn> LinkedTransactions { get; set; } = new List<QBLinkedTxn>();
     }
 
     public class QBSalesTaxPaymentCheck

@@ -2313,8 +2313,9 @@ class QBDataTransformer:
         Transform InventoryTransfer (between sites/locations).
         QBO doesn't have multi-location inventory in all plans.
         """
-        from_site = qbd.get('FromInventorySiteRef', 'Unknown')
-        to_site = qbd.get('ToInventorySiteRef', 'Unknown')
+        # After normalization, fields are FromInventorySiteRef and ToInventorySiteRef
+        from_site = qbd.get('FromInventorySiteRef') or qbd.get('FromInventorySiteRefFullName', 'Unknown')
+        to_site = qbd.get('ToInventorySiteRef') or qbd.get('ToInventorySiteRefFullName', 'Unknown')
 
         qbo = {
             '_qbd_entity': 'InventoryTransfer',
@@ -2424,9 +2425,10 @@ class QBDataTransformer:
             'Line': []
         }
 
-        # Add vendor if present
-        if qbd.get('PayeeEntityRef'):
-            vendor_id = self.map_id('vendors', qbd['PayeeEntityRef'])
+        # Add vendor if present (could be PayeeEntityRef or VendorRef)
+        payee_ref = qbd.get('PayeeEntityRef') or qbd.get('VendorRef')
+        if payee_ref:
+            vendor_id = self.map_id('vendors', payee_ref)
             if vendor_id:
                 qbo['VendorRef'] = {'value': vendor_id}
 
@@ -2577,9 +2579,9 @@ class QBDataTransformer:
             'Line': []
         }
 
-        # Add deposit account if present
-        if qbd.get('ARAccountRef'):
-            ar_id = self.map_id('accounts', qbd['ARAccountRef'])
+        # Add deposit account if present (RefundFromAccountRef in QBD)
+        if qbd.get('RefundFromAccountRef'):
+            ar_id = self.map_id('accounts', qbd['RefundFromAccountRef'])
             if ar_id:
                 qbo['DepositToAccountRef'] = {'value': ar_id}
 
@@ -2590,13 +2592,15 @@ class QBDataTransformer:
         Transform BillPaymentCreditCard (paying bill with credit card).
         Maps to: QBO BillPayment with PayType='CreditCard'.
         """
-        vendor_id = self.map_id('vendors', qbd.get('PayeeEntityRef'))
+        # Check both PayeeEntityRef and VendorRef (normalization creates VendorRef)
+        payee_ref = qbd.get('PayeeEntityRef') or qbd.get('VendorRef')
+        vendor_id = self.map_id('vendors', payee_ref)
 
         if not vendor_id:
             self.add_manual_review(
                 entity_type='BillPaymentCreditCard',
                 name=f"CC Bill Payment {qbd.get('TxnDate', 'Unknown')}",
-                reason="Missing PayeeEntityRef (vendor)"
+                reason="Missing PayeeEntityRef/VendorRef (vendor)"
             )
             self.stats['total_skipped'] += 1
             return None
@@ -2620,10 +2624,13 @@ class QBDataTransformer:
 
         # Link to bills being paid
         for applied in qbd.get('AppliedToBills', []):
-            bill_id = self.map_id('bills', applied.get('BillRef'))
+            # After normalization: TxnID is the bill reference, PaymentAmount is the amount
+            bill_ref = applied.get('BillRef') or applied.get('TxnID')
+            payment_amt = applied.get('Amount') or applied.get('PaymentAmount', 0)
+            bill_id = self.map_id('bills', bill_ref)
             if bill_id:
                 qbo['Line'].append({
-                    'Amount': self.to_decimal(applied.get('Amount', 0)),
+                    'Amount': self.to_decimal(payment_amt),
                     'LinkedTxn': [{
                         'TxnId': bill_id,
                         'TxnType': 'Bill'

@@ -149,8 +149,14 @@ FIELD_MAP = {
     'salesRepRefFullName': 'SalesRepRefFullName',
     'shipMethodRefListId': 'ShipMethodRef',
     'shipMethodRefFullName': 'ShipMethodRefFullName',
-    'priceLeveRefListId': 'PriceLevelRef',
+    'priceLevelRefListId': 'PriceLevelRef',
     'priceLevelRefFullName': 'PriceLevelRefFullName',
+    'fromInventorySiteRefListId': 'FromInventorySiteRef',
+    'fromInventorySiteRefFullName': 'FromInventorySiteRefFullName',
+    'toInventorySiteRefListId': 'ToInventorySiteRef',
+    'toInventorySiteRefFullName': 'ToInventorySiteRefFullName',
+    'refundFromAccountRefListId': 'RefundFromAccountRef',
+    'refundFromAccountRefFullName': 'RefundFromAccountRefFullName',
 
     # Common fields
     'name': 'Name',
@@ -183,6 +189,8 @@ FIELD_MAP = {
     'purchaseCost': 'PurchaseCost',
     'qtyOnHand': 'QtyOnHand',
     'reorderPoint': 'ReorderPoint',
+    'priceLevelPercentage': 'PriceLevelPercentage',
+    'priceLevelType': 'PriceLevelType',
 
     # Reference number fields
     'refNumber': 'RefNumber',
@@ -257,6 +265,15 @@ FIELD_MAP = {
     'itemLines': 'ItemLines',
     'invoiceLines': 'InvoiceLines',
     'journalLines': 'JournalLines',
+    'linkedTransactions': 'AppliedToBills',  # BillPayment linked txns → AppliedToBills
+    'linkToTxnId': 'LinkToTxnID',
+    'subtotal': 'Subtotal',
+    'salesTaxTotal': 'SalesTaxTotal',
+    'clearedStatus': 'ClearedStatus',
+    'unitOfMeasure': 'UnitOfMeasure',
+    'lotNumber': 'LotNumber',
+    'serialNumber': 'SerialNumber',
+    'linkAmount': 'PaymentAmount',  # LinkedTxn amount → PaymentAmount
 
     # Address fields
     'billAddress': 'BillAddress',
@@ -301,6 +318,11 @@ LINE_FIELD_MAP = {
     'isBillable': 'IsBillable',
     'billableStatus': 'BillableStatus',
     'journalLineType': 'JournalLineType',  # 'Debit' or 'Credit'
+    # LinkedTxn fields (for AppliedToBills)
+    'txnId': 'BillRef',  # In linked txns, txnId is the bill reference
+    'txnType': 'TxnType',
+    'linkAmount': 'Amount',  # Rename linkAmount to Amount for consistency
+    'appliedAmount': 'Amount',
 }
 
 
