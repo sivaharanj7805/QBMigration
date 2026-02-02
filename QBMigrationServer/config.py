@@ -1,9 +1,13 @@
 import os
+import logging
 from datetime import timedelta
 import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Initialize logger at module level before Config class uses it
+logger = logging.getLogger(__name__)
 
 
 class Config:
