@@ -372,6 +372,58 @@ def detailed_health_check():
             'message': f'Could not check circuit breakers: {str(e)}'
         }
 
+    # FIX: Redis Cache Health Check
+    try:
+        redis_url = os.getenv('REDIS_URL') or current_app.config.get('REDIS_URL')
+        if redis_url:
+            import redis
+            redis_client = redis.from_url(redis_url, socket_connect_timeout=5)
+
+            # Ping test
+            redis_client.ping()
+
+            # Get basic info
+            info = redis_client.info('server')
+            memory_info = redis_client.info('memory')
+
+            health_status['checks']['redis'] = {
+                'status': 'pass',
+                'connected': True,
+                'version': info.get('redis_version', 'unknown'),
+                'used_memory_human': memory_info.get('used_memory_human', 'unknown'),
+                'connected_clients': redis_client.info('clients').get('connected_clients', 0)
+            }
+        else:
+            health_status['checks']['redis'] = {
+                'status': 'info',
+                'configured': False,
+                'message': 'Redis URL not configured'
+            }
+    except redis.exceptions.ConnectionError as e:
+        health_status['checks']['redis'] = {
+            'status': 'fail',
+            'connected': False,
+            'message': f'Connection failed: {str(e)}'
+        }
+        health_status['status'] = 'degraded'
+    except redis.exceptions.TimeoutError:
+        health_status['checks']['redis'] = {
+            'status': 'fail',
+            'connected': False,
+            'message': 'Connection timeout'
+        }
+        health_status['status'] = 'degraded'
+    except ImportError:
+        health_status['checks']['redis'] = {
+            'status': 'skipped',
+            'message': 'Redis library not installed'
+        }
+    except Exception as e:
+        health_status['checks']['redis'] = {
+            'status': 'unknown',
+            'message': f'Could not check Redis: {str(e)}'
+        }
+
     # FIX: Database Pool Status (SQLAlchemy connection pool)
     try:
         from sqlalchemy import pool as sa_pool
