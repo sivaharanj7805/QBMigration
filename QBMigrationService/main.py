@@ -24,8 +24,12 @@ Version: 3.2.0 (Enterprise Security Edition)
 import os
 import sys
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+
+# Initialize logger at module level
+logger = logging.getLogger(__name__)
 
 # Import all modules
 from config import (
@@ -36,7 +40,7 @@ from config import (
 from encryption import EncryptionManager
 from data_transformer import QBDataTransformer
 from qbo_client import QBOClient
-from verifier import MigrationVerifier
+from verifier import PremiumMigrationVerifier
 from audit_logger import AuditLogger
 from security import SecurityManager, SecurityError
 from data_retention import DataRetentionManager
@@ -279,7 +283,7 @@ class MigrationOrchestrator:
 
             # CRITICAL FIX: Wrap verification in try/except
             try:
-                verifier = MigrationVerifier(qbo_client)
+                verifier = PremiumMigrationVerifier(qbo_client)
                 verification = verifier.verify_migration(
                     transformed_data['entities'],
                     upload_result,

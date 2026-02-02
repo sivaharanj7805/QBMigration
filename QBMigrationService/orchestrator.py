@@ -6,15 +6,16 @@ QBMigrationService functionality without needing to import individual modules.
 
 Usage:
     from orchestrator import MigrationOrchestrator
-    
+
     orchestrator = MigrationOrchestrator(
         qbo_client_id="...",
         qbo_client_secret="...",
         qbo_refresh_token="...",
         realm_id="...",
-        logger.info(f"{pct}%: {msg}")
+        qbo_environment="sandbox",
+        progress_callback=lambda pct, msg: print(f"{pct}%: {msg}")
     )
-    
+
     result = orchestrator.run_migration(encrypted_data, encryption_metadata)
 """
 
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from oauth_manager import OAuthManager
     from qbo_client import PremiumQBOClient
     from data_transformer import QBDataTransformer
-    from verifier import MigrationVerifier
+    from verifier import PremiumMigrationVerifier
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -105,12 +106,18 @@ class MigrationOrchestrator:
         """Initialize OAuth manager"""
         if self._oauth_manager is None:
             from oauth_manager import OAuthManager
+            from pathlib import Path
+            import config as svc_config
+
+            # Get OAuth URLs from config module
             self._oauth_manager = OAuthManager(
                 client_id=self.qbo_client_id,
                 client_secret=self.qbo_client_secret,
                 refresh_token=self.qbo_refresh_token,
-                realm_id=self.realm_id,
-                environment=self.qbo_environment
+                oauth_token_url=svc_config.OAUTH_TOKEN_URL,
+                oauth_introspect_url=svc_config.OAUTH_INTROSPECT_URL,
+                oauth_revoke_url=svc_config.OAUTH_REVOKE_URL,
+                data_dir=Path(svc_config.DATA_DIR)
             )
         return self._oauth_manager
 
@@ -118,10 +125,13 @@ class MigrationOrchestrator:
         """Initialize QBO client with token"""
         if self._qbo_client is None:
             from qbo_client import PremiumQBOClient
+            import config as svc_config
+
+            # Build base_url from config (includes realm_id)
             self._qbo_client = PremiumQBOClient(
                 access_token=access_token,
-                realm_id=self.realm_id,
-                environment=self.qbo_environment
+                base_url=svc_config.BASE_URL,
+                db_path=str(svc_config.DATA_DIR / "migration_state.db")
             )
         return self._qbo_client
 
@@ -132,11 +142,11 @@ class MigrationOrchestrator:
             self._transformer = QBDataTransformer()
         return self._transformer
 
-    def _init_verifier(self, qbo_client: 'PremiumQBOClient') -> 'MigrationVerifier':
+    def _init_verifier(self, qbo_client: 'PremiumQBOClient') -> 'PremiumMigrationVerifier':
         """Initialize migration verifier"""
         if self._verifier is None:
-            from verifier import MigrationVerifier
-            self._verifier = MigrationVerifier(qbo_client)
+            from verifier import PremiumMigrationVerifier
+            self._verifier = PremiumMigrationVerifier(qbo_client)
         return self._verifier
     
     def run_migration(
@@ -236,9 +246,13 @@ class MigrationOrchestrator:
             
             # Step 5: Verify migration (85-95%)
             self._report_progress(85, "Verifying migration")
-            
+
             verifier = self._init_verifier(qbo_client)
-            verification_result = verifier.verify_all(data, entities_migrated)
+            verification_result = verifier.verify_migration(
+                entities=data,
+                upload_result={'successful': sum(entities_migrated.values()), 'failed': 0},
+                oauth_manager=oauth_mgr
+            )
             
             # Step 6: Complete (100%)
             self._report_progress(100, "Migration complete")
