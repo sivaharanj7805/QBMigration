@@ -141,6 +141,8 @@ class Config:
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=int(os.getenv('SESSION_TIMEOUT_HOURS', '24')))
     SESSION_COOKIE_NAME = 'qb_session'
+    # FIX: Allow SESSION_COOKIE_DOMAIN from environment for cross-subdomain auth
+    SESSION_COOKIE_DOMAIN = os.getenv('SESSION_COOKIE_DOMAIN', None)
     
     # Rate Limiting
     RATELIMIT_ENABLED = True
