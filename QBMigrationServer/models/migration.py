@@ -340,12 +340,15 @@ class Migration(db.Model):
                     db.session.commit()
                     raise ValueError(error_msg)
 
-            # If no trial balance provided, require it for completion
-            elif results and not results.get('skip_trial_balance_check'):
+            # CRITICAL SECURITY FIX: Trial balance verification is MANDATORY
+            # Removed skip_trial_balance_check flag - forensic integrity cannot be bypassed
+            # If no trial balance data provided, migration MUST fail
+            elif results and 'trial_balance' not in results:
                 error_msg = (
                     "Trial balance verification data missing. "
                     "Forensic migration requires trial balance reconciliation. "
-                    "Migration cannot be marked complete without verification."
+                    "Migration cannot be marked complete without verification. "
+                    "This is a MANDATORY forensic requirement and cannot be bypassed."
                 )
                 self.status = 'failed'
                 self.set_error_message(error_msg)

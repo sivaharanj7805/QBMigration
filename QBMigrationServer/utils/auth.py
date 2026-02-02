@@ -23,10 +23,11 @@ def verified_required(f):
     def decorated_function(*args, **kwargs):
         if not current_user.is_authenticated:
             return jsonify({'error': 'Authentication required'}), 401
-        
-        if not current_user.is_verified:
+
+        # CRIT-01 FIX: User model has 'email_verified' not 'is_verified'
+        if not current_user.email_verified:
             return jsonify({'error': 'Email verification required'}), 403
-        
+
         return f(*args, **kwargs)
-    
+
     return decorated_function

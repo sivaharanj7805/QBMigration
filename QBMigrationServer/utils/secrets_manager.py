@@ -16,6 +16,7 @@ import os
 import json
 import logging
 import time
+import threading
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ SECRETS_CACHE_TTL_SECONDS = int(os.getenv('SECRETS_CACHE_TTL_SECONDS', '300'))  
 # Global cache storage with TTL support
 _secrets_cache: Dict[str, Any] = {}
 _secrets_cache_timestamp: float = 0
+# THREAD SAFETY FIX: Add lock for cache access in multi-threaded environments
+_secrets_cache_lock = threading.Lock()
 
 
 class SecretsManagerError(Exception):
@@ -66,13 +69,16 @@ def get_all_secrets(secret_name: Optional[str] = None, force_refresh: bool = Fal
     Uses caching to avoid repeated API calls. Cache expires after SECRETS_CACHE_TTL_SECONDS
     to support secret rotation. Use force_refresh=True to bypass cache.
 
+    THREAD SAFETY FIX: Uses lock for thread-safe cache access in multi-threaded
+    environments (Gunicorn workers, etc.)
+
     Args:
         secret_name: Name of the secret in Secrets Manager.
                      Defaults to SECRETS_MANAGER_NAME env var or 'forensicbridge/production'.
         force_refresh: If True, bypass cache and fetch fresh secrets.
 
     Returns:
-        Dictionary of secret key-value pairs.
+        Dictionary of secret key-value pairs (copy to prevent external modification).
 
     Raises:
         SecretsManagerError: If secrets cannot be retrieved.
@@ -84,11 +90,14 @@ def get_all_secrets(secret_name: Optional[str] = None, force_refresh: bool = Fal
         logger.info("Development mode: Using environment variables instead of Secrets Manager")
         return _get_env_secrets()
 
-    # Check if cached secrets are still valid (TTL-based)
-    if not force_refresh and _is_cache_valid():
-        cache_age = time.time() - _secrets_cache_timestamp
-        logger.debug(f"Using cached secrets (age: {cache_age:.1f}s, TTL: {SECRETS_CACHE_TTL_SECONDS}s)")
-        return _secrets_cache
+    # THREAD SAFETY FIX: Use lock for cache check and update
+    with _secrets_cache_lock:
+        # Check if cached secrets are still valid (TTL-based)
+        if not force_refresh and _is_cache_valid():
+            cache_age = time.time() - _secrets_cache_timestamp
+            logger.debug(f"Using cached secrets (age: {cache_age:.1f}s, TTL: {SECRETS_CACHE_TTL_SECONDS}s)")
+            # Return copy to prevent external modification of cache
+            return _secrets_cache.copy()
 
     secret_name = secret_name or os.getenv(
         'SECRETS_MANAGER_NAME',
@@ -104,15 +113,17 @@ def get_all_secrets(secret_name: Optional[str] = None, force_refresh: bool = Fal
         if 'SecretString' in response:
             secrets = json.loads(response['SecretString'])
 
-            # Update cache with TTL
-            _secrets_cache = secrets
-            _secrets_cache_timestamp = time.time()
+            # THREAD SAFETY FIX: Use lock for cache update
+            with _secrets_cache_lock:
+                _secrets_cache.clear()
+                _secrets_cache.update(secrets)
+                _secrets_cache_timestamp = time.time()
 
             logger.info(
                 f"Successfully loaded {len(secrets)} secrets from Secrets Manager "
                 f"(cache TTL: {SECRETS_CACHE_TTL_SECONDS}s)"
             )
-            return secrets
+            return secrets.copy()  # Return copy to prevent external modification
         else:
             # Binary secret
             raise SecretsManagerError("Binary secrets not supported")
