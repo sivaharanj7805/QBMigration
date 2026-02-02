@@ -74,12 +74,12 @@ def _validate_session_binding() -> Tuple[bool, str]:
     return True, ''
 
 
-def _bind_session():
+def _bind_session() -> None:
     """
     Bind the current session to browser fingerprints for security.
     Call this when creating a new authenticated session.
     """
-    logger.info()
+    logger.info("Binding new session to browser fingerprint")
     session['_created_at'] = datetime.datetime.now(timezone.utc).isoformat()
 
 
