@@ -4,6 +4,30 @@ import { Download, FileSpreadsheet, Package, CheckCircle2, Loader2, AlertCircle 
 import { useState } from "react";
 import { api } from "@/lib/api";
 
+/**
+ * FIX: Sanitize filename to remove/replace characters invalid in filenames
+ * Prevents issues with special characters in company names breaking downloads
+ */
+function sanitizeFilename(name: string): string {
+    if (!name) return "Company";
+
+    // Remove or replace characters that are invalid in filenames (Windows/Mac/Linux)
+    // Invalid chars: / \ : * ? " < > |
+    let sanitized = name
+        .replace(/[/\\:*?"<>|]/g, "_")  // Replace invalid chars with underscore
+        .replace(/\s+/g, "_")            // Replace whitespace with underscore
+        .replace(/_+/g, "_")             // Collapse multiple underscores
+        .replace(/^_+|_+$/g, "");        // Trim leading/trailing underscores
+
+    // Limit length to 100 characters to prevent filename issues
+    if (sanitized.length > 100) {
+        sanitized = sanitized.substring(0, 100);
+    }
+
+    // Ensure we have a valid filename
+    return sanitized || "Company";
+}
+
 interface CasewareBundleCardProps {
     migrationId: string;
     companyName: string;
@@ -44,10 +68,11 @@ export function CasewareBundleCard({
             }
 
             // Step 3: Trigger browser download
+            // FIX: Sanitize company name for safe filename
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `${companyName}_CasewareBundle.zip`;
+            a.download = `${sanitizeFilename(companyName)}_CasewareBundle.zip`;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
