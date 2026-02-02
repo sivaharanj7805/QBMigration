@@ -18,18 +18,20 @@ class TeamInvite(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    owner_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    
+    # GDPR FIX: CASCADE delete invites when owner is deleted
+    owner_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+
     # Invite details
     email = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default='member')  # member, admin
     invite_token = db.Column(db.String(64), unique=True)
-    
+
     # Status tracking
     status = db.Column(db.String(50), default='pending')  # pending, accepted, expired, cancelled
-    
+
     # When accepted, this links to the user who accepted
-    accepted_user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    # GDPR FIX: SET NULL when accepted user is deleted (preserve invite history without PII)
+    accepted_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

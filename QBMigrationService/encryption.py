@@ -238,23 +238,26 @@ class EncryptionManager:
             raise ValueError(f"Decryption failed: {e}")
     
     @staticmethod
-    def verify_data_integrity(plaintext: str, expected_hash: Optional[str], allow_legacy: bool = True) -> bool:
+    def verify_data_integrity(plaintext: str, expected_hash: Optional[str], allow_legacy: bool = False) -> bool:
         """
         $25M FIX: Verify data integrity using SHA-256 hash
 
         This MUST be called after decryption and BEFORE transformation.
 
+        SECURITY FIX: Changed default to allow_legacy=False for fail-safe behavior.
+        Callers must explicitly opt-in to legacy mode for backwards compatibility.
+
         Args:
             plaintext: Decrypted data
             expected_hash: Expected SHA-256 hash from source
-            allow_legacy: If True, allow data without hash (legacy data). Default True.
+            allow_legacy: If True, allow data without hash (legacy data). Default FALSE.
 
         Returns:
             True if hash matches or no hash provided (legacy with allow_legacy=True)
 
         Raises:
             ValueError: If hash verification fails (HARD ABORT)
-            ValueError: If no hash provided and allow_legacy=False
+            ValueError: If no hash provided and allow_legacy=False (default)
         """
         import logging
         logger = logging.getLogger(__name__)
