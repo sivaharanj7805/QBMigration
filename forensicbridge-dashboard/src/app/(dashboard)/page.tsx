@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
     Upload,
     FileSpreadsheet,
@@ -73,11 +73,15 @@ function isValidQBFile(fileName: string): boolean {
 
 /**
  * Format date for display
+ * MEDIUM FIX: Added check for Invalid Date to handle malformed date strings
  */
 function formatDate(isoDate: string | null): string {
     if (!isoDate) return "--";
     try {
         const date = new Date(isoDate);
+        // MEDIUM FIX: Check for Invalid Date (NaN time value)
+        // new Date('invalid') creates a Date object but with NaN time value
+        if (isNaN(date.getTime())) return "--";
         return date.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
@@ -171,6 +175,16 @@ export default function DashboardHome() {
     const [loading, setLoading] = useState(true);
     const [apiConnected, setApiConnected] = useState<boolean | null>(null);
 
+    // HIGH FIX: Mounted ref to prevent state updates after component unmounts
+    // This prevents React memory leak warnings and potential errors
+    const isMountedRef = useRef(true);
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
     // Check API connection on mount
     useEffect(() => {
         checkApiConnection();
@@ -187,10 +201,16 @@ export default function DashboardHome() {
                 signal: controller.signal,
             });
             clearTimeout(timeoutId);
-            setApiConnected(response.ok);
+            // HIGH FIX: Check if mounted before setting state to prevent memory leaks
+            if (isMountedRef.current) {
+                setApiConnected(response.ok);
+            }
         } catch {
             clearTimeout(timeoutId);
-            setApiConnected(false);
+            // HIGH FIX: Check if mounted before setting state to prevent memory leaks
+            if (isMountedRef.current) {
+                setApiConnected(false);
+            }
         }
     };
 
@@ -199,8 +219,11 @@ export default function DashboardHome() {
         try {
             // Fetch stats
             const statsResponse = await authFetch(`${API_URL}/api/migrations/stats`);
+            // HIGH FIX: Check if mounted before setting state to prevent memory leaks
+            if (!isMountedRef.current) return;
             if (statsResponse.ok) {
                 const statsData = await statsResponse.json();
+                if (!isMountedRef.current) return;
                 if (statsData.success) {
                     setStats(statsData.stats);
                 }
@@ -208,8 +231,11 @@ export default function DashboardHome() {
 
             // Fetch recent migrations
             const migrationsResponse = await authFetch(`${API_URL}/api/migrations?per_page=5`);
+            // HIGH FIX: Check if mounted before setting state to prevent memory leaks
+            if (!isMountedRef.current) return;
             if (migrationsResponse.ok) {
                 const migrationsData = await migrationsResponse.json();
+                if (!isMountedRef.current) return;
                 if (migrationsData.success) {
                     interface ApiMigration {
                         id?: string;
@@ -240,7 +266,10 @@ export default function DashboardHome() {
                 console.error("Failed to fetch dashboard data");
             }
         } finally {
-            setLoading(false);
+            // HIGH FIX: Check if mounted before setting loading state
+            if (isMountedRef.current) {
+                setLoading(false);
+            }
         }
     };
 
