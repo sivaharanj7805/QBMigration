@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Users, Mail, UserPlus, Crown, User, X, Loader2 } from 'lucide-react';
+import { authFetch } from '@/lib/auth';
 
 // API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -37,12 +38,8 @@ export function TeamManagement() {
 
     const loadTeamData = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/auth/team`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
+            // SECURITY FIX: Use authFetch for proper CSRF token and httpOnly cookie handling
+            const response = await authFetch(`${API_URL}/api/auth/team`);
 
             if (response.ok) {
                 const data = await response.json();
@@ -70,13 +67,9 @@ export function TeamManagement() {
         setInviting(true);
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/auth/team/invite`, {
+            // SECURITY FIX: Use authFetch for proper CSRF token and httpOnly cookie handling
+            const response = await authFetch(`${API_URL}/api/auth/team/invite`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
                 body: JSON.stringify({
                     email: inviteEmail,
                     role: inviteRole
