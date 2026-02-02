@@ -2640,6 +2640,218 @@ class QBDataTransformer:
         return qbo
 
     # ========================================================================
+    # BATCH 7: REMAINING ENTITY TRANSFORMS (14 additional for 100% coverage)
+    # ========================================================================
+
+    def transform_buildassembly(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform BuildAssembly (manufacturing assembly items).
+        QBO doesn't have BuildAssembly - store for manual inventory adjustment.
+        """
+        return {
+            '_qbd_entity': 'BuildAssembly',
+            'TxnID': qbd.get('TxnID', ''),
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'RefNumber': qbd.get('RefNumber', ''),
+            'ItemInventoryAssemblyRef': qbd.get('ItemInventoryAssemblyRef', ''),
+            'QuantityToBuild': self.to_decimal(qbd.get('QuantityToBuild', 0)),
+            '_migration_note': 'BuildAssembly not supported in QBO - adjust inventory manually'
+        }
+
+    def transform_companyactivity(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform CompanyActivity (summary statistics).
+        Used for migration validation, not imported to QBO.
+        """
+        return {
+            '_qbd_entity': 'CompanyActivity',
+            'TotalCustomers': qbd.get('TotalCustomers', 0),
+            'TotalVendors': qbd.get('TotalVendors', 0),
+            'TotalItems': qbd.get('TotalItems', 0),
+            'TotalInvoices': qbd.get('TotalInvoices', 0),
+            'OldestTxnDate': self.format_date(qbd.get('OldestTxnDate')),
+            'NewestTxnDate': self.format_date(qbd.get('NewestTxnDate')),
+            '_migration_note': 'CompanyActivity used for validation only'
+        }
+
+    def transform_dataextension(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform DataExtension (custom fields).
+        QBO has limited custom field support - store for reference.
+        """
+        return {
+            '_qbd_entity': 'DataExtension',
+            'EntityType': qbd.get('EntityType', ''),
+            'EntityID': qbd.get('EntityID', ''),
+            'FieldName': qbd.get('FieldName', ''),
+            'FieldValue': qbd.get('FieldValue', ''),
+            'DataType': qbd.get('DataType', ''),
+            '_migration_note': 'Custom fields require manual setup in QBO'
+        }
+
+    def transform_datedriventerm(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform DateDrivenTerm (payment terms based on date).
+        Maps to: QBO Term with date-based settings.
+        """
+        return {
+            'Name': qbd.get('Name', ''),
+            'Active': qbd.get('IsActive', True),
+            'Type': 'DATE_DRIVEN',
+            'DayOfMonthDue': qbd.get('DayOfMonthDue', 0),
+            'DueNextMonthDays': qbd.get('DueNextMonthDays', 0),
+            '_migration_note': 'DateDrivenTerm - verify date logic in QBO'
+        }
+
+    def transform_deletedrecords(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform DeletedRecords (audit trail of deletions).
+        Not imported to QBO - used for forensic audit trail only.
+        """
+        records = qbd.get('Records', [])
+        return {
+            '_qbd_entity': 'DeletedRecords',
+            'TotalDeleted': len(records),
+            'Records': [{
+                'Type': r.get('TxnDelType') or r.get('ListDelType', ''),
+                'ID': r.get('TxnID') or r.get('ListID', ''),
+                'RefNumber': r.get('RefNumber', ''),
+                'FullName': r.get('FullName', ''),
+                'TimeDeleted': self.format_date(r.get('TimeDeleted'))
+            } for r in records],
+            '_migration_note': 'DeletedRecords for audit trail only - not imported to QBO'
+        }
+
+    def transform_inventorysite(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform InventorySite (warehouse/location).
+        QBO Plus/Advanced has Locations - map accordingly.
+        """
+        return {
+            'Name': qbd.get('Name', ''),
+            'Active': qbd.get('IsActive', True),
+            'Description': qbd.get('Description', ''),
+            'IsDefaultSite': qbd.get('IsDefaultSite', False),
+            '_migration_note': 'Map to QBO Location (Plus/Advanced plans only)'
+        }
+
+    def transform_lead(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform Lead (potential customer).
+        QBO doesn't have Leads - convert to Customer with status note.
+        """
+        display_name = self.ensure_unique_display_name(
+            qbd.get('Name') or f"{qbd.get('FirstName', '')} {qbd.get('LastName', '')}".strip(),
+            'Lead'
+        )
+        return {
+            'DisplayName': display_name,
+            'CompanyName': qbd.get('CompanyName', ''),
+            'GivenName': qbd.get('FirstName', ''),
+            'FamilyName': qbd.get('LastName', ''),
+            'PrimaryPhone': {'FreeFormNumber': qbd.get('Phone', '')} if qbd.get('Phone') else None,
+            'PrimaryEmailAddr': {'Address': qbd.get('Email', '')} if qbd.get('Email') else None,
+            'Notes': f"Lead Status: {qbd.get('Status', 'Unknown')} - Converted from QBD Lead",
+            '_migration_note': 'Lead converted to Customer in QBO'
+        }
+
+    def transform_othername(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform OtherName (general name not customer/vendor/employee).
+        QBO doesn't have OtherName - store for reference.
+        """
+        return {
+            '_qbd_entity': 'OtherName',
+            'Name': qbd.get('Name', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'CompanyName': qbd.get('CompanyName', ''),
+            'Phone': qbd.get('Phone', ''),
+            'Email': qbd.get('Email', ''),
+            '_migration_note': 'OtherName not supported in QBO - classify as Customer or Vendor'
+        }
+
+    def transform_payrollitemwage(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform PayrollItemWage (wage types).
+        QBO Payroll has different wage item structure.
+        """
+        return {
+            '_qbd_entity': 'PayrollItemWage',
+            'Name': qbd.get('Name', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'WageType': qbd.get('WageType', ''),
+            '_migration_note': 'PayrollItemWage requires manual setup in QBO Payroll'
+        }
+
+    def transform_payrollitemnonwage(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform PayrollItemNonWage (deductions, additions, company contributions).
+        QBO Payroll has different structure for these items.
+        """
+        return {
+            '_qbd_entity': 'PayrollItemNonWage',
+            'Name': qbd.get('Name', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'NonWageType': qbd.get('NonWageType', ''),
+            '_migration_note': 'PayrollItemNonWage requires manual setup in QBO Payroll'
+        }
+
+    def transform_preferences(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform Preferences (company settings).
+        Used to configure QBO settings - not directly imported.
+        """
+        return {
+            '_qbd_entity': 'Preferences',
+            'MultiCurrencyEnabled': qbd.get('MultiCurrencyEnabled', False),
+            'HomeCurrency': qbd.get('HomeCurrency', 'USD'),
+            'FiscalYearStartMonth': qbd.get('FiscalYearStartMonth', 1),
+            'InventoryEnabled': qbd.get('InventoryEnabled', False),
+            '_migration_note': 'Preferences used to configure QBO settings'
+        }
+
+    def transform_reportverification(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform ReportVerification (balance verification data).
+        Used for migration validation - not imported to QBO.
+        """
+        return {
+            '_qbd_entity': 'ReportVerification',
+            'VerifiedAt': self.format_date(qbd.get('VerifiedAt')),
+            'BalanceSheet': qbd.get('BalanceSheet', {}),
+            'ProfitLoss': qbd.get('ProfitLoss', {}),
+            '_migration_note': 'ReportVerification for audit validation only'
+        }
+
+    def transform_salesrep(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform SalesRep.
+        QBO doesn't have separate SalesRep entity - uses Employees or custom fields.
+        """
+        return {
+            '_qbd_entity': 'SalesRep',
+            'Initial': qbd.get('Initial', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'SalesRepEntityRef': qbd.get('SalesRepEntityRef', ''),
+            'SalesRepEntityRefFullName': qbd.get('SalesRepEntityRefFullName', ''),
+            '_migration_note': 'SalesRep linked to Employee/Vendor - set up team members in QBO'
+        }
+
+    def transform_workerscompcode(self, qbd: Dict) -> Optional[Dict]:
+        """
+        Transform WorkersCompCode (workers compensation codes).
+        QBO Payroll handles workers comp differently.
+        """
+        return {
+            '_qbd_entity': 'WorkersCompCode',
+            'Name': qbd.get('Name', ''),
+            'IsActive': qbd.get('IsActive', True),
+            'Description': qbd.get('Description', ''),
+            'CurrentRate': self.to_decimal(qbd.get('CurrentRate', 0), 4),
+            '_migration_note': 'WorkersCompCode requires manual setup in QBO Payroll'
+        }
+
+    # ========================================================================
     # CASEWARE MODE: AUDIT BUNDLE GENERATION
     # ========================================================================
 
