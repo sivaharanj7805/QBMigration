@@ -85,15 +85,19 @@ def process_migration(self, db_id):
                 migration.progress_percent = 100
             else:
                 migration.status = 'failed'
-                migration.error_message = result.get('error', 'Unknown error')
-            
+                # CRITICAL FIX: Use set_error_message() to encrypt error data
+                # Direct assignment bypasses encryption and could leak sensitive QB data
+                migration.set_error_message(result.get('error', 'Unknown error'))
+
             db.session.commit()
             return result
-            
+
         except Exception as e:
             logger.exception(f"Fatal error in worker for migration {db_id}: {str(e)}")
             migration.status = 'failed'
-            migration.error_message = str(e)
+            # CRITICAL FIX: Use set_error_message() to encrypt error data
+            # Direct assignment bypasses encryption and could leak sensitive QB data
+            migration.set_error_message(str(e))
             db.session.commit()
             
             if self.request.retries < self.max_retries:

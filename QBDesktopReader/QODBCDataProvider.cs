@@ -317,15 +317,24 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Account";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
                 {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
                     {
                         while (await Task.Run(() => reader.Read(), ct))
@@ -401,14 +410,25 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Customer";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
+                {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
+
                 {
                     cmd.CommandTimeout = 300; // 5 minutes for large datasets
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
@@ -518,14 +538,25 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Vendor";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
+                {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
+
                 {
                     cmd.CommandTimeout = 300;
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
@@ -603,14 +634,25 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Employee";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
+                {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
+
                 {
                     cmd.CommandTimeout = 300;
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
@@ -762,15 +804,24 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Class";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
                 {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
                     {
                         while (await Task.Run(() => reader.Read(), ct))
@@ -1033,14 +1084,25 @@ namespace QBDesktopExtractor
                     TimeCreated, TimeModified, EditSequence
                 FROM Invoice";
 
-            if (modifiedSince.HasValue)
+            // HIGH FIX: Use parameterized query instead of string interpolation
+            // While DateTime formatting is safe, using parameters is best practice
+            // and prevents potential issues if this pattern is copied for user input
+            var useModifiedFilter = modifiedSince.HasValue;
+            if (useModifiedFilter)
             {
-                sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                sql += " WHERE TimeModified >= ?";
             }
 
             try
             {
                 using (var cmd = new OdbcCommand(sql, _connection))
+                {
+                    // HIGH FIX: Use OdbcParameter for type-safe query
+                    if (useModifiedFilter)
+                    {
+                        cmd.Parameters.AddWithValue("@modifiedSince", modifiedSince.Value);
+                    }
+
                 {
                     cmd.CommandTimeout = 600;
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))

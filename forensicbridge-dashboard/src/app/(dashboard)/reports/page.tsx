@@ -14,6 +14,9 @@ import {
     Loader2,
     FileX
 } from "lucide-react";
+// CRITICAL SECURITY FIX: Import authFetch instead of using localStorage tokens
+// authFetch uses httpOnly cookies via credentials: 'include' which prevents XSS token theft
+import { authFetch } from "@/lib/auth";
 
 // Types
 interface Report {
@@ -76,11 +79,9 @@ export default function ReportsPage() {
         setDownloadingId(reportId);
         setDownloadError(null);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/reports/${reportId}/download`, {
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
+            // CRITICAL SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage tokens
+            // localStorage tokens are vulnerable to XSS attacks - httpOnly cookies are not
+            const response = await authFetch(`${API_URL}/api/reports/${reportId}/download`);
 
             if (response.ok) {
                 const blob = await response.blob();
@@ -124,11 +125,9 @@ export default function ReportsPage() {
         setLoading(true);
         setError(null);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/reports`, {
-                credentials: 'include',
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            });
+            // CRITICAL SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage tokens
+            // localStorage tokens are vulnerable to XSS attacks - httpOnly cookies are not
+            const response = await authFetch(`${API_URL}/api/reports`);
             if (response.ok) {
                 const data = await response.json();
                 setReports(data.reports || []);
@@ -370,14 +369,10 @@ export default function ReportsPage() {
                                         onClick={async () => {
                                             setShowGenerateModal(false);
                                             try {
-                                                const token = localStorage.getItem('token');
-                                                const response = await fetch(`${API_URL}/api/reports/generate`, {
+                                                // CRITICAL SECURITY FIX: Use authFetch with httpOnly cookies instead of localStorage tokens
+                                                // localStorage tokens are vulnerable to XSS attacks - httpOnly cookies are not
+                                                const response = await authFetch(`${API_URL}/api/reports/generate`, {
                                                     method: 'POST',
-                                                    credentials: 'include',
-                                                    headers: {
-                                                        'Content-Type': 'application/json',
-                                                        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                                                    },
                                                     body: JSON.stringify({ type: type.type }),
                                                 });
                                                 if (response.ok) {
