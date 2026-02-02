@@ -49,6 +49,8 @@ export function WhitelabelPreview({
     const [previewLogo, setPreviewLogo] = useState<string | null>(config.logo_url);
     const [isPreviewMode, setIsPreviewMode] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    // FIX: Add error state for logo upload validation instead of using alert()
+    const [logoError, setLogoError] = useState<string | null>(null);
 
     /**
      * Resize image to maximum dimensions while maintaining aspect ratio.
@@ -94,9 +96,13 @@ export function WhitelabelPreview({
     const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            // Clear any previous error
+            setLogoError(null);
+
             // Validate file size (max 2MB)
             if (file.size > 2 * 1024 * 1024) {
-                alert('Image file must be less than 2MB');
+                // FIX: Use state-based error instead of alert()
+                setLogoError('Image file must be less than 2MB');
                 return;
             }
 
@@ -211,6 +217,12 @@ export function WhitelabelPreview({
                                 <p className="text-xs text-gray-500 mt-1">
                                     PNG, JPG up to 2MB. Recommended: 200x200px
                                 </p>
+                                {/* FIX: Display logo upload error message */}
+                                {logoError && (
+                                    <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                                        <span>⚠</span> {logoError}
+                                    </p>
+                                )}
                             </div>
                             <input
                                 ref={fileInputRef}
