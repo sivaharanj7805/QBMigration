@@ -20,12 +20,18 @@ ALLOWED_EXTENSIONS = {'iif', 'csv', 'xls', 'xlsx', 'qbw'}
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 
-def allowed_file(filename):
+def allowed_file(filename: str) -> bool:
     """
     Validate that a filename has an allowed extension.
 
     HIGH FIX: Enhanced validation to prevent double-extension bypass attacks.
     Example attack: "malware.exe.csv" would pass the old check but is dangerous.
+
+    Args:
+        filename: The filename to validate
+
+    Returns:
+        True if the file extension is allowed, False otherwise
     """
     if not filename or '.' not in filename:
         return False

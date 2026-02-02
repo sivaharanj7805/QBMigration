@@ -7,7 +7,8 @@ import os
 import stripe
 import logging
 from datetime import datetime, timezone
-from flask import Blueprint, request, jsonify, current_app
+from typing import Callable, Any, Tuple
+from flask import Blueprint, request, jsonify, current_app, Response
 from functools import wraps
 import jwt
 
@@ -23,10 +24,18 @@ payments_bp = Blueprint('payments', __name__, url_prefix='/api/payments')
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
 
-def token_required(f):
-    """Decorator to require valid JWT token"""
+def token_required(f: Callable[..., Any]) -> Callable[..., Tuple[Response, int] | Any]:
+    """
+    Decorator to require valid JWT token.
+
+    Args:
+        f: The function to wrap
+
+    Returns:
+        Wrapped function that validates JWT token before execution
+    """
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> Tuple[Response, int] | Any:
         token = None
         auth_header = request.headers.get('Authorization')
         
