@@ -4,7 +4,7 @@ Pre-migration file scan and PDF report generation
 """
 
 from flask import Blueprint, request, jsonify, send_file
-from datetime import datetime
+from datetime import datetime, timezone
 import tempfile
 import os
 from io import BytesIO
@@ -82,7 +82,7 @@ def scan_file():
     result = {
         'session_id': session_id,
         'company_name': company_name,
-        'scan_date': datetime.utcnow().isoformat(),
+        'scan_date': datetime.now(timezone.utc).isoformat(),
         'is_migration_ready': is_ready,
         'readiness_score': 100 - (len(issues) * 30) - (len(warnings) * 10),
         'file_size_mb': round(file_size_mb, 2),
@@ -132,7 +132,7 @@ def generate_report(session_id):
         c.drawString(50, height - 120, f'Session ID: {session_id}')
         
         c.setFont('Helvetica', 11)
-        c.drawString(50, height - 140, f'Generated: {datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}')
+        c.drawString(50, height - 140, f'Generated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}')
         
         # Status
         c.setFillColor(HexColor('#10B981'))

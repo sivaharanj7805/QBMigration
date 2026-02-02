@@ -23,6 +23,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict
 from threading import Lock
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class OAuthManager:
@@ -78,7 +82,7 @@ class OAuthManager:
                         "EncryptionManager not available. Tokens cannot be stored securely. "
                         "Install the encryption module or set FLASK_ENV=development for testing."
                     )
-                print("⚠️  WARNING: EncryptionManager not available. Tokens will be stored in plaintext (dev only)!")
+                logger.info("⚠️  WARNING: EncryptionManager not available. Tokens will be stored in plaintext (dev only)!")
                 self.encryption_manager = None
         else:
             self.encryption_manager = encryption_manager
@@ -133,12 +137,12 @@ class OAuthManager:
                 # Store encrypted key for future use
                 self.encrypted_data_key = response['CiphertextBlob']
                 
-                print("✅ Using AWS KMS for token encryption")
+                logger.info("✅ Using AWS KMS for token encryption")
                 return key, None
                 
             except Exception as e:
-                print(f"⚠️  AWS KMS failed: {e}")
-                print("   Falling back to derived key")
+                logger.info(f"⚠️  AWS KMS failed: {e}")
+                logger.info("   Falling back to derived key")
         
         # Try Azure Key Vault
         azure_keyvault_url = os.getenv('AZURE_KEYVAULT_URL')
@@ -161,12 +165,12 @@ class OAuthManager:
                 
                 self.encrypted_data_key = result.ciphertext
                 
-                print("✅ Using Azure Key Vault for token encryption")
+                logger.info("✅ Using Azure Key Vault for token encryption")
                 return key, None
                 
             except Exception as e:
-                print(f"⚠️  Azure Key Vault failed: {e}")
-                print("   Falling back to derived key")
+                logger.info(f"⚠️  Azure Key Vault failed: {e}")
+                logger.info("   Falling back to derived key")
         
         # SECURITY FIX: Default to 'production' (fail-safe) when FLASK_ENV is not set
         # This ensures that unset environments don't silently use insecure key derivation
@@ -180,8 +184,8 @@ class OAuthManager:
             )
 
         # Fallback: Derive from client_secret (development only)
-        print("⚠️  Using fallback key derivation (DEVELOPMENT ONLY)")
-        print("   Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption")
+        logger.info("⚠️  Using fallback key derivation (DEVELOPMENT ONLY)")
+        logger.info("   Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption")
 
         return self.encryption_manager.derive_key_from_password(
             self.client_secret,
@@ -221,13 +225,13 @@ class OAuthManager:
             if expiry_str:
                 self.token_expiry = datetime.fromisoformat(expiry_str)
             
-            print("✓ OAuth tokens loaded and decrypted")
+            logger.info("✓ OAuth tokens loaded and decrypted")
             
         except FileNotFoundError:
             pass
         except Exception as e:
-            print(f"⚠️  Could not load cached tokens: {e}")
-            print("   Will request new tokens on first API call")
+            logger.info(f"⚠️  Could not load cached tokens: {e}")
+            logger.info("   Will request new tokens on first API call")
     
     def save_tokens(self):
         """
@@ -277,10 +281,10 @@ class OAuthManager:
             # Atomic rename
             temp_file.replace(self.token_file)
             
-            print("✓ OAuth tokens encrypted and saved securely")
+            logger.info("✓ OAuth tokens encrypted and saved securely")
             
         except Exception as e:
-            print(f"⚠️  Failed to save tokens: {e}")
+            logger.info(f"⚠️  Failed to save tokens: {e}")
             if temp_file.exists():
                 temp_file.unlink()
     
@@ -311,7 +315,7 @@ class OAuthManager:
             if not self.is_token_expired():
                 return self.access_token
             
-            print("Refreshing OAuth access token...")
+            logger.info("Refreshing OAuth access token...")
             
             headers = {
                 "Accept": "application/json",
@@ -354,7 +358,7 @@ class OAuthManager:
                     # ✅ Save encrypted
                     self.save_tokens()
                     
-                    print(f"✓ Access token refreshed (expires in {expires_in}s)")
+                    logger.info(f"✓ Access token refreshed (expires in {expires_in}s)")
                     
                     # Verify scopes
                     self.verify_scopes()
@@ -404,7 +408,7 @@ class OAuthManager:
         Returns:
             True if scopes are valid
         """
-        print("\nVerifying OAuth permissions...")
+        logger.info("\nVerifying OAuth permissions...")
         
         required_scope = "com.intuit.quickbooks.accounting"
         
@@ -432,7 +436,7 @@ class OAuthManager:
                 result = response.json()
                 
                 if not result.get('active', False):
-                    print("  ⚠️  Token is not active")
+                    logger.info("  ⚠️  Token is not active")
                     if fail_on_missing:
                         raise Exception("OAuth token is not active")
                     return False
@@ -441,12 +445,12 @@ class OAuthManager:
                 actual_scopes = scope_string.split() if scope_string else []
                 
                 if required_scope in actual_scopes:
-                    print(f"  ✓ Token has required scope: {required_scope}")
+                    logger.info(f"  ✓ Token has required scope: {required_scope}")
                     self.scopes = actual_scopes
                     return True
                 else:
-                    print(f"  ⚠️  Token missing required scope: {required_scope}")
-                    print(f"     Actual scopes: {', '.join(actual_scopes) if actual_scopes else 'none'}")
+                    logger.info(f"  ⚠️  Token missing required scope: {required_scope}")
+                    logger.info(f"     Actual scopes: {', '.join(actual_scopes) if actual_scopes else 'none'}")
                     
                     if fail_on_missing:
                         raise Exception(
@@ -459,7 +463,7 @@ class OAuthManager:
                 if fail_on_missing:
                     raise Exception("Could not verify OAuth scopes")
                     
-                print("  ⚠️  Could not verify scopes (proceeding with caution)")
+                logger.info("  ⚠️  Could not verify scopes (proceeding with caution)")
                 return True
                 
         except requests.exceptions.RequestException as e:
@@ -478,7 +482,7 @@ class OAuthManager:
         """
         ✅ PRODUCTION-GRADE: Revoke tokens and delete encrypted file
         """
-        print("Revoking OAuth tokens...")
+        logger.info("Revoking OAuth tokens...")
         
         headers = {
             "Accept": "application/json",
@@ -501,7 +505,7 @@ class OAuthManager:
             )
             
             if response.status_code == 200:
-                print("✓ Tokens revoked")
+                logger.info("✓ Tokens revoked")
                 
                 # ✅ SECURITY: Securely delete encrypted file
                 if self.token_file.exists():
@@ -519,7 +523,7 @@ class OAuthManager:
                 raise Exception(f"Revocation failed: {response.status_code}")
                 
         except Exception as e:
-            print(f"⚠️  Token revocation failed: {e}")
+            logger.info(f"⚠️  Token revocation failed: {e}")
             raise
     
     # ========================================================================
@@ -560,20 +564,20 @@ class OAuthManager:
                 result = response.json()
                 company_info = result.get("CompanyInfo", {})
                 
-                print(f"\n✓ Connected to: {company_info.get('CompanyName')}")
-                print(f"  Legal Name: {company_info.get('LegalName', 'N/A')}")
-                print(f"  Country: {company_info.get('Country', 'N/A')}")
+                logger.info(f"\n✓ Connected to: {company_info.get('CompanyName')}")
+                logger.info(f"  Legal Name: {company_info.get('LegalName', 'N/A')}")
+                logger.info(f"  Country: {company_info.get('Country', 'N/A')}")
                 
                 return company_info
             else:
-                print(f"⚠️  Could not fetch company info: {response.status_code}")
+                logger.info(f"⚠️  Could not fetch company info: {response.status_code}")
                 return None
                 
         except requests.exceptions.Timeout:
-            print("⚠️  Company info request timed out")
+            logger.info("⚠️  Company info request timed out")
             return None
         except Exception as e:
-            print(f"⚠️  Could not fetch company info: {e}")
+            logger.info(f"⚠️  Could not fetch company info: {e}")
             return None
     
     # ========================================================================

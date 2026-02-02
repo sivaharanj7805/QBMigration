@@ -8,15 +8,19 @@ Usage:
 
 import os
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def init_database():
     """Initialize database with all tables"""
-    print("=" * 60)
-    print("ForensicBridge Database Initialization")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("ForensicBridge Database Initialization")
+    logger.info("=" * 60)
     
     # Import Flask app and database
     from app import create_app
@@ -30,12 +34,12 @@ def init_database():
         from models.migration import Migration
         from models.license import License
         
-        print("\n1. Creating all database tables...")
+        logger.info("\n1. Creating all database tables...")
         db.create_all()
-        print("   [OK] Tables created successfully")
+        logger.info("   [OK] Tables created successfully")
         
         # Add any missing columns
-        print("\n2. Checking for missing columns...")
+        logger.info("\n2. Checking for missing columns...")
         from sqlalchemy import text, inspect
         
         inspector = inspect(db.engine)
@@ -55,42 +59,42 @@ def init_database():
                     try:
                         conn.execute(text(f'ALTER TABLE users ADD COLUMN {col_name} {col_type}'))
                         conn.commit()
-                        print(f"   [OK] Added column: {col_name}")
+                        logger.info(f"   [OK] Added column: {col_name}")
                     except Exception as e:
                         if 'already exists' in str(e):
-                            print(f"   [--] Column exists: {col_name}")
+                            logger.info(f"   [--] Column exists: {col_name}")
                         else:
-                            print(f"   [ERR] Error adding {col_name}: {e}")
+                            logger.info(f"   [ERR] Error adding {col_name}: {e}")
                 else:
-                    print(f"   [--] Column exists: {col_name}")
+                    logger.info(f"   [--] Column exists: {col_name}")
         
         # Verify tables exist
-        print("\n3. Verifying tables...")
+        logger.info("\n3. Verifying tables...")
         tables = inspector.get_table_names()
         required_tables = ['users', 'migrations', 'licenses']
         for table in required_tables:
             if table in tables:
-                print(f"   [OK] Table exists: {table}")
+                logger.info(f"   [OK] Table exists: {table}")
             else:
-                print(f"   [ERR] Missing table: {table}")
+                logger.info(f"   [ERR] Missing table: {table}")
         
         # Show user count
-        print("\n4. Current database stats:")
+        logger.info("\n4. Current database stats:")
         try:
             user_count = User.query.count()
             migration_count = Migration.query.count()
-            print(f"   - Users: {user_count}")
-            print(f"   - Migrations: {migration_count}")
+            logger.info(f"   - Users: {user_count}")
+            logger.info(f"   - Migrations: {migration_count}")
         except Exception as e:
-            print(f"   - Error getting stats: {e}")
+            logger.info(f"   - Error getting stats: {e}")
         
-        print("\n" + "=" * 60)
-        print("Database initialization complete!")
-        print("=" * 60)
-        print("\nYou can now:")
-        print("  1. Start the Flask server: python run.py")
-        print("  2. Register a new account at http://localhost:3000/register")
-        print("  3. Login at http://localhost:3000/login")
+        logger.info("\n" + "=" * 60)
+        logger.info("Database initialization complete!")
+        logger.info("=" * 60)
+        logger.info("\nYou can now:")
+        logger.info("  1. Start the Flask server: python run.py")
+        logger.info("  2. Register a new account at http://localhost:3000/register")
+        logger.info("  3. Login at http://localhost:3000/login")
 
 if __name__ == '__main__':
     init_database()

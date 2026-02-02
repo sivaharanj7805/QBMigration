@@ -1,3 +1,4 @@
+from datetime import timezone
 """
 Internal API Endpoints
 
@@ -192,7 +193,7 @@ def internal_health():
     return jsonify({
         'status': 'healthy',
         'service': 'forensicbridge-internal-api',
-        'timestamp': __import__('datetime').datetime.utcnow().isoformat()
+        'timestamp': __import__('datetime').datetime.now(timezone.utc).isoformat()
     }), 200
 
 

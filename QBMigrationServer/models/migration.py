@@ -1,5 +1,5 @@
 from models.database import db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import current_app
 import uuid
 import json
@@ -135,7 +135,7 @@ class Migration(db.Model):
         if not self.migration_id:
             self.migration_id = str(uuid.uuid4())
         if not self.expires_at:
-            self.expires_at = datetime.utcnow() + timedelta(hours=MIGRATION_EXPIRY_HOURS)
+            self.expires_at = datetime.now(timezone.utc) + timedelta(hours=MIGRATION_EXPIRY_HOURS)
     
     # ============================================================================
     # ERROR MESSAGE ENCRYPTION (prevent leaking QB data in errors)
@@ -300,7 +300,7 @@ class Migration(db.Model):
         if self.status in ['provisioning', 'uploaded']:
             self.status = 'processing'
             self.aws_instance_id = instance_id
-            self.started_at = datetime.utcnow()
+            self.started_at = datetime.now(timezone.utc)
             self.current_step = 'Running migration on AWS'
             db.session.commit()
             return True
@@ -331,7 +331,7 @@ class Migration(db.Model):
                     self.status = 'failed'
                     self.set_error_message(error_msg)
                     self.error_code = 'TRIAL_BALANCE_MISMATCH'
-                    self.completed_at = datetime.utcnow()
+                    self.completed_at = datetime.now(timezone.utc)
 
                     # Store verification data even on failure
                     if results:
@@ -353,13 +353,13 @@ class Migration(db.Model):
                 self.status = 'failed'
                 self.set_error_message(error_msg)
                 self.error_code = 'TRIAL_BALANCE_MISSING'
-                self.completed_at = datetime.utcnow()
+                self.completed_at = datetime.now(timezone.utc)
                 db.session.commit()
                 raise ValueError(error_msg)
 
             # Trial balance verified - proceed with completion
             self.status = 'completed'
-            self.completed_at = datetime.utcnow()
+            self.completed_at = datetime.now(timezone.utc)
             self.progress_percent = 100
             self.current_step = 'Completed - Trial Balance Verified'
 
@@ -386,7 +386,7 @@ class Migration(db.Model):
             self.status = 'failed'
             self.set_error_message(error_message)
             self.error_code = error_code
-            self.completed_at = datetime.utcnow()
+            self.completed_at = datetime.now(timezone.utc)
             db.session.commit()
             return True
         return False
@@ -417,20 +417,20 @@ class Migration(db.Model):
     def mark_s3_deleted(self):
         """Mark S3 file as deleted"""
         self.s3_file_deleted = True
-        self.s3_file_deleted_at = datetime.utcnow()
+        self.s3_file_deleted_at = datetime.now(timezone.utc)
         db.session.commit()
     
     def mark_ec2_terminated(self):
         """Mark EC2 instance as terminated"""
         self.ec2_terminated = True
-        self.ec2_terminated_at = datetime.utcnow()
+        self.ec2_terminated_at = datetime.now(timezone.utc)
         db.session.commit()
     
     def mark_cleanup_completed(self):
         """Mark cleanup as fully completed"""
         self.status = 'cleaned'
         self.cleanup_completed = True
-        self.cleanup_completed_at = datetime.utcnow()
+        self.cleanup_completed_at = datetime.now(timezone.utc)
         self.current_step = 'All resources deleted'
         db.session.commit()
     
@@ -489,7 +489,7 @@ class Migration(db.Model):
         processed = processed[-WEBHOOK_ID_LIMIT:]
         self.webhook_processed_ids = json.dumps(processed)
 
-        self.last_webhook_at = datetime.utcnow()
+        self.last_webhook_at = datetime.now(timezone.utc)
         db.session.commit()
         return True
     
@@ -499,7 +499,7 @@ class Migration(db.Model):
     
     def is_expired(self):
         """Check if migration has expired"""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
     
     def is_stuck(self, timeout_hours=STUCK_TIMEOUT_HOURS):
         """Check if migration is stuck (processing too long)"""
@@ -509,7 +509,7 @@ class Migration(db.Model):
         if not self.started_at:
             return False
         
-        elapsed = datetime.utcnow() - self.started_at
+        elapsed = datetime.now(timezone.utc) - self.started_at
         return elapsed > timedelta(hours=timeout_hours)
     
     def needs_cleanup(self):
@@ -533,7 +533,7 @@ class Migration(db.Model):
         if not self.started_at:
             return 0
         
-        end_time = self.completed_at or datetime.utcnow()
+        end_time = self.completed_at or datetime.now(timezone.utc)
         delta = end_time - self.started_at
         return int(delta.total_seconds() / 60)
     
@@ -620,7 +620,7 @@ class Migration(db.Model):
                 data = json.loads(self.trial_balance_data)
                 # Keep only non-sensitive metadata
                 metadata = {
-                    'stripped_at': datetime.utcnow().isoformat(),
+                    'stripped_at': datetime.now(timezone.utc).isoformat(),
                     'original_account_count': len(data.get('accounts', [])) if 'accounts' in data else None,
                     'original_transaction_count': len(data.get('transactions', [])) if 'transactions' in data else None,
                     'data_hash': data.get('hash') if 'hash' in data else None,
@@ -631,7 +631,7 @@ class Migration(db.Model):
             except (json.JSONDecodeError, TypeError) as e:
                 # If parsing fails, just clear the data
                 self.trial_balance_data = json.dumps({
-                    'stripped_at': datetime.utcnow().isoformat(),
+                    'stripped_at': datetime.now(timezone.utc).isoformat(),
                     'error': 'Failed to parse original data'
                 })
 
@@ -641,7 +641,7 @@ class Migration(db.Model):
                 data = json.loads(self.live_status_data)
                 # Keep only non-sensitive metadata
                 metadata = {
-                    'stripped_at': datetime.utcnow().isoformat(),
+                    'stripped_at': datetime.now(timezone.utc).isoformat(),
                     'final_phase': data.get('current_phase') if 'current_phase' in data else None,
                     'phase_count': len(data.get('phases', [])) if 'phases' in data else None,
                     'completion_status': data.get('status') if 'status' in data else None
@@ -650,7 +650,7 @@ class Migration(db.Model):
             except (json.JSONDecodeError, TypeError) as e:
                 # If parsing fails, just clear the data
                 self.live_status_data = json.dumps({
-                    'stripped_at': datetime.utcnow().isoformat(),
+                    'stripped_at': datetime.now(timezone.utc).isoformat(),
                     'error': 'Failed to parse original data'
                 })
 

@@ -6,7 +6,7 @@ Cleans up orphaned EC2 instances and S3 files
 
 import boto3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 
 # Initialize AWS clients
@@ -88,7 +88,7 @@ def cleanup_orphaned_instances():
             ]
         )
         
-        cutoff_time = datetime.utcnow() - timedelta(hours=ORPHANED_TIMEOUT_HOURS)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ORPHANED_TIMEOUT_HOURS)
         
         for reservation in response['Reservations']:
             for instance in reservation['Instances']:
@@ -97,7 +97,7 @@ def cleanup_orphaned_instances():
                 
                 # Check if instance is too old
                 if launch_time < cutoff_time:
-                    logger.info(f"Terminating orphaned instance: {instance_id} (running for {(datetime.utcnow() - launch_time).total_seconds() / 3600:.1f} hours)")
+                    logger.info(f"Terminating orphaned instance: {instance_id} (running for {(datetime.now(timezone.utc) - launch_time).total_seconds() / 3600:.1f} hours)")
                     
                     try:
                         ec2.terminate_instances(InstanceIds=[instance_id])
@@ -128,7 +128,7 @@ def cleanup_old_s3_files():
         paginator = s3.get_paginator('list_objects_v2')
         pages = paginator.paginate(Bucket=S3_BUCKET, Prefix='migrations/')
         
-        cutoff_time = datetime.utcnow() - timedelta(hours=S3_FILE_TTL_HOURS)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=S3_FILE_TTL_HOURS)
         
         for page in pages:
             if 'Contents' not in page:
@@ -140,7 +140,7 @@ def cleanup_old_s3_files():
                 
                 # Check if file is too old
                 if last_modified < cutoff_time:
-                    logger.info(f"Deleting old S3 file: {key} (age: {(datetime.utcnow() - last_modified).total_seconds() / 3600:.1f} hours)")
+                    logger.info(f"Deleting old S3 file: {key} (age: {(datetime.now(timezone.utc) - last_modified).total_seconds() / 3600:.1f} hours)")
                     
                     try:
                         s3.delete_object(Bucket=S3_BUCKET, Key=key)

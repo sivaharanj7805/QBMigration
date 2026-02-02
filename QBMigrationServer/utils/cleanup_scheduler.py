@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
@@ -72,7 +72,7 @@ class CleanupScheduler:
             
             # Migrations that are stuck (processing > 6 hours)
             timeout_hours = self.app.config.get('ORPHANED_INSTANCE_TIMEOUT_HOURS', 6)
-            stuck_cutoff = datetime.utcnow() - timedelta(hours=timeout_hours)
+            stuck_cutoff = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
             
             stuck_migrations = Migration.query.filter(
                 Migration.status == 'processing',
@@ -82,7 +82,7 @@ class CleanupScheduler:
             
             # Expired migrations
             expired_migrations = Migration.query.filter(
-                Migration.expires_at < datetime.utcnow(),
+                Migration.expires_at < datetime.now(timezone.utc),
                 Migration.cleanup_completed == False
             ).all()
             

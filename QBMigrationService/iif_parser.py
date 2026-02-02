@@ -10,8 +10,12 @@ import os
 import json
 import csv
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from io import StringIO
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class IIFParser:
@@ -153,7 +157,7 @@ class IIFParser:
         """Get parsed result with metadata"""
         return {
             'metadata': {
-                'parsed_at': datetime.utcnow().isoformat(),
+                'parsed_at': datetime.now(timezone.utc).isoformat(),
                 'stats': self.stats,
                 'errors': self.errors[:100]  # Limit error list
             },
@@ -212,7 +216,7 @@ class QuickBooksExportParser:
         
         return {
             'metadata': {
-                'parsed_at': datetime.utcnow().isoformat(),
+                'parsed_at': datetime.now(timezone.utc).isoformat(),
                 'file_type': 'csv',
                 'record_count': len(records)
             },
@@ -252,7 +256,7 @@ class QuickBooksExportParser:
         
         return {
             'metadata': {
-                'parsed_at': datetime.utcnow().isoformat(),
+                'parsed_at': datetime.now(timezone.utc).isoformat(),
                 'file_type': 'excel',
                 'sheets': list(all_data.keys())
             },
@@ -384,10 +388,10 @@ if __name__ == '__main__':
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python iif_parser.py <file.iif>")
+        logger.info("Usage: python iif_parser.py <file.iif>")
         sys.exit(1)
     
     parser = QuickBooksExportParser()
     result = parser.parse(sys.argv[1])
     
-    print(json.dumps(result, indent=2, default=str))
+    logger.info(json.dumps(result, indent=2, default=str))

@@ -15,7 +15,7 @@ import hmac
 import hashlib
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def emit_migration_progress(migration_id: str, progress: int, step: str,
         'progress': progress,
         'step': step,
         'status': status,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     
     if details:
@@ -236,7 +236,7 @@ def emit_migration_completed(migration_id: str, results: dict):
         'progress': 100,
         'step': 'Migration complete',
         'results': results,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     
     socketio.emit('migration_completed', data, room=f'migration_{migration_id}')
@@ -259,7 +259,7 @@ def emit_migration_failed(migration_id: str, error: str, error_code: str = None)
         'status': 'failed',
         'error': error,
         'error_code': error_code,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
     }
     
     socketio.emit('migration_failed', data, room=f'migration_{migration_id}')

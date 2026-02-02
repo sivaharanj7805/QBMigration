@@ -10,6 +10,10 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 class HealthCheckPDFGenerator:
@@ -356,7 +360,7 @@ class HealthCheckPDFGenerator:
             pass
         
         # Fallback: return HTML path
-        print(f"PDF generation not available. HTML report saved to: {html_path}")
+        logger.info(f"PDF generation not available. HTML report saved to: {html_path}")
         return html_path
 
 
@@ -387,4 +391,4 @@ if __name__ == "__main__":
     # Generate report
     generator = HealthCheckPDFGenerator("ForensicBridge")
     output = generator.generate_html_report(sample_results, "health_check_report.html")
-    print(f"Report generated: {output}")
+    logger.info(f"Report generated: {output}")
