@@ -559,8 +559,29 @@ class ApiClient {
     }
 }
 
-// Export singleton instance - FIX: Use function call to get URL at runtime
-export const api = new ApiClient(API_BASE_URL());
+// FIX: Lazy singleton initialization to prevent SSR/build errors
+// The singleton is only created when first accessed, not at module load time
+let _apiInstance: ApiClient | null = null;
+
+function getApiInstance(): ApiClient {
+    if (!_apiInstance) {
+        _apiInstance = new ApiClient(API_BASE_URL());
+    }
+    return _apiInstance;
+}
+
+// Export api as a proxy that lazily initializes the singleton
+// This prevents errors during SSR/build when env vars may not be available
+export const api = new Proxy({} as ApiClient, {
+    get(_target, prop: keyof ApiClient) {
+        const instance = getApiInstance();
+        const value = instance[prop];
+        if (typeof value === 'function') {
+            return value.bind(instance);
+        }
+        return value;
+    }
+});
 
 // Export class for testing
 export { ApiClient };
