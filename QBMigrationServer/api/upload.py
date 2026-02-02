@@ -59,9 +59,11 @@ def sanitize_input(value, max_length=255):
     if max_length and len(value) > max_length:
         value = value[:max_length]
 
-    # Ensure result is not empty after sanitization
+    # SECURITY FIX: Return None for empty results instead of constant string
+    # This allows callers to detect and handle invalid input appropriately
+    # Returning "sanitized_input" caused data corruption - multiple records with same name
     if not value:
-        return "sanitized_input"
+        return None
 
     return value
 
