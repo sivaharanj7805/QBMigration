@@ -88,13 +88,13 @@ class EncryptionManager:
     def decrypt_data(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes) -> bytes:
         """
         Decrypt data using AES-256-GCM
-        
+
         Args:
             ciphertext: Encrypted data
             key: 256-bit encryption key
             iv: 96-bit initialization vector
             tag: GCM authentication tag
-            
+
         Returns:
             Decrypted plaintext
         """
@@ -104,13 +104,67 @@ class EncryptionManager:
                 modes.GCM(iv, tag),
                 backend=default_backend()
             )
-            
+
             decryptor = cipher.decryptor()
             plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-            
+
             return plaintext
         except Exception as e:
             raise ValueError(f"Decryption failed: {e}")
+
+    @staticmethod
+    def decrypt_chunked(
+        encrypted_data: Union[bytes, str],
+        key: Union[bytes, str] = None,
+        iv: Union[bytes, str] = None,
+        tag: Union[bytes, str] = None
+    ) -> str:
+        """
+        Decrypt chunked/streamed data from C# client.
+
+        AUDIT FIX: This method was missing but called by orchestrator.py.
+        Handles decryption of data encrypted by C# QBDesktopReader.
+
+        Args:
+            encrypted_data: Encrypted bytes or base64-encoded string
+            key: 256-bit AES key (bytes or base64 string)
+            iv: 96-bit initialization vector (bytes or base64 string)
+            tag: GCM authentication tag (bytes or base64 string)
+
+        Returns:
+            Decrypted JSON string
+
+        Raises:
+            ValueError: If decryption fails or required parameters missing
+        """
+        if key is None or iv is None or tag is None:
+            raise ValueError("decrypt_chunked requires key, iv, and tag parameters")
+
+        # Convert base64 strings to bytes if needed
+        if isinstance(key, str):
+            key = base64.b64decode(key)
+        if isinstance(iv, str):
+            iv = base64.b64decode(iv)
+        if isinstance(tag, str):
+            tag = base64.b64decode(tag)
+        if isinstance(encrypted_data, str):
+            # Could be base64 or raw string
+            try:
+                encrypted_data = base64.b64decode(encrypted_data)
+            except Exception:
+                # Assume it's already bytes-like
+                encrypted_data = encrypted_data.encode('utf-8')
+
+        # Decrypt using the core decrypt_data method
+        plaintext_bytes = EncryptionManager.decrypt_data(
+            ciphertext=encrypted_data,
+            key=key,
+            iv=iv,
+            tag=tag
+        )
+
+        # Return as UTF-8 string (JSON)
+        return plaintext_bytes.decode('utf-8')
     
     @staticmethod
     def decrypt_from_json_with_verification(encrypted_json: Union[str, Dict]) -> Tuple[str, str]:
