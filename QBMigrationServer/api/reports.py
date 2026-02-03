@@ -12,6 +12,7 @@ FIX: Added rate limiting and path traversal protection
 
 from flask import Blueprint, request, jsonify, current_app, send_file
 from flask_login import login_required, current_user
+from api.auth import require_auth
 from models.database import db
 from models.migration import Migration
 from extensions import limiter
@@ -25,6 +26,11 @@ from io import BytesIO
 logger = logging.getLogger(__name__)
 
 reports_bp = Blueprint('reports', __name__)
+
+
+def _get_user_id():
+    """Get current user ID from require_auth decorator."""
+    return int(request.current_user['user_id'])
 
 
 def is_valid_migration_id(migration_id):
@@ -50,7 +56,7 @@ def get_report_storage_dir():
 
 @reports_bp.route('/api/reports', methods=['GET'])
 @limiter.limit("30 per minute")
-@login_required
+@require_auth
 def list_reports():
     """
     List all generated reports for the current user.
@@ -59,7 +65,7 @@ def list_reports():
     try:
         # Get completed migrations that can have reports
         migrations = Migration.query.filter_by(
-            user_id=int(current_user.get_id()),
+            user_id=_get_user_id(),
             status='completed'
         ).order_by(Migration.completed_at.desc()).all()
 
@@ -134,7 +140,7 @@ def list_reports():
 
 @reports_bp.route('/api/reports/generate', methods=['POST'])
 @limiter.limit("10 per minute")  # Rate limit report generation (CPU intensive)
-@login_required
+@require_auth
 def generate_report():
     """
     Generate a new report for a migration.
@@ -154,12 +160,12 @@ def generate_report():
         if migration_id:
             migration = Migration.query.filter_by(
                 migration_id=migration_id,
-                user_id=int(current_user.get_id())
+                user_id=_get_user_id()
             ).first()
         else:
             # Get latest completed migration
             migration = Migration.query.filter_by(
-                user_id=int(current_user.get_id()),
+                user_id=_get_user_id(),
                 status='completed'
             ).order_by(Migration.completed_at.desc()).first()
 
@@ -210,7 +216,7 @@ def generate_report():
 
 @reports_bp.route('/api/reports/<report_id>/download', methods=['GET'])
 @limiter.limit("20 per minute")
-@login_required
+@require_auth
 def download_report(report_id):
     """Download a generated report PDF."""
     try:
@@ -242,7 +248,7 @@ def download_report(report_id):
         # Verify user owns this migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:
@@ -281,7 +287,7 @@ def download_report(report_id):
 
 @reports_bp.route('/api/migrations/<migration_id>/discrepancies', methods=['GET'])
 @limiter.limit("30 per minute")
-@login_required
+@require_auth
 def get_discrepancies(migration_id):
     """
     Get discrepancy data for a migration.
@@ -290,7 +296,7 @@ def get_discrepancies(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:
@@ -352,13 +358,13 @@ def get_discrepancies(migration_id):
 
 @reports_bp.route('/api/migrations/<migration_id>/discrepancy-report', methods=['GET'])
 @limiter.limit("10 per minute")  # Rate limit (may generate PDF)
-@login_required
+@require_auth
 def download_discrepancy_report(migration_id):
     """Download discrepancy report PDF for a migration."""
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:
@@ -391,13 +397,13 @@ def download_discrepancy_report(migration_id):
 
 @reports_bp.route('/api/migrations/<migration_id>/record-count', methods=['GET'])
 @limiter.limit("60 per minute")
-@login_required
+@require_auth
 def get_record_count(migration_id):
     """Get the record count for a migration."""
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:

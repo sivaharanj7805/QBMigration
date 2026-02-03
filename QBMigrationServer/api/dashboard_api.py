@@ -11,6 +11,7 @@ Provides API endpoints for:
 
 from flask import Blueprint, request, jsonify, current_app, send_file
 from flask_login import login_required, current_user
+from api.auth import require_auth
 from models.database import db
 from models.migration import Migration
 from sqlalchemy import func, extract
@@ -53,12 +54,17 @@ except ImportError:
 dashboard_bp = Blueprint('dashboard', __name__)
 
 
+def _get_user_id():
+    """Get current user ID from require_auth decorator."""
+    return int(request.current_user['user_id'])
+
+
 # =============================================================================
 # PIZZA TRACKER - Real-time Status
 # =============================================================================
 
 @dashboard_bp.route('/api/migrations/<migration_id>/live-status', methods=['GET'])
-@login_required
+@require_auth
 def get_live_status(migration_id):
     """
     Enhanced status endpoint for Pizza Tracker polling.
@@ -87,7 +93,7 @@ def get_live_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
         
         if not migration:
@@ -224,7 +230,7 @@ def get_live_status(migration_id):
 
 
 @dashboard_bp.route('/api/migrations/bulk-status', methods=['POST'])
-@login_required
+@require_auth
 def get_bulk_status():
     """
     Get status for multiple migrations at once (Enterprise feature).
@@ -257,12 +263,12 @@ def get_bulk_status():
 
         if not migration_ids:
             # Return all migrations if no IDs specified
-            migrations = Migration.query.filter_by(user_id=int(current_user.get_id()))\
+            migrations = Migration.query.filter_by(user_id=_get_user_id())\
                 .order_by(Migration.created_at.desc()).limit(100).all()
         else:
             migrations = Migration.query.filter(
                 Migration.migration_id.in_(migration_ids),
-                Migration.user_id == int(current_user.get_id())
+                Migration.user_id == _get_user_id()
             ).all()
         
         migrations_data = {}
@@ -299,7 +305,7 @@ def get_bulk_status():
 # =============================================================================
 
 @dashboard_bp.route('/api/dashboard/overview', methods=['GET'])
-@login_required
+@require_auth
 def get_dashboard_overview():
     """
     Aggregate statistics for dashboard KPI cards.
@@ -318,11 +324,11 @@ def get_dashboard_overview():
     """
     try:
         # Get migration counts by status
-        total = Migration.query.filter_by(user_id=int(current_user.get_id())).count()
-        completed = Migration.query.filter_by(user_id=int(current_user.get_id()), status='completed').count()
-        failed = Migration.query.filter_by(user_id=int(current_user.get_id()), status='failed').count()
+        total = Migration.query.filter_by(user_id=_get_user_id()).count()
+        completed = Migration.query.filter_by(user_id=_get_user_id(), status='completed').count()
+        failed = Migration.query.filter_by(user_id=_get_user_id(), status='failed').count()
         in_progress = Migration.query.filter(
-            Migration.user_id == int(current_user.get_id()),
+            Migration.user_id == _get_user_id(),
             Migration.status.in_(['pending', 'uploading', 'uploaded', 'provisioning', 'processing'])
         ).count()
         
@@ -336,7 +342,7 @@ def get_dashboard_overview():
                 extract('epoch', Migration.completed_at - Migration.created_at)
             )
         ).filter(
-            Migration.user_id == int(current_user.get_id()),
+            Migration.user_id == _get_user_id(),
             Migration.status == 'completed',
             Migration.completed_at.isnot(None),
             Migration.created_at.isnot(None)
@@ -348,7 +354,7 @@ def get_dashboard_overview():
         # Recent activity (last 24 hours)
         yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_completed = Migration.query.filter(
-            Migration.user_id == int(current_user.get_id()),
+            Migration.user_id == _get_user_id(),
             Migration.status == 'completed',
             Migration.completed_at >= yesterday
         ).count()
@@ -376,7 +382,7 @@ def get_dashboard_overview():
 
 
 @dashboard_bp.route('/api/dashboard/recent-activity', methods=['GET'])
-@login_required
+@require_auth
 def get_recent_activity():
     """
     Recent activity feed for Forensic Log display.
@@ -384,7 +390,7 @@ def get_recent_activity():
     """
     try:
         # Get recent migrations with activity
-        migrations = Migration.query.filter_by(user_id=int(current_user.get_id()))\
+        migrations = Migration.query.filter_by(user_id=_get_user_id())\
             .order_by(Migration.updated_at.desc() if hasattr(Migration, 'updated_at') else Migration.created_at.desc())\
             .limit(20).all()
         
@@ -453,7 +459,7 @@ def get_recent_activity():
 # =============================================================================
 
 @dashboard_bp.route('/api/migrations/<migration_id>/trial-balance', methods=['GET'])
-@login_required
+@require_auth
 def get_trial_balance(migration_id):
     """
     Get trial balance verification data for Reconciliation Shield display.
@@ -474,7 +480,7 @@ def get_trial_balance(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
         
         if not migration:
@@ -540,7 +546,7 @@ def get_trial_balance(migration_id):
 # =============================================================================
 
 @dashboard_bp.route('/api/migrations/<migration_id>/audit-certificate', methods=['GET'])
-@login_required
+@require_auth
 def download_audit_certificate(migration_id):
     """
     Download PDF audit certificate for completed migration.
@@ -556,7 +562,7 @@ def download_audit_certificate(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:
@@ -643,7 +649,7 @@ def download_audit_certificate(migration_id):
 
 
 @dashboard_bp.route('/api/migrations/<migration_id>/audit-certificate/preview', methods=['GET'])
-@login_required
+@require_auth
 def preview_audit_certificate(migration_id):
     """
     Get audit certificate preview data (for thumbnail card).
@@ -651,7 +657,7 @@ def preview_audit_certificate(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
         
         if not migration:
@@ -683,7 +689,7 @@ def preview_audit_certificate(migration_id):
 # =============================================================================
 
 @dashboard_bp.route('/api/migrations/<migration_id>/export-caseware', methods=['POST'])
-@login_required
+@require_auth
 def export_caseware_bundle(migration_id):
     """
     Generate Caseware Audit Bundle for a completed migration.
@@ -705,7 +711,7 @@ def export_caseware_bundle(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
         
         if not migration:
@@ -946,7 +952,7 @@ def export_caseware_bundle(migration_id):
 
 
 @dashboard_bp.route('/api/migrations/<migration_id>/caseware-bundle', methods=['GET'])
-@login_required
+@require_auth
 def download_caseware_bundle(migration_id):
     """
     Download the generated Caseware Audit Bundle (.zip).
@@ -966,7 +972,7 @@ def download_caseware_bundle(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
 
         if not migration:
@@ -1102,7 +1108,7 @@ def download_caseware_bundle(migration_id):
 
 
 @dashboard_bp.route('/api/migrations/<migration_id>/caseware-status', methods=['GET'])
-@login_required
+@require_auth
 def get_caseware_status(migration_id):
     """
     Get Caseware bundle generation status for a migration.
@@ -1110,7 +1116,7 @@ def get_caseware_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_user_id()
         ).first()
         
         if not migration:

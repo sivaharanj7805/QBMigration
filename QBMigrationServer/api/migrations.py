@@ -85,6 +85,79 @@ def validate_pagination_param(value, param_name, default, min_val, max_val):
     return value_int
 
 
+@migrations_bp.route('/api/migrations', methods=['POST'])
+@limiter.limit("10 per minute")
+@require_auth
+def create_migration():
+    """
+    Create a new migration from previously uploaded/validated files.
+
+    Request Body:
+        {
+            "destination": "qbo" | "caseware",
+            "files": ["file1.qbw", "file2.csv"]
+        }
+
+    Returns:
+        201: {success, migration_id}
+        400: Invalid input
+    """
+    import uuid
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body required'}), 400
+
+        destination = data.get('destination', 'qbo')
+        files = data.get('files', [])
+
+        if destination not in ('qbo', 'caseware'):
+            return jsonify({
+                'success': False,
+                'error': 'destination must be "qbo" or "caseware"'
+            }), 400
+
+        if not files:
+            return jsonify({
+                'success': False,
+                'error': 'At least one file is required'
+            }), 400
+
+        user_id = _get_current_user_id()
+        migration_id = str(uuid.uuid4())
+
+        # Use first file name as company name hint
+        company_name = files[0].rsplit('.', 1)[0] if files else 'Unknown Company'
+
+        migration = Migration(
+            migration_id=migration_id,
+            user_id=user_id,
+            company_name=company_name,
+            qb_file_name=files[0] if files else '',
+            status='pending',
+            destination=destination,
+        )
+        db.session.add(migration)
+        db.session.commit()
+
+        logger.info(f"Created migration {migration_id} for user {user_id}, destination: {destination}")
+
+        return jsonify({
+            'success': True,
+            'migration_id': migration_id,
+            'status': 'pending'
+        }), 201
+
+    except Exception as e:
+        logger.exception(f"Failed to create migration: {e}")
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': 'Failed to create migration'
+        }), 500
+
+
 @migrations_bp.route('/api/migrations', methods=['GET'])
 @require_auth
 def list_migrations():
@@ -429,8 +502,10 @@ def start_migration(migration_id):
         
         # CRITICAL FIX: Ensure realm_id is present - use from user if not provided
         if 'realm_id' not in qbo_credentials or not qbo_credentials['realm_id']:
-            if hasattr(current_user, 'qbo_realm_id') and current_user.qbo_realm_id:
-                qbo_credentials['realm_id'] = current_user.qbo_realm_id
+            from models.user import User
+            user = User.query.get(_get_current_user_id())
+            if user and user.qbo_realm_id:
+                qbo_credentials['realm_id'] = user.qbo_realm_id
             else:
                 return jsonify({
                     'success': False,
@@ -790,12 +865,14 @@ def execute_migration_celery(migration_id):
             }), 400
         
         # Get OAuth tokens from user if available
+        from models.user import User
         oauth_tokens = None
-        if hasattr(current_user, 'qbo_access_token') and current_user.qbo_access_token:
+        user = User.query.get(_get_current_user_id())
+        if user and user.qbo_access_token:
             oauth_tokens = {
-                'access_token': current_user.qbo_access_token,
-                'refresh_token': current_user.qbo_refresh_token,
-                'realm_id': current_user.qbo_realm_id
+                'access_token': user.qbo_access_token,
+                'refresh_token': user.qbo_refresh_token,
+                'realm_id': user.qbo_realm_id
             }
         
         # Queue the migration task
