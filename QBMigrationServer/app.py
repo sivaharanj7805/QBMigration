@@ -266,8 +266,154 @@ def auto_migrate_database(app):
                 ON session_validation_logs(session_id)
             """))
 
+            # FIX: Create migrations table if it doesn't exist (production schema drift)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS migrations (
+                    id SERIAL PRIMARY KEY,
+                    migration_id VARCHAR(36) UNIQUE NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    session_id VARCHAR(50),
+                    company_name VARCHAR(255),
+                    qb_file_name VARCHAR(255),
+                    file_hash VARCHAR(64),
+                    data_size_bytes BIGINT,
+                    s3_uri VARCHAR(500),
+                    s3_bucket VARCHAR(255),
+                    s3_key VARCHAR(500),
+                    aws_instance_id VARCHAR(50),
+                    aws_region VARCHAR(50) DEFAULT 'us-east-1',
+                    status VARCHAR(50) DEFAULT 'pending' NOT NULL,
+                    progress_percent INTEGER DEFAULT 0,
+                    current_step VARCHAR(255),
+                    customers_migrated INTEGER DEFAULT 0,
+                    vendors_migrated INTEGER DEFAULT 0,
+                    invoices_migrated INTEGER DEFAULT 0,
+                    bills_migrated INTEGER DEFAULT 0,
+                    items_migrated INTEGER DEFAULT 0,
+                    total_records_migrated INTEGER DEFAULT 0,
+                    error_message_encrypted TEXT,
+                    error_code VARCHAR(50),
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 3,
+                    cleanup_completed BOOLEAN DEFAULT FALSE,
+                    cleanup_completed_at TIMESTAMP,
+                    s3_file_deleted BOOLEAN DEFAULT FALSE,
+                    s3_file_deleted_at TIMESTAMP,
+                    ec2_terminated BOOLEAN DEFAULT FALSE,
+                    ec2_terminated_at TIMESTAMP,
+                    estimated_cost_usd NUMERIC(14,6),
+                    actual_cost_usd NUMERIC(14,6),
+                    cost_breakdown TEXT,
+                    trial_balance_data TEXT,
+                    live_status_data TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    ip_address VARCHAR(50),
+                    user_agent VARCHAR(500),
+                    request_id VARCHAR(36),
+                    qbo_company_id VARCHAR(50),
+                    qbo_company_name VARCHAR(255),
+                    destination VARCHAR(20) DEFAULT 'qbo' NOT NULL,
+                    caseware_bundle_path VARCHAR(500),
+                    caseware_bundle_ready BOOLEAN DEFAULT FALSE,
+                    webhook_processed_ids TEXT,
+                    last_webhook_at TIMESTAMP,
+                    verification_results TEXT
+                )
+            """))
+
+            # FIX: Add missing columns to migrations table (handles schema drift)
+            migration_columns = [
+                ("session_id", "VARCHAR(50)"),
+                ("file_hash", "VARCHAR(64)"),
+                ("data_size_bytes", "BIGINT"),
+                ("s3_uri", "VARCHAR(500)"),
+                ("s3_bucket", "VARCHAR(255)"),
+                ("s3_key", "VARCHAR(500)"),
+                ("aws_instance_id", "VARCHAR(50)"),
+                ("aws_region", "VARCHAR(50) DEFAULT 'us-east-1'"),
+                ("current_step", "VARCHAR(255)"),
+                ("customers_migrated", "INTEGER DEFAULT 0"),
+                ("vendors_migrated", "INTEGER DEFAULT 0"),
+                ("invoices_migrated", "INTEGER DEFAULT 0"),
+                ("bills_migrated", "INTEGER DEFAULT 0"),
+                ("items_migrated", "INTEGER DEFAULT 0"),
+                ("total_records_migrated", "INTEGER DEFAULT 0"),
+                ("error_message_encrypted", "TEXT"),
+                ("error_code", "VARCHAR(50)"),
+                ("retry_count", "INTEGER DEFAULT 0"),
+                ("max_retries", "INTEGER DEFAULT 3"),
+                ("cleanup_completed", "BOOLEAN DEFAULT FALSE"),
+                ("cleanup_completed_at", "TIMESTAMP"),
+                ("s3_file_deleted", "BOOLEAN DEFAULT FALSE"),
+                ("s3_file_deleted_at", "TIMESTAMP"),
+                ("ec2_terminated", "BOOLEAN DEFAULT FALSE"),
+                ("ec2_terminated_at", "TIMESTAMP"),
+                ("estimated_cost_usd", "NUMERIC(14,6)"),
+                ("actual_cost_usd", "NUMERIC(14,6)"),
+                ("cost_breakdown", "TEXT"),
+                ("trial_balance_data", "TEXT"),
+                ("live_status_data", "TEXT"),
+                ("started_at", "TIMESTAMP"),
+                ("completed_at", "TIMESTAMP"),
+                ("expires_at", "TIMESTAMP"),
+                ("ip_address", "VARCHAR(50)"),
+                ("user_agent", "VARCHAR(500)"),
+                ("request_id", "VARCHAR(36)"),
+                ("qbo_company_id", "VARCHAR(50)"),
+                ("qbo_company_name", "VARCHAR(255)"),
+                ("destination", "VARCHAR(20) DEFAULT 'qbo'"),
+                ("caseware_bundle_path", "VARCHAR(500)"),
+                ("caseware_bundle_ready", "BOOLEAN DEFAULT FALSE"),
+                ("webhook_processed_ids", "TEXT"),
+                ("last_webhook_at", "TIMESTAMP"),
+                ("verification_results", "TEXT"),
+            ]
+            for col_name, col_type in migration_columns:
+                try:
+                    conn.execute(text(
+                        f"ALTER TABLE migrations ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                    ))
+                except Exception:
+                    pass  # Column already exists
+
+            # FIX: Create whitelabel_settings table if missing (fixes /api/settings/whitelabel 404/500)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS whitelabel_settings (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) UNIQUE,
+                    company_name VARCHAR(255) DEFAULT 'ForensicBridge',
+                    logo_url TEXT,
+                    primary_color VARCHAR(7) DEFAULT '#3B82F6',
+                    secondary_color VARCHAR(7) DEFAULT '#0F172A',
+                    accent_color VARCHAR(7) DEFAULT '#B8860B',
+                    support_email VARCHAR(255) DEFAULT '',
+                    support_phone VARCHAR(50) DEFAULT '',
+                    website_url VARCHAR(500) DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+
+            # FIX: Create migration_credit table if missing (fixes /api/auth/me 500)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS migration_credit (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    tier VARCHAR(50) DEFAULT 'free',
+                    total_credits INTEGER DEFAULT 0,
+                    used_credits INTEGER DEFAULT 0,
+                    purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    stripe_payment_id VARCHAR(255),
+                    stripe_subscription_id VARCHAR(255)
+                )
+            """))
+
             conn.commit()
-            app.logger.info('Database schema verified/updated successfully')
+            app.logger.info('Database schema verified/updated successfully (including migrations, whitelabel_settings, migration_credit tables)')
     except Exception as e:
         # Log but don't crash - columns might already exist or other non-fatal issue
         app.logger.warning(f'Schema migration note: {str(e)}')
