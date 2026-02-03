@@ -1547,14 +1547,14 @@ class TestTransformEntityPublicMethod:
         assert result is None
 
     def test_transform_entity_propagates_id_mapping(self, transformer, qbd_customers):
-        """id_mapping dict should be updated inside transform_entity."""
+        """id_mapping dict should be merged with normalized (lowercase) keys."""
         existing_maps = {
             'Customers': {'EXTERNAL-1': 'QBO-EXT-1'}
         }
         transformer.transform_entity('Customers', qbd_customers[0], id_mapping=existing_maps)
 
-        # External mapping should be merged in
-        assert transformer.id_mapping['Customers']['EXTERNAL-1'] == 'QBO-EXT-1'
+        # PascalCase keys from orchestrator are normalized to lowercase on merge
+        assert transformer.id_mapping['customers']['EXTERNAL-1'] == 'QBO-EXT-1'
 
 
 # ============================================================================

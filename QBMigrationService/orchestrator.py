@@ -278,7 +278,22 @@ class MigrationOrchestrator:
             
             qbo_client = self._init_qbo_client(access_token)
             transformer = self._init_transformer()
-            
+
+            # Step 3b: Query existing TaxAgencies from QBO (read-only entities)
+            # TaxAgency cannot be created via API — must map to existing ones
+            try:
+                existing_agencies = qbo_client.query_tax_agencies(
+                    oauth_manager=oauth_mgr)
+                for agency in existing_agencies:
+                    agency_id = agency.get('Id')
+                    agency_name = agency.get('DisplayName', '')
+                    if agency_id and agency_name:
+                        transformer.id_mapping['tax_agencies'][agency_name] = agency_id
+                logger.info(
+                    f"Found {len(existing_agencies)} existing TaxAgencies in QBO")
+            except Exception as e:
+                logger.warning(f"Could not query TaxAgencies: {e}")
+
             # Step 4: Migrate entities (20-85%)
             entity_id_mappings = {}  # Separate dict for ID mappings
             entity_counts = {}       # Separate dict for counts
@@ -462,7 +477,16 @@ class MigrationOrchestrator:
 
                 # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
                 # CRITICAL FIX: Use singular entity type for QBO API endpoint
-                result = qbo_client.create_entity(api_entity_type, transformed, oauth_manager=oauth_manager)
+                # Route TaxCode to TaxService endpoint (different payload/URL)
+                if transformed.get('_use_tax_service'):
+                    tax_code_name = transformed.pop('TaxCode', '')
+                    tax_rate_details = transformed.pop('TaxRateDetails', [])
+                    transformed.pop('_use_tax_service', None)
+                    result = qbo_client.create_tax_service(
+                        tax_code_name, tax_rate_details,
+                        oauth_manager=oauth_manager)
+                else:
+                    result = qbo_client.create_entity(api_entity_type, transformed, oauth_manager=oauth_manager)
 
                 if result and 'Id' in result:
                     # Track mapping for references

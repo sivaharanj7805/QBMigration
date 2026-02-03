@@ -837,6 +837,73 @@ class PremiumQBOClient:
         
         return response
     
+    def create_tax_service(
+        self,
+        tax_code_name: str,
+        tax_rate_details: list,
+        oauth_manager: Optional[Any] = None
+    ) -> Dict:
+        """
+        Create TaxCode + TaxRate(s) via the QBO TaxService proxy endpoint.
+
+        QBO does NOT support creating TaxCode or TaxRate via standard entity
+        endpoints. Both must be created together via POST /taxservice/taxcode.
+
+        Args:
+            tax_code_name: Name for the new TaxCode
+            tax_rate_details: List of dicts with keys:
+                TaxRateName, RateValue, TaxAgencyId, TaxApplicableOn
+            oauth_manager: Optional OAuth manager for token refresh
+
+        Returns:
+            Response from QBO containing created TaxCode and TaxRate IDs
+        """
+        payload = {
+            'TaxCode': tax_code_name,
+            'TaxRateDetails': tax_rate_details,
+        }
+
+        response = self._make_request(
+            "POST",
+            "taxservice/taxcode",
+            payload,
+            oauth_manager=oauth_manager
+        )
+
+        if "Fault" in response:
+            fault = response.get("Fault", {})
+            errors = fault.get("Error", [])
+            error_details = []
+            for error in errors if errors else [{}]:
+                msg = error.get("Message", "Unknown")
+                detail = error.get("Detail", "")
+                error_details.append(f"{msg}: {detail}" if detail else msg)
+            raise ValueError(
+                f"TaxService creation failed for '{tax_code_name}': "
+                + "; ".join(error_details)
+            )
+
+        return response
+
+    def query_tax_agencies(self, oauth_manager: Optional[Any] = None) -> list:
+        """
+        Query existing TaxAgency entities from QBO.
+
+        TaxAgency is read-only in QBO — cannot be created via API.
+        Must query existing ones to get their IDs for TaxService calls.
+
+        Returns:
+            List of TaxAgency dicts with 'Id' and 'DisplayName'
+        """
+        response = self._make_request(
+            "GET",
+            "query?query=SELECT * FROM TaxAgency",
+            oauth_manager=oauth_manager
+        )
+
+        query_response = response.get('QueryResponse', {})
+        return query_response.get('TaxAgency', [])
+
     def _get_next_batch_id(self) -> str:
         """
         FIX #18: Thread-safe batch ID generation

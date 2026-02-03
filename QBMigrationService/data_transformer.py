@@ -101,6 +101,10 @@ class QBDataTransformer:
         
         # ID mappings (QBD → QBO)
         self.id_mapping = defaultdict(dict)
+
+        # TaxRate cache: QBD rate ID → {Name, Rate, AgencyRef, ApplicableOn}
+        # Populated by transform_taxrate(), consumed by transform_taxcode()
+        self._tax_rate_cache: Dict[str, Dict] = {}
         
         # DisplayName tracking (cross-entity uniqueness)
         self.used_display_names: Set[str] = set()
@@ -350,8 +354,9 @@ class QBDataTransformer:
         transformer.used_display_names = set(shared_names.keys())
         
         # Copy shared id_mapping to local (for fast reads)
+        # Normalize keys to lowercase for consistent lookup via map_id()
         for et, mappings in shared_id_mapping.items():
-            transformer.id_mapping[et] = dict(mappings)
+            transformer.id_mapping[et.lower()] = dict(mappings)
         
         # Get transformation method
         method_name = f'transform_{entity_type.lower()}'
@@ -391,10 +396,11 @@ class QBDataTransformer:
         
         # Sync id_mapping back to shared state
         for et, mappings in transformer.id_mapping.items():
-            if et not in shared_id_mapping:
-                shared_id_mapping[et] = {}
+            key = et.lower()
+            if key not in shared_id_mapping:
+                shared_id_mapping[key] = {}
             for qbd_id, qbo_id in mappings.items():
-                shared_id_mapping[et][qbd_id] = qbo_id
+                shared_id_mapping[key][qbd_id] = qbo_id
         
         return transformed, stats
     
@@ -416,10 +422,14 @@ class QBDataTransformer:
             Transformed entity or None if skipped
         """
         # Update id_mapping if provided
+        # CRITICAL FIX: Orchestrator stores real QBO IDs with PascalCase keys
+        # (e.g., 'Customers'), but map_id()/map_id_required() look up with
+        # lowercase keys (e.g., 'customers'). Normalize to lowercase on merge
+        # so real QBO IDs replace temp IDs in the correct bucket.
         if id_mapping:
             for et, mappings in id_mapping.items():
                 if isinstance(mappings, dict):
-                    self.id_mapping[et].update(mappings)
+                    self.id_mapping[et.lower()].update(mappings)
 
         # Map entity type variations
         type_mapping = {
@@ -1904,9 +1914,24 @@ class QBDataTransformer:
         return qbo
 
     def transform_attachable(self, qbd: Dict) -> Dict:
-        """Transform Attachable."""
+        """Transform Attachable (metadata only — file upload requires multipart)."""
+        filename = qbd.get('FileName', 'attachment.pdf')
+
+        # Derive ContentType from file extension
+        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        content_type_map = {
+            'pdf': 'application/pdf', 'png': 'image/png',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'gif': 'image/gif', 'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'csv': 'text/csv', 'txt': 'text/plain',
+        }
+
         qbo = {
-            'FileName': qbd.get('FileName', 'attachment.pdf'),
+            'FileName': filename,
+            'ContentType': content_type_map.get(ext, 'application/octet-stream'),
             'Note': qbd.get('Note', '')
         }
 
@@ -2611,6 +2636,16 @@ class QBDataTransformer:
             'Name': self.sanitize_name(qbd.get('Name', 'Payment')),
             'Active': self._to_bool(qbd.get('IsActive', True))
         }
+
+        # Classify credit card types (QBO uses CREDIT_CARD vs NON_CREDIT_CARD)
+        pm_type = (qbd.get('PaymentMethodType') or qbd.get('Type') or '').lower()
+        if any(cc in name for cc in ['visa', 'master', 'amex', 'discover', 'credit']):
+            qbo['Type'] = 'CREDIT_CARD'
+        elif pm_type in ('creditcard', 'credit card', 'credit_card'):
+            qbo['Type'] = 'CREDIT_CARD'
+        else:
+            qbo['Type'] = 'NON_CREDIT_CARD'
+
         self._store_entity_mapping('payment_methods', qbd)
         return qbo
 
@@ -2752,53 +2787,105 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_taxagency(self, qbd: Dict) -> Dict:
-        """Transform TaxAgency."""
-        qbo = {
-            'DisplayName': self.sanitize_name(qbd.get('Name', 'Tax Agency'))
-        }
+    def transform_taxagency(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TaxAgency — READ-ONLY in QBO, cannot be created via API.
+
+        TaxAgency entities must already exist in QBO. This method stores the
+        ID mapping (if a QBO match was found) but returns None to skip creation.
+        The orchestrator handles querying existing agencies before migration.
+        """
         self._store_entity_mapping('tax_agencies', qbd)
-        return qbo
+        # Return None — TaxAgency is read-only in QBO API
+        return None
 
 
     def transform_taxcode(self, qbd: Dict) -> Optional[Dict]:
-        """Transform TaxCode (skip defaults)."""
+        """Transform TaxCode for QBO TaxService endpoint.
+
+        QBO does NOT support POST /taxcode. TaxCodes must be created via
+        POST /taxservice/taxcode with a completely different payload:
+        {
+            "TaxCode": "name",
+            "TaxRateDetails": [{"TaxRateName", "RateValue", "TaxAgencyId", "TaxApplicableOn"}]
+        }
+
+        Returns a dict with '_use_tax_service': True flag so the orchestrator
+        routes it to create_tax_service() instead of create_entity().
+        """
         name = (qbd.get('Name') or '').upper()
 
-        # Skip default codes
+        # Skip default codes that already exist in QBO
         if name in {'TAX', 'NON'}:
             return None
 
-        qbo = {
-            'Name': self.sanitize_name(qbd.get('Name', 'Tax')),
-            'Taxable': qbd.get('IsTaxable', True)
-        }
+        tax_code_name = self.sanitize_name(qbd.get('Name', 'Tax'))
 
-        if qbd.get('TaxRates'):
-            tax_rate_details = []
-            for rate in qbd.get('TaxRates', []):
-                mapped_id = self.map_id('tax_rates', rate)
-                if mapped_id:
-                    tax_rate_details.append({'TaxRateRef': {'value': mapped_id}})
-            if tax_rate_details:
-                qbo['SalesTaxRateList'] = {'TaxRateDetail': tax_rate_details}
+        # Build TaxRateDetails from embedded rate data
+        tax_rate_details = []
+        for rate_data in qbd.get('TaxRates', []):
+            if isinstance(rate_data, dict):
+                # Rate data has full info
+                agency_id = self.map_id('tax_agencies', rate_data.get('AgencyRef'))
+                tax_rate_details.append({
+                    'TaxRateName': self.sanitize_name(
+                        rate_data.get('Name', f'{tax_code_name} Rate')),
+                    'RateValue': str(self.to_decimal(rate_data.get('Rate', 0))),
+                    'TaxAgencyId': agency_id or '1',
+                    'TaxApplicableOn': rate_data.get('ApplicableOn', 'Sales'),
+                })
+            elif isinstance(rate_data, str):
+                # Rate data is just a reference ID — look up from stored rates
+                stored_rate = self._tax_rate_cache.get(rate_data, {})
+                agency_id = self.map_id(
+                    'tax_agencies', stored_rate.get('AgencyRef'))
+                tax_rate_details.append({
+                    'TaxRateName': self.sanitize_name(
+                        stored_rate.get('Name', f'{tax_code_name} Rate')),
+                    'RateValue': str(self.to_decimal(
+                        stored_rate.get('Rate', 0))),
+                    'TaxAgencyId': agency_id or '1',
+                    'TaxApplicableOn': stored_rate.get(
+                        'ApplicableOn', 'Sales'),
+                })
+
+        if not tax_rate_details:
+            # No rate details — add to manual review
+            self.add_manual_review(
+                'TaxCode', tax_code_name,
+                reason='No TaxRateDetails available — QBO TaxService requires '
+                       'at least one rate. Configure manually in QBO.')
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            '_use_tax_service': True,  # Flag for orchestrator routing
+            'TaxCode': tax_code_name,
+            'TaxRateDetails': tax_rate_details,
+        }
 
         self._store_entity_mapping('tax_codes', qbd)
         return qbo
 
 
-    def transform_taxrate(self, qbd: Dict) -> Dict:
-        """Transform TaxRate."""
-        qbo = {
-            'Name': self.sanitize_name(qbd.get('Name', 'Tax Rate')),
-            'RateValue': self.to_decimal(qbd.get('Rate', 0)),
-            'Active': self._to_bool(qbd.get('IsActive', True))
-        }
-        mapped_id = self.map_id('tax_agencies', qbd.get('AgencyRef'))
-        if mapped_id:
-            qbo['AgencyRef'] = {'value': mapped_id}
+    def transform_taxrate(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TaxRate — cache for TaxCode creation, skip standalone create.
+
+        QBO does NOT support POST /taxrate. TaxRates are created as part of
+        TaxCode via the TaxService endpoint. This method caches the rate data
+        for use by transform_taxcode() and returns None to skip standalone creation.
+        """
+        # Cache rate data for transform_taxcode to reference
+        qbd_id = qbd.get('ListID') or qbd.get('Id') or qbd.get('Name')
+        if qbd_id:
+            self._tax_rate_cache[str(qbd_id)] = {
+                'Name': qbd.get('Name', 'Tax Rate'),
+                'Rate': qbd.get('Rate', qbd.get('RateValue', 0)),
+                'AgencyRef': qbd.get('AgencyRef'),
+                'ApplicableOn': qbd.get('ApplicableOn', 'Sales'),
+            }
         self._store_entity_mapping('tax_rates', qbd)
-        return qbo
+        # Return None — TaxRate is created via TaxService with TaxCode
+        return None
 
 
     def transform_term(self, qbd: Dict) -> Optional[Dict]:
@@ -2817,7 +2904,7 @@ class QBDataTransformer:
         if qbd.get('DueDays') is not None:
             try:
                 qbo['DueDays'] = int(float(str(qbd['DueDays'])))
-                qbo['Type'] = 'STANDARD'
+                # Note: 'Type' is read-only in QBO — auto-determined from DueDays
             except (ValueError, TypeError):
                 pass
 
@@ -2834,32 +2921,54 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_timeactivity(self, qbd: Dict) -> Dict:
-        """Transform TimeActivity."""
+    def transform_timeactivity(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TimeActivity.
+
+        QBO requires: NameOf, EmployeeRef/VendorRef (matching NameOf), Hours, Minutes.
+        Skip entities missing required fields rather than sending incomplete payloads.
+        """
+        name_of = qbd.get('NameOf', 'Employee')
         qbo = {
-            'NameOf': qbd.get('NameOf', 'Employee'),
+            'NameOf': name_of,
             'TxnDate': self.format_date(qbd.get('TxnDate'))
         }
 
-        if qbo['NameOf'] == 'Employee':
+        # Required: EmployeeRef or VendorRef depending on NameOf
+        has_person_ref = False
+        if name_of == 'Employee':
             mapped_id = self.map_id('employees', qbd.get('EmployeeRef'))
             if mapped_id:
                 qbo['EmployeeRef'] = {'value': mapped_id}
+                has_person_ref = True
         else:
             mapped_id = self.map_id('vendors', qbd.get('VendorRef'))
             if mapped_id:
                 qbo['VendorRef'] = {'value': mapped_id}
+                has_person_ref = True
 
+        if not has_person_ref:
+            ref_type = 'EmployeeRef' if name_of == 'Employee' else 'VendorRef'
+            name = qbd.get('TxnID') or qbd.get('Name') or 'Unknown'
+            self.add_manual_review('TimeActivity', str(name),
+                                   reason=f'Missing required {ref_type}')
+            self.stats['total_skipped'] += 1
+            return None
+
+        # Required: Hours and Minutes
+        hours = 0
+        minutes = 0
         if qbd.get('Hours') is not None:
             try:
-                qbo['Hours'] = int(float(str(qbd['Hours'])))
+                hours = int(float(str(qbd['Hours'])))
             except (ValueError, TypeError):
                 pass
         if qbd.get('Minutes') is not None:
             try:
-                qbo['Minutes'] = int(float(str(qbd['Minutes'])))
+                minutes = int(float(str(qbd['Minutes'])))
             except (ValueError, TypeError):
                 pass
+        qbo['Hours'] = hours
+        qbo['Minutes'] = minutes
 
         if qbd.get('CustomerRef'):
             mapped_id = self.map_id('customers', qbd['CustomerRef'])

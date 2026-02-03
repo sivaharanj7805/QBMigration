@@ -347,22 +347,39 @@ class TestMinimalExtractorData:
         assert 'DueDays' not in result
         assert 'DiscountDays' not in result
 
-    def test_taxcode_minimal(self, transformer):
-        """TaxCode with no TaxRates collection (omitted by NullValueHandling)."""
+    def test_taxcode_no_rates_skipped(self, transformer):
+        """TaxCode without TaxRateDetails → skipped (QBO TaxService requires rates)."""
         qbd = {'ListID': 'TC-001', 'Name': 'Custom Tax'}
         result = transformer.transform_taxcode(qbd)
-        assert result is not None
-        assert 'SalesTaxRateList' not in result
+        # No TaxRateDetails → added to manual_review, returns None
+        assert result is None
+        assert transformer.stats['total_skipped'] >= 1
 
-    def test_taxrate_minimal(self, transformer):
+    def test_taxcode_with_embedded_rates(self, transformer):
+        """TaxCode with embedded rate data → produces TaxService payload."""
+        qbd = {
+            'ListID': 'TC-002', 'Name': 'State Sales Tax',
+            'TaxRates': [{'Name': 'State Rate', 'Rate': '8.25', 'AgencyRef': 'TA-1'}]
+        }
+        result = transformer.transform_taxcode(qbd)
+        assert result is not None
+        assert result['_use_tax_service'] is True
+        assert result['TaxCode'] == 'State Sales Tax'
+        assert len(result['TaxRateDetails']) == 1
+        assert result['TaxRateDetails'][0]['RateValue'] == '8.25'
+
+    def test_taxrate_returns_none_caches(self, transformer):
+        """TaxRate returns None (not standalone-creatable) but caches data."""
         qbd = {'ListID': 'TR-001', 'Name': 'State Tax', 'RateValue': '8.25'}
         result = transformer.transform_taxrate(qbd)
-        assert result is not None
+        assert result is None  # TaxRate is created via TaxService, not standalone
+        assert 'TR-001' in transformer._tax_rate_cache
 
-    def test_taxagency_minimal(self, transformer):
+    def test_taxagency_returns_none(self, transformer):
+        """TaxAgency is read-only in QBO — returns None."""
         qbd = {'ListID': 'TA-001', 'Name': 'State Tax Board'}
         result = transformer.transform_taxagency(qbd)
-        assert result is not None
+        assert result is None  # Read-only entity
 
     def test_paymentmethod_custom(self, transformer):
         """Custom payment method (not a default like Cash/Check)."""
@@ -377,8 +394,20 @@ class TestMinimalExtractorData:
         assert result is not None
 
     def test_timeactivity_minimal(self, transformer):
-        """TimeActivity with minimal fields — just date and name type."""
+        """TimeActivity requires EmployeeRef/VendorRef — skip if missing."""
         qbd = {'TxnID': 'TA-001', 'TxnDate': '2024-01-15', 'NameOf': 'Employee'}
+        result = transformer.transform_timeactivity(qbd)
+        # No EmployeeRef mapping → skipped
+        assert result is None
+
+    def test_timeactivity_with_employee(self, transformer):
+        """TimeActivity with valid EmployeeRef."""
+        transformer.store_mapping('employees', 'EMP-001', 'QBO-EMP-001')
+        qbd = {
+            'TxnID': 'TA-002', 'TxnDate': '2024-01-15',
+            'NameOf': 'Employee', 'EmployeeRef': 'EMP-001',
+            'Hours': '8', 'Minutes': '30',
+        }
         result = transformer.transform_timeactivity(qbd)
         assert result is not None
 
@@ -711,3 +740,232 @@ class TestFullPipelineResilience:
         assert results[0] is not None
         # Second invoice should be skipped (no lines)
         assert results[1] is None
+
+
+# ============================================================================
+# ID MAPPING CASE SENSITIVITY FIX
+# ============================================================================
+
+class TestIdMappingCaseNormalization:
+    """Verify that PascalCase keys from the orchestrator are normalized to
+    lowercase for consistent lookup via map_id() and map_id_required()."""
+
+    def test_pascalcase_merge_normalizes_to_lowercase(self, transformer):
+        """PascalCase keys from orchestrator merge into lowercase buckets."""
+        existing_maps = {
+            'Customers': {'CUST-001': 'QBO-CUST-REAL-1'},
+            'Accounts': {'ACCT-001': 'QBO-ACCT-REAL-1'},
+        }
+        transformer.transform_entity('Customers', {'Name': 'Test'}, id_mapping=existing_maps)
+        # Real QBO IDs should be in lowercase buckets
+        assert transformer.id_mapping['customers']['CUST-001'] == 'QBO-CUST-REAL-1'
+        assert transformer.id_mapping['accounts']['ACCT-001'] == 'QBO-ACCT-REAL-1'
+
+    def test_real_id_replaces_temp_id(self, transformer):
+        """Real QBO ID from orchestrator replaces temp ID from transformer."""
+        # Simulate transformer storing a temp ID
+        transformer.store_mapping('customers', 'CUST-001', 'temp_customers_1')
+        assert transformer.map_id('customers', 'CUST-001') == 'temp_customers_1'
+
+        # Simulate orchestrator merging real QBO ID (PascalCase key)
+        existing_maps = {'Customers': {'CUST-001': 'QBO-123'}}
+        transformer.transform_entity('Customers', {'Name': 'Test'}, id_mapping=existing_maps)
+
+        # map_id uses lowercase — should now find the real QBO ID
+        assert transformer.map_id('customers', 'CUST-001') == 'QBO-123'
+
+    def test_map_id_required_uses_real_id(self, transformer):
+        """map_id_required resolves to real QBO ID after merge."""
+        existing_maps = {'Vendors': {'VEND-001': 'QBO-VEND-42'}}
+        transformer.transform_entity('Vendors', {'Name': 'V'}, id_mapping=existing_maps)
+
+        qbo_id, valid = transformer.map_id_required(
+            'vendors', 'VEND-001', 'Vendor for Bill', 'Bill', 'BILL-1')
+        assert valid is True
+        assert qbo_id == 'QBO-VEND-42'
+
+    def test_cascade_customer_to_invoice(self, transformer):
+        """Invoice resolves customer to real QBO ID after merge."""
+        # Merge real customer ID
+        existing_maps = {'Customers': {'CUST-001': 'QBO-CUST-99'}}
+        transformer.transform_entity('Customers', {'Name': 'X'}, id_mapping=existing_maps)
+
+        # Merge real item ID
+        existing_maps2 = {'Items': {'ITEM-001': 'QBO-ITEM-50'}}
+        transformer.transform_entity('Items', {'Name': 'Y', 'ItemType': 'Service'},
+                                     id_mapping=existing_maps2)
+
+        # Now transform an invoice referencing that customer+item
+        invoice = {
+            'TxnID': 'INV-001',
+            'CustomerRef': 'CUST-001',
+            'TxnDate': '2024-01-15',
+            'InvoiceLines': [{'Amount': '100.00', 'ItemRef': 'ITEM-001'}]
+        }
+        result = transformer.transform_invoice(invoice)
+        assert result is not None
+        assert result['CustomerRef'] == {'value': 'QBO-CUST-99'}
+        assert result['Line'][0]['SalesItemLineDetail']['ItemRef'] == {'value': 'QBO-ITEM-50'}
+
+    def test_failed_customer_blocks_invoice(self, transformer):
+        """Invoice skipped when customer mapping doesn't exist (failed creation)."""
+        # No customer mapping at all — simulates failed customer creation
+        invoice = {
+            'TxnID': 'INV-002',
+            'CustomerRef': 'CUST-MISSING',
+            'TxnDate': '2024-01-15',
+            'InvoiceLines': [{'Amount': '100.00', 'ItemRef': 'ITEM-001'}]
+        }
+        result = transformer.transform_invoice(invoice)
+        # Invoice should be skipped — no valid CustomerRef
+        assert result is None
+
+
+# ============================================================================
+# TAX SERVICE ROUTING
+# ============================================================================
+
+class TestTaxServiceRouting:
+    """Verify TaxCode uses TaxService endpoint, TaxRate caches, TaxAgency is read-only."""
+
+    def test_taxcode_produces_taxservice_payload(self, transformer):
+        """TaxCode with rates produces _use_tax_service flag."""
+        qbd = {
+            'ListID': 'TC-100',
+            'Name': 'County Tax',
+            'TaxRates': [
+                {'Name': 'County Rate', 'Rate': '6.5', 'AgencyRef': 'AG-1'},
+            ]
+        }
+        result = transformer.transform_taxcode(qbd)
+        assert result is not None
+        assert result.get('_use_tax_service') is True
+        assert result['TaxCode'] == 'County Tax'
+        assert len(result['TaxRateDetails']) == 1
+        detail = result['TaxRateDetails'][0]
+        assert detail['TaxRateName'] == 'County Rate'
+        assert detail['RateValue'] == '6.50'
+        assert detail['TaxApplicableOn'] == 'Sales'
+
+    def test_taxcode_with_cached_rate_refs(self, transformer):
+        """TaxCode references TaxRate IDs that were cached by transform_taxrate."""
+        # First cache a tax rate
+        transformer.transform_taxrate({
+            'ListID': 'TR-50', 'Name': 'City Tax', 'Rate': '2.0',
+            'AgencyRef': 'AG-2'
+        })
+        # Now create a TaxCode that references it by ID
+        result = transformer.transform_taxcode({
+            'ListID': 'TC-50', 'Name': 'City Code',
+            'TaxRates': ['TR-50']
+        })
+        assert result is not None
+        assert result['TaxRateDetails'][0]['TaxRateName'] == 'City Tax'
+        assert result['TaxRateDetails'][0]['RateValue'] == '2.00'
+
+    def test_taxcode_default_skipped(self, transformer):
+        """Default TaxCodes (TAX, NON) are skipped."""
+        assert transformer.transform_taxcode({'Name': 'TAX'}) is None
+        assert transformer.transform_taxcode({'Name': 'Non'}) is None
+
+    def test_taxagency_stores_mapping_returns_none(self, transformer):
+        """TaxAgency stores mapping but returns None (read-only)."""
+        qbd = {'ListID': 'TA-100', 'Name': 'IRS'}
+        result = transformer.transform_taxagency(qbd)
+        assert result is None
+
+    def test_taxrate_caches_all_fields(self, transformer):
+        """TaxRate caches Name, Rate, AgencyRef, ApplicableOn."""
+        qbd = {
+            'ListID': 'TR-100',
+            'Name': 'Federal Tax',
+            'Rate': '10.0',
+            'AgencyRef': 'AG-1',
+            'ApplicableOn': 'Purchase',
+        }
+        transformer.transform_taxrate(qbd)
+        cached = transformer._tax_rate_cache['TR-100']
+        assert cached['Name'] == 'Federal Tax'
+        assert cached['Rate'] == '10.0'
+        assert cached['AgencyRef'] == 'AG-1'
+        assert cached['ApplicableOn'] == 'Purchase'
+
+
+# ============================================================================
+# CONFIG ENTITY PAYLOAD FIXES
+# ============================================================================
+
+class TestConfigEntityPayloadFixes:
+    """Verify payload corrections for Term, PaymentMethod, Attachable, TimeActivity."""
+
+    def test_term_no_type_field(self, transformer):
+        """Term should NOT include read-only 'Type' field."""
+        qbd = {'ListID': 'T-1', 'Name': 'Custom 45', 'DueDays': '45'}
+        result = transformer.transform_term(qbd)
+        assert result is not None
+        assert 'Type' not in result  # Type is read-only in QBO
+        assert result['DueDays'] == 45
+
+    def test_paymentmethod_credit_card_classification(self, transformer):
+        """PaymentMethod with 'credit' in name → CREDIT_CARD type."""
+        qbd = {'ListID': 'PM-1', 'Name': 'Corporate Credit Card'}
+        result = transformer.transform_paymentmethod(qbd)
+        assert result is not None
+        assert result['Type'] == 'CREDIT_CARD'
+
+    def test_paymentmethod_non_credit_card(self, transformer):
+        """PaymentMethod without credit card keywords → NON_CREDIT_CARD."""
+        qbd = {'ListID': 'PM-2', 'Name': 'Wire Transfer'}
+        result = transformer.transform_paymentmethod(qbd)
+        assert result['Type'] == 'NON_CREDIT_CARD'
+
+    def test_paymentmethod_type_from_source(self, transformer):
+        """PaymentMethod with explicit Type from source data."""
+        qbd = {'ListID': 'PM-3', 'Name': 'Company Card',
+               'PaymentMethodType': 'CreditCard'}
+        result = transformer.transform_paymentmethod(qbd)
+        assert result['Type'] == 'CREDIT_CARD'
+
+    def test_attachable_has_content_type(self, transformer):
+        """Attachable should include ContentType derived from extension."""
+        qbd = {'TxnID': 'ATT-1', 'FileName': 'invoice_scan.pdf'}
+        result = transformer.transform_attachable(qbd)
+        assert result['ContentType'] == 'application/pdf'
+
+    def test_attachable_jpg_content_type(self, transformer):
+        qbd = {'TxnID': 'ATT-2', 'FileName': 'receipt.jpg'}
+        result = transformer.transform_attachable(qbd)
+        assert result['ContentType'] == 'image/jpeg'
+
+    def test_attachable_unknown_extension(self, transformer):
+        """Unknown extension defaults to application/octet-stream."""
+        qbd = {'TxnID': 'ATT-3', 'FileName': 'data.xyz'}
+        result = transformer.transform_attachable(qbd)
+        assert result['ContentType'] == 'application/octet-stream'
+
+    def test_timeactivity_missing_employee_ref_skipped(self, transformer):
+        """TimeActivity without valid EmployeeRef → skipped."""
+        qbd = {'TxnID': 'TA-1', 'TxnDate': '2024-01-15', 'NameOf': 'Employee'}
+        result = transformer.transform_timeactivity(qbd)
+        assert result is None
+        assert len(transformer.manual_review) >= 1
+        assert 'Missing required EmployeeRef' in transformer.manual_review[-1]['reason']
+
+    def test_timeactivity_missing_vendor_ref_skipped(self, transformer):
+        """TimeActivity with NameOf=Vendor but no VendorRef → skipped."""
+        qbd = {'TxnID': 'TA-2', 'TxnDate': '2024-01-15', 'NameOf': 'Vendor'}
+        result = transformer.transform_timeactivity(qbd)
+        assert result is None
+        assert 'Missing required VendorRef' in transformer.manual_review[-1]['reason']
+
+    def test_timeactivity_hours_minutes_default_to_zero(self, transformer):
+        """TimeActivity always includes Hours/Minutes (default to 0)."""
+        transformer.store_mapping('employees', 'EMP-1', 'QBO-EMP-1')
+        qbd = {
+            'TxnID': 'TA-3', 'TxnDate': '2024-01-15',
+            'NameOf': 'Employee', 'EmployeeRef': 'EMP-1',
+        }
+        result = transformer.transform_timeactivity(qbd)
+        assert result is not None
+        assert result['Hours'] == 0
+        assert result['Minutes'] == 0

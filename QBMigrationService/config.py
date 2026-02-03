@@ -165,7 +165,7 @@ QBO_TOTAL_TIMEOUT = get_env_int("QBO_TOTAL_TIMEOUT", 60)  # Total request timeou
 QBO_REQUEST_TIMEOUT = (QBO_CONNECT_TIMEOUT, QBO_READ_TIMEOUT)
 
 # Retry configuration
-RETRY_MAX_ATTEMPTS = get_env_int("RETRY_MAX_ATTEMPTS", 3)
+RETRY_MAX_ATTEMPTS = get_env_int("RETRY_MAX_ATTEMPTS", 7)  # QBO rate limit window is 60s; 7 retries with base-2 backoff covers ~127s
 RETRY_BACKOFF_BASE = get_env_float("RETRY_BACKOFF_BASE", 2.0)  # Exponential backoff base
 RETRY_BACKOFF_MAX = get_env_int("RETRY_BACKOFF_MAX", 60)  # Maximum retry delay in seconds
 RETRY_JITTER = get_env_bool("RETRY_JITTER", "true")  # Add random jitter to prevent thundering herd
