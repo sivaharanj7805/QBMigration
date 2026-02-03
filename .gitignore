@@ -121,3 +121,8 @@ credentials.txt
 auth.txt
 QBMigrationServer/package-lock.json
 .keys_rotation_temp
+
+# Test-generated artifacts
+QBMigrationServer/caseware_bundles/
+QBMigrationServer/certificates/
+QBMigrationServer/reports/
