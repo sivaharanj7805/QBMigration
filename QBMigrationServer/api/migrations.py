@@ -4,11 +4,17 @@ from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
+from api.auth import require_auth
 import logging
 import re
 
 migrations_bp = Blueprint('migrations', __name__)
 logger = logging.getLogger(__name__)
+
+
+def _get_current_user_id():
+    """Get current user ID from require_auth decorator (request.current_user)."""
+    return int(request.current_user['user_id'])
 
 
 # HIGH-07 FIX: UUID format validation for migration IDs
@@ -80,7 +86,7 @@ def validate_pagination_param(value, param_name, default, min_val, max_val):
 
 
 @migrations_bp.route('/api/migrations', methods=['GET'])
-@login_required
+@require_auth
 def list_migrations():
     """
     List migrations for current user with pagination support.
@@ -134,7 +140,7 @@ def list_migrations():
                 }), 400
 
         # Build query
-        query = Migration.query.filter_by(user_id=int(current_user.get_id()))
+        query = Migration.query.filter_by(user_id=_get_current_user_id())
 
         # Apply status filter if provided
         if status_filter:
@@ -196,7 +202,7 @@ def list_migrations():
 
 
 @migrations_bp.route('/api/migrations/<migration_id>', methods=['GET'])
-@login_required
+@require_auth
 def get_migration(migration_id):
     """
     Get specific migration details
@@ -221,7 +227,7 @@ def get_migration(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -262,7 +268,7 @@ def get_migration(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/status', methods=['GET'])
-@login_required
+@require_auth
 def get_migration_status(migration_id):
     """
     Get migration status (lightweight endpoint for polling)
@@ -286,7 +292,7 @@ def get_migration_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -324,7 +330,7 @@ def get_migration_status(migration_id):
 
 @migrations_bp.route('/api/migrations/<migration_id>/start', methods=['POST'])
 @limiter.limit("5 per minute")
-@login_required
+@require_auth
 def start_migration(migration_id):
     """
     Start migration on ephemeral AWS instance
@@ -348,7 +354,7 @@ def start_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -498,7 +504,7 @@ def start_migration(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/process', methods=['POST'])
-@login_required
+@require_auth
 def process_migration(migration_id):
     """
     Process migration - alias for start_migration
@@ -508,7 +514,7 @@ def process_migration(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/cancel', methods=['POST'])
-@login_required
+@require_auth
 def cancel_migration(migration_id):
     """
     Cancel running migration
@@ -526,7 +532,7 @@ def cancel_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -589,7 +595,7 @@ def cancel_migration(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>/retry', methods=['POST'])
-@login_required
+@require_auth
 def retry_migration(migration_id):
     """
     Retry failed migration
@@ -607,7 +613,7 @@ def retry_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -672,7 +678,7 @@ def retry_migration(migration_id):
 
 
 @migrations_bp.route('/api/migrations/<migration_id>', methods=['DELETE'])
-@login_required
+@require_auth
 def delete_migration(migration_id):
     """
     Delete migration record and cleanup resources
@@ -689,7 +695,7 @@ def delete_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -744,7 +750,7 @@ def delete_migration(migration_id):
 # ============================================================================
 
 @migrations_bp.route('/api/migrations/<migration_id>/execute', methods=['POST'])
-@login_required
+@require_auth
 def execute_migration_celery(migration_id):
     """
     Execute migration using Celery background worker (Option B).
@@ -767,7 +773,7 @@ def execute_migration_celery(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=int(current_user.get_id())
+            user_id=_get_current_user_id()
         ).first()
         
         if not migration:
@@ -796,7 +802,7 @@ def execute_migration_celery(migration_id):
         task = run_migration_task.delay(
             migration_id=migration_id,
             encrypted_file_path=migration.s3_uri or migration.file_path,
-            user_id=int(current_user.get_id()),
+            user_id=_get_current_user_id(),
             oauth_tokens=oauth_tokens
         )
         
@@ -835,7 +841,7 @@ def execute_migration_celery(migration_id):
 
 
 @migrations_bp.route('/api/migrations/stats', methods=['GET'])
-@login_required
+@require_auth
 def get_migration_stats():
     """
     Get migration statistics for dashboard.
@@ -846,7 +852,7 @@ def get_migration_stats():
         from sqlalchemy import func
         from datetime import datetime, timedelta, timezone
         
-        user_id = int(current_user.get_id())
+        user_id = _get_current_user_id()
         
         # Get current month's migrations
         now = datetime.now(timezone.utc)
