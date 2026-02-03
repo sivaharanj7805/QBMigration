@@ -222,7 +222,8 @@ class TestMasterEndToEnd:
         with patch.object(client, '_process_single_batch') as mock_batch:
             mock_batch.return_value = (
                 [{'Id': str(i), 'DisplayName': f'Entity {i}'} for i in range(30)],
-                []
+                [],
+                {}
             )
             
             for entity_type, entities in result['entities'].items():
@@ -417,9 +418,9 @@ class TestBatchPerformance:
         batch_sizes = []
         
         with patch.object(client, '_process_single_batch') as mock_batch:
-            def capture_batch_size(batch, entity_type, batch_id, oauth_mgr, mig_id):
+            def capture_batch_size(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
                 batch_sizes.append(len(batch))
-                return ([{'Id': str(i)} for i in range(len(batch))], [])
+                return ([{'Id': str(i)} for i in range(len(batch))], [], {})
             
             mock_batch.side_effect = capture_batch_size
             

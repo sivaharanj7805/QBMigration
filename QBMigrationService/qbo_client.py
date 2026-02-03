@@ -931,18 +931,32 @@ class PremiumQBOClient:
         entity_type: str,
         batch_id: str,
         oauth_manager: Optional[Any],
-        migration_id: str
-    ) -> Tuple[List[Dict], List[Dict]]:
+        migration_id: str,
+        source_ids: Optional[List[str]] = None
+    ) -> Tuple[List[Dict], List[Dict], Dict[str, str]]:
         """
-        Process a single batch with proper error handling and tracking
+        Process a single batch with proper error handling and tracking.
 
-        FIX #130: Proper transaction handling
-        FIX #243: Store failed items
+        Args:
+            batch: List of entity dicts to create
+            entity_type: QBO entity type (singular, e.g., 'Customer')
+            batch_id: Unique batch identifier
+            oauth_manager: OAuth manager for token refresh
+            migration_id: Migration ID for tracking
+            source_ids: Optional parallel list of QB Desktop source IDs.
+                If provided, used for dedup checks and ID mapping instead
+                of extracting from entity data (which may not have ListID/TxnID
+                after transformation to QBO format).
+
+        Returns:
+            Tuple of (succeeded_entities, failed_items, id_mappings)
+            where id_mappings = {source_id: qbo_id}
         """
         self._enforce_batch_rate_limit()
 
         succeeded = []
         failed = []
+        id_mappings = {}  # source_id → qbo_id
 
         batch_data = {
             "BatchItemRequest": []
@@ -952,18 +966,25 @@ class PremiumQBOClient:
         idempotency_key = f"{batch_id}_{migration_id}"
 
         for j, entity_data in enumerate(batch):
+            # Get source ID: prefer explicit source_ids, fall back to entity fields
+            if source_ids and j < len(source_ids):
+                qbd_id = source_ids[j]
+            else:
+                qbd_id = (
+                    entity_data.get("ListID") or
+                    entity_data.get("TxnID") or
+                    entity_data.get("Id") or
+                    entity_data.get("Name") or
+                    entity_data.get("DocNumber") or
+                    f"index_{j}"
+                )
+
             # Dedup check: skip already-migrated entities
-            qbd_id = original_entity_id = (
-                entity_data.get("ListID") or
-                entity_data.get("TxnID") or
-                entity_data.get("Id") or
-                entity_data.get("Name") or
-                entity_data.get("DocNumber") or
-                f"index_{j}"
-            )
             existing = self.was_entity_created(entity_type, qbd_id)
             if existing:
                 logger.debug(f"Skipping already-migrated {entity_type} {qbd_id}")
+                # Still record the mapping so orchestrator has it
+                id_mappings[qbd_id] = existing
                 continue
 
             batch_data["BatchItemRequest"].append({
@@ -975,7 +996,7 @@ class PremiumQBOClient:
         # FIX: Don't send empty BatchItemRequest after dedup filters everything
         if not batch_data["BatchItemRequest"]:
             logger.info(f"All {len(batch)} entities in batch already migrated, skipping")
-            return [], []  # Return empty succeeded/failed
+            return [], [], id_mappings
 
         try:
             response = self._make_request(
@@ -985,9 +1006,9 @@ class PremiumQBOClient:
                 oauth_manager=oauth_manager,
                 idempotency_key=idempotency_key
             )
-            
+
             batch_responses = response.get("BatchItemResponse", [])
-            
+
             # FIX #320: Check if BatchItemResponse is empty
             if not batch_responses:
                 logger.error(f"Empty BatchItemResponse for batch {batch_id}")
@@ -997,8 +1018,8 @@ class PremiumQBOClient:
                         "entity": entity,
                         "error": "Empty API response"
                     })
-                return succeeded, failed
-            
+                return succeeded, failed, id_mappings
+
             for i, batch_item in enumerate(batch_responses):
                 bid = batch_item.get("bId", f"bid_{i}")
 
@@ -1014,12 +1035,10 @@ class PremiumQBOClient:
                 # Safely get original entity
                 original_entity = batch[req_index] if req_index < len(batch) else batch[i] if i < len(batch) else {}
 
-                if batch_item.get(entity_type):
-                    # Success
-                    created_entity = batch_item[entity_type]
-                    succeeded.append(created_entity)
-
-                    # Record in database - use source entity data for ID
+                # Get source ID for this item
+                if source_ids and req_index < len(source_ids):
+                    qbd_id = source_ids[req_index]
+                else:
                     qbd_id = (
                         original_entity.get("ListID") or
                         original_entity.get("TxnID") or
@@ -1028,11 +1047,18 @@ class PremiumQBOClient:
                         original_entity.get("DocNumber") or
                         f"index_{req_index}"
                     )
+
+                if batch_item.get(entity_type):
+                    # Success
+                    created_entity = batch_item[entity_type]
+                    succeeded.append(created_entity)
+
                     qbo_id = created_entity.get("Id")
                     sync_token = created_entity.get("SyncToken", "0")
 
                     if qbo_id:
                         self.record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)
+                        id_mappings[qbd_id] = qbo_id
 
                 elif batch_item.get("Fault"):
                     # Failure
@@ -1047,36 +1073,50 @@ class PremiumQBOClient:
                     failed.append(failed_item)
 
                     logger.error(f"Batch item {bid} failed: {error_msg}")
-        
+
         except Exception as e:
             # Entire batch failed
             logger.error(f"Batch {batch_id} failed completely: {e}")
-            
+
             for entity in batch:
                 failed.append({
                     "entity": entity,
                     "error": str(e)
                 })
-        
-        return succeeded, failed
+
+        return succeeded, failed, id_mappings
     
     def batch_create_parallel(
         self,
         entities: List[Dict],
         entity_type: str,
         oauth_manager: Optional[Any] = None,
-        migration_id: str = None
+        migration_id: str = None,
+        source_ids: Optional[List[str]] = None
     ) -> Dict:
         """
-        FIX #13, #15: Proper parallel batch processing with thread safety
-        FIX #243: Return structured failed items
+        Parallel batch processing with thread safety and source ID tracking.
+
+        Args:
+            entities: List of entity dicts to create in QBO
+            entity_type: QBO entity type (singular, e.g., 'Customer')
+            oauth_manager: OAuth manager for token refresh
+            migration_id: Migration ID for tracking
+            source_ids: Optional parallel list of QB Desktop source IDs (same
+                length and order as entities). When provided, enables correct
+                ID mapping for entities that have been transformed to QBO format
+                and no longer contain ListID/TxnID fields.
+
+        Returns:
+            Dict with succeeded_count, failed, id_mappings, etc.
         """
         results = {
             "succeeded": [],
             "succeeded_count": 0,
             "succeeded_ids": [],
             "failed": [],
-            "total": len(entities)
+            "total": len(entities),
+            "id_mappings": {}  # source_id → qbo_id
         }
 
         # AUDIT FIX: Use config constant instead of hardcoded value
@@ -1089,23 +1129,24 @@ class PremiumQBOClient:
 
         for i in range(0, len(entities), batch_size):
             batch = entities[i:i + batch_size]
+            batch_source_ids = source_ids[i:i + batch_size] if source_ids else None
             batch_id = self._get_next_batch_id()
-            batches.append((batch, batch_id))
+            batches.append((batch, batch_id, batch_source_ids))
 
-        # HIGH FIX: Use logger instead of print for production environments
         logger.info(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
 
-            for batch, batch_id in batches:
+            for batch, batch_id, batch_src_ids in batches:
                 future = executor.submit(
                     self._process_single_batch,
                     batch,
                     entity_type,
                     batch_id,
                     oauth_manager,
-                    migration_id
+                    migration_id,
+                    batch_src_ids
                 )
                 futures.append(future)
 
@@ -1113,12 +1154,11 @@ class PremiumQBOClient:
                 self._check_shutdown()
 
                 try:
-                    succeeded, failed = future.result()
+                    succeeded, failed, batch_id_mappings = future.result()
                     results["succeeded_count"] += len(succeeded)
                     results["succeeded_ids"].extend([s.get("Id", "") for s in succeeded])
-                    # Memory optimization: only keep IDs, not full entity objects
-                    # Full entities are already persisted in SQLite via record_entity_success
                     results["failed"].extend(failed)
+                    results["id_mappings"].update(batch_id_mappings)
                 except Exception as e:
                     logger.error(f"Batch processing error: {e}")
 
@@ -1127,7 +1167,6 @@ class PremiumQBOClient:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
 
-        # HIGH FIX: Use logger instead of print
         logger.info(f"Batch processing complete: Succeeded={results['succeeded_count']}, Failed={len(results['failed'])}")
 
         return results
@@ -1139,23 +1178,17 @@ class PremiumQBOClient:
         oauth_manager: Optional[Any] = None,
         migration_id: str = None,
         target_throughput: int = 500000,  # rows per hour
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
+        source_ids: Optional[List[str]] = None
     ) -> Dict:
         """
-        $25M FEATURE: Optimized batch processing for enterprise migrations.
-        Targets 500,000 rows in under 60 minutes.
-        
+        Optimized batch processing for enterprise migrations.
+
         2026 Intuit Batch Limits:
         - 30 Payloads per batch request
         - 40 Batch requests per minute per Realm ID
         - 10 requests per second throttling
-        
-        Strategy:
-        1. Use maximum batch size (30 items)
-        2. Parallel workers (respecting QBO plan limits)
-        3. Adaptive rate limiting based on X-RateLimit-Remaining
-        4. Progress tracking for Pizza Tracker
-        
+
         Args:
             entities: List of entities to create
             entity_type: QBO entity type (e.g., 'Invoice', 'Customer')
@@ -1163,12 +1196,13 @@ class PremiumQBOClient:
             migration_id: Migration ID for tracking
             target_throughput: Target rows per hour (default 500K)
             progress_callback: Callback(processed, total, rate) for progress updates
-            
+            source_ids: Optional parallel list of QB Desktop source IDs
+
         Returns:
-            Dict with succeeded, failed, total, and timing stats
+            Dict with succeeded, failed, total, id_mappings, and timing stats
         """
         start_time = time.time()
-        
+
         results = {
             "succeeded": [],
             "succeeded_count": 0,
@@ -1176,7 +1210,8 @@ class PremiumQBOClient:
             "failed": [],
             "total": len(entities),
             "start_time": datetime.now().isoformat(),
-            "entity_type": entity_type
+            "entity_type": entity_type,
+            "id_mappings": {}
         }
 
         if not entities:
@@ -1202,13 +1237,14 @@ class PremiumQBOClient:
         batches = []
         for i in range(0, len(entities), batch_size):
             batch = entities[i:i + batch_size]
+            batch_src_ids = source_ids[i:i + batch_size] if source_ids else None
             batch_id = self._get_next_batch_id()
-            batches.append((batch, batch_id, i))  # Include offset for progress
+            batches.append((batch, batch_id, i, batch_src_ids))
 
         total_batches = len(batches)
         processed_entities = 0
 
-        logger.info(f"$25M BATCH: Processing {len(entities)} {entity_type} in {total_batches} batches with {optimal_workers} workers")
+        logger.info(f"BATCH: Processing {len(entities)} {entity_type} in {total_batches} batches with {optimal_workers} workers")
 
         # Process with controlled parallelism
         with ThreadPoolExecutor(max_workers=optimal_workers) as executor:
@@ -1222,7 +1258,7 @@ class PremiumQBOClient:
 
                 # Submit new batches (up to worker limit)
                 while batch_queue and len(active_futures) < optimal_workers:
-                    batch, batch_id, offset = batch_queue.popleft()
+                    batch, batch_id, offset, batch_src_ids = batch_queue.popleft()
 
                     future = executor.submit(
                         self._process_single_batch,
@@ -1230,7 +1266,8 @@ class PremiumQBOClient:
                         entity_type,
                         batch_id,
                         oauth_manager,
-                        migration_id
+                        migration_id,
+                        batch_src_ids
                     )
                     futures[future] = (batch_id, offset, len(batch))
                     active_futures.add(future)
@@ -1246,11 +1283,11 @@ class PremiumQBOClient:
                         batch_id, offset, batch_len = futures[future]
 
                         try:
-                            succeeded, failed = future.result()
+                            succeeded, failed, batch_id_mappings = future.result()
                             results["succeeded_count"] += len(succeeded)
                             results["succeeded_ids"].extend([s.get("Id", "") for s in succeeded])
-                            # Memory optimization: only keep IDs, not full entity objects
                             results["failed"].extend(failed)
+                            results["id_mappings"].update(batch_id_mappings)
                             processed_entities += batch_len
 
                             # Report progress

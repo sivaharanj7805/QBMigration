@@ -85,24 +85,25 @@ class TestBatchProcessing:
         entities = [{"Name": f"Customer {i}"} for i in range(100)]
         
         with patch.object(mock_client, '_process_single_batch') as mock_process:
-            mock_process.return_value = ([], [])
-            
+            mock_process.return_value = ([], [], {})
+
             mock_client.batch_create_parallel(
                 entities=entities,
                 entity_type="Customer"
             )
-            
+
             # 100 / 30 = 4 batches (30 + 30 + 30 + 10)
             assert mock_process.call_count == 4
-    
+
     def test_batch_create_parallel_returns_structured_results(self, mock_client):
         """Test that results contain succeeded and failed lists"""
         entities = [{"Name": "Test Customer"}]
-        
+
         with patch.object(mock_client, '_process_single_batch') as mock_process:
             mock_process.return_value = (
                 [{"Id": "1", "Name": "Test Customer"}],
-                []
+                [],
+                {"1": "1"}
             )
             
             results = mock_client.batch_create_parallel(
@@ -129,43 +130,45 @@ class TestBatchProcessing:
     def test_batch_create_optimized_tracks_throughput(self, mock_client):
         """Test that optimized batch tracks throughput"""
         entities = [{"Name": f"Customer {i}"} for i in range(60)]
-        
+
         with patch.object(mock_client, '_process_single_batch') as mock_process:
             mock_process.return_value = (
                 [{"Id": str(i)} for i in range(30)],
-                []
+                [],
+                {}
             )
-            
+
             results = mock_client.batch_create_optimized(
                 entities=entities,
                 entity_type="Customer",
                 target_throughput=100000
             )
-            
+
             assert "throughput_per_hour" in results
             assert "duration_seconds" in results
             assert "target_met" in results
-    
+
     def test_batch_create_optimized_calls_progress_callback(self, mock_client):
         """Test that progress callback is invoked"""
         entities = [{"Name": f"Customer {i}"} for i in range(30)]
         callback_calls = []
-        
+
         def mock_callback(processed, total, rate):
             callback_calls.append((processed, total, rate))
-        
+
         with patch.object(mock_client, '_process_single_batch') as mock_process:
             mock_process.return_value = (
                 [{"Id": str(i)} for i in range(30)],
-                []
+                [],
+                {}
             )
-            
+
             mock_client.batch_create_optimized(
                 entities=entities,
                 entity_type="Customer",
                 progress_callback=mock_callback
             )
-            
+
             assert len(callback_calls) > 0
 
 
@@ -310,7 +313,8 @@ class TestErrorHandling:
         with patch.object(client, '_process_single_batch') as mock_process:
             mock_process.return_value = (
                 [],
-                [{"error": "Test error", "entity": {"Name": "Failed"}}]
+                [{"error": "Test error", "entity": {"Name": "Failed"}}],
+                {}
             )
             
             client.batch_create_parallel(
@@ -356,7 +360,7 @@ class TestIdempotency:
             mock_request.return_value = {"BatchItemResponse": []}
             
             # Access _process_single_batch to check idempotency key
-            succeeded, failed = client._process_single_batch(
+            succeeded, failed, id_mappings = client._process_single_batch(
                 [{"Name": "Test"}],
                 "Customer",
                 "batch_001",
@@ -495,9 +499,10 @@ class TestPerformance:
         with patch.object(client, '_process_single_batch') as mock_process:
             mock_process.return_value = (
                 [{"Id": str(i)} for i in range(30)],
-                []
+                [],
+                {}
             )
-            
+
             start = time.time()
             results = client.batch_create_parallel(entities, "Customer")
             duration = time.time() - start

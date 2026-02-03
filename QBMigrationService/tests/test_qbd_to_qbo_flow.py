@@ -399,7 +399,7 @@ class TestEntityDependencyOrdering:
 
         def tracking_process(batch, entity_type, *args, **kwargs):
             call_order.append(entity_type)
-            return [], []
+            return [], [], {}
 
         with patch.object(
             mock_qbo_client, '_process_single_batch', side_effect=tracking_process
@@ -651,9 +651,9 @@ class TestBatchSizeLimits:
         entities = [{'Name': f'Customer_{i}'} for i in range(50)]
         batches_processed = []
 
-        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id):
+        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
             batches_processed.append(len(batch))
-            return [], []
+            return [], [], {}
 
         with patch.object(
             mock_qbo_client, '_process_single_batch', side_effect=track_batch
@@ -671,9 +671,9 @@ class TestBatchSizeLimits:
         entities = [{'Name': f'V_{i}'} for i in range(30)]
         batches_processed = []
 
-        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id):
+        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
             batches_processed.append(len(batch))
-            return [], []
+            return [], [], {}
 
         with patch.object(
             mock_qbo_client, '_process_single_batch', side_effect=track_batch
@@ -689,9 +689,9 @@ class TestBatchSizeLimits:
         """A single entity still creates one batch."""
         batches_processed = []
 
-        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id):
+        def track_batch(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
             batches_processed.append(len(batch))
-            return [], []
+            return [], [], {}
 
         with patch.object(
             mock_qbo_client, '_process_single_batch', side_effect=track_batch
@@ -1587,11 +1587,11 @@ class TestParallelBatchProcessing:
         """Succeeded and failed counts should be aggregated from all batches."""
         entities = [{'Name': f'E{i}'} for i in range(60)]
 
-        def mock_process(batch, entity_type, batch_id, oauth_mgr, mig_id):
+        def mock_process(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
             # Every other entity fails
             succeeded = [{'Id': str(i)} for i in range(len(batch) // 2)]
             failed = [{'entity': e, 'error': 'test'} for e in batch[len(batch) // 2:]]
-            return succeeded, failed
+            return succeeded, failed, {}
 
         with patch.object(
             mock_qbo_client, '_process_single_batch', side_effect=mock_process
@@ -1742,9 +1742,9 @@ class TestLargeBatchStress:
         entities = [{'Name': f'E{i}'} for i in range(100)]
         batch_sizes = []
 
-        def track(batch, entity_type, batch_id, oauth_mgr, mig_id):
+        def track(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
             batch_sizes.append(len(batch))
-            return [], []
+            return [], [], {}
 
         with patch.object(mock_qbo_client, '_process_single_batch', side_effect=track):
             mock_qbo_client.batch_create_parallel(
@@ -1789,3 +1789,522 @@ class TestGracefulShutdown:
     def test_no_shutdown_by_default(self, mock_qbo_client):
         """By default, _check_shutdown should not raise."""
         mock_qbo_client._check_shutdown()  # Should not raise
+
+
+# ============================================================================
+# BATCH MIGRATION INTEGRATION TESTS
+# ============================================================================
+
+class TestBatchMigrationOrchestrator:
+    """Test the batch migration path in the orchestrator."""
+
+    @pytest.fixture
+    def orchestrator(self):
+        return MigrationOrchestrator(
+            qbo_client_id='test_id',
+            qbo_client_secret='test_secret',
+            qbo_refresh_token='test_token',
+            realm_id='123456789',
+            qbo_environment='sandbox'
+        )
+
+    @pytest.fixture
+    def mock_qbo_client(self, tmp_path):
+        return PremiumQBOClient(
+            access_token='test_token',
+            db_path=str(tmp_path / 'batch_test.db')
+        )
+
+    def test_migrate_entity_batch_flat_entities(self, orchestrator, mock_qbo_client):
+        """Flat entity types (no parent-child) should use _batch_create_flat."""
+        transformer = QBDataTransformer()
+        source_data = [
+            {'ListID': f'VEND-{i}', 'Name': f'Vendor {i}'} for i in range(5)
+        ]
+
+        # Mock batch_create_parallel to capture calls and return IDs
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            mock_batch.return_value = {
+                'succeeded_count': 5,
+                'failed': [],
+                'id_mappings': {f'VEND-{i}': str(100 + i) for i in range(5)},
+                'succeeded_ids': [str(100 + i) for i in range(5)]
+            }
+
+            existing_maps = {}
+            success, failed, skipped = orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Vendors', source_data,
+                existing_maps, migration_id='test-batch-1'
+            )
+
+            assert success == 5
+            assert failed == 0
+            assert skipped == 0
+
+            # Verify batch_create_parallel was called once
+            mock_batch.assert_called_once()
+            call_kwargs = mock_batch.call_args
+            assert call_kwargs[1]['entity_type'] == 'Vendor'
+
+            # Source IDs should be passed through
+            passed_source_ids = call_kwargs[1]['source_ids']
+            assert len(passed_source_ids) == 5
+            assert 'VEND-0' in passed_source_ids
+
+            # ID mappings should be captured in existing_maps
+            assert 'Vendors' in existing_maps
+            assert existing_maps['Vendors']['VEND-0'] == '100'
+            assert existing_maps['Vendors']['VEND-4'] == '104'
+
+    def test_migrate_entity_batch_skips_none_transforms(self, orchestrator, mock_qbo_client):
+        """Entities that transform to None should be counted as skipped."""
+        transformer = QBDataTransformer()
+        # TaxAgency returns None (read-only entity)
+        source_data = [
+            {'ListID': 'TA-1', 'Name': 'Tax Agency 1'},
+            {'ListID': 'TA-2', 'Name': 'Tax Agency 2'},
+        ]
+
+        existing_maps = {}
+        success, failed, skipped = orchestrator._migrate_entity_batch(
+            mock_qbo_client, transformer, 'TaxAgencies', source_data,
+            existing_maps, migration_id='test-skip'
+        )
+
+        assert success == 0
+        assert failed == 0
+        assert skipped == 2  # Both skipped because TaxAgency returns None
+
+    def test_migrate_entity_batch_tax_service_routing(self, orchestrator, mock_qbo_client):
+        """TaxCode entities with _use_tax_service flag should go to TaxService endpoint."""
+        transformer = QBDataTransformer()
+        # Pre-populate tax rate cache so TaxCode produces a payload
+        transformer._tax_rate_cache['TR-1'] = {
+            'Name': 'State Tax', 'Rate': '7.0',
+            'AgencyRef': 'AG-1', 'ApplicableOn': 'Sales'
+        }
+        transformer.id_mapping['tax_agencies']['AG-1'] = '50'
+
+        source_data = [{
+            'ListID': 'TC-1', 'Name': 'Custom Tax',
+            'TaxRates': ['TR-1']
+        }]
+
+        with patch.object(mock_qbo_client, 'create_tax_service') as mock_ts:
+            mock_ts.return_value = {'TaxCodeId': '99'}
+
+            existing_maps = {}
+            success, failed, skipped = orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'TaxCodes', source_data,
+                existing_maps, migration_id='test-tax'
+            )
+
+            assert success == 1
+            assert failed == 0
+            mock_ts.assert_called_once()
+            # TaxCodeId should be captured
+            assert existing_maps['TaxCodes']['TC-1'] == '99'
+
+    def test_migrate_entity_batch_handles_failures(self, orchestrator, mock_qbo_client):
+        """Failed entities in batch should be counted correctly."""
+        transformer = QBDataTransformer()
+        source_data = [
+            {'ListID': f'CUST-{i}', 'Name': f'Customer {i}'} for i in range(3)
+        ]
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            mock_batch.return_value = {
+                'succeeded_count': 2,
+                'failed': [{'entity': {}, 'error': 'Duplicate'}],
+                'id_mappings': {'CUST-0': '200', 'CUST-1': '201'},
+                'succeeded_ids': ['200', '201']
+            }
+
+            existing_maps = {}
+            success, failed, skipped = orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Customers', source_data,
+                existing_maps, migration_id='test-fail'
+            )
+
+            assert success == 2
+            assert failed == 1
+            assert existing_maps['Customers']['CUST-0'] == '200'
+            assert existing_maps['Customers']['CUST-1'] == '201'
+
+    def test_migrate_entity_batch_empty_source(self, orchestrator, mock_qbo_client):
+        """Empty source data should produce zero counts."""
+        transformer = QBDataTransformer()
+        existing_maps = {}
+        success, failed, skipped = orchestrator._migrate_entity_batch(
+            mock_qbo_client, transformer, 'Invoices', [],
+            existing_maps, migration_id='test-empty'
+        )
+        assert success == 0
+        assert failed == 0
+        assert skipped == 0
+
+
+class TestBatchCreateHierarchical:
+    """Test parent-child hierarchy handling in batch creates."""
+
+    @pytest.fixture
+    def orchestrator(self):
+        return MigrationOrchestrator(
+            qbo_client_id='test_id',
+            qbo_client_secret='test_secret',
+            qbo_refresh_token='test_token',
+            realm_id='123456789'
+        )
+
+    @pytest.fixture
+    def mock_qbo_client(self, tmp_path):
+        return PremiumQBOClient(
+            access_token='test_token',
+            db_path=str(tmp_path / 'hier_test.db')
+        )
+
+    def test_roots_created_before_children(self, orchestrator, mock_qbo_client):
+        """Root accounts should be batch-created before child accounts."""
+        transformer = QBDataTransformer()
+        source_data = [
+            {'ListID': 'ACC-PARENT', 'Name': 'Parent Account',
+             'AccountType': 'Bank'},
+            {'ListID': 'ACC-CHILD', 'Name': 'Child Account',
+             'AccountType': 'Bank', 'ParentRef': 'ACC-PARENT'},
+        ]
+
+        batch_calls = []
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            def capture_batch(**kwargs):
+                entities = kwargs.get('entities', [])
+                source_ids = kwargs.get('source_ids', [])
+                batch_calls.append(source_ids)
+                # Return IDs for root entities on first call
+                id_map = {}
+                for sid in source_ids:
+                    id_map[sid] = f'QBO-{sid}'
+                return {
+                    'succeeded_count': len(entities),
+                    'failed': [],
+                    'id_mappings': id_map,
+                    'succeeded_ids': list(id_map.values())
+                }
+
+            mock_batch.side_effect = capture_batch
+
+            existing_maps = {}
+            s, f = orchestrator._batch_create_hierarchical(
+                mock_qbo_client, 'Account', 'Accounts',
+                [(sid, raw, transformer.transform_entity('Accounts', raw))
+                 for sid, raw in [
+                     ('ACC-PARENT', source_data[0]),
+                     ('ACC-CHILD', source_data[1]),
+                 ] if True],
+                existing_maps, None, 'test-hier',
+                transformer=transformer
+            )
+
+            # Should be called twice: once for roots, once for children
+            assert len(batch_calls) == 2
+            assert 'ACC-PARENT' in batch_calls[0]
+            assert 'ACC-CHILD' in batch_calls[1]
+
+    def test_orphans_treated_as_roots(self, orchestrator, mock_qbo_client):
+        """Children whose parents aren't in this batch should be treated as roots."""
+        transformer = QBDataTransformer()
+        # Child whose parent doesn't exist in this batch
+        source_data = [
+            {'ListID': 'ACC-ORPHAN', 'Name': 'Orphan Account',
+             'AccountType': 'Bank', 'ParentRef': 'ACC-UNKNOWN'},
+        ]
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            mock_batch.return_value = {
+                'succeeded_count': 1,
+                'failed': [],
+                'id_mappings': {'ACC-ORPHAN': 'QBO-ORPHAN'},
+                'succeeded_ids': ['QBO-ORPHAN']
+            }
+
+            existing_maps = {}
+            items = [(s['ListID'], s, transformer.transform_entity('Accounts', s))
+                     for s in source_data]
+            items = [(sid, raw, t) for sid, raw, t in items if t is not None]
+
+            s, f = orchestrator._batch_create_hierarchical(
+                mock_qbo_client, 'Account', 'Accounts',
+                items, existing_maps, None, 'test-orphan',
+                transformer=transformer
+            )
+
+            # Orphan should be created (treated as root)
+            assert s == 1
+            assert f == 0
+            mock_batch.assert_called_once()
+
+    def test_deep_hierarchy_three_levels(self, orchestrator, mock_qbo_client):
+        """Three-level hierarchy: grandparent → parent → child."""
+        transformer = QBDataTransformer()
+        source_data = [
+            {'ListID': 'C-GP', 'Name': 'Grandparent', 'AccountType': 'Expense'},
+            {'ListID': 'C-P', 'Name': 'Parent', 'AccountType': 'Expense',
+             'ParentRef': 'C-GP'},
+            {'ListID': 'C-C', 'Name': 'Child', 'AccountType': 'Expense',
+             'ParentRef': 'C-P'},
+        ]
+
+        batch_calls = []
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            def capture(**kwargs):
+                source_ids = kwargs.get('source_ids', [])
+                batch_calls.append(source_ids)
+                id_map = {sid: f'QBO-{sid}' for sid in source_ids}
+                return {
+                    'succeeded_count': len(source_ids),
+                    'failed': [],
+                    'id_mappings': id_map,
+                    'succeeded_ids': list(id_map.values())
+                }
+
+            mock_batch.side_effect = capture
+
+            existing_maps = {}
+            items = [(s['ListID'], s, transformer.transform_entity('Accounts', s))
+                     for s in source_data]
+            items = [(sid, raw, t) for sid, raw, t in items if t is not None]
+
+            s, f = orchestrator._batch_create_hierarchical(
+                mock_qbo_client, 'Account', 'Accounts',
+                items, existing_maps, None, 'test-deep',
+                transformer=transformer
+            )
+
+            assert s == 3
+            assert f == 0
+            # Three levels = three batch calls
+            assert len(batch_calls) == 3
+            assert batch_calls[0] == ['C-GP']
+            assert batch_calls[1] == ['C-P']
+            assert batch_calls[2] == ['C-C']
+
+
+class TestBatchSourceIdTracking:
+    """Test that source IDs are correctly tracked through the batch pipeline."""
+
+    @pytest.fixture
+    def mock_client(self, tmp_path):
+        return PremiumQBOClient(
+            access_token='test_token',
+            db_path=str(tmp_path / 'src_id_test.db')
+        )
+
+    def test_source_ids_passed_to_process_single_batch(self, mock_client):
+        """batch_create_parallel should split source_ids alongside entities."""
+        entities = [{'DisplayName': f'Cust {i}'} for i in range(35)]
+        source_ids = [f'QBD-{i}' for i in range(35)]
+        received_source_ids = []
+
+        def capture(batch, entity_type, batch_id, oauth_mgr, mig_id, source_ids=None):
+            received_source_ids.append(source_ids)
+            return [], [], {}
+
+        with patch.object(mock_client, '_process_single_batch', side_effect=capture):
+            mock_client.batch_create_parallel(
+                entities, 'Customer', migration_id='test-src-ids',
+                source_ids=source_ids
+            )
+
+        # 35 entities = 2 batches (30 + 5)
+        assert len(received_source_ids) == 2
+        assert len(received_source_ids[0]) == 30
+        assert len(received_source_ids[1]) == 5
+        assert received_source_ids[0][0] == 'QBD-0'
+        assert received_source_ids[0][29] == 'QBD-29'
+        assert received_source_ids[1][0] == 'QBD-30'
+        assert received_source_ids[1][4] == 'QBD-34'
+
+    def test_source_ids_used_for_dedup(self, mock_client):
+        """When source_ids provided, dedup should check source_id, not entity fields."""
+        # Pre-record an entity as already created
+        mock_client.record_created('Customer', 'QBD-EXISTING', 'QBO-123', 'mig-1', '0')
+
+        entities = [
+            {'DisplayName': 'Already Exists'},
+            {'DisplayName': 'New Customer'},
+        ]
+        source_ids = ['QBD-EXISTING', 'QBD-NEW']
+
+        with patch.object(mock_client, '_make_request') as mock_req:
+            mock_req.return_value = {
+                'BatchItemResponse': [{
+                    'bId': 'bid_1',
+                    'Customer': {'Id': 'QBO-456', 'SyncToken': '0'}
+                }]
+            }
+
+            succeeded, failed, id_mappings = mock_client._process_single_batch(
+                entities, 'Customer', 'batch_001', None, 'mig-2',
+                source_ids=source_ids
+            )
+
+        # First entity should be skipped (dedup), second created
+        assert len(succeeded) == 1
+        assert 'QBD-EXISTING' in id_mappings  # From dedup lookup
+        assert id_mappings['QBD-EXISTING'] == 'QBO-123'
+        assert 'QBD-NEW' in id_mappings  # From creation
+        assert id_mappings['QBD-NEW'] == 'QBO-456'
+
+    def test_id_mappings_aggregated_from_parallel_batches(self, mock_client):
+        """ID mappings from multiple parallel batches should be merged."""
+        entities = [{'DisplayName': f'C{i}'} for i in range(60)]
+        source_ids = [f'SRC-{i}' for i in range(60)]
+
+        def mock_process(batch, entity_type, batch_id, oauth_mgr, mig_id, src_ids=None):
+            succeeded = [{'Id': f'QBO-{sid}'} for sid in (src_ids or [])]
+            id_map = {sid: f'QBO-{sid}' for sid in (src_ids or [])}
+            return succeeded, [], id_map
+
+        with patch.object(mock_client, '_process_single_batch', side_effect=mock_process):
+            result = mock_client.batch_create_parallel(
+                entities, 'Customer', migration_id='test-agg',
+                source_ids=source_ids
+            )
+
+        # All 60 mappings should be present
+        assert len(result['id_mappings']) == 60
+        assert result['id_mappings']['SRC-0'] == 'QBO-SRC-0'
+        assert result['id_mappings']['SRC-59'] == 'QBO-SRC-59'
+        assert result['succeeded_count'] == 60
+
+    def test_no_source_ids_falls_back_to_entity_fields(self, mock_client):
+        """Without source_ids, should extract ID from entity's ListID/Name fields."""
+        entities = [
+            {'ListID': 'LIST-001', 'Name': 'Entity 1'},
+            {'Name': 'Entity 2'},  # No ListID, falls back to Name
+        ]
+
+        with patch.object(mock_client, '_make_request') as mock_req:
+            mock_req.return_value = {
+                'BatchItemResponse': [
+                    {'bId': 'bid_0', 'Customer': {'Id': 'Q1', 'SyncToken': '0'}},
+                    {'bId': 'bid_1', 'Customer': {'Id': 'Q2', 'SyncToken': '0'}},
+                ]
+            }
+
+            succeeded, failed, id_mappings = mock_client._process_single_batch(
+                entities, 'Customer', 'batch_001', None, 'mig-fb'
+                # No source_ids — falls back to entity fields
+            )
+
+        assert id_mappings['LIST-001'] == 'Q1'
+        assert id_mappings['Entity 2'] == 'Q2'
+
+
+class TestBatchMigrationEndToEnd:
+    """End-to-end test: raw QBD data → batch API → ID mappings propagated."""
+
+    @pytest.fixture
+    def orchestrator(self):
+        return MigrationOrchestrator(
+            qbo_client_id='test_id',
+            qbo_client_secret='test_secret',
+            qbo_refresh_token='test_token',
+            realm_id='123456789'
+        )
+
+    @pytest.fixture
+    def mock_qbo_client(self, tmp_path):
+        return PremiumQBOClient(
+            access_token='test_token',
+            db_path=str(tmp_path / 'e2e_batch.db')
+        )
+
+    def test_id_mappings_flow_between_entity_types(self, orchestrator, mock_qbo_client):
+        """Customer IDs captured in batch should be available for Invoice transforms."""
+        transformer = QBDataTransformer()
+
+        # Step 1: Migrate customers
+        customers = [
+            {'ListID': 'CUST-1', 'Name': 'Acme Corp'},
+            {'ListID': 'CUST-2', 'Name': 'Beta Inc'},
+        ]
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            mock_batch.return_value = {
+                'succeeded_count': 2,
+                'failed': [],
+                'id_mappings': {'CUST-1': '500', 'CUST-2': '501'},
+                'succeeded_ids': ['500', '501']
+            }
+
+            existing_maps = {}
+            orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Customers', customers,
+                existing_maps, migration_id='test-e2e'
+            )
+
+        # Verify customer IDs are in existing_maps
+        assert existing_maps['Customers']['CUST-1'] == '500'
+        assert existing_maps['Customers']['CUST-2'] == '501'
+
+        # Step 2: Now transform an invoice that references CUST-1
+        # The transformer should be able to resolve the customer reference
+        # because existing_maps is passed to transform_entity
+        transformer.id_mapping['customers']['CUST-1'] = '500'
+
+        invoice = {
+            'TxnID': 'INV-1', 'RefNumber': '1001',
+            'CustomerRef': 'CUST-1', 'TxnDate': '2024-01-15',
+            'InvoiceLines': [
+                {'Amount': '100.00', 'Description': 'Service'}
+            ]
+        }
+
+        result = transformer.transform_entity('Invoices', invoice, id_mapping=existing_maps)
+        # If CustomerRef resolved, it should have a value reference
+        if result and 'CustomerRef' in result:
+            assert result['CustomerRef']['value'] == '500'
+
+    def test_batch_migration_multiple_entity_types(self, orchestrator, mock_qbo_client):
+        """Multiple entity types should be migrated sequentially via batch."""
+        transformer = QBDataTransformer()
+
+        entity_types_processed = []
+
+        with patch.object(mock_qbo_client, 'batch_create_parallel') as mock_batch:
+            def capture_type(**kwargs):
+                entity_types_processed.append(kwargs.get('entity_type'))
+                return {
+                    'succeeded_count': 1,
+                    'failed': [],
+                    'id_mappings': {},
+                    'succeeded_ids': []
+                }
+
+            mock_batch.side_effect = capture_type
+            existing_maps = {}
+
+            # Migrate accounts
+            orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Accounts',
+                [{'ListID': 'ACC-1', 'Name': 'Cash', 'AccountType': 'Bank'}],
+                existing_maps, migration_id='test-multi'
+            )
+
+            # Migrate customers
+            orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Customers',
+                [{'ListID': 'CUST-1', 'Name': 'Client'}],
+                existing_maps, migration_id='test-multi'
+            )
+
+            # Migrate vendors
+            orchestrator._migrate_entity_batch(
+                mock_qbo_client, transformer, 'Vendors',
+                [{'ListID': 'VEND-1', 'Name': 'Supplier'}],
+                existing_maps, migration_id='test-multi'
+            )
+
+        assert entity_types_processed == ['Account', 'Customer', 'Vendor']

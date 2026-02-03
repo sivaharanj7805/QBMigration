@@ -352,14 +352,15 @@ class MigrationOrchestrator:
                 if entity_name in data and data[entity_name]:
                     self._report_progress(start_pct, f"Migrating {entity_name}")
 
-                    # RELIABILITY FIX: Pass oauth_mgr for automatic token refresh on 401
-                    success, failed, skipped = self._migrate_entity(
+                    # Use batch API for performance (30 entities/request, parallel workers)
+                    success, failed, skipped = self._migrate_entity_batch(
                         qbo_client,
                         transformer,
                         entity_name,
                         data[entity_name],
-                        entity_id_mappings,  # Pass mappings dict
-                        oauth_mgr  # Auto-refresh tokens during long migrations
+                        entity_id_mappings,
+                        oauth_mgr,
+                        migration_id
                     )
 
                     entity_counts[entity_name] = success
@@ -506,7 +507,294 @@ class MigrationOrchestrator:
                 continue
 
         return success_count, fail_count, skipped_count
-    
+
+    def _migrate_entity_batch(
+        self,
+        qbo_client: 'PremiumQBOClient',
+        transformer: 'QBDataTransformer',
+        entity_name: str,
+        source_data: List[Dict[str, Any]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional['OAuthManager'] = None,
+        migration_id: str = None
+    ) -> Tuple[int, int, int]:
+        """
+        Migrate an entity type using batch API (30 entities per request, parallel workers).
+
+        Flow:
+        1. Transform all records, collecting (source_id, transformed) pairs
+        2. Separate TaxService entities from regular batch-eligible entities
+        3. For parent-child types (Account, Customer, Class, Department),
+           process in hierarchy levels: roots first, then children
+        4. Batch-create regular entities via batch_create_parallel
+        5. Handle TaxService entities individually (different endpoint)
+        6. Capture QBO IDs from responses and update existing_maps
+
+        Args:
+            qbo_client: Initialized QBO client
+            transformer: Data transformer
+            entity_name: Plural entity name (e.g., 'Customers', 'Invoices')
+            source_data: List of raw QB Desktop records
+            existing_maps: ID mapping dict, updated in-place with new mappings
+            oauth_manager: OAuth manager for automatic token refresh
+            migration_id: Migration ID for tracking
+
+        Returns:
+            Tuple of (success_count, fail_count, skipped_count)
+        """
+        success_count = 0
+        fail_count = 0
+        skipped_count = 0
+
+        # Plural → Singular mapping for QBO API endpoints
+        PLURAL_TO_SINGULAR = {
+            'CompanyCurrencies': 'CompanyCurrency', 'TaxAgencies': 'TaxAgency',
+            'TaxRates': 'TaxRate', 'TaxCodes': 'TaxCode',
+            'Terms': 'Term', 'PaymentMethods': 'PaymentMethod',
+            'Classes': 'Class', 'Departments': 'Department',
+            'Accounts': 'Account', 'Customers': 'Customer', 'Vendors': 'Vendor',
+            'Items': 'Item', 'Employees': 'Employee',
+            'Invoices': 'Invoice', 'Bills': 'Bill', 'Payments': 'Payment',
+            'Estimates': 'Estimate', 'Deposits': 'Deposit', 'Transfers': 'Transfer',
+            'JournalEntries': 'JournalEntry', 'CreditMemos': 'CreditMemo',
+            'PurchaseOrders': 'PurchaseOrder', 'SalesReceipts': 'SalesReceipt',
+            'BillPayments': 'BillPayment', 'VendorCredits': 'VendorCredit',
+            'RefundReceipts': 'RefundReceipt', 'TimeActivities': 'TimeActivity',
+            'InventoryAdjustments': 'InventoryAdjustment',
+            'Purchases': 'Purchase', 'TaxPayments': 'TaxPayment',
+            'Attachables': 'Attachable',
+        }
+        api_entity_type = PLURAL_TO_SINGULAR.get(entity_name, entity_name)
+
+        # Entity types with parent-child hierarchies (ParentRef within same type)
+        PARENT_CHILD_TYPES = {'Accounts', 'Customers', 'Classes', 'Departments'}
+
+        # ------------------------------------------------------------------
+        # Phase 1: Transform all records, collecting (source_id, raw, transformed)
+        # ------------------------------------------------------------------
+        all_items = []  # List of (source_id, raw_record, transformed_dict)
+        tax_service_items = []  # List of (source_id, transformed_dict)
+
+        for record in source_data:
+            try:
+                transformed = transformer.transform_entity(
+                    entity_name, record, id_mapping=existing_maps
+                )
+
+                if not transformed:
+                    skipped_count += 1
+                    continue
+
+                source_id = (
+                    record.get('ListID') or record.get('TxnID')
+                    or record.get('Id') or record.get('Name')
+                )
+
+                if transformed.get('_use_tax_service'):
+                    tax_service_items.append((source_id, transformed))
+                else:
+                    all_items.append((source_id, record, transformed))
+
+            except Exception as e:
+                skipped_count += 1
+                logger.warning(f"Transform failed for {entity_name} record: {e}")
+
+        # ------------------------------------------------------------------
+        # Phase 2: Batch-create regular entities
+        # ------------------------------------------------------------------
+        if all_items:
+            if entity_name in PARENT_CHILD_TYPES:
+                # Process in hierarchy levels to preserve parent-child relationships
+                s, f = self._batch_create_hierarchical(
+                    qbo_client, api_entity_type, entity_name,
+                    all_items, existing_maps, oauth_manager, migration_id,
+                    transformer=transformer
+                )
+            else:
+                # Flat batch — all entities are independent
+                s, f = self._batch_create_flat(
+                    qbo_client, api_entity_type, entity_name,
+                    all_items, existing_maps, oauth_manager, migration_id
+                )
+            success_count += s
+            fail_count += f
+
+        # ------------------------------------------------------------------
+        # Phase 3: Handle TaxService entities individually (special endpoint)
+        # ------------------------------------------------------------------
+        for source_id, transformed in tax_service_items:
+            try:
+                tax_code_name = transformed.pop('TaxCode', '')
+                tax_rate_details = transformed.pop('TaxRateDetails', [])
+                transformed.pop('_use_tax_service', None)
+
+                result = qbo_client.create_tax_service(
+                    tax_code_name, tax_rate_details,
+                    oauth_manager=oauth_manager
+                )
+
+                # TaxService returns TaxCodeId in response
+                tc_id = None
+                if isinstance(result, dict):
+                    tc_id = result.get('TaxCodeId') or result.get('Id')
+                    # Some QBO versions nest under TaxCode key
+                    if not tc_id and 'TaxCode' in result:
+                        tc_id = result['TaxCode'].get('Id')
+
+                if tc_id and source_id:
+                    if entity_name not in existing_maps:
+                        existing_maps[entity_name] = {}
+                    existing_maps[entity_name][source_id] = str(tc_id)
+
+                success_count += 1
+
+            except Exception as e:
+                fail_count += 1
+                logger.warning(f"TaxService create failed for {entity_name}: {e}")
+
+        return success_count, fail_count, skipped_count
+
+    def _batch_create_flat(
+        self,
+        qbo_client: 'PremiumQBOClient',
+        api_entity_type: str,
+        entity_name: str,
+        items: List[Tuple[str, Dict, Dict]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional['OAuthManager'],
+        migration_id: str
+    ) -> Tuple[int, int]:
+        """
+        Batch-create entities that have no internal parent-child relationships.
+
+        Args:
+            items: List of (source_id, raw_record, transformed_entity) tuples
+
+        Returns:
+            (success_count, fail_count)
+        """
+        source_ids = [item[0] for item in items]
+        entities = [item[2] for item in items]
+
+        result = qbo_client.batch_create_parallel(
+            entities=entities,
+            entity_type=api_entity_type,
+            oauth_manager=oauth_manager,
+            migration_id=migration_id or '',
+            source_ids=source_ids
+        )
+
+        # Update in-memory ID mappings for subsequent entity types
+        id_mappings = result.get('id_mappings', {})
+        if id_mappings:
+            if entity_name not in existing_maps:
+                existing_maps[entity_name] = {}
+            existing_maps[entity_name].update(id_mappings)
+
+        return result.get('succeeded_count', 0), len(result.get('failed', []))
+
+    def _batch_create_hierarchical(
+        self,
+        qbo_client: 'PremiumQBOClient',
+        api_entity_type: str,
+        entity_name: str,
+        items: List[Tuple[str, Dict, Dict]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional['OAuthManager'],
+        migration_id: str,
+        transformer: Optional['QBDataTransformer'] = None
+    ) -> Tuple[int, int]:
+        """
+        Batch-create entities with parent-child hierarchies in levels.
+
+        Entities are sorted into levels by their ParentRef depth:
+          Level 0: root entities (no ParentRef)
+          Level 1: children of level-0 entities
+          Level 2: children of level-1 entities
+          ...
+
+        Each level is batch-created, IDs captured, and then the next level's
+        transforms are updated with parent IDs before creating.
+
+        This preserves parent-child relationships while still using batch API.
+        """
+        total_success = 0
+        total_fail = 0
+
+        # Build source_id → (raw_record, transformed) lookup
+        items_by_source_id = {}
+        for source_id, raw_record, transformed in items:
+            items_by_source_id[source_id or id(raw_record)] = (source_id, raw_record, transformed)
+
+        # Separate into roots (no ParentRef) and children
+        roots = []
+        children_by_parent = {}  # parent_source_id → list of items
+
+        for source_id, raw_record, transformed in items:
+            parent_ref = raw_record.get('ParentRef')
+            if not parent_ref:
+                roots.append((source_id, raw_record, transformed))
+            else:
+                parent_id = str(parent_ref)
+                if parent_id not in children_by_parent:
+                    children_by_parent[parent_id] = []
+                children_by_parent[parent_id].append((source_id, raw_record, transformed))
+
+        # Process level by level using BFS
+        current_level = roots
+
+        # Also include "orphans" — children whose parents aren't in this batch
+        # (parent was in a previous migration or doesn't exist)
+        known_ids = {item[0] for item in items if item[0]}
+        for parent_id, children in list(children_by_parent.items()):
+            if parent_id not in known_ids:
+                # Parent not in this batch — treat children as roots
+                current_level.extend(children)
+                del children_by_parent[parent_id]
+
+        level_num = 0
+        while current_level:
+            logger.info(
+                f"  {entity_name} hierarchy level {level_num}: "
+                f"{len(current_level)} entities"
+            )
+
+            # For levels > 0, re-transform to pick up parent QBO IDs
+            if level_num > 0 and transformer:
+                retransformed = []
+                for source_id, raw_record, old_transformed in current_level:
+                    try:
+                        transformed = transformer.transform_entity(
+                            entity_name, raw_record, id_mapping=existing_maps
+                        )
+                        if transformed:
+                            retransformed.append((source_id, raw_record, transformed))
+                        else:
+                            total_fail += 1
+                    except Exception as e:
+                        total_fail += 1
+                        logger.warning(f"Re-transform failed for {entity_name}: {e}")
+                current_level = retransformed
+
+            if current_level:
+                s, f = self._batch_create_flat(
+                    qbo_client, api_entity_type, entity_name,
+                    current_level, existing_maps, oauth_manager, migration_id
+                )
+                total_success += s
+                total_fail += f
+
+            # Collect next level: children of entities we just created
+            next_level = []
+            for source_id, _, _ in current_level:
+                if source_id and source_id in children_by_parent:
+                    next_level.extend(children_by_parent[source_id])
+
+            current_level = next_level
+            level_num += 1
+
+        return total_success, total_fail
+
     def run_migration_from_s3(
         self,
         s3_uri: str,
