@@ -735,6 +735,8 @@ def login():
     # FIX: Set JWT token as httpOnly cookie for secure cross-origin auth
     # This ensures the token is sent with subsequent requests even when
     # session cookies face cross-origin restrictions
+    # FIX: Use SameSite=None in production so the cookie is sent on cross-origin
+    # requests (e.g., frontend on different subdomain). SameSite=None requires Secure=True.
     is_production = os.getenv('FLASK_ENV') == 'production'
 
     # Use SameSite=None in production to allow cross-site authenticated requests from the dashboard
@@ -908,6 +910,8 @@ def logout():
     logger.info(f"User {user_id} logged out successfully")
 
     # Create response and clear the auth_token cookie
+    # FIX: Match SameSite/Secure attributes from login so the cookie is properly cleared
+    is_production = os.getenv('FLASK_ENV') == 'production'
     response = jsonify({'success': True, 'message': 'Logged out successfully'})
 
     # Mirror cookie attributes used during login for proper deletion across browsers
