@@ -8,7 +8,6 @@ File Upload API Endpoints
 """
 
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required
 from api.auth import require_auth
 from models.database import db
 from models.migration import Migration

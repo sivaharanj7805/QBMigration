@@ -10,7 +10,6 @@ Provides API endpoints for:
 """
 
 from flask import Blueprint, request, jsonify, current_app, send_file
-from flask_login import login_required, current_user
 from api.auth import require_auth
 from models.database import db
 from models.migration import Migration

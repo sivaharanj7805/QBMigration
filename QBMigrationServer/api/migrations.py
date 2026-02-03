@@ -1,5 +1,4 @@
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required, current_user
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
