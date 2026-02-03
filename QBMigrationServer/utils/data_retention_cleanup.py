@@ -16,6 +16,7 @@ Usage:
     result = cleanup_old_migration_data(retention_hours=24)
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from flask import Flask
@@ -62,10 +63,18 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
 
         for migration in migrations_to_clean:
             try:
-                # Check if data is already stripped
-                if migration.trial_balance_data and 'stripped_at' in migration.trial_balance_data:
-                    continue
-                if migration.live_status_data and 'stripped_at' in migration.live_status_data:
+                # Check if data is already stripped (parse JSON, don't substring-match)
+                already_stripped = False
+                for field_data in [migration.trial_balance_data, migration.live_status_data]:
+                    if field_data:
+                        try:
+                            parsed = json.loads(field_data)
+                            if isinstance(parsed, dict) and 'stripped_at' in parsed:
+                                already_stripped = True
+                                break
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                if already_stripped:
                     continue
 
                 if dry_run:

@@ -773,7 +773,7 @@ def initiate_chunked_upload():
         upload_id = str(uuid.uuid4())
         now = time.time()
         expires_at = now + CHUNKED_UPLOAD_EXPIRY_SECONDS
-        expires_at_iso = datetime.utcfromtimestamp(expires_at).isoformat() + 'Z'
+        expires_at_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
 
         session_data = {
             'upload_id': upload_id,

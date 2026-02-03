@@ -132,10 +132,7 @@ def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
 
     # Add remote IP if provided (recommended for security)
     if remote_ip:
-        if provider == 'turnstile':
-            verify_data['remoteip'] = remote_ip
-        else:
-            verify_data['remoteip'] = remote_ip
+        verify_data['remoteip'] = remote_ip
 
     try:
         # Make verification request

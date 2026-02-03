@@ -100,7 +100,7 @@ QB Migration Team
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     <p style="color: #999; font-size: 12px;">
         QB Migration Team<br>
-        © {datetime.now().year} All rights reserved.
+        © {datetime.now(timezone.utc).year} All rights reserved.
     </p>
 </body>
 </html>
@@ -159,7 +159,7 @@ QB Migration Security Team
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     <p style="color: #999; font-size: 12px;">
         QB Migration Security Team<br>
-        © {datetime.now().year} All rights reserved.
+        © {datetime.now(timezone.utc).year} All rights reserved.
     </p>
 </body>
 </html>
@@ -252,7 +252,7 @@ QB Migration Team
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     <p style="color: #999; font-size: 12px;">
         QB Migration Team<br>
-        © {datetime.now().year} All rights reserved.
+        © {datetime.now(timezone.utc).year} All rights reserved.
     </p>
 </body>
 </html>

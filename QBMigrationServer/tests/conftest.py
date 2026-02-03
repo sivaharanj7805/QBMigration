@@ -13,6 +13,10 @@ import logging
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# SAFETY: Set testing environment BEFORE importing app to prevent
+# module-level create_app() from running with production config
+os.environ['FLASK_ENV'] = 'testing'
+
 from app import create_app
 from models.database import db
 from models.user import User

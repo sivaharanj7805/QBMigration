@@ -229,7 +229,7 @@ class Migration(db.Model):
         
         # S3 storage cost (for 24 hours)
         size_gb = self.data_size_bytes / (1024 ** 3)
-        s3_cost = size_gb * s3_cost_per_gb * (24 / 30 / 24)  # Cost for 24 hours
+        s3_cost = size_gb * s3_cost_per_gb * (1 / 30)  # Cost for 1 day out of 30-day month
         
         # EC2 cost (estimate 5 hours)
         ec2_cost = ec2_cost_per_hour * 5

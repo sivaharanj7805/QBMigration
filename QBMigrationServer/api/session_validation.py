@@ -46,8 +46,8 @@ class SessionActivation(db.Model):
 
     # Activation status
     status = db.Column(db.String(50), default='active')  # active, revoked, expired
-    activated_at = db.Column(db.DateTime, default=datetime.utcnow)
-    last_used_at = db.Column(db.DateTime, default=datetime.utcnow)
+    activated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Usage tracking
     extraction_count = db.Column(db.Integer, default=0)
@@ -70,7 +70,7 @@ class SessionValidationLog(db.Model):
     action = db.Column(db.String(50))  # validate, activate, extract, reject
     result = db.Column(db.String(50))  # success, failed, rate_limited, invalid
     error_message = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 def log_validation_attempt(session_id, device_fingerprint, ip_address, action, result, error=None):
@@ -159,7 +159,7 @@ def validate_session():
         }), 400
 
     # Hash the fingerprint for storage
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -275,7 +275,7 @@ def activate_session():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -451,7 +451,7 @@ def start_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session and device
     project = Project.query.filter_by(session_id=session_id).first()
@@ -577,7 +577,7 @@ def complete_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()

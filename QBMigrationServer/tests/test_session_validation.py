@@ -5,12 +5,6 @@ Tests /api/session/* endpoints from api/session_validation.py
 These endpoints use project session IDs (format: FB-YYYYMMDDHHMMSS-XXXXXXXX),
 NOT Flask login sessions. Authentication is done via session_id + device_fingerprint
 rather than Flask-Login.
-
-NOTE: The source code has a known bug where `fingerprint_hash` is referenced but
-never assigned (the `hash_fingerprint()` call was replaced with `logger.info()`).
-Tests that proceed past initial field validation into code paths that reference
-fingerprint_hash will encounter NameError. These tests are marked with xfail to
-document expected behavior once the bug is fixed.
 """
 
 import pytest
@@ -128,12 +122,6 @@ class TestValidateSession:
         )
         assert response.status_code == 400
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in validate_session(). "
-               "hash_fingerprint() is never called; logger.info() replaced the assignment.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_validate_nonexistent_session_returns_404(self, client, db_session):
         """A session_id that does not exist in the database should return 404."""
         response = client.post(
@@ -148,12 +136,6 @@ class TestValidateSession:
         data = response.get_json()
         assert data['valid'] is False
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in validate_session(). "
-               "hash_fingerprint() is never called; logger.info() replaced the assignment.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_validate_valid_session_returns_success(
         self, client, db_session, test_project
     ):
@@ -204,12 +186,6 @@ class TestActivateSession:
         data = response.get_json()
         assert data['success'] is False
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in activate_session(). "
-               "hash_fingerprint() is never called; logger.info() replaced the assignment.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_activate_nonexistent_session_returns_404(self, client, db_session):
         """Activating a non-existent session should return 404."""
         response = client.post(
@@ -224,12 +200,6 @@ class TestActivateSession:
         data = response.get_json()
         assert data['success'] is False
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in activate_session(). "
-               "hash_fingerprint() is never called; logger.info() replaced the assignment.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_activate_valid_session_succeeds(
         self, client, db_session, test_project
     ):
@@ -277,12 +247,6 @@ class TestStartExtraction:
         data = response.get_json()
         assert data['success'] is False
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in start_extraction(). "
-               "hash_fingerprint() is never called; logger.info() replaced the assignment.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_start_extraction_invalid_session_returns_404(self, client, db_session):
         """Starting extraction with invalid session should return 404."""
         response = client.post(
@@ -328,11 +292,7 @@ class TestCompleteExtraction:
     def test_complete_extraction_invalid_session_returns_404(
         self, client, db_session
     ):
-        """Completing extraction with invalid session should return 404.
-
-        Note: complete_extraction checks the project before using fingerprint_hash
-        in log_validation_attempt, so the 404 path works despite the source bug.
-        """
+        """Completing extraction with invalid session should return 404."""
         response = client.post(
             '/api/session/complete-extraction',
             json={
@@ -439,13 +399,6 @@ class TestRateLimiting:
     for the same session_id + IP address combination.
     """
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined. "
-               "The validate endpoint crashes with NameError before rate-limit "
-               "logging can accumulate, so the 429 path is never reached.",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_rate_limit_after_many_validate_attempts(
         self, client, db_session, test_project
     ):
@@ -507,11 +460,6 @@ class TestSessionEdgeCases:
         response = client.get('/api/session/status/')
         assert response.status_code == 404
 
-    @pytest.mark.xfail(
-        reason="Source bug: fingerprint_hash variable undefined in validate_session().",
-        raises=(NameError, Exception),
-        strict=False
-    )
     def test_validate_archived_project_returns_403(
         self, client, db_session, test_project
     ):

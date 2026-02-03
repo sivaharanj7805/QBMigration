@@ -24,7 +24,7 @@ import logging
 import requests
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Blueprint, send_file, jsonify, redirect, Response, request
 
 logger = logging.getLogger(__name__)
@@ -244,7 +244,7 @@ def generate_zip_metadata(zip_path):
         'sha256': sha256,
         'size': file_size,
         'filename': os.path.basename(zip_path),
-        'generated_at': datetime.now().isoformat(),
+        'generated_at': datetime.now(timezone.utc).isoformat(),
         'version': EXTRACTOR_VERSION
     }
 
@@ -283,7 +283,10 @@ def is_cache_valid():
 
     try:
         cache_time = datetime.fromisoformat(cached_at)
-        if datetime.now() - cache_time > timedelta(hours=CACHE_DURATION_HOURS):
+        # Ensure both datetimes are timezone-aware for comparison
+        if cache_time.tzinfo is None:
+            cache_time = cache_time.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - cache_time > timedelta(hours=CACHE_DURATION_HOURS):
             return False
     except Exception:
         return False
@@ -365,7 +368,7 @@ def download_and_cache_from_github():
             return None
 
         metadata = {
-            'cached_at': datetime.now().isoformat(),
+            'cached_at': datetime.now(timezone.utc).isoformat(),
             'sha256': sha256_hash.hexdigest(),
             'size': total_size,
             'source_url': download_url,
