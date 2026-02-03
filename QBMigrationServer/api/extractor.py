@@ -26,6 +26,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from flask import Blueprint, send_file, jsonify, redirect, Response, request
+from utils.auth import admin_required
 
 logger = logging.getLogger(__name__)
 
@@ -735,6 +736,7 @@ def extractor_status():
 
 
 @extractor_bp.route('/cache/refresh', methods=['POST'])
+@admin_required
 def refresh_cache():
     """Force refresh the cached extractor from GitHub."""
     logger.info("Force refreshing extractor cache...")
@@ -764,6 +766,7 @@ def refresh_cache():
 
 
 @extractor_bp.route('/cache/clear', methods=['POST'])
+@admin_required
 def clear_cache():
     """Clear the cached extractor."""
     try:
@@ -1053,6 +1056,7 @@ def verify_zip():
 
 
 @extractor_bp.route('/zip/regenerate-hash', methods=['POST'])
+@admin_required
 def regenerate_zip_hash():
     """
     Force regeneration of the zip file hash metadata.

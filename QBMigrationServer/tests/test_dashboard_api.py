@@ -15,7 +15,7 @@ FIXED: Uses authenticated_client fixture properly for all authenticated endpoint
 
 import pytest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, MagicMock
 
 # Import Flask app
@@ -49,7 +49,7 @@ class TestDashboardAPI:
             company_name='Waterloo Manufacturing',
             qb_file_name='waterloo.qbw',
             current_step='Migrating Invoices',
-            created_at=datetime.utcnow() - timedelta(minutes=30)
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=30)
         )
         db_session.add(migration)
         db_session.commit()
@@ -335,7 +335,7 @@ class TestAuditCertificateAPI(TestDashboardAPI):
         """Test that download works for completed migrations"""
         migration = Migration.query.filter_by(migration_id=sample_migration).first()
         migration.status = 'completed'
-        migration.completed_at = datetime.utcnow()
+        migration.completed_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Note: This test may fail if PDF generation dependencies aren't available
@@ -369,7 +369,7 @@ class TestAPIPerformance(TestDashboardAPI):
                 status='completed' if i % 2 == 0 else 'failed',
                 progress_percent=100,
                 company_name=f'Company {i}',
-                created_at=datetime.utcnow() - timedelta(days=i)
+                created_at=datetime.now(timezone.utc) - timedelta(days=i)
             )
             db_session.add(m)
             migrations.append(m.migration_id)

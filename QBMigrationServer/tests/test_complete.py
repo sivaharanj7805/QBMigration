@@ -614,7 +614,7 @@ class TestMigrationModel:
         db_session.add(migration)
         db_session.commit()
         
-        webhook_id = 'test-webhook-' + str(datetime.utcnow().timestamp())
+        webhook_id = 'test-webhook-' + str(datetime.now(timezone.utc).timestamp())
         
         # VERIFY: First time not processed
         assert not migration.is_webhook_processed(webhook_id), \
