@@ -122,7 +122,7 @@ function StatusBadge({ status }: { status: string }) {
         case "uploaded":
             return <span className="badge badge-warning">Ready</span>;
         default:
-            return <span className="badge badge-gray">{status}</span>;
+            return <span className="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">{status.replace(/_/g, ' ')}</span>;
     }
 }
 
@@ -308,6 +308,7 @@ export default function DashboardHome() {
     }, []);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setUploadError('');  // Clear previous error
         const file = e.target.files?.[0];
         if (file) {
             if (!isValidQBFile(file.name)) {
@@ -348,11 +349,13 @@ export default function DashboardHome() {
             });
 
             if (response.ok) {
-                setUploadStatus("processing");
-                setTimeout(() => {
+                const data = await response.json();
+                if (data.migration_id) {
+                    router.push(`/migrations/${data.migration_id}`);
+                } else {
                     setUploadStatus("complete");
                     fetchDashboardData();
-                }, 2000);
+                }
             } else {
                 // SECURITY FIX: Wrap response.json() in try/catch for non-OK responses
                 // The response body may not be valid JSON
@@ -482,8 +485,10 @@ export default function DashboardHome() {
                             <p className="text-lg font-medium text-gray-700 mb-2">
                                 Uploading {sanitize.text(uploadedFile?.name || '')}...
                             </p>
-                            <div className="w-64 mx-auto progress-bar">
-                                <div className="progress-bar-fill" style={{ width: "60%" }} />
+                            <div className="w-64 mx-auto">
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '100%' }}></div>
+                                </div>
                             </div>
                         </div>
                     )}

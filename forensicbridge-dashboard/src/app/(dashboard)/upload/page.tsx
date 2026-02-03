@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
     Upload,
     FileSpreadsheet,
@@ -14,6 +15,7 @@ import {
     FileBarChart2,
     Building2
 } from "lucide-react";
+import { api } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
 import { sanitize } from "@/lib/sanitize";
 import { useLoadingGuard } from "@/lib/hooks/useSecurityHooks";
@@ -37,6 +39,7 @@ const SUPPORTED_FORMATS = [
     { ext: ".QBM", name: "QuickBooks Portable", description: "Smaller portable file" },
 ];
 
+// Use shared API URL from environment (api client handles this internally for its own requests)
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5GB
 
@@ -104,63 +107,8 @@ function FileStatusBadge({ status, error }: { status: string; error?: string }) 
     }
 }
 
-/**
- * Destination Card Component
- */
-function DestinationCard({
-    type,
-    title,
-    description,
-    tags,
-    selected,
-    onSelect,
-    color,
-    icon: Icon,
-}: {
-    type: DestinationType;
-    title: string;
-    description: string;
-    tags: { label: string; color: string }[];
-    selected: boolean;
-    onSelect: () => void;
-    color: string;
-    icon: React.ComponentType<{ className?: string }>;
-}) {
-    const borderColor = selected ? `border-${color}-500` : 'border-gray-200';
-    const bgColor = selected ? `bg-${color}-50` : '';
-    const ringColor = selected ? `ring-2 ring-${color}-200` : '';
-    const iconBgColor = selected ? `bg-${color}-500` : `bg-${color}-100`;
-    const iconTextColor = selected ? 'text-white' : `text-${color}-600`;
-
-    return (
-        <button
-            onClick={onSelect}
-            className={`p-6 rounded-xl border-2 text-left transition-all ${borderColor} ${bgColor} ${ringColor} hover:border-${color}-300 hover:bg-gray-50`}
-        >
-            <div className="flex items-start gap-4">
-                <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${iconBgColor}`}>
-                    <Icon className={`w-7 h-7 ${iconTextColor}`} />
-                </div>
-                <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 text-lg">{title}</h3>
-                    <p className="text-sm text-gray-600 mt-1">{description}</p>
-                    <div className="flex flex-wrap gap-2 mt-3">
-                        {tags.map((tag) => (
-                            <span key={tag.label} className={`text-xs ${tag.color} px-2 py-1 rounded`}>
-                                {tag.label}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-                {selected && (
-                    <CheckCircle2 className={`w-6 h-6 text-${color}-500`} />
-                )}
-            </div>
-        </button>
-    );
-}
-
 export default function UploadPage() {
+    const router = useRouter();
     const [isDragActive, setIsDragActive] = useState(false);
     const [files, setFiles] = useState<UploadedFile[]>([]);
     const [destination, setDestination] = useState<DestinationType>(null);
@@ -180,6 +128,19 @@ export default function UploadPage() {
     }, []);
 
     const processFile = async (file: File) => {
+        // Check for empty file
+        if (file.size === 0) {
+            const uploadedFile: UploadedFile = {
+                name: sanitize.filename(file.name),
+                size: file.size,
+                type: file.name.split('.').pop()?.toUpperCase() || "UNKNOWN",
+                status: "error",
+                error: "File is empty",
+            };
+            setFiles(prev => [...prev, uploadedFile]);
+            return;
+        }
+
         // Validate file
         const validation = isValidQBFile(file.name);
         if (!validation.valid) {
@@ -258,7 +219,7 @@ export default function UploadPage() {
 
         const droppedFiles = Array.from(e.dataTransfer.files);
         droppedFiles.forEach(processFile);
-    }, []);
+    }, [processFile]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);
@@ -289,7 +250,7 @@ export default function UploadPage() {
                 const data = await response.json();
                 const migrationId = data.migration_id || data.id;
                 if (migrationId) {
-                    window.location.href = `/migrations/${migrationId}`;
+                    router.push(`/migrations/${migrationId}`);
                 }
                 return { success: true };
             } else {

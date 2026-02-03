@@ -64,7 +64,9 @@ class CasewareExporter:
     DEBIT_TYPES = {
         'Bank', 'Accounts Receivable', 'Other Current Assets',
         'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
-        'Expense', 'Other Expense', 'Inventory'
+        'Expense', 'Other Expense', 'Inventory',
+        'Undeposited Funds', 'Prepaid Expenses',
+        'Other Current Asset', 'Fixed Asset', 'Other Asset',
     }
 
     def __init__(self, output_dir: str, company_name: str = "Company",
@@ -104,7 +106,19 @@ class CasewareExporter:
         }
 
         logger.info(f"CasewareExporter v{self.VERSION} initialized. Output: {self.output_dir}")
-    
+
+    def reset_stats(self):
+        """Reset statistics for a fresh export run."""
+        with self._stats_lock:
+            self.stats = {
+                'accounts_exported': 0,
+                'transactions_exported': 0,
+                'total_debits': Decimal('0'),
+                'total_credits': Decimal('0'),
+                'hashes_generated': 0,
+                'accounting_standard': self.leadsheet_mapper.detected_standard
+            }
+
     # ========================================================================
     # HASH VERIFICATION (FIX #3: Independent verification method)
     # ========================================================================
@@ -168,7 +182,7 @@ class CasewareExporter:
             if field in data and data[field] is not None:
                 value = data[field]
                 if isinstance(value, (int, float, Decimal)):
-                    value = f"{float(value):.2f}"
+                    value = f"{Decimal(str(value)):.2f}"
                 elif isinstance(value, datetime):
                     value = value.strftime('%Y-%m-%d')
                 hash_input.append(f"{field}:{value}")
@@ -180,7 +194,7 @@ class CasewareExporter:
                 if isinstance(value, (dict, list)):
                     value = json.dumps(value, sort_keys=True, default=str)
                 elif isinstance(value, (int, float, Decimal)):
-                    value = f"{float(value):.2f}"
+                    value = f"{Decimal(str(value)):.2f}"
                 hash_input.append(f"{key}:{value}")
         
         # Compute SHA-256
@@ -235,7 +249,6 @@ class CasewareExporter:
             'Account Description',
             'Type',
             'Lead Sheet Code',
-            'Prior Year Balance',
             'Current Year Balance',
             'Debit',
             'Credit',
@@ -252,18 +265,32 @@ class CasewareExporter:
                 logger.warning(f"Skipping non-dict account: {type(account).__name__}")
                 continue
             
-            # Extract account details
-            acct_num = self._sanitize_csv_value(account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', ''))
-            acct_name = self._sanitize_csv_value(account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account'))
+            # Extract raw account details (before sanitization)
+            raw_acct_num = str(account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', ''))
+            raw_acct_name = str(account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account'))
             acct_type = account.get('accountType') or account.get('AccountType', 'Other')
             balance = self._to_decimal(account.get('balance') or account.get('Balance') or account.get('CurrentBalance', 0))
-            
+
+            # Hash on ORIGINAL values for verification
+            hash_data = {
+                'AccountNumber': raw_acct_num,
+                'Name': raw_acct_name,
+                'Type': acct_type,
+                'Balance': str(balance),
+                'AsOfDate': as_of_date
+            }
+            integrity_hash = self.compute_sha256_hash(hash_data)
+
+            # THEN sanitize for CSV output
+            acct_num = self._sanitize_csv_value(raw_acct_num)
+            acct_name = self._sanitize_csv_value(raw_acct_name)
+
             # Determine type code
             type_code = self.leadsheet_mapper.get_type_code(acct_type)
 
             # FIX #33: Get Lead Sheet code from locale-aware mapper
             lead_sheet = self.leadsheet_mapper.get_lead_sheet_code(acct_type)
-            
+
             # Determine debit/credit
             if acct_type in self.DEBIT_TYPES:
                 debit = balance if balance >= 0 else Decimal('0')
@@ -271,19 +298,10 @@ class CasewareExporter:
             else:
                 credit = balance if balance >= 0 else Decimal('0')
                 debit = abs(balance) if balance < 0 else Decimal('0')
-            
+
             total_debits += debit
             total_credits += credit
-            
-            # Compute integrity hash
-            hash_data = {
-                'AccountNumber': acct_num,
-                'Name': acct_name,
-                'Type': acct_type,
-                'Balance': str(balance),
-                'AsOfDate': as_of_date
-            }
-            integrity_hash = self.compute_sha256_hash(hash_data)
+
             # CRITICAL FIX: Thread-safe stats update
             with self._stats_lock:
                 self.stats['hashes_generated'] += 1
@@ -293,7 +311,6 @@ class CasewareExporter:
                 acct_name,
                 type_code,
                 lead_sheet,
-                '',  # Prior year balance (can be populated from prior period data)
                 f"{balance:.2f}",
                 f"{debit:.2f}",
                 f"{credit:.2f}",
@@ -308,7 +325,6 @@ class CasewareExporter:
         rows.append([
             '',
             'TOTALS',
-            '',
             '',
             '',
             '',
@@ -332,24 +348,27 @@ class CasewareExporter:
                 # TOTALS row would be imported as an account and fail validation
                 for row in rows[:-1]:  # Exclude last row (TOTALS)
                     writer.writerow(row)
-
-                # Write metadata as trailing comments (Caseware ignores rows after data)
-                f.write(f"\n")
-                f.write(f"# === METADATA (not imported) ===\n")
-                f.write(f"# Company: {self.company_name}\n")
-                f.write(f"# As Of Date: {as_of_date}\n")
-                f.write(f"# Generated: {datetime.now().isoformat()}\n")
-                f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-                f.write(f"# Total Debits: {total_debits:.2f}\n")
-                f.write(f"# Total Credits: {total_credits:.2f}\n")
-                f.write(f"# Accounting Standard: {self.leadsheet_mapper.detected_standard}\n")
         except IOError as e:
             logger.error(f"Failed to write Trial Balance file: {e}")
             raise IOError(f"Cannot write to {output_file}: {e}") from e
         except PermissionError as e:
             logger.error(f"Permission denied writing Trial Balance: {e}")
             raise
-        
+
+        # Write metadata to a separate JSON file instead of trailing CSV comments
+        metadata_file = self.output_dir / "Audit_TB_metadata.json"
+        metadata = {
+            'company': self.company_name,
+            'as_of_date': as_of_date,
+            'generated': datetime.now().isoformat(),
+            'generator': f'ForensicBridge CasewareExporter v{self.VERSION}',
+            'total_debits': str(total_debits),
+            'total_credits': str(total_credits),
+            'accounting_standard': self.leadsheet_mapper.detected_standard
+        }
+        with open(metadata_file, 'w', encoding='utf-8') as mf:
+            json.dump(metadata, mf, indent=2)
+
         with self._stats_lock:
             self.stats['total_debits'] = total_debits
             self.stats['total_credits'] = total_credits
@@ -433,15 +452,14 @@ class CasewareExporter:
                     logger.warning(f"Invalid date format in transaction: {txn_date}, error: {e}")
             
             # FIX #3: Option to expand line items for detailed auditing
+            # FIX: Double-entry bookkeeping - _create_gl_rows returns pairs of entries
             if expand_line_items and 'lines' in txn:
                 for line in txn.get('lines', []):
-                    row = self._create_gl_row(txn, line, txn_date)
-                    if row:
-                        rows.append(row)
+                    entry_rows = self._create_gl_rows(txn, line, txn_date)
+                    rows.extend(entry_rows)
             else:
-                row = self._create_gl_row(txn, None, txn_date)
-                if row:
-                    rows.append(row)
+                entry_rows = self._create_gl_rows(txn, None, txn_date)
+                rows.extend(entry_rows)
             
             processed_count += 1
             
@@ -453,7 +471,6 @@ class CasewareExporter:
         hash_content = {
             'company': self.company_name,
             'period': {'start': start_date, 'end': end_date},
-            'generated_at': datetime.now().isoformat(),
             'row_count': len(rows),
             'rows': rows
         }
@@ -474,26 +491,26 @@ class CasewareExporter:
 
                 # Write data rows starting at row 2
                 writer.writerows(rows)
-
-                # Write metadata as trailing comments (after data, not imported by Caseware)
-                f.write(f"\n")
-                f.write(f"# === INTEGRITY METADATA (not imported) ===\n")
-                f.write(f"# Company: {self.company_name}\n")
-                if start_date:
-                    f.write(f"# Period: {start_date} to {end_date or 'present'}\n")
-                f.write(f"# Generated: {datetime.now().isoformat()}\n")
-                f.write(f"# Generator: ForensicBridge CasewareExporter v{self.VERSION}\n")
-                f.write(f"# GLOBAL_FILE_HASH (SHA-256): {global_file_hash}\n")
-                f.write(f"# Total Transactions: {len(rows)}\n")
-                f.write(f"# Verify: Recompute SHA-256 of all data rows to verify integrity.\n")
-                f.write(f"# Row-level: Each row has Forensic_Integrity_Hash for per-transaction verification.\n")
         except IOError as e:
             logger.error(f"Failed to write General Ledger file: {e}")
             raise IOError(f"Cannot write to {output_file}: {e}") from e
         except PermissionError as e:
             logger.error(f"Permission denied writing General Ledger: {e}")
             raise
-        
+
+        # Write metadata to a separate JSON file instead of trailing CSV comments
+        gl_metadata_file = self.output_dir / "Audit_GL_metadata.json"
+        gl_metadata = {
+            'company': self.company_name,
+            'period': {'start': start_date, 'end': end_date},
+            'generated': datetime.now().isoformat(),
+            'generator': f'ForensicBridge CasewareExporter v{self.VERSION}',
+            'global_file_hash': global_file_hash,
+            'total_transactions': len(rows),
+        }
+        with open(gl_metadata_file, 'w', encoding='utf-8') as mf:
+            json.dump(gl_metadata, mf, indent=2)
+
         # Store global hash in stats (thread-safe)
         with self._stats_lock:
             self.stats['global_file_hash'] = global_file_hash
@@ -561,11 +578,10 @@ COLUMN MAPPING:
    Column 1: Account Description -> Map to: Account Description
    Column 2: Type               -> Map to: (Ignore - for reference)
    Column 3: Lead Sheet Code    -> Map to: Lead Sheet
-   Column 4: Prior Year Balance -> Map to: Prior Year Balance
-   Column 5: Current Year Balance -> Map to: Current Balance
-   Column 6: Debit              -> Map to: Debit
-   Column 7: Credit             -> Map to: Credit
-   Column 8: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
+   Column 4: Current Year Balance -> Map to: Current Balance
+   Column 5: Debit              -> Map to: Debit
+   Column 6: Credit             -> Map to: Credit
+   Column 7: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
 
 ================================================================================
                      STEP 2: IMPORT GENERAL LEDGER
@@ -658,7 +674,7 @@ For technical support: support@forensicbridge.com
                     "has_header": True,
                     "columns": [
                         "Account Number", "Account Description", "Type",
-                        "Lead Sheet Code", "Prior Year Balance",
+                        "Lead Sheet Code",
                         "Current Year Balance", "Debit", "Credit",
                         "Forensic_Integrity_Hash"
                     ]
@@ -726,7 +742,10 @@ For technical support: support@forensicbridge.com
         if validation_errors:
             logger.error(f"Invalid qb_data: {validation_errors}")
             raise ValueError(f"Invalid qb_data structure: {'; '.join(validation_errors)}")
-        
+
+        # Reset stats for a fresh export run
+        self.reset_stats()
+
         logger.info("="*60)
         logger.info("GENERATING CASEWARE AUDIT BUNDLE")
         logger.info("="*60)
@@ -753,10 +772,12 @@ For technical support: support@forensicbridge.com
         
         # 1. Export Trial Balance
         accounts = qb_data.get('accounts', [])
-        if accounts:
-            tb_file = self.export_trial_balance(accounts, as_of_date)
-            result['files']['trial_balance'] = tb_file
-            logger.info(f"✅ Trial Balance: {self.stats['accounts_exported']} accounts")
+        if not accounts:
+            logger.warning("No accounts provided - creating empty Trial Balance file")
+        # Continue with export regardless (will just have headers if empty)
+        tb_file = self.export_trial_balance(accounts, as_of_date)
+        result['files']['trial_balance'] = tb_file
+        logger.info(f"Trial Balance: {self.stats['accounts_exported']} accounts")
         
         if progress_callback:
             progress_callback(1, 3, "Trial balance exported")
@@ -811,9 +832,9 @@ For technical support: support@forensicbridge.com
     # All transaction types to collect
     TXN_TYPES = [
         'invoices', 'bills', 'receivePayments', 'billPayments',
-        'creditMemos', 'salesReceipts', 'estimates',
+        'creditMemos', 'salesReceipts',
         'journalEntries', 'checks', 'deposits', 'transfers',
-        'vendorCredits', 'purchaseOrders', 'salesOrders',
+        'vendorCredits',
         'refundReceipts', 'inventoryAdjustments', 'taxPayments'
     ]
     
@@ -871,6 +892,17 @@ For technical support: support@forensicbridge.com
             logger.warning(f"Could not convert value to Decimal: {value}, error: {e}")
             return Decimal('0')
     
+    def _singularize(self, name: str) -> str:
+        """Singularize entity type name for lookup."""
+        name = name.lower()
+        if name.endswith('ies'):
+            return name[:-3] + 'y'  # journalentries -> journalentry
+        elif name.endswith('ses'):
+            return name[:-2]  # purchases -> purchase
+        elif name.endswith('s') and not name.endswith('ss'):
+            return name[:-1]  # invoices -> invoice, bills -> bill
+        return name
+
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """FIX #5: Parse date string to datetime object with multiple format support."""
         if not date_str:
@@ -902,70 +934,91 @@ For technical support: support@forensicbridge.com
         if value is None:
             return ''
 
-        value_str = str(value)
+        str_value = str(value).strip()
 
-        if not value_str:
+        if not str_value:
             return ''
 
         # SECURITY FIX: Define dangerous characters that trigger formula evaluation
-        DANGEROUS_CHARS = ('=', '+', '-', '@', '\t', '\r', '\n')
+        # Removed '-' to preserve negative numbers and hyphens
+        DANGEROUS_CHARS = ('=', '+', '@', '\t', '\r', '\n')
 
-        # SECURITY FIX: Check both the original string AND after stripping whitespace
-        # This prevents bypass via " =cmd" (space prefix) attacks
-        stripped = value_str.lstrip()
+        # Remove embedded newlines/tabs that could create cell injection
+        str_value = str_value.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
 
-        # Check if first character (or first non-space character) is dangerous
-        if value_str[0] in DANGEROUS_CHARS:
-            return "'" + value_str
-        elif stripped and stripped[0] in DANGEROUS_CHARS:
-            # Space-prefixed formula injection attempt - sanitize the whole string
-            return "'" + value_str
+        # Check first character
+        if str_value[0] in DANGEROUS_CHARS:
+            str_value = str_value[1:]  # Remove the dangerous leading character
+            logger.debug(f"Stripped CSV injection character from value")
 
-        return value_str
+        return str_value
     
-    def _create_gl_row(self, txn: Dict, line_item: Optional[Dict], txn_date: str) -> Optional[List]:
+    # Contra account mapping for double-entry bookkeeping
+    CONTRA_ACCOUNT_MAP = {
+        'invoice': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
+        'payment': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
+        'receivepayment': ('1000', 'Cash/Bank', 'Bank'),
+        'bill': ('2000', 'Accounts Payable', 'Accounts Payable'),
+        'billpayment': ('2000', 'Accounts Payable', 'Accounts Payable'),
+        'salesreceipt': ('1000', 'Undeposited Funds', 'Bank'),
+        'creditmemo': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
+        'vendorcredit': ('2000', 'Accounts Payable', 'Accounts Payable'),
+        'refundreceipt': ('1000', 'Undeposited Funds', 'Bank'),
+        'deposit': ('4000', 'Income/Various', 'Income'),
+        'check': ('1000', 'Cash/Bank', 'Bank'),
+        'expense': ('1000', 'Cash/Bank', 'Bank'),
+        'purchase': ('1000', 'Cash/Bank', 'Bank'),
+        'transfer': ('1000', 'Transfer Account', 'Bank'),
+        'taxpayment': ('2100', 'Tax Payable', 'Other Current Liability'),
+        'charge': ('2000', 'Accounts Payable', 'Accounts Payable'),
+        'inventoryadjustment': ('5100', 'Inventory Adjustment', 'CostOfGoodsSold'),
+    }
+
+    def _create_gl_rows(self, txn: Dict, line_item: Optional[Dict], txn_date: str) -> List[List]:
         """
-        Create a General Ledger row from a transaction (or line item).
-        
-        FIX #3: Supports both header-only export and line item expansion.
-        
+        Create General Ledger rows from a transaction (or line item).
+
+        Returns TWO rows per entry for proper double-entry bookkeeping:
+        1. The primary entry on the source account
+        2. The offsetting contra entry on the contra account
+
         Args:
             txn: The parent transaction dictionary
             line_item: Optional line item dict (if expanding line items)
             txn_date: Pre-extracted transaction date
-            
+
         Returns:
-            List of row values or None if invalid
+            List of row lists (usually 2 rows for double-entry, or empty if invalid)
         """
         # Use line item values if provided, fall back to transaction header
         source = line_item if line_item else txn
-        
+
         acct_num = self._sanitize_csv_value(
-            source.get('accountNumber') or source.get('AccountNumber') or 
-            source.get('AccountRef', {}).get('value') or 
+            source.get('accountNumber') or source.get('AccountNumber') or
+            source.get('AccountRef', {}).get('value') or
             txn.get('accountNumber') or txn.get('AccountNumber') or ''
         )
         acct_name = self._sanitize_csv_value(
-            source.get('accountName') or source.get('AccountName') or 
-            source.get('AccountRef', {}).get('name') or 
+            source.get('accountName') or source.get('AccountName') or
+            source.get('AccountRef', {}).get('name') or
             txn.get('accountName') or txn.get('AccountName') or ''
         )
         txn_type = txn.get('txnType') or txn.get('TxnType') or txn.get('type', '')
         ref_number = self._sanitize_csv_value(
             txn.get('refNumber') or txn.get('RefNumber') or txn.get('DocNumber', '')
         )
-        
+
         # Memo: use line description if available
         if line_item:
             memo = self._sanitize_csv_value(
-                line_item.get('description') or line_item.get('Description') or 
+                line_item.get('description') or line_item.get('Description') or
                 line_item.get('memo') or txn.get('memo') or ''
             )
         else:
             memo = self._sanitize_csv_value(
                 txn.get('memo') or txn.get('Memo') or txn.get('description', '')
             )
-        
+
         # Amount: use line amount if available
         if line_item:
             amount = self._to_decimal(
@@ -975,37 +1028,100 @@ For technical support: support@forensicbridge.com
             amount = self._to_decimal(
                 txn.get('amount') or txn.get('Amount') or txn.get('TotalAmount', 0)
             )
-        
+
         acct_type = source.get('accountType') or source.get('AccountType') or ''
-        
-        # Determine debit/credit
+
+        # Determine debit/credit for primary entry
         debit, credit = self._determine_debit_credit(amount, txn_type, acct_type)
-        
+
         # Compute integrity hash for this row
         hash_data = line_item if line_item else txn
         integrity_hash = self.compute_sha256_hash(hash_data)
-        
+
         with self._stats_lock:
             self.stats['hashes_generated'] += 1
             self.stats['transactions_exported'] += 1
-        
-        return [
+
+        # Normalize the date to YYYY-MM-DD format
+        formatted_date = txn_date
+        if txn_date:
+            parsed = self._parse_date(txn_date)
+            if parsed:
+                formatted_date = parsed.strftime('%Y-%m-%d')
+
+        # Primary entry row
+        primary_row = [
             acct_num,
             acct_name,
             txn_type,
-            txn_date,
+            formatted_date,
             ref_number,
-            memo[:100] if memo else '',
+            memo[:255] if memo else '',
             f"{amount:.2f}",
             f"{debit:.2f}",
             f"{credit:.2f}",
             integrity_hash
         ]
+
+        rows = [primary_row]
+
+        # Double-entry: create the offsetting contra entry
+        txn_type_lower = self._singularize(txn_type or '')
+        contra_info = self.CONTRA_ACCOUNT_MAP.get(txn_type_lower)
+
+        if contra_info and (debit > 0 or credit > 0):
+            contra_acct_num, contra_acct_name, contra_acct_type = contra_info
+
+            # Use contra account from transaction if available (e.g., deposit account)
+            contra_acct_from_txn = (
+                source.get('contraAccountNumber') or source.get('ContraAccountRef', {}).get('value') or
+                txn.get('depositToAccountNumber') or txn.get('DepositToAccountRef', {}).get('value')
+            )
+            contra_name_from_txn = (
+                source.get('contraAccountName') or source.get('ContraAccountRef', {}).get('name') or
+                txn.get('depositToAccountName') or txn.get('DepositToAccountRef', {}).get('name')
+            )
+            if contra_acct_from_txn:
+                contra_acct_num = self._sanitize_csv_value(contra_acct_from_txn)
+            if contra_name_from_txn:
+                contra_acct_name = self._sanitize_csv_value(contra_name_from_txn)
+
+            # Contra entry: swap debit and credit (offsetting)
+            contra_debit = credit  # If primary was credit, contra is debit
+            contra_credit = debit  # If primary was debit, contra is credit
+
+            contra_hash = self.compute_sha256_hash({
+                'contra': True,
+                'parent_hash': integrity_hash,
+                'account': contra_acct_num,
+                'debit': str(contra_debit),
+                'credit': str(contra_credit)
+            })
+
+            contra_row = [
+                contra_acct_num,
+                contra_acct_name,
+                txn_type,
+                formatted_date,
+                ref_number,
+                memo[:255] if memo else '',
+                f"{-amount:.2f}",
+                f"{contra_debit:.2f}",
+                f"{contra_credit:.2f}",
+                contra_hash
+            ]
+            rows.append(contra_row)
+
+            with self._stats_lock:
+                self.stats['hashes_generated'] += 1
+                self.stats['transactions_exported'] += 1
+
+        return rows
     
     def _determine_debit_credit(self, amount: Decimal, txn_type: str, acct_type: str) -> Tuple[Decimal, Decimal]:
         """
         FIX #5: Transaction-type aware debit/credit determination.
-        
+
         Accounting rules:
         - Payments received credit A/R
         - Bills increase A/P (credit)
@@ -1013,30 +1129,32 @@ For technical support: support@forensicbridge.com
         - Invoices increase A/R (debit)
         - Journal entries need special handling (have explicit debit/credit)
         """
-        txn_type_lower = txn_type.lower() if txn_type else ''
-        
-        # Credit transactions (reduce asset or increase liability)
-        credit_types = {
-            'payment', 'receivepayment', 'deposit', 'creditmemo', 'refund',
-            'vendorcredit', 'refundreceipt', 'creditcardcredit'
-        }
-        
+        # Normalize: singularize for plural->singular matching
+        # This handles 'invoices'->'invoice', 'journalEntries'->'journalentry', etc.
+        txn_type_lower = self._singularize(txn_type or '')
+
         # Debit transactions (increase asset or reduce liability)
         debit_types = {
             'invoice', 'bill', 'salesreceipt', 'check', 'expense',
-            'billpayment', 'creditcardcharge', 'purchaseorder'
+            'billpayment', 'purchase', 'inventoryadjustment',
+            'taxpayment', 'charge'
         }
-        
+
+        # Credit transactions (reduce asset or increase liability)
+        credit_types = {
+            'payment', 'receivepayment', 'creditmemo', 'vendorcredit',
+            'refundreceipt', 'deposit', 'creditcardpayment'
+        }
+
         # Neutral transactions (use amount sign)
         neutral_types = {
-            'journalentry', 'transfer', 'inventoryadjustment', 'taxPayment',
-            'estimate', 'salesorder'
+            'journalentry', 'transfer'
         }
-        
-        if txn_type_lower in credit_types:
-            return (Decimal('0'), abs(amount))
-        elif txn_type_lower in debit_types:
+
+        if txn_type_lower in debit_types:
             return (abs(amount), Decimal('0'))
+        elif txn_type_lower in credit_types:
+            return (Decimal('0'), abs(amount))
         else:
             # Fallback to sign-based logic for neutral/unknown types
             if amount >= 0:

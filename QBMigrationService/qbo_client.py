@@ -10,6 +10,7 @@ import uuid
 import random
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from decimal import Decimal
@@ -82,6 +83,10 @@ class PremiumQBOClient:
         # Batch tracking (FIX #18)
         self.batch_counter = 0
         self.batch_lock = Lock()
+
+        # Per-minute batch rate limiting
+        self._batch_timestamps = []
+        self._batch_timestamps_lock = Lock()
         
         # $25M FIX: Plan-aware parallel processing configuration
         # Different QBO plans have different API rate limits
@@ -142,12 +147,12 @@ class PremiumQBOClient:
         env_override = os.getenv("QBO_UPLOAD_WORKERS")
         if env_override:
             try:
-                limit = int(env_override)
+                limit = max(1, min(int(env_override), 10))  # Cap at 10 workers
                 # FIX SVC-06: Use logger instead of print
                 logger.info(f"Using environment override: {limit} workers")
             except ValueError:
                 pass
-        
+
         return limit
     
     def _register_signal_handlers(self):
@@ -342,32 +347,35 @@ class PremiumQBOClient:
     def get_synctoken(self, entity_type: str, qbo_id: str) -> str:
         """
         FIX #33, #124: Retrieve current SyncToken for entity
+        FIX: Acquire db_lock FIRST, then synctoken_lock to match lock ordering
+        in record_created() and prevent deadlocks.
         """
-        # Check cache first
-        with self.synctoken_lock:
-            if (entity_type, qbo_id) in self.synctoken_cache:
-                return self.synctoken_cache[(entity_type, qbo_id)]
-        
-        # Query database
         with self.db_lock:
+            with self.synctoken_lock:
+                # Check cache first
+                cache_key = (entity_type, str(qbo_id))
+                if cache_key in self.synctoken_cache:
+                    return self.synctoken_cache[cache_key]
+
+            # Fall back to DB lookup (still under db_lock)
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 SELECT sync_token FROM migrated_entities
                 WHERE entity_type = ? AND qbo_id = ?
             ''', (entity_type, qbo_id))
-            
+
             result = cursor.fetchone()
             conn.close()
-            
+
             if result:
                 sync_token = result[0] or "0"
-                # Update cache
+                # Update cache (acquire synctoken_lock under db_lock)
                 with self.synctoken_lock:
-                    self.synctoken_cache[(entity_type, qbo_id)] = sync_token
+                    self.synctoken_cache[(entity_type, str(qbo_id))] = sync_token
                 return sync_token
-            
+
             return "0"
     
     def update_synctoken(self, entity_type: str, qbo_id: str, new_synctoken: str):
@@ -543,7 +551,8 @@ class PremiumQBOClient:
         retries: int = 0,
         oauth_manager: Optional[Any] = None,
         idempotency_key: Optional[str] = None,
-        correlation_id: Optional[str] = None
+        correlation_id: Optional[str] = None,
+        _auth_refreshed: bool = False
     ) -> Dict:
         """
         ENHANCED: Request with configurable timeout and correlation ID support
@@ -591,7 +600,8 @@ class PremiumQBOClient:
             elif method == "GET":
                 response = self.session.get(url, headers=headers, timeout=request_timeout)
             elif method == "DELETE":
-                response = self.session.delete(url, headers=headers, json=data, timeout=request_timeout)
+                logger.warning("QBO uses POST for deletes, not DELETE. Use delete_entity() instead.")
+                raise ValueError("QBO API does not support HTTP DELETE. Use POST with ?operation=delete via delete_entity()")
             else:
                 raise ValueError(f"Unsupported method: {method}")
             
@@ -625,14 +635,36 @@ class PremiumQBOClient:
             
             elif response.status_code == 401:
                 # FIX #263: Token might be expired, refresh and retry
-                if retries == 0 and oauth_manager:
+                # FIX: Use _auth_refreshed flag instead of retries==0 so
+                # unrelated retries (timeout, 503) don't block token refresh
+                if not _auth_refreshed and oauth_manager:
                     logger.warning(f"[{correlation_id}] Token expired (401), refreshing...")
                     oauth_manager.refresh_access_token()
-                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
+                    new_token = oauth_manager.get_access_token()
+                    if new_token:
+                        self.access_token = new_token
+                    return self._make_request(method, endpoint, data, retries, oauth_manager, idempotency_key, correlation_id, _auth_refreshed=True)
                 else:
                     raise Exception(f"Authentication failed (TID: {intuit_tid}, CID: {correlation_id})")
             
-            elif response.status_code in getattr(config, 'RETRYABLE_STATUS_CODES', {503}):
+            elif response.status_code == 400:
+                # Validation error - NOT retryable
+                error_detail = "Unknown validation error"
+                try:
+                    error_body = response.json()
+                    if 'Fault' in error_body:
+                        errors = error_body['Fault'].get('Error', [])
+                        error_detail = '; '.join(e.get('Detail', e.get('Message', '')) for e in errors)
+                except Exception:
+                    error_detail = response.text[:500]
+                logger.error(f"QBO validation error (400): {error_detail}")
+                raise ValueError(f"QBO API validation error: {error_detail}")
+
+            elif response.status_code == 403:
+                logger.error(f"QBO permission denied (403) for {method} {endpoint}")
+                raise PermissionError(f"QBO API permission denied for {endpoint}")
+
+            elif response.status_code in getattr(config, 'RETRYABLE_STATUS_CODES', {429, 500, 502, 503, 504}):
                 if retries < max_retries:
                     wait_time = self._calculate_backoff(retries)
                     logger.warning(f"[{correlation_id}] Server error ({response.status_code}). Retry {retries+1}/{max_retries} in {wait_time}s... (TID: {intuit_tid})")
@@ -640,20 +672,6 @@ class PremiumQBOClient:
                     return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
                 else:
                     raise Exception(f"Max retries exceeded for server error (TID: {intuit_tid}, CID: {correlation_id})")
-            
-            elif response.status_code == 500:
-                try:
-                    error_body = response.json()
-                    if "busy" in str(error_body).lower():
-                        if retries < max_retries:
-                            logger.warning(f"[{correlation_id}] QuickBooks is busy, waiting 30s...")
-                            time.sleep(30)
-                            return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
-                except (json.JSONDecodeError, ValueError):
-                    pass
-                
-                # FIX #8: Don't log full response (may contain sensitive data)
-                raise Exception(f"QBO server error (500) (TID: {intuit_tid}, CID: {correlation_id})")
             
             response.raise_for_status()
             
@@ -727,10 +745,8 @@ class PremiumQBOClient:
         endpoint = f"{entity_type.lower()}?operation=delete"
         
         delete_data = {
-            entity_type: {
-                "Id": qbo_id,
-                "SyncToken": sync_token
-            }
+            "Id": qbo_id,
+            "SyncToken": sync_token
         }
         
         try:
@@ -825,6 +841,19 @@ class PremiumQBOClient:
             self.batch_counter += 1
             return f"batch_{int(time.time())}_{self.batch_counter}"
     
+    def _enforce_batch_rate_limit(self):
+        """Enforce 40 batch requests per minute per realm"""
+        with self._batch_timestamps_lock:
+            now = time.time()
+            # Remove timestamps older than 60 seconds
+            self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
+            if len(self._batch_timestamps) >= 40:
+                sleep_time = 60 - (now - self._batch_timestamps[0])
+                if sleep_time > 0:
+                    logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
+                    time.sleep(sleep_time)
+            self._batch_timestamps.append(time.time())
+
     def _process_single_batch(
         self,
         batch: List[Dict],
@@ -835,26 +864,48 @@ class PremiumQBOClient:
     ) -> Tuple[List[Dict], List[Dict]]:
         """
         Process a single batch with proper error handling and tracking
-        
+
         FIX #130: Proper transaction handling
         FIX #243: Store failed items
         """
+        self._enforce_batch_rate_limit()
+
         succeeded = []
         failed = []
-        
+
         batch_data = {
             "BatchItemRequest": []
         }
-        
+
         # FIX #312: Use idempotency key for crash recovery
         idempotency_key = f"{batch_id}_{migration_id}"
-        
+
         for j, entity_data in enumerate(batch):
+            # Dedup check: skip already-migrated entities
+            qbd_id = original_entity_id = (
+                entity_data.get("ListID") or
+                entity_data.get("TxnID") or
+                entity_data.get("Id") or
+                entity_data.get("Name") or
+                entity_data.get("DocNumber") or
+                f"index_{j}"
+            )
+            existing = self.was_entity_created(entity_type, qbd_id)
+            if existing:
+                logger.debug(f"Skipping already-migrated {entity_type} {qbd_id}")
+                continue
+
             batch_data["BatchItemRequest"].append({
                 "bId": f"bid_{j}",
+                "operation": "create",
                 entity_type: entity_data
             })
-        
+
+        # FIX: Don't send empty BatchItemRequest after dedup filters everything
+        if not batch_data["BatchItemRequest"]:
+            logger.info(f"All {len(batch)} entities in batch already migrated, skipping")
+            return [], []  # Return empty succeeded/failed
+
         try:
             response = self._make_request(
                 "POST",
@@ -897,11 +948,13 @@ class PremiumQBOClient:
                     created_entity = batch_item[entity_type]
                     succeeded.append(created_entity)
 
-                    # Record in database - use more comprehensive ID extraction
+                    # Record in database - use source entity data for ID
                     qbd_id = (
+                        original_entity.get("ListID") or
+                        original_entity.get("TxnID") or
+                        original_entity.get("Id") or
                         original_entity.get("Name") or
                         original_entity.get("DocNumber") or
-                        original_entity.get("Description") or
                         f"index_{req_index}"
                     )
                     qbo_id = created_entity.get("Id")
@@ -949,6 +1002,8 @@ class PremiumQBOClient:
         """
         results = {
             "succeeded": [],
+            "succeeded_count": 0,
+            "succeeded_ids": [],
             "failed": [],
             "total": len(entities)
         }
@@ -960,18 +1015,18 @@ class PremiumQBOClient:
         except ImportError:
             batch_size = 30  # QBO maximum if config unavailable
         batches = []
-        
+
         for i in range(0, len(entities), batch_size):
             batch = entities[i:i + batch_size]
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id))
-        
+
         # HIGH FIX: Use logger instead of print for production environments
         logger.info(f"Processing {len(batches)} batches in parallel (max {self.max_workers} workers)...")
-        
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = []
-            
+
             for batch, batch_id in batches:
                 future = executor.submit(
                     self._process_single_batch,
@@ -982,25 +1037,28 @@ class PremiumQBOClient:
                     migration_id
                 )
                 futures.append(future)
-            
+
             for future in as_completed(futures):
                 self._check_shutdown()
-                
+
                 try:
                     succeeded, failed = future.result()
-                    results["succeeded"].extend(succeeded)
+                    results["succeeded_count"] += len(succeeded)
+                    results["succeeded_ids"].extend([s.get("Id", "") for s in succeeded])
+                    # Memory optimization: only keep IDs, not full entity objects
+                    # Full entities are already persisted in SQLite via record_entity_success
                     results["failed"].extend(failed)
                 except Exception as e:
                     logger.error(f"Batch processing error: {e}")
-        
+
         # Store failed items for export
         if results["failed"]:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
-        
+
         # HIGH FIX: Use logger instead of print
-        logger.info(f"Batch processing complete: Succeeded={len(results['succeeded'])}, Failed={len(results['failed'])}")
-        
+        logger.info(f"Batch processing complete: Succeeded={results['succeeded_count']}, Failed={len(results['failed'])}")
+
         return results
     
     def batch_create_optimized(
@@ -1042,12 +1100,14 @@ class PremiumQBOClient:
         
         results = {
             "succeeded": [],
+            "succeeded_count": 0,
+            "succeeded_ids": [],
             "failed": [],
             "total": len(entities),
             "start_time": datetime.now().isoformat(),
             "entity_type": entity_type
         }
-        
+
         if not entities:
             return results
 
@@ -1057,42 +1117,42 @@ class PremiumQBOClient:
             batch_size = BATCH_SIZE
         except ImportError:
             batch_size = 30  # QBO maximum if config unavailable
-        
+
         # Calculate optimal workers based on rate limits
         # 40 requests/min = 0.67 requests/second per worker
         # With 8 workers: 5.3 requests/second (within 10/sec limit)
         optimal_workers = min(self.max_workers, 8)
-        
+
         # Calculate delay between batch submissions to stay within limits
         # Target: 10 requests/second maximum
         min_delay = 1.0 / 10  # 100ms minimum between requests
-        
+
         # Split into batches
         batches = []
         for i in range(0, len(entities), batch_size):
             batch = entities[i:i + batch_size]
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id, i))  # Include offset for progress
-        
+
         total_batches = len(batches)
         processed_entities = 0
-        
+
         logger.info(f"$25M BATCH: Processing {len(entities)} {entity_type} in {total_batches} batches with {optimal_workers} workers")
-        
+
         # Process with controlled parallelism
         with ThreadPoolExecutor(max_workers=optimal_workers) as executor:
             # Submit batches with rate limiting
             futures = {}
-            batch_queue = list(batches)
+            batch_queue = deque(batches)
             active_futures = set()
-            
+
             while batch_queue or active_futures:
                 self._check_shutdown()
-                
+
                 # Submit new batches (up to worker limit)
                 while batch_queue and len(active_futures) < optimal_workers:
-                    batch, batch_id, offset = batch_queue.pop(0)
-                    
+                    batch, batch_id, offset = batch_queue.popleft()
+
                     future = executor.submit(
                         self._process_single_batch,
                         batch,
@@ -1103,38 +1163,40 @@ class PremiumQBOClient:
                     )
                     futures[future] = (batch_id, offset, len(batch))
                     active_futures.add(future)
-                    
+
                     # Rate limit between batch submissions
                     time.sleep(min_delay)
-                
+
                 # Process completed futures
                 completed = set()
                 for future in active_futures:
                     if future.done():
                         completed.add(future)
                         batch_id, offset, batch_len = futures[future]
-                        
+
                         try:
                             succeeded, failed = future.result()
-                            results["succeeded"].extend(succeeded)
+                            results["succeeded_count"] += len(succeeded)
+                            results["succeeded_ids"].extend([s.get("Id", "") for s in succeeded])
+                            # Memory optimization: only keep IDs, not full entity objects
                             results["failed"].extend(failed)
                             processed_entities += batch_len
-                            
+
                             # Report progress
                             if progress_callback:
                                 elapsed = time.time() - start_time
                                 rate = processed_entities / elapsed * 3600 if elapsed > 0 else 0
                                 progress_callback(processed_entities, len(entities), rate)
-                            
+
                         except Exception as e:
                             logger.error(f"Batch {batch_id} error: {e}")
                             results["failed"].append({
                                 "batch_id": batch_id,
                                 "error": str(e)
                             })
-                
+
                 active_futures -= completed
-                
+
                 # Small delay to prevent busy-waiting
                 if active_futures and not completed:
                     time.sleep(0.05)
@@ -1154,7 +1216,7 @@ class PremiumQBOClient:
             with self.failed_items_lock:
                 self.failed_items.extend(results["failed"])
         
-        logger.info(f"$25M BATCH COMPLETE: {len(results['succeeded'])} succeeded, {len(results['failed'])} failed")
+        logger.info(f"$25M BATCH COMPLETE: {results['succeeded_count']} succeeded, {len(results['failed'])} failed")
         logger.info(f"  Duration: {duration_seconds:.1f}s | Throughput: {actual_throughput:.0f}/hour")
         
         if results["target_met"]:
@@ -1198,6 +1260,18 @@ class PremiumQBOClient:
         Returns:
             Count of entities
         """
+        # Validate entity_type against whitelist to prevent injection
+        valid_types = {
+            'Account', 'Customer', 'Vendor', 'Item', 'Employee', 'Invoice',
+            'Bill', 'Payment', 'Estimate', 'SalesReceipt', 'PurchaseOrder',
+            'Deposit', 'Transfer', 'JournalEntry', 'CreditMemo', 'VendorCredit',
+            'BillPayment', 'TimeActivity', 'TaxCode', 'TaxRate', 'Term',
+            'PaymentMethod', 'Class', 'Department', 'Attachable',
+            'CompanyCurrency', 'Budget'
+        }
+        if entity_type not in valid_types:
+            raise ValueError(f"Invalid entity type for query: {entity_type}")
+
         query = f"SELECT COUNT(*) FROM {entity_type}"
         endpoint = f"query?query={requests.utils.quote(query)}"
 
@@ -1491,7 +1565,7 @@ class PremiumQBOClient:
                         migration_id=migration_id
                     )
 
-                succeeded_count = len(result.get('succeeded', []))
+                succeeded_count = result.get('succeeded_count', 0)
                 failed_items = result.get('failed', [])
                 failed_count = len(failed_items)
 

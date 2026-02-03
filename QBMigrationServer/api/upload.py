@@ -15,6 +15,7 @@ from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
 import hashlib
 import logging
+import os
 import uuid
 import base64
 import re
@@ -634,7 +635,7 @@ def _handle_v31_upload(data, user):
             'migration_id': migration_id,
             'status': 'uploaded_to_s3',
             'message': 'File uploaded successfully',
-            's3_location': f"s3://{result['bucket']}/{result['key']}"
+            'storage': 'uploaded_securely'
         }), 201
         
     except Exception as e:
@@ -745,6 +746,9 @@ def upload_ndjson_bundle():
             stored_files = []
             for file_entry in files:
                 file_name = file_entry.get('file_name', 'unknown.ndjson')
+                # Prevent path traversal - remove directory components and unsafe characters
+                file_name = os.path.basename(file_name)
+                file_name = re.sub(r'[^\w\-.]', '_', file_name)
                 content_b64 = file_entry.get('content_base64', '')
                 
                 if content_b64:
@@ -814,6 +818,17 @@ def upload_ndjson_bundle():
 _chunked_uploads = {}
 _chunked_uploads_lock = threading.Lock()
 CHUNKED_UPLOAD_EXPIRY_SECONDS = 24 * 60 * 60  # 24 hours
+
+
+def _cleanup_expired_uploads():
+    """Remove expired chunked uploads to prevent memory leaks"""
+    with _chunked_uploads_lock:
+        now = time.time()
+        expired = [k for k, v in _chunked_uploads.items()
+                   if now - v.get('created_at', 0) > CHUNKED_UPLOAD_EXPIRY_SECONDS]
+        for k in expired:
+            del _chunked_uploads[k]
+            logger.info(f"Cleaned up expired chunked upload: {k}")
 
 
 @upload_bp.route('/initiate', methods=['POST'])

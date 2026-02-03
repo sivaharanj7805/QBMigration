@@ -311,6 +311,11 @@ class Migration(db.Model):
         Mark migration as completed (idempotent)
         FORENSIC REQUIREMENT: Enforces $0.00 trial balance variance
         """
+        # SECURITY FIX: Require results parameter - trial balance verification is mandatory
+        if results is None:
+            logger.error("mark_as_completed called without results - trial balance verification required")
+            return False
+
         # Only update if currently processing (prevent overwriting completed state)
         if self.status == 'processing':
             # FORENSIC ENFORCEMENT: Check trial balance reconciliation
@@ -502,7 +507,14 @@ class Migration(db.Model):
     
     def is_expired(self):
         """Check if migration has expired"""
-        return datetime.now(timezone.utc) > self.expires_at
+        if self.expires_at:
+            # Ensure both are timezone-aware
+            now = datetime.now(timezone.utc)
+            expires = self.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            return now > expires
+        return False
     
     def is_stuck(self, timeout_hours=STUCK_TIMEOUT_HOURS):
         """Check if migration is stuck (processing too long)"""

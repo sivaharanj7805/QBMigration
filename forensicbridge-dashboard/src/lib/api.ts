@@ -112,7 +112,7 @@ class ApiClient {
      * Generate a unique request ID for correlation
      */
     private generateRequestId(): string {
-        return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     }
 
     /**
@@ -151,12 +151,13 @@ class ApiClient {
             const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
             // Support external abort signal
+            const onAbort = () => controller.abort();
             if (signal) {
                 if (signal.aborted) {
                     clearTimeout(timeoutId);
                     return { success: false, error: 'Request cancelled' };
                 }
-                signal.addEventListener('abort', () => controller.abort());
+                signal.addEventListener('abort', onAbort);
             }
 
             try {
@@ -167,6 +168,9 @@ class ApiClient {
                     signal: controller.signal,
                 });
                 clearTimeout(timeoutId);
+                if (signal) {
+                    signal.removeEventListener('abort', onAbort);
+                }
                 lastStatus = response.status;
 
                 // Extract CSRF token from response header if provided
@@ -175,7 +179,12 @@ class ApiClient {
                     setCsrfToken(newCsrfToken);
                 }
 
-                const rawData = await response.json();
+                let rawData;
+                try {
+                    rawData = await response.json();
+                } catch {
+                    rawData = { error: `HTTP ${response.status}: ${response.statusText}` };
+                }
 
                 if (!response.ok) {
                     if (this.isRetryableError(response.status) && attempt < this.maxRetries) {
@@ -211,6 +220,9 @@ class ApiClient {
                 return { success: true, data: rawData as T };
             } catch (error) {
                 clearTimeout(timeoutId);
+                if (signal) {
+                    signal.removeEventListener('abort', onAbort);
+                }
                 lastError = error instanceof Error ? error : new Error(String(error));
 
                 if (lastError.name === 'AbortError') {
@@ -255,12 +267,13 @@ class ApiClient {
         const timeoutId = setTimeout(() => controller.abort(), timeout);
 
         // Support external abort signal
+        const onAbort = () => controller.abort();
         if (signal) {
             if (signal.aborted) {
                 clearTimeout(timeoutId);
                 return null;
             }
-            signal.addEventListener('abort', () => controller.abort());
+            signal.addEventListener('abort', onAbort);
         }
 
         const csrfToken = getCsrfToken();
@@ -276,6 +289,9 @@ class ApiClient {
                 signal: controller.signal,
             });
             clearTimeout(timeoutId);
+            if (signal) {
+                signal.removeEventListener('abort', onAbort);
+            }
 
             if (!response.ok) {
                 if (process.env.NODE_ENV === 'development') {
@@ -287,6 +303,9 @@ class ApiClient {
             return await response.blob();
         } catch (error) {
             clearTimeout(timeoutId);
+            if (signal) {
+                signal.removeEventListener('abort', onAbort);
+            }
 
             if (error instanceof Error && error.name === 'AbortError') {
                 if (process.env.NODE_ENV === 'development') {
