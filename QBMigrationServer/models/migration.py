@@ -101,7 +101,7 @@ class Migration(db.Model):
     live_status_data = db.Column(db.Text)   # JSON: Detailed phase tracking, logs
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     started_at = db.Column(db.DateTime)
     completed_at = db.Column(db.DateTime)
     expires_at = db.Column(db.DateTime)
@@ -229,7 +229,7 @@ class Migration(db.Model):
         
         # S3 storage cost (for 24 hours)
         size_gb = self.data_size_bytes / (1024 ** 3)
-        s3_cost = size_gb * s3_cost_per_gb * (24 / 30 / 24)  # Cost for 24 hours
+        s3_cost = size_gb * s3_cost_per_gb * (1 / 30)  # Cost for 1 day out of 30-day month
         
         # EC2 cost (estimate 5 hours)
         ec2_cost = ec2_cost_per_hour * 5
@@ -459,14 +459,17 @@ class Migration(db.Model):
         and both get processed.
         """
         from sqlalchemy import text
+        from models.database import is_postgresql
 
         try:
-            # RACE CONDITION FIX: Use database-level locking
+            # RACE CONDITION FIX: Use database-level locking (PostgreSQL only)
             # This prevents two concurrent requests from both processing the same webhook
-            db.session.execute(
-                text("SELECT id FROM migrations WHERE id = :id FOR UPDATE NOWAIT"),
-                {"id": self.id}
-            )
+            # SQLite has implicit locking at the database level
+            if is_postgresql():
+                db.session.execute(
+                    text("SELECT id FROM migrations WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": self.id}
+                )
         except Exception as lock_error:
             # Another transaction has the lock - webhook is being processed
             logger.warning(f"Webhook {webhook_id} - migration {self.id} is locked by another transaction: {lock_error}")

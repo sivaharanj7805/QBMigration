@@ -9,7 +9,7 @@ def admin_required(f):
         if not current_user.is_authenticated:
             return jsonify({'error': 'Authentication required'}), 401
         
-        if not current_user.is_admin:
+        if not current_user.is_admin():
             return jsonify({'error': 'Admin privileges required'}), 403
         
         return f(*args, **kwargs)

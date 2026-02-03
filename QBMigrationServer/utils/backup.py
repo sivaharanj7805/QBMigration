@@ -73,7 +73,7 @@ class BackupManager:
                 return None
             
             # Create backup filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
             backup_filename = f"qb_migrations_backup_{timestamp}.db"
             backup_path = os.path.join(self.backup_dir, backup_filename)
             
@@ -126,7 +126,7 @@ class BackupManager:
             parsed = urlparse(db_uri)
 
             # Create backup filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
             backup_filename = f"qb_migrations_backup_{timestamp}.sql"
             backup_path = os.path.join(self.backup_dir, backup_filename)
 
@@ -479,7 +479,7 @@ class BackupManager:
     def cleanup_old_backups(self):
         """Delete backups older than retention period"""
         try:
-            cutoff_date = datetime.now() - timedelta(days=self.retention_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
             
             # Clean up local backups
             for filename in os.listdir(self.backup_dir):
@@ -487,7 +487,7 @@ class BackupManager:
                     continue
                 
                 filepath = os.path.join(self.backup_dir, filename)
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                file_time = datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc)
                 
                 if file_time < cutoff_date:
                     os.remove(filepath)
@@ -533,7 +533,7 @@ class BackupManager:
                     'filename': filename,
                     'path': filepath,
                     'size': os.path.getsize(filepath),
-                    'created': datetime.fromtimestamp(os.path.getmtime(filepath)),
+                    'created': datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc),
                     'location': 'local',
                     'encrypted': filename.endswith('.encrypted')
                 })
@@ -606,7 +606,7 @@ class BackupManager:
                 db_path = db_uri.replace('sqlite:///', '')
                 
                 # Create backup of current database
-                current_backup = f"{db_path}.before_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                current_backup = f"{db_path}.before_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
                 shutil.copy2(db_path, current_backup)
                 logger.info(f"Current database backed up to: {current_backup}")
                 

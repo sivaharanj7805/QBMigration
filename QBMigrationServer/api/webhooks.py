@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
-from models.database import db
+from models.database import db, is_postgresql
 from models.migration import Migration
 from datetime import datetime, timedelta, timezone
 import logging
@@ -40,7 +40,10 @@ def verify_webhook_signature(migration_id, signature, timestamp):
             return False, "Invalid timestamp format"
         
         # Check timestamp is recent (prevent replay attacks)
-        age = datetime.now(timezone.utc) - webhook_time.replace(tzinfo=None)
+        # Ensure webhook_time is timezone-aware before comparison
+        if webhook_time.tzinfo is None:
+            webhook_time = webhook_time.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - webhook_time
         max_age = timedelta(minutes=current_app.config.get('WEBHOOK_REPLAY_WINDOW_MINUTES', 5))
         
         if age > max_age:
@@ -124,10 +127,14 @@ def migration_started():
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
         # This ensures only one webhook handler can process the same migration at a time
         # FIX: Use nowait=True to prevent indefinite blocking, with retry logic
+        # Note: FOR UPDATE only works with PostgreSQL; SQLite has implicit locking
+        from models.database import is_postgresql
         try:
-            migration = db.session.query(Migration).filter_by(
-                migration_id=migration_id
-            ).with_for_update(nowait=True).first()
+            query = db.session.query(Migration).filter_by(migration_id=migration_id)
+            if is_postgresql():
+                migration = query.with_for_update(nowait=True).first()
+            else:
+                migration = query.first()
         except Exception as lock_error:
             # Row is locked by another process - this is expected under high concurrency
             logger.warning(f"Migration {migration_id} is locked by another webhook handler, retrying...")
@@ -228,10 +235,13 @@ def migration_progress():
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
         # FIX: Use nowait=True to prevent indefinite blocking
+        # Note: FOR UPDATE only works with PostgreSQL; SQLite has implicit locking
         try:
-            migration = db.session.query(Migration).filter_by(
-                migration_id=migration_id
-            ).with_for_update(nowait=True).first()
+            query = db.session.query(Migration).filter_by(migration_id=migration_id)
+            if is_postgresql():
+                migration = query.with_for_update(nowait=True).first()
+            else:
+                migration = query.first()
         except Exception as lock_error:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()
@@ -308,10 +318,13 @@ def migration_completed():
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
         # FIX: Use nowait=True to prevent indefinite blocking
+        # Note: FOR UPDATE only works with PostgreSQL; SQLite has implicit locking
         try:
-            migration = db.session.query(Migration).filter_by(
-                migration_id=migration_id
-            ).with_for_update(nowait=True).first()
+            query = db.session.query(Migration).filter_by(migration_id=migration_id)
+            if is_postgresql():
+                migration = query.with_for_update(nowait=True).first()
+            else:
+                migration = query.first()
         except Exception as lock_error:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()
@@ -397,10 +410,13 @@ def migration_failed():
 
         # CRITICAL FIX: Use SELECT FOR UPDATE to prevent race conditions
         # FIX: Use nowait=True to prevent indefinite blocking
+        # Note: FOR UPDATE only works with PostgreSQL; SQLite has implicit locking
         try:
-            migration = db.session.query(Migration).filter_by(
-                migration_id=migration_id
-            ).with_for_update(nowait=True).first()
+            query = db.session.query(Migration).filter_by(migration_id=migration_id)
+            if is_postgresql():
+                migration = query.with_for_update(nowait=True).first()
+            else:
+                migration = query.first()
         except Exception as lock_error:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()

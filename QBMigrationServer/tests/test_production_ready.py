@@ -26,6 +26,33 @@ TEST_EMAIL = f"test_prod_{int(time.time())}@forensicbridge.ca"
 TEST_PASSWORD = "TestPass123!"
 
 
+def _server_is_running():
+    """Check if the API server is actually running."""
+    try:
+        requests.get(f"{API_BASE_URL}/api/health", timeout=2)
+        return True
+    except (requests.ConnectionError, requests.Timeout):
+        return False
+
+
+def _postgresql_is_available():
+    """Check if PostgreSQL is available."""
+    db_url = os.getenv('DATABASE_URL', '')
+    return 'postgresql' in db_url or 'postgres' in db_url
+
+
+requires_server = pytest.mark.skipif(
+    not _server_is_running(),
+    reason=f"API server not running at {API_BASE_URL}"
+)
+
+requires_postgresql = pytest.mark.skipif(
+    not _postgresql_is_available(),
+    reason="PostgreSQL not available (using SQLite for tests)"
+)
+
+
+@requires_server
 class TestProductionAuthentication:
     """Test real authentication flows"""
     
@@ -139,6 +166,7 @@ class TestProductionAuthentication:
         assert response.status_code == 401
 
 
+@requires_server
 class TestProductionLicenseAPI:
     """Test real license validation endpoints"""
     
@@ -240,6 +268,7 @@ class TestProductionEncryption:
         assert ph.verify(hash2, password)
 
 
+@requires_postgresql
 class TestProductionDatabase:
     """Test real database operations"""
     
@@ -297,6 +326,7 @@ class TestProductionDatabase:
             assert count == 1, "Migrations table should exist"
 
 
+@requires_server
 class TestProductionAPIEndpoints:
     """Test all critical API endpoints are responding"""
     
@@ -319,6 +349,7 @@ class TestProductionAPIEndpoints:
             f"{endpoint} returned {response.status_code}, expected {expected_min}-{expected_max}"
 
 
+@requires_server
 class TestProductionSecurity:
     """Test security measures are in place"""
     

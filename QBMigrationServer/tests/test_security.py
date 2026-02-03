@@ -121,7 +121,7 @@ class TestAuthentication:
         protected_endpoints = [
             '/api/migrations',
             '/api/auth/me',
-            '/api/dashboard/stats',
+            '/api/dashboard/overview',
         ]
 
         for endpoint in protected_endpoints:

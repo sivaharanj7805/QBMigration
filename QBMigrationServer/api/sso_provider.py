@@ -10,6 +10,7 @@ Enterprise firms (BDO, MNP, Big 4) require SSO for firm-managed accounts.
 """
 
 from flask import Blueprint, request, jsonify, redirect, session, current_app, url_for
+from flask_login import login_required, current_user
 from functools import wraps
 import datetime
 from datetime import timezone
@@ -487,16 +488,17 @@ def sp_metadata():
 
 
 @sso_bp.route('/configure', methods=['POST'])
+@login_required
 def configure_provider():
     """
     Configure SSO provider for an organization (admin endpoint)
-    
+
     Request Body:
         org_id (str): Organization ID
         provider_type (str): 'microsoft' | 'google' | 'okta' | 'saml2'
         config (dict): Provider-specific configuration
     """
-    # In production, this should require admin authentication
+    # SECURITY FIX: Require authentication (was previously unauthenticated)
     data = request.get_json() or {}
     
     org_id = data.get('org_id')

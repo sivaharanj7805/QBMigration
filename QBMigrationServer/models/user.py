@@ -75,7 +75,7 @@ class User(UserMixin, db.Model):
     account_locked_until = db.Column(db.DateTime)
     
     # Security - Password Management
-    password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    password_changed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     password_history = db.Column(db.Text)  # JSON array of previous password hashes
     must_change_password = db.Column(db.Boolean, default=False)
     
@@ -88,9 +88,11 @@ class User(UserMixin, db.Model):
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime)
+    last_login_at = db.Column(db.DateTime)  # For anomaly detection
+    last_login_ip = db.Column(db.String(45))  # For anomaly detection (supports IPv6)
     
     # QuickBooks Online OAuth (tokens stored encrypted)
     qbo_access_token = db.Column(db.Text, nullable=True)  # Encrypted access token
@@ -327,12 +329,15 @@ class User(UserMixin, db.Model):
         # HIGH FIX: Validate JSON structure when loading password history
         # Prevents code injection or corruption attacks via malformed JSON
         # FIX: Use database-level locking for thread-safe password history access
+        from models.database import is_postgresql
         try:
-            # Acquire row-level lock to prevent concurrent modifications
-            db.session.execute(
-                db.text("SELECT password_history FROM users WHERE id = :user_id FOR SHARE"),
-                {"user_id": self.id}
-            )
+            # Acquire row-level lock to prevent concurrent modifications (PostgreSQL only)
+            # SQLite doesn't support FOR SHARE but has implicit locking
+            if is_postgresql():
+                db.session.execute(
+                    db.text("SELECT password_history FROM users WHERE id = :user_id FOR SHARE"),
+                    {"user_id": self.id}
+                )
 
             history = json.loads(self.password_history)
 
@@ -385,11 +390,14 @@ class User(UserMixin, db.Model):
         # HIGH FIX: Validate JSON structure when loading password history
         # FIX: Use database-level locking for thread-safe password history manipulation
         try:
-            # Acquire row-level lock to prevent concurrent modifications
-            db.session.execute(
-                db.text("SELECT password_history FROM users WHERE id = :user_id FOR UPDATE"),
-                {"user_id": self.id}
-            )
+            # Acquire row-level lock to prevent concurrent modifications (PostgreSQL only)
+            # SQLite doesn't support FOR UPDATE but has implicit locking
+            dialect = db.session.bind.dialect.name if db.session.bind else 'sqlite'
+            if dialect == 'postgresql':
+                db.session.execute(
+                    db.text("SELECT password_history FROM users WHERE id = :user_id FOR UPDATE"),
+                    {"user_id": self.id}
+                )
 
             history = json.loads(self.password_history) if self.password_history else []
 
@@ -443,14 +451,21 @@ class User(UserMixin, db.Model):
             return False
 
         # Check if lock has expired
-        if datetime.now(timezone.utc) > self.account_locked_until:
+        # Handle both timezone-aware and naive datetimes
+        now = datetime.now(timezone.utc)
+        lock_until = self.account_locked_until
+        if lock_until.tzinfo is None:
+            # Make naive datetime timezone-aware (assume UTC)
+            lock_until = lock_until.replace(tzinfo=timezone.utc)
+
+        if now > lock_until:
             # Lock expired, reset
             self.account_locked_until = None
             self.failed_login_attempts = 0
             db.session.commit()
-            return True
+            return False  # Not locked anymore
 
-        return False
+        return True  # Still locked
     
     def record_failed_login(self):
         """
@@ -465,16 +480,23 @@ class User(UserMixin, db.Model):
         if self.failed_login_attempts >= 5:
             self.account_locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
     
-    def record_successful_login(self):
+    def record_successful_login(self, ip_address=None):
         """
         Record successful login
-        
-        Resets failed login counter
+
+        Resets failed login counter and updates login tracking for anomaly detection.
+
+        Args:
+            ip_address: Optional IP address for anomaly detection
         """
+        now = datetime.now(timezone.utc)
         self.failed_login_attempts = 0
         self.last_failed_login = None
         self.account_locked_until = None
-        self.last_login = datetime.now(timezone.utc)
+        self.last_login = now
+        self.last_login_at = now  # For anomaly detection
+        if ip_address:
+            self.last_login_ip = ip_address
     
     # ========================================================================
     # MULTI-FACTOR AUTHENTICATION
@@ -710,7 +732,18 @@ class User(UserMixin, db.Model):
     # ========================================================================
     
     def get_id(self):
-        """Required by Flask-Login"""
+        """Required by Flask-Login.
+
+        Uses SQLAlchemy identity key to avoid DetachedInstanceError
+        when the instance is not bound to a session.
+        """
+        from sqlalchemy import inspect as sa_inspect
+        try:
+            state = sa_inspect(self)
+            if state.identity:
+                return str(state.identity[0])
+        except Exception:
+            pass
         return str(self.id)
     
     @property

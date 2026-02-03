@@ -95,7 +95,7 @@ class WebhookDeliveryLog(db.Model):
     instance_id = db.Column(db.String(64))
     
     # Timing
-    received_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    received_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     processed_at = db.Column(db.DateTime)
     processing_time_ms = db.Column(db.Integer)
     

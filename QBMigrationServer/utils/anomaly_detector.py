@@ -87,21 +87,29 @@ def detect_rapid_login_attempts(user_id: int, window_hours: int = 1) -> Tuple[bo
         (is_suspicious: bool, reason: str)
     """
     try:
-        # Query login attempts in the time window
+        # Query the user's failed login attempt counter and last login time.
+        # The users table stores a running count of failed_login_attempts which
+        # is reset on successful login. Check if the count exceeds the threshold
+        # and the attempts occurred within the time window.
         window_start = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
         result = db.session.execute(text("""
-            SELECT COUNT(*) as login_count
+            SELECT failed_login_attempts, last_login_at
             FROM users
             WHERE id = :user_id
-            AND last_login_at >= :window_start
-        """), {'user_id': user_id, 'window_start': window_start})
+        """), {'user_id': user_id})
 
         row = result.fetchone()
-        login_count = row[0] if row else 0
+        if not row:
+            return False, ""
 
-        if login_count > ANOMALY_THRESHOLDS['max_logins_per_hour']:
-            return True, f"Rapid login attempts: {login_count} in {window_hours}h (threshold: {ANOMALY_THRESHOLDS['max_logins_per_hour']})"
+        failed_attempts = row[0] or 0
+        last_login = row[1]
+
+        # Only flag if the failed attempts are recent (within the window)
+        if failed_attempts > ANOMALY_THRESHOLDS['max_logins_per_hour']:
+            if last_login and last_login >= window_start:
+                return True, f"Rapid login attempts: {failed_attempts} failed in {window_hours}h (threshold: {ANOMALY_THRESHOLDS['max_logins_per_hour']})"
 
         return False, ""
 

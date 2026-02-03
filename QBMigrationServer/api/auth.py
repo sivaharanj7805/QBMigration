@@ -83,6 +83,7 @@ def _bind_session() -> None:
     """
     logger.info("Binding new session to browser fingerprint")
     session['_created_at'] = datetime.datetime.now(timezone.utc).isoformat()
+    session['_ua_fingerprint'] = _get_user_agent_fingerprint()
 
 
 # =============================================================================
@@ -201,7 +202,7 @@ def require_mfa(f: Callable[..., Any]) -> Callable[..., Any]:
         if not user_id:
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 404
 
@@ -263,7 +264,7 @@ def require_role(*allowed_roles):
             if not user_id:
                 return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if not user:
                 return jsonify({'success': False, 'error': 'User not found'}), 404
 
@@ -333,7 +334,7 @@ def verify_mfa():
         return jsonify({'success': False, 'error': 'Invalid MFA code format'}), 400
 
     user_id = request.current_user.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -442,7 +443,9 @@ def validate_email(email: str) -> bool:
         from email_validator import validate_email as ev_validate, EmailNotValidError
         try:
             # Validate email format
-            valid = ev_validate(email)
+            # Skip DNS deliverability check in testing environment
+            check_deliverability = os.getenv('FLASK_ENV') != 'testing'
+            valid = ev_validate(email, check_deliverability=check_deliverability)
             return True
         except EmailNotValidError:
             return False
@@ -674,11 +677,11 @@ def login():
         return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
     
     # Successful login
-    user.record_successful_login()
+    client_ip = get_client_ip()
+    user.record_successful_login(ip_address=client_ip)
     db.session.commit()
 
     # FIX #39: Anomaly detection for suspicious login patterns
-    client_ip = get_client_ip()
     anomalies = check_login_anomalies(user.id, client_ip)
 
     if anomalies:
@@ -700,6 +703,10 @@ def login():
     session['user_id'] = user.id
     session['email'] = user.email
     session['_fresh'] = True  # Mark session as freshly authenticated
+
+    # Establish Flask-Login session so @login_required works with session cookies
+    from flask_login import login_user
+    login_user(user)
 
     # SECURITY FIX: Bind session to browser fingerprint to detect hijacking
     _bind_session()
@@ -749,7 +756,7 @@ def get_current_user():
     from models.migration_credit import MigrationCredit
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -874,7 +881,7 @@ def logout():
     # Revoke QBO tokens if user has them (CRITICAL for 100/100 OAuth score)
     if user_id:
         try:
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if user and (user.qbo_access_token or user.qbo_refresh_token):
                 # Import here to avoid circular imports
                 from api.qbo import revoke_qbo_tokens
@@ -952,7 +959,7 @@ def validate_session():
     user_id = user_data.get('user_id')
 
     try:
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 401
 
@@ -969,32 +976,6 @@ def validate_session():
     except Exception as e:
         logger.error(f"Session validation error: {e}")
         return jsonify({'success': False, 'error': 'Session validation failed'}), 401
-
-    # Look up user
-    user = User.query.filter_by(email=email).first()
-
-    if user and user.is_active:
-        # Generate reset token
-        reset_token = _generate_password_reset_token(user.id, user.email)
-
-        # Store token JTI in user record for one-time use validation
-        # This would require a database field, so for now we rely on JWT expiry
-
-        # Send reset email
-        _send_password_reset_email(email, reset_token)
-
-        logger.info(f"Password reset requested for {hash_email(email)}")
-    else:
-        # User doesn't exist - still perform timing-consistent operations
-        import os
-        from argon2 import PasswordHasher
-        ph = PasswordHasher()
-        # Perform fake hash to match timing
-        try:
-            fake_password = os.urandom(16).hex()
-            _ = ph.hash(fake_password)
-        except Exception:
-            pass
 
 # =============================================================================
 # TIER SELECTION & MANAGEMENT
@@ -1073,7 +1054,7 @@ def select_tier():
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1134,7 +1115,7 @@ def upgrade_tier():
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1178,7 +1159,7 @@ def upgrade_tier():
 def list_team_members():
     """List team members and pending invites"""
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1241,7 +1222,7 @@ def invite_team_member():
         return jsonify({'success': False, 'error': 'Email is required'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1520,7 +1501,7 @@ def reset_password():
 
     # Get user
     user_id = payload.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1705,7 +1686,7 @@ def send_verification_email():
     }
     """
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1781,7 +1762,7 @@ def verify_email():
 
     # Get user
     user_id = payload.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1831,7 +1812,7 @@ def get_verification_status():
     }
     """
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1944,7 +1925,7 @@ def sync_credits():
     from models.migration_credit import MigrationCredit
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404

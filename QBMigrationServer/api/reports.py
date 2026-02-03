@@ -59,7 +59,7 @@ def list_reports():
     try:
         # Get completed migrations that can have reports
         migrations = Migration.query.filter_by(
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             status='completed'
         ).order_by(Migration.completed_at.desc()).all()
 
@@ -83,7 +83,7 @@ def list_reports():
                     'id': f'{m.migration_id}_variance',
                     'type': 'variance',
                     'name': 'Variance Report',
-                    'date': datetime.fromtimestamp(os.path.getmtime(variance_path)).strftime('%Y-%m-%d'),
+                    'date': datetime.fromtimestamp(os.path.getmtime(variance_path), tz=timezone.utc).strftime('%Y-%m-%d'),
                     'status': 'ready',
                     'description': 'Side-by-side P&L and Balance Sheet comparison'
                 })
@@ -96,7 +96,7 @@ def list_reports():
                     'id': f'{m.migration_id}_certificate',
                     'type': 'certificate',
                     'name': 'Audit Certificate',
-                    'date': datetime.fromtimestamp(os.path.getmtime(cert_path)).strftime('%Y-%m-%d'),
+                    'date': datetime.fromtimestamp(os.path.getmtime(cert_path), tz=timezone.utc).strftime('%Y-%m-%d'),
                     'status': 'ready',
                     'description': 'Professional PDF with SHA-256 verification'
                 })
@@ -154,12 +154,12 @@ def generate_report():
         if migration_id:
             migration = Migration.query.filter_by(
                 migration_id=migration_id,
-                user_id=current_user.id
+                user_id=int(current_user.get_id())
             ).first()
         else:
             # Get latest completed migration
             migration = Migration.query.filter_by(
-                user_id=current_user.id,
+                user_id=int(current_user.get_id()),
                 status='completed'
             ).order_by(Migration.completed_at.desc()).first()
 
@@ -242,7 +242,7 @@ def download_report(report_id):
         # Verify user owns this migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:
@@ -290,7 +290,7 @@ def get_discrepancies(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:
@@ -358,7 +358,7 @@ def download_discrepancy_report(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:
@@ -397,7 +397,7 @@ def get_record_count(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:

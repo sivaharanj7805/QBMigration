@@ -8,7 +8,8 @@ File Upload API Endpoints
 """
 
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required, current_user
+from flask_login import login_required
+from api.auth import require_auth
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
@@ -118,7 +119,7 @@ def get_public_key():
 
 @upload_bp.route('', methods=['POST'])
 @limiter.limit("10 per minute")
-@login_required  # Use decorator instead of manual check
+@require_auth  # Use our custom auth decorator that sets request.current_user
 def upload_file():
     """
     Upload encrypted QuickBooks Desktop file
@@ -156,15 +157,18 @@ def upload_file():
         413: File too large
         500: Server error
     """
-    # CRITICAL FIX: Check authentication FIRST
-    if not current_user or not current_user.is_authenticated:
-        logger.warning(f"Unauthenticated upload attempt from {request.remote_addr}")
-        return jsonify({
-            'success': False,
-            'error': 'Authentication required'
-        }), 401
-    
+    # Auth is handled by @require_auth decorator which sets request.current_user
     try:
+        # Get user from current session (request.current_user is set by @require_auth)
+        from models.user import User
+        user_id = request.current_user.get('user_id')
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 401
+
         # Get request data
         data = request.get_json()
         if not data:
@@ -172,16 +176,16 @@ def upload_file():
                 'success': False,
                 'error': 'No data provided'
             }), 400
-        
+
         # DETECT FORMAT: v3.1 or original
         is_v31_format = 'encryption' in data and isinstance(data.get('encryption'), dict)
-        
+
         if is_v31_format:
             # NEW v3.1 FORMAT
-            return _handle_v31_upload(data, current_user)
+            return _handle_v31_upload(data, user)
         else:
             # ORIGINAL FORMAT (unchanged)
-            return _handle_original_upload(data, current_user)
+            return _handle_original_upload(data, user)
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
@@ -635,7 +639,7 @@ def upload_ndjson_bundle():
         # Create migration record
         migration = Migration(
             migration_id=migration_id,
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             company_name=company_name,
             qb_file_name=company_info.get('qb_file_name', 'ndjson_bundle'),
             file_hash=company_fingerprint,
@@ -769,12 +773,12 @@ def initiate_chunked_upload():
         upload_id = str(uuid.uuid4())
         now = time.time()
         expires_at = now + CHUNKED_UPLOAD_EXPIRY_SECONDS
-        expires_at_iso = datetime.utcfromtimestamp(expires_at).isoformat() + 'Z'
+        expires_at_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
 
         session_data = {
             'upload_id': upload_id,
             'session_id': session_id,
-            'user_id': current_user.id,
+            'user_id': int(current_user.get_id()),
             'total_chunks': total_chunks,
             'key_id': key_id,
             'algorithm': algorithm,
@@ -846,7 +850,7 @@ def upload_chunk():
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
@@ -943,7 +947,7 @@ def chunk_exists():
         if not session_data:
             return jsonify({'exists': False, 'chunk_hash': None}), 200
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'exists': False, 'chunk_hash': None}), 200
 
         chunk_info = session_data['chunks'].get(chunk_index)
@@ -1026,7 +1030,7 @@ def commit_chunked_upload():
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
@@ -1062,7 +1066,7 @@ def commit_chunked_upload():
         # Create migration record
         migration = Migration(
             migration_id=migration_id,
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             company_name=sanitize_input(metadata.get('company_name', 'Chunked Upload'), max_length=255),
             qb_file_name=sanitize_input(metadata.get('qb_file_name', 'chunked_upload.enc'), max_length=255),
             file_hash=file_hash,
@@ -1178,7 +1182,7 @@ def abort_chunked_upload():
             session_data = _chunked_uploads.pop(upload_id, None)
 
         if session_data:
-            if session_data['user_id'] != current_user.id:
+            if session_data['user_id'] != int(current_user.get_id()):
                 # Put it back - not authorized to abort this session
                 with _chunked_uploads_lock:
                     _chunked_uploads[upload_id] = session_data
@@ -1233,7 +1237,7 @@ def get_upload_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:

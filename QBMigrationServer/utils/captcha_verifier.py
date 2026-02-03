@@ -132,10 +132,7 @@ def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
 
     # Add remote IP if provided (recommended for security)
     if remote_ip:
-        if provider == 'turnstile':
-            verify_data['remoteip'] = remote_ip
-        else:
-            verify_data['remoteip'] = remote_ip
+        verify_data['remoteip'] = remote_ip
 
     try:
         # Make verification request
@@ -192,6 +189,11 @@ def is_captcha_required(email: str, failed_attempts: int = 0) -> bool:
     Returns:
         True if CAPTCHA should be required, False otherwise
     """
+    import os
+    # Skip CAPTCHA in testing environment
+    if os.getenv('FLASK_ENV') == 'testing':
+        return False
+
     # FIX #38: Require CAPTCHA after 3 failed attempts
     if failed_attempts >= 3:
         logger.info(f"CAPTCHA required for {email}: {failed_attempts} failed attempts")

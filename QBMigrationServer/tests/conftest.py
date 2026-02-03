@@ -13,6 +13,10 @@ import logging
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# SAFETY: Set testing environment BEFORE importing app to prevent
+# module-level create_app() from running with production config
+os.environ['FLASK_ENV'] = 'testing'
+
 from app import create_app
 from models.database import db
 from models.user import User
@@ -59,6 +63,14 @@ def app():
     ctx = app.app_context()
     ctx.push()
     
+    # Register blueprints not included in create_app (e.g., payments)
+    try:
+        from api.payments import payments_bp
+        if 'payments' not in app.blueprints:
+            app.register_blueprint(payments_bp)
+    except ImportError:
+        logger.warning("Could not import payments blueprint")
+
     # Create all tables
     try:
         db.create_all()
@@ -199,13 +211,43 @@ def test_user(db_session):
     return user
 
 
+class AuthenticatedClient:
+    """Wrapper around Flask test client that adds JWT Authorization header to all requests."""
+
+    def __init__(self, client, token):
+        self._client = client
+        self._token = token
+        self._auth_headers = {'Authorization': f'Bearer {token}'}
+
+    def _merge_headers(self, kwargs):
+        headers = dict(self._auth_headers)
+        if 'headers' in kwargs:
+            headers.update(kwargs['headers'])
+        kwargs['headers'] = headers
+        return kwargs
+
+    def get(self, *args, **kwargs):
+        kwargs = self._merge_headers(kwargs)
+        return self._client.get(*args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self._client.post(*args, **self._merge_headers(kwargs))
+
+    def put(self, *args, **kwargs):
+        return self._client.put(*args, **self._merge_headers(kwargs))
+
+    def delete(self, *args, **kwargs):
+        return self._client.delete(*args, **self._merge_headers(kwargs))
+
+    def patch(self, *args, **kwargs):
+        return self._client.patch(*args, **self._merge_headers(kwargs))
+
+
 @pytest.fixture
 def authenticated_client(client, test_user):
     """
-    Create authenticated test client
-    
-    Convenience fixture for tests that need pre-authenticated requests
-    
+    Create authenticated test client that includes JWT token in all requests.
+
     Usage:
         def test_something(authenticated_client):
             response = authenticated_client.get('/api/protected')
@@ -216,12 +258,17 @@ def authenticated_client(client, test_user):
         'email': 'test@example.com',
         'password': 'Test1234'
     })
-    
+
     # SAFETY CHECK: Verify login succeeded
     if response.status_code != 200:
         raise RuntimeError(f"Test user login failed: {response.data}")
-    
-    return client
+
+    data = response.get_json()
+    token = data.get('token')
+    if not token:
+        raise RuntimeError("Login response missing JWT token")
+
+    return AuthenticatedClient(client, token)
 
 
 @pytest.fixture

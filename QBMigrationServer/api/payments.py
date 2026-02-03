@@ -52,7 +52,7 @@ def token_required(f: Callable[..., Any]) -> Callable[..., Tuple[Response, int] 
                 logger.error("SECRET_KEY not configured - rejecting authentication")
                 return jsonify({'success': False, 'error': 'Server configuration error'}), 500
             data = jwt.decode(token, secret_key, algorithms=['HS256'])
-            current_user = User.query.get(data['user_id'])
+            current_user = db.session.get(User,data['user_id'])
             
             if not current_user:
                 return jsonify({'success': False, 'error': 'User not found'}), 401
@@ -275,7 +275,7 @@ def handle_successful_payment(session):
             credit.mark_paid(payment_intent_id)
 
             # Update user's subscription tier and sync migration counts
-            user = User.query.get(credit.user_id)
+            user = db.session.get(User,credit.user_id)
             if user:
                 # Always update tier to reflect most recent purchase
                 if not user.subscription_tier:

@@ -87,7 +87,7 @@ def get_live_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -196,13 +196,16 @@ def get_live_status(migration_id):
             'phases': phases,
             'company_name': migration.company_name,
             'started_at': migration.created_at.isoformat() if migration.created_at else None,
-            'elapsed_seconds': (datetime.now(timezone.utc) - migration.created_at).total_seconds() if migration.created_at else 0
+            'elapsed_seconds': (datetime.now(timezone.utc) - (migration.created_at.replace(tzinfo=timezone.utc) if migration.created_at and migration.created_at.tzinfo is None else migration.created_at)).total_seconds() if migration.created_at else 0
         }
-        
+
         # Add completion data if done
         if migration.status == 'completed' and migration.completed_at:
             response['completed_at'] = migration.completed_at.isoformat()
-            response['duration_seconds'] = (migration.completed_at - migration.created_at).total_seconds()
+            if migration.created_at:
+                created = migration.created_at.replace(tzinfo=timezone.utc) if migration.created_at.tzinfo is None else migration.created_at
+                completed = migration.completed_at.replace(tzinfo=timezone.utc) if migration.completed_at.tzinfo is None else migration.completed_at
+                response['duration_seconds'] = (completed - created).total_seconds()
         
         # Add error info if failed
         if migration.status == 'failed':
@@ -254,12 +257,12 @@ def get_bulk_status():
 
         if not migration_ids:
             # Return all migrations if no IDs specified
-            migrations = Migration.query.filter_by(user_id=current_user.id)\
+            migrations = Migration.query.filter_by(user_id=int(current_user.get_id()))\
                 .order_by(Migration.created_at.desc()).limit(100).all()
         else:
             migrations = Migration.query.filter(
                 Migration.migration_id.in_(migration_ids),
-                Migration.user_id == current_user.id
+                Migration.user_id == int(current_user.get_id())
             ).all()
         
         migrations_data = {}
@@ -315,11 +318,11 @@ def get_dashboard_overview():
     """
     try:
         # Get migration counts by status
-        total = Migration.query.filter_by(user_id=current_user.id).count()
-        completed = Migration.query.filter_by(user_id=current_user.id, status='completed').count()
-        failed = Migration.query.filter_by(user_id=current_user.id, status='failed').count()
+        total = Migration.query.filter_by(user_id=int(current_user.get_id())).count()
+        completed = Migration.query.filter_by(user_id=int(current_user.get_id()), status='completed').count()
+        failed = Migration.query.filter_by(user_id=int(current_user.get_id()), status='failed').count()
         in_progress = Migration.query.filter(
-            Migration.user_id == current_user.id,
+            Migration.user_id == int(current_user.get_id()),
             Migration.status.in_(['pending', 'uploading', 'uploaded', 'provisioning', 'processing'])
         ).count()
         
@@ -333,7 +336,7 @@ def get_dashboard_overview():
                 extract('epoch', Migration.completed_at - Migration.created_at)
             )
         ).filter(
-            Migration.user_id == current_user.id,
+            Migration.user_id == int(current_user.get_id()),
             Migration.status == 'completed',
             Migration.completed_at.isnot(None),
             Migration.created_at.isnot(None)
@@ -345,7 +348,7 @@ def get_dashboard_overview():
         # Recent activity (last 24 hours)
         yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_completed = Migration.query.filter(
-            Migration.user_id == current_user.id,
+            Migration.user_id == int(current_user.get_id()),
             Migration.status == 'completed',
             Migration.completed_at >= yesterday
         ).count()
@@ -381,7 +384,7 @@ def get_recent_activity():
     """
     try:
         # Get recent migrations with activity
-        migrations = Migration.query.filter_by(user_id=current_user.id)\
+        migrations = Migration.query.filter_by(user_id=int(current_user.get_id()))\
             .order_by(Migration.updated_at.desc() if hasattr(Migration, 'updated_at') else Migration.created_at.desc())\
             .limit(20).all()
         
@@ -471,7 +474,7 @@ def get_trial_balance(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -553,7 +556,7 @@ def download_audit_certificate(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:
@@ -648,7 +651,7 @@ def preview_audit_certificate(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -702,7 +705,7 @@ def export_caseware_bundle(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -963,7 +966,7 @@ def download_caseware_bundle(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
 
         if not migration:
@@ -1107,7 +1110,7 @@ def get_caseware_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:

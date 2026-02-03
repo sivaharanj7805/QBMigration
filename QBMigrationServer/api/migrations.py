@@ -134,7 +134,7 @@ def list_migrations():
                 }), 400
 
         # Build query
-        query = Migration.query.filter_by(user_id=current_user.id)
+        query = Migration.query.filter_by(user_id=int(current_user.get_id()))
 
         # Apply status filter if provided
         if status_filter:
@@ -221,7 +221,7 @@ def get_migration(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -286,7 +286,7 @@ def get_migration_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -348,7 +348,7 @@ def start_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -526,7 +526,7 @@ def cancel_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -607,7 +607,7 @@ def retry_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -689,7 +689,7 @@ def delete_migration(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -767,7 +767,7 @@ def execute_migration_celery(migration_id):
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:
@@ -796,7 +796,7 @@ def execute_migration_celery(migration_id):
         task = run_migration_task.delay(
             migration_id=migration_id,
             encrypted_file_path=migration.s3_uri or migration.file_path,
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             oauth_tokens=oauth_tokens
         )
         
@@ -846,7 +846,7 @@ def get_migration_stats():
         from sqlalchemy import func
         from datetime import datetime, timedelta, timezone
         
-        user_id = current_user.id
+        user_id = int(current_user.get_id())
         
         # Get current month's migrations
         now = datetime.now(timezone.utc)

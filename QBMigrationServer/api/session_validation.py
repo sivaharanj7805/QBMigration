@@ -46,8 +46,8 @@ class SessionActivation(db.Model):
 
     # Activation status
     status = db.Column(db.String(50), default='active')  # active, revoked, expired
-    activated_at = db.Column(db.DateTime, default=datetime.utcnow)
-    last_used_at = db.Column(db.DateTime, default=datetime.utcnow)
+    activated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_used_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Usage tracking
     extraction_count = db.Column(db.Integer, default=0)
@@ -70,7 +70,7 @@ class SessionValidationLog(db.Model):
     action = db.Column(db.String(50))  # validate, activate, extract, reject
     result = db.Column(db.String(50))  # success, failed, rate_limited, invalid
     error_message = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 def log_validation_attempt(session_id, device_fingerprint, ip_address, action, result, error=None):
@@ -159,7 +159,7 @@ def validate_session():
         }), 400
 
     # Hash the fingerprint for storage
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -275,7 +275,7 @@ def activate_session():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
@@ -297,26 +297,38 @@ def activate_session():
     # This ensures that concurrent requests don't both pass the device limit check
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
+    from models.database import is_postgresql
 
     try:
         # Lock existing activations for this session to prevent race conditions
         # This ensures only one request can check and create at a time
-        locked_activations = db.session.execute(
-            text("""
-                SELECT id, device_fingerprint, extraction_count, status
-                FROM session_activations
-                WHERE session_id = :session_id
-                FOR UPDATE
-            """),
-            {"session_id": session_id}
-        ).fetchall()
+        # PostgreSQL uses FOR UPDATE, SQLite has implicit database-level locking
+        if is_postgresql():
+            locked_activations = db.session.execute(
+                text("""
+                    SELECT id, device_fingerprint, extraction_count, status
+                    FROM session_activations
+                    WHERE session_id = :session_id
+                    FOR UPDATE
+                """),
+                {"session_id": session_id}
+            ).fetchall()
+        else:
+            locked_activations = db.session.execute(
+                text("""
+                    SELECT id, device_fingerprint, extraction_count, status
+                    FROM session_activations
+                    WHERE session_id = :session_id
+                """),
+                {"session_id": session_id}
+            ).fetchall()
 
         # Check for existing activation for this device
         existing = None
         active_count = 0
         for row in locked_activations:
             if row.device_fingerprint == fingerprint_hash:
-                existing = SessionActivation.query.get(row.id)
+                existing = db.session.get(SessionActivation, row.id)
             if row.status == 'active':
                 active_count += 1
 
@@ -439,7 +451,7 @@ def start_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session and device
     project = Project.query.filter_by(session_id=session_id).first()
@@ -565,7 +577,7 @@ def complete_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
-    logger.info(device_fingerprint)
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()
