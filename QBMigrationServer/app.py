@@ -314,7 +314,7 @@ def create_app(config_name='development'):
 
     backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
     if not backup_key:
-        if env == 'production':
+        if config_name == 'production':
             raise ValueError(
                 "CRITICAL: BACKUP_ENCRYPTION_KEY must be set in production. "
                 "This key is required for encrypting QBO OAuth tokens. "
@@ -324,7 +324,7 @@ def create_app(config_name='development'):
             # Generate a key for development/testing
             backup_key = Fernet.generate_key().decode()
             app.config['BACKUP_ENCRYPTION_KEY'] = backup_key
-            logger.warning("Using generated BACKUP_ENCRYPTION_KEY for %s environment", env)
+            logger.warning("Using generated BACKUP_ENCRYPTION_KEY for %s environment", config_name)
 
     # Validate it's a valid Fernet key by attempting to create a Fernet instance
     try:
@@ -1094,8 +1094,11 @@ def create_app(config_name='development'):
     return app
 
 
-# Create the app instance
-app = create_app(os.getenv('FLASK_ENV', 'development'))
+# Create the app instance (only when not imported by test runner)
+if os.getenv('FLASK_ENV') != 'testing':
+    app = create_app(os.getenv('FLASK_ENV', 'development'))
+else:
+    app = None
 
 
 if __name__ == '__main__':

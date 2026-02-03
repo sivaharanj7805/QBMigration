@@ -59,6 +59,14 @@ def app():
     ctx = app.app_context()
     ctx.push()
     
+    # Register blueprints not included in create_app (e.g., payments)
+    try:
+        from api.payments import payments_bp
+        if 'payments' not in app.blueprints:
+            app.register_blueprint(payments_bp)
+    except ImportError:
+        logger.warning("Could not import payments blueprint")
+
     # Create all tables
     try:
         db.create_all()

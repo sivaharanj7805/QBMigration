@@ -40,7 +40,10 @@ def verify_webhook_signature(migration_id, signature, timestamp):
             return False, "Invalid timestamp format"
         
         # Check timestamp is recent (prevent replay attacks)
-        age = datetime.now(timezone.utc) - webhook_time.replace(tzinfo=None)
+        # Ensure webhook_time is timezone-aware before comparison
+        if webhook_time.tzinfo is None:
+            webhook_time = webhook_time.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - webhook_time
         max_age = timedelta(minutes=current_app.config.get('WEBHOOK_REPLAY_WINDOW_MINUTES', 5))
         
         if age > max_age:
