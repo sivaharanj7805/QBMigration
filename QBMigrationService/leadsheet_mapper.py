@@ -15,6 +15,7 @@ Version: 1.0.0
 """
 
 import logging
+import threading
 from typing import Dict, Optional, Literal
 
 logger = logging.getLogger(__name__)
@@ -269,6 +270,7 @@ class LeadSheetMapper:
 
     def __init__(self):
         """Initialize LeadSheetMapper."""
+        self._detection_lock = threading.Lock()
         self.detected_standard: Optional[AccountingStandard] = None
 
     def detect_accounting_standard(self, company_data: Dict) -> AccountingStandard:
@@ -287,61 +289,60 @@ class LeadSheetMapper:
         Returns:
             Detected accounting standard
         """
-        if not company_data:
-            logger.warning("No company data provided, defaulting to US_GAAP")
+        with self._detection_lock:
+            if not company_data:
+                logger.warning("No company data provided, defaulting to US_GAAP")
+                self.detected_standard = 'US_GAAP'
+                return self.detected_standard
+
+            # Check country field (case-insensitive)
+            country = (company_data.get('country') or
+                       company_data.get('Country') or
+                       company_data.get('companyCountry') or '').strip().upper()
+
+            # Check currency - use homeCurrency as primary indicator
+            currency = (company_data.get('homeCurrency') or
+                        company_data.get('currency') or
+                        company_data.get('Currency') or '').strip().upper()
+
+            # Detection: Canadian GAAP
+            # Use homeCurrency as primary indicator, not address text
+            if country in ['CA', 'CAN', 'CANADA']:
+                logger.info("Detected Canadian GAAP from company country")
+                self.detected_standard = 'CANADIAN_GAAP'
+                return self.detected_standard
+            elif currency == 'CAD' and country not in ['US', 'USA']:
+                logger.info("Detected Canadian GAAP from CAD currency")
+                self.detected_standard = 'CANADIAN_GAAP'
+                return self.detected_standard
+
+            # Detection: IFRS (International countries)
+            # IFRS is used in 140+ countries including UK, EU, Australia, etc.
+            ifrs_countries = {
+                'GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES',
+                'AU', 'AUS', 'AUSTRALIA',
+                'NZ', 'NEW ZEALAND',
+                'IN', 'IND', 'INDIA',
+                'SG', 'SINGAPORE',
+                'HK', 'HONG KONG',
+                'MY', 'MALAYSIA',
+                'ZA', 'SOUTH AFRICA',
+                # EU countries
+                'DE', 'GERMANY', 'FR', 'FRANCE', 'IT', 'ITALY', 'ES', 'SPAIN',
+                'NL', 'NETHERLANDS', 'BE', 'BELGIUM', 'SE', 'SWEDEN', 'DK', 'DENMARK',
+                'NO', 'NORWAY', 'FI', 'FINLAND', 'IE', 'IRELAND', 'AT', 'AUSTRIA',
+                'PL', 'POLAND', 'PT', 'PORTUGAL', 'GR', 'GREECE', 'CZ', 'CZECH',
+            }
+
+            if country in ifrs_countries or currency in ['GBP', 'EUR', 'AUD', 'NZD', 'INR']:
+                logger.info(f"Detected IFRS from company data (Country: {country}, Currency: {currency})")
+                self.detected_standard = 'IFRS'
+                return self.detected_standard
+
+            # Default: US GAAP
+            logger.info(f"Defaulting to US_GAAP (Country: {country or 'unknown'}, Currency: {currency or 'USD'})")
             self.detected_standard = 'US_GAAP'
             return self.detected_standard
-
-        # Check country field (case-insensitive)
-        country = (company_data.get('country') or
-                   company_data.get('Country') or
-                   company_data.get('companyCountry') or '').strip().upper()
-
-        # Check currency
-        currency = (company_data.get('currency') or
-                    company_data.get('Currency') or
-                    company_data.get('homeCurrency') or '').strip().upper()
-
-        # Check address for country indicators
-        address = (company_data.get('address') or
-                   company_data.get('Address') or
-                   company_data.get('companyAddress') or '').upper()
-
-        # Detection: Canadian GAAP
-        if (country in ['CA', 'CAN', 'CANADA'] or
-            currency == 'CAD' or
-            'CANADA' in address):
-            logger.info("Detected Canadian GAAP from company data")
-            self.detected_standard = 'CANADIAN_GAAP'
-            return self.detected_standard
-
-        # Detection: IFRS (International countries)
-        # IFRS is used in 140+ countries including UK, EU, Australia, etc.
-        ifrs_countries = {
-            'GB', 'UK', 'UNITED KINGDOM', 'ENGLAND', 'SCOTLAND', 'WALES',
-            'AU', 'AUS', 'AUSTRALIA',
-            'NZ', 'NEW ZEALAND',
-            'IN', 'IND', 'INDIA',
-            'SG', 'SINGAPORE',
-            'HK', 'HONG KONG',
-            'MY', 'MALAYSIA',
-            'ZA', 'SOUTH AFRICA',
-            # EU countries
-            'DE', 'GERMANY', 'FR', 'FRANCE', 'IT', 'ITALY', 'ES', 'SPAIN',
-            'NL', 'NETHERLANDS', 'BE', 'BELGIUM', 'SE', 'SWEDEN', 'DK', 'DENMARK',
-            'NO', 'NORWAY', 'FI', 'FINLAND', 'IE', 'IRELAND', 'AT', 'AUSTRIA',
-            'PL', 'POLAND', 'PT', 'PORTUGAL', 'GR', 'GREECE', 'CZ', 'CZECH',
-        }
-
-        if country in ifrs_countries or currency in ['GBP', 'EUR', 'AUD', 'NZD', 'INR']:
-            logger.info(f"Detected IFRS from company data (Country: {country}, Currency: {currency})")
-            self.detected_standard = 'IFRS'
-            return self.detected_standard
-
-        # Default: US GAAP
-        logger.info(f"Defaulting to US_GAAP (Country: {country or 'unknown'}, Currency: {currency or 'USD'})")
-        self.detected_standard = 'US_GAAP'
-        return self.detected_standard
 
     def get_lead_sheet_codes(self, accounting_standard: Optional[AccountingStandard] = None) -> Dict[str, str]:
         """
@@ -374,6 +375,9 @@ class LeadSheetMapper:
         Returns:
             Lead sheet code string (defaults to 'X9'/'OTH'/'9999' if not found)
         """
+        if not account_type:
+            return 'X9'
+
         standard = accounting_standard or self.detected_standard or 'US_GAAP'
         codes = self.get_lead_sheet_codes(standard)
 
@@ -385,7 +389,11 @@ class LeadSheetMapper:
         else:
             default_code = 'X9'
 
-        return codes.get(account_type, default_code)
+        # Try exact match first, then title case, then normalized title case
+        return (codes.get(account_type) or
+                codes.get(account_type.title()) or
+                codes.get(account_type.lower().replace(' ', '').title()) or
+                default_code)
 
     def get_type_code(self, account_type: str) -> str:
         """
@@ -432,13 +440,12 @@ class LeadSheetMapper:
 
         code = type_map.get(account_type)
         if code is None:
-            logger.warning(f"Unmapped account type: {account_type}, defaulting to X")
-            return 'X'
+            logger.warning(f"Unknown account type for type code mapping: '{account_type}' - defaulting to 'O' (Other)")
+            return 'O'
         return code
 
 
 # CRITICAL FIX: Thread-safe singleton pattern
-import threading
 _mapper_instance: Optional[LeadSheetMapper] = None
 _mapper_lock = threading.Lock()
 

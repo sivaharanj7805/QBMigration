@@ -11,6 +11,7 @@ import json
 import csv
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+from decimal import Decimal
 from io import StringIO
 import logging
 
@@ -56,6 +57,12 @@ class IIFParser:
         """Parse an IIF file and return structured data
         AUDIT FIX: Added robust path validation with proper containment check
         """
+        # Reset state for fresh parse
+        self.data = {key: [] for key in self.RECORD_TYPES.values()}
+        self.headers = {}
+        self.errors = []
+        self.stats = {'total_lines': 0, 'parsed_records': 0, 'skipped_lines': 0, 'errors': 0}
+
         # Security: Robust path traversal prevention
         # 1. Normalize the path to resolve any relative components
         real_path = os.path.realpath(file_path)
@@ -89,6 +96,12 @@ class IIFParser:
     
     def parse_content(self, content: str) -> Dict[str, Any]:
         """Parse IIF content string"""
+        # Reset state for fresh parse
+        self.data = {key: [] for key in self.RECORD_TYPES.values()}
+        self.headers = {}
+        self.errors = []
+        self.stats = {'total_lines': 0, 'parsed_records': 0, 'skipped_lines': 0, 'errors': 0}
+
         lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
         self.stats['total_lines'] = len(lines)
         
@@ -108,24 +121,7 @@ class IIFParser:
                     header_type = record_type[1:]  # Remove the !
                     self.headers[header_type] = fields[1:]
                     
-                # Data line
-                elif record_type in self.RECORD_TYPES:
-                    data_key = self.RECORD_TYPES[record_type]
-                    headers = self.headers.get(record_type, [])
-                    
-                    record = {}
-                    for i, value in enumerate(fields[1:], 0):
-                        if i < len(headers):
-                            record[headers[i]] = value.strip()
-                        else:
-                            record[f'field_{i}'] = value.strip()
-                    
-                    record['_source_line'] = line_num
-                    record['_record_type'] = record_type
-                    self.data[data_key].append(record)
-                    self.stats['parsed_records'] += 1
-                    
-                # Transaction split line
+                # Transaction split line (must be checked before general RECORD_TYPES)
                 elif record_type == 'SPL':
                     headers = self.headers.get('SPL', [])
                     record = {}
@@ -133,7 +129,25 @@ class IIFParser:
                         if i < len(headers):
                             record[headers[i]] = value.strip()
                     record['_source_line'] = line_num
+                    record['_record_type'] = 'SPL'
                     self.data['transaction_splits'].append(record)
+                    self.stats['parsed_records'] += 1
+
+                # Data line
+                elif record_type in self.RECORD_TYPES:
+                    data_key = self.RECORD_TYPES[record_type]
+                    headers = self.headers.get(record_type, [])
+
+                    record = {}
+                    for i, value in enumerate(fields[1:], 0):
+                        if i < len(headers):
+                            record[headers[i]] = value.strip()
+                        else:
+                            record[f'field_{i}'] = value.strip()
+
+                    record['_source_line'] = line_num
+                    record['_record_type'] = record_type
+                    self.data[data_key].append(record)
                     self.stats['parsed_records'] += 1
                     
                 elif record_type == 'ENDTRNS':
@@ -197,17 +211,40 @@ class QuickBooksExportParser:
         else:
             raise ValueError(f"Unsupported file format: {ext}")
     
+    def _validate_file_path(self, file_path: str) -> str:
+        """Validate file path for security (path traversal prevention)"""
+        real_path = os.path.realpath(file_path)
+        allowed_base_dirs = [
+            os.path.realpath(os.getcwd()),
+            os.path.realpath(os.path.dirname(__file__)),
+        ]
+        data_dir = os.environ.get('DATA_DIR')
+        if data_dir:
+            allowed_base_dirs.append(os.path.realpath(data_dir))
+
+        is_path_allowed = any(
+            real_path.startswith(base_dir + os.sep) or real_path == base_dir
+            for base_dir in allowed_base_dirs
+        )
+        if not is_path_allowed:
+            raise ValueError(f"Security: File path is outside allowed directories: {file_path}")
+        if not os.path.isfile(real_path):
+            raise ValueError(f"Invalid file path (not a file): {file_path}")
+        return real_path
+
     def _parse_csv(self, file_path: str) -> Dict[str, Any]:
         """Parse CSV export from QuickBooks"""
+        # Security: Validate path
+        real_path = self._validate_file_path(file_path)
         records = []
-        
-        with open(file_path, 'r', encoding='utf-8-sig') as f:
+
+        with open(real_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Clean up keys and values
+                # Clean up keys and values (handle None keys from extra columns)
                 clean_row = {
-                    k.strip(): v.strip() if v else ''
-                    for k, v in row.items()
+                    (k.strip() if k else '_unknown'): v.strip() if v else ''
+                    for k, v in row.items() if k is not None
                 }
                 records.append(clean_row)
         
@@ -226,12 +263,14 @@ class QuickBooksExportParser:
     
     def _parse_excel(self, file_path: str) -> Dict[str, Any]:
         """Parse Excel export from QuickBooks"""
+        # Security: Validate path
+        real_path = self._validate_file_path(file_path)
         try:
             import openpyxl
         except ImportError:
             raise ImportError("openpyxl required for Excel parsing. Install with: pip install openpyxl")
-        
-        wb = openpyxl.load_workbook(file_path, read_only=True)
+
+        wb = openpyxl.load_workbook(real_path, read_only=True)
         all_data = {}
         
         for sheet_name in wb.sheetnames:
@@ -267,22 +306,33 @@ class QuickBooksExportParser:
     def _detect_entity_type(self, file_path: str, records: List[Dict]) -> str:
         """Detect entity type from filename or content"""
         filename = os.path.basename(file_path).lower()
-        
-        # Check filename
+
+        # Check filename with word boundary matching
         type_hints = {
+            'customers': 'customers',
             'customer': 'customers',
+            'vendors': 'vendors',
             'vendor': 'vendors',
+            'invoices': 'invoices',
             'invoice': 'invoices',
+            'bills': 'bills',
             'bill': 'bills',
+            'payments': 'payments',
             'payment': 'payments',
+            'accounts': 'accounts',
             'account': 'accounts',
+            'items': 'items',
             'item': 'items',
+            'employees': 'employees',
             'employee': 'employees',
             'journal': 'journal_entries',
         }
-        
+
+        # Use word boundary matching instead of substring
+        filename_lower = os.path.basename(filename).replace('.csv', '').replace('.xlsx', '').replace('.xls', '')
         for hint, entity_type in type_hints.items():
-            if hint in filename:
+            # Check for exact match or word boundary
+            if filename_lower == hint or filename_lower.startswith(hint + '_') or filename_lower.endswith('_' + hint):
                 return entity_type
         
         # Check headers
@@ -325,6 +375,7 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
                 'Line1': cust.get('BADDR1', ''),
                 'Line2': cust.get('BADDR2', ''),
                 'City': cust.get('BADDR3', ''),
+                'CountrySubDivisionCode': cust.get('BADDR4', ''),
                 'PostalCode': cust.get('BADDR5', ''),
             },
             '_source': 'iif_import',
@@ -371,11 +422,25 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     
     # Transform items
     for item in iif_data.get('data', {}).get('items', []):
+        item_type = item.get('INVITEMTYPE', 'SERV')
+        type_map = {
+            'SERV': 'Service',
+            'PART': 'NonInventory',
+            'INVENTORY': 'Inventory',
+            'ASSEMBLY': 'Inventory',
+            'OTHCHARGE': 'Service',
+            'DISCOUNT': 'Service',
+            'PAYMENT': 'Service',
+            'SUBTOTAL': 'Service',
+            'GROUP': 'Bundle',
+            'FIXEDASSET': 'NonInventory',
+        }
+        qbo_type = type_map.get(item_type, 'Service')
         qbo_data['items'].append({
             'Name': item.get('NAME', ''),
             'Description': item.get('DESC', ''),
-            'UnitPrice': item.get('PRICE', 0),
-            'Type': 'Service' if item.get('INVITEMTYPE') == 'SERV' else 'Inventory',
+            'UnitPrice': Decimal(str(item.get('PRICE', 0) or 0)),
+            'Type': qbo_type,
             '_source': 'iif_import',
             '_original_id': item.get('NAME', '')
         })

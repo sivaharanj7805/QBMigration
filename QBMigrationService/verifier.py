@@ -3,7 +3,7 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -302,7 +302,7 @@ class PremiumMigrationVerifier:
     def __init__(self, qbo_client):
         self.client = qbo_client
         self.report = {
-            "migration_date": datetime.now().isoformat(),
+            "migration_date": datetime.now(timezone.utc).isoformat(),
             "summary": {},
             "details": {},
             "warnings": [],
@@ -341,12 +341,21 @@ class PremiumMigrationVerifier:
         qbd_credits = Decimal('0')
         
         for account in qbd_accounts:
-            balance = Decimal(str(account.get("Balance", 0)))
+            balance = self._safe_decimal(account.get("Balance", 0))
             account_type = account.get("AccountType", "")
-            
+
             # Debit accounts (increase with debit)
-            if account_type in ["Bank", "AccountsReceivable", "OtherCurrentAsset", 
-                               "FixedAsset", "OtherAsset", "Expense", "CostOfGoodsSold", "OtherExpense"]:
+            # QBD accounts may use either format
+            if account_type in [
+                "Bank", "AccountsReceivable", "Accounts Receivable",
+                "OtherCurrentAsset", "Other Current Asset", "Other Current Assets",
+                "FixedAsset", "Fixed Asset", "Fixed Assets",
+                "OtherAsset", "Other Asset", "Other Assets",
+                "Expense", "CostOfGoodsSold", "Cost of Goods Sold",
+                "OtherExpense", "Other Expense",
+                "Inventory", "UndepositedFunds", "Undeposited Funds",
+                "PrepaidExpenses", "Prepaid Expenses"
+            ]:
                 if balance > 0:
                     qbd_debits += balance
                 else:
@@ -372,12 +381,20 @@ class PremiumMigrationVerifier:
             qbo_credits = Decimal('0')
             
             for account in qbo_accounts:
-                balance = Decimal(str(account.get("CurrentBalance", 0)))
+                balance = self._safe_decimal(account.get("CurrentBalance", 0))
                 account_type = account.get("AccountType", "")
                 
-                # Same logic as QBD
-                if account_type in ["Bank", "Accounts Receivable", "Other Current Asset",
-                                   "Fixed Asset", "Other Asset", "Expense", "Cost of Goods Sold", "Other Expense"]:
+                # Same logic as QBD - QBO accounts may use either format
+                if account_type in [
+                    "Bank", "AccountsReceivable", "Accounts Receivable",
+                    "OtherCurrentAsset", "Other Current Asset", "Other Current Assets",
+                    "FixedAsset", "Fixed Asset", "Fixed Assets",
+                    "OtherAsset", "Other Asset", "Other Assets",
+                    "Expense", "CostOfGoodsSold", "Cost of Goods Sold",
+                    "OtherExpense", "Other Expense",
+                    "Inventory", "UndepositedFunds", "Undeposited Funds",
+                    "PrepaidExpenses", "Prepaid Expenses"
+                ]:
                     if balance > 0:
                         qbo_debits += balance
                     else:
@@ -517,18 +534,18 @@ class PremiumMigrationVerifier:
                 qbo_transactions = self._get_account_transactions(qbo_account['Id'], oauth_manager)
                 
                 qbo_reconciled_balance = sum(
-                    float(txn.get('Amount', 0))
+                    self._safe_decimal(txn.get('Amount', 0))
                     for txn in qbo_transactions
                     if txn.get('Status') == 'Reconciled'
                 )
+
+                balance_diff = abs(self._safe_decimal(qbd_reconciled_balance) - qbo_reconciled_balance)
                 
-                balance_diff = abs(float(qbd_reconciled_balance) - qbo_reconciled_balance)
-                
-                if balance_diff > 0.01:
+                if balance_diff > Decimal('0.01'):
                     discrepancy = {
                         "account": account_name,
-                        "qbd_balance": float(qbd_reconciled_balance),
-                        "qbo_balance": qbo_reconciled_balance,
+                        "qbd_balance": float(self._safe_decimal(qbd_reconciled_balance)),
+                        "qbo_balance": float(qbo_reconciled_balance),
                         "difference": balance_diff
                     }
                     reconciliation_results["discrepancies"].append(discrepancy)
@@ -583,9 +600,8 @@ class PremiumMigrationVerifier:
                 if results:
                     transactions.extend(results)
             except Exception as e:
-                # Log but continue
-                pass
-        
+                logger.warning(f"Non-critical verification step failed: {e}")
+
         # Pattern 2: Transaction-level account references
         txn_level_queries = {
             'Payment': "SELECT * FROM Payment WHERE DepositToAccountRef = '{account_id}'",
@@ -601,8 +617,8 @@ class PremiumMigrationVerifier:
                 if results:
                     transactions.extend(results)
             except Exception as e:
-                pass
-        
+                logger.warning(f"Non-critical verification step failed: {e}")
+
         # Pattern 3: Transfer (both sides)
         try:
             # From account
@@ -617,8 +633,8 @@ class PremiumMigrationVerifier:
             if results:
                 transactions.extend(results)
         except Exception as e:
-            pass
-        
+            logger.warning(f"Non-critical verification step failed: {e}")
+
         # Pattern 4: Item-based transactions (indirect account reference)
         # These require two-step lookup: Transaction → Item → Account
         item_based_transactions = self._get_item_based_transactions(
@@ -684,8 +700,8 @@ class PremiumMigrationVerifier:
                         if results:
                             transactions.extend(results)
                     except Exception as e:
-                        pass
-        
+                        logger.warning(f"Non-critical verification step failed: {e}")
+
         except Exception as e:
             # Log error but don't fail reconciliation
             logger.info(f"⚠️  Item-based transaction lookup failed: {e}")
@@ -725,14 +741,14 @@ class PremiumMigrationVerifier:
                 oauth_manager=oauth_manager
             )
             
-            total_ar = sum(Decimal(str(acc.get("CurrentBalance", 0))) for acc in ar_accounts)
+            total_ar = sum(self._safe_decimal(acc.get("CurrentBalance", 0)) for acc in ar_accounts)
             
             # Get total open invoices
             invoices = self.client.query("Invoice", oauth_manager=oauth_manager)
             total_open_invoices = sum(
-                Decimal(str(inv.get("Balance", 0))) 
-                for inv in invoices 
-                if inv.get("Balance", 0) > 0
+                self._safe_decimal(inv.get("Balance", 0))
+                for inv in invoices
+                if self._safe_decimal(inv.get("Balance", 0)) > 0
             )
             
             # If A/R != Open Invoices, there are unapplied credits
@@ -763,10 +779,10 @@ class PremiumMigrationVerifier:
     # EXISTING VERIFICATION METHODS (Enhanced)
     # ========================================================================
     
-    def verify_customers(self, expected_count: int) -> bool:
+    def verify_customers(self, expected_count: int, oauth_manager=None) -> bool:
         """Verify customer migration"""
         try:
-            actual_count = self.client.query_count("Customer")
+            actual_count = self.client.query_count("Customer", oauth_manager=oauth_manager)
             
             self.report["summary"]["customers"] = {
                 "expected": expected_count,
@@ -780,10 +796,10 @@ class PremiumMigrationVerifier:
             logger.error(f"Customer verification failed: {e}")
             return False
     
-    def verify_vendors(self, expected_count: int) -> bool:
+    def verify_vendors(self, expected_count: int, oauth_manager=None) -> bool:
         """Verify vendor migration"""
         try:
-            actual_count = self.client.query_count("Vendor")
+            actual_count = self.client.query_count("Vendor", oauth_manager=oauth_manager)
             
             self.report["summary"]["vendors"] = {
                 "expected": expected_count,
@@ -797,10 +813,10 @@ class PremiumMigrationVerifier:
             logger.error(f"Vendor verification failed: {e}")
             return False
     
-    def verify_invoices(self, expected_count: int) -> bool:
+    def verify_invoices(self, expected_count: int, oauth_manager=None) -> bool:
         """Verify invoice migration"""
         try:
-            actual_count = self.client.query_count("Invoice")
+            actual_count = self.client.query_count("Invoice", oauth_manager=oauth_manager)
 
             self.report["summary"]["invoices"] = {
                 "expected": expected_count,
@@ -860,11 +876,11 @@ class PremiumMigrationVerifier:
                 if expected_count > 0:
                     try:
                         if qbo_type == 'Customer':
-                            result = self.verify_customers(expected_count)
+                            result = self.verify_customers(expected_count, oauth_manager=oauth_manager)
                         elif qbo_type == 'Vendor':
-                            result = self.verify_vendors(expected_count)
+                            result = self.verify_vendors(expected_count, oauth_manager=oauth_manager)
                         elif qbo_type == 'Invoice':
-                            result = self.verify_invoices(expected_count)
+                            result = self.verify_invoices(expected_count, oauth_manager=oauth_manager)
                         else:
                             # Generic count check
                             actual_count = self.client.query_count(qbo_type, oauth_manager=oauth_manager)
@@ -897,11 +913,21 @@ class PremiumMigrationVerifier:
 
         # Record source hash verification
         if source_hash:
+            # Compute hash of the source entities for comparison
+            # Use the same data that was hashed on the source side
+            hash_input = json.dumps(entities, sort_keys=True, default=str).encode()
+            computed_hash = hashlib.sha256(hash_input).hexdigest()
+            hash_match = computed_hash == source_hash
             self.report["data_integrity"] = {
                 "source_hash": source_hash,
-                "verified": True
+                "computed_hash": computed_hash,
+                "verified": hash_match
             }
-            logger.info(f"  Data Integrity: ✅ Hash verified ({source_hash[:16]}...)")
+            if hash_match:
+                logger.info(f"  Data Integrity: Hash verified ({source_hash[:16]}...)")
+            else:
+                logger.warning(f"  Data Integrity: Hash mismatch! Source={source_hash[:16]}... Computed={computed_hash[:16]}...")
+                issues.append("Data integrity hash mismatch - source data may have been modified")
         else:
             logger.info(f"  Data Integrity: ⚠️ No hash available")
 
@@ -982,9 +1008,9 @@ class PremiumMigrationVerifier:
         # Company Info Box
         company_data = [
             ['Company Name:', company_name],
-            ['Migration Date:', datetime.now().strftime('%B %d, %Y')],
+            ['Migration Date:', datetime.now(timezone.utc).strftime('%B %d, %Y')],
             ['Migration ID:', migration_id],
-            ['Certification Date:', datetime.now().strftime('%B %d, %Y at %I:%M %p')]
+            ['Certification Date:', datetime.now(timezone.utc).strftime('%B %d, %Y at %I:%M %p')]
         ]
         
         company_table = Table(company_data, colWidths=[2*inch, 4*inch])
@@ -1031,8 +1057,9 @@ class PremiumMigrationVerifier:
             balance_sheet_match = max(0, 100 - (debit_var / total * 100))
             pl_match = max(0, 100 - (credit_var / max(qbd_data.get("credits", 1), 1) * 100))
         else:
-            balance_sheet_match = 100.0  # Default if no data
-            pl_match = 100.0
+            balance_sheet_match = 0.0
+            pl_match = 0.0
+            logger.warning("No trial balance data available for verification - defaulting to 0%")
         trial_balance_match = 100.0 if trial_balance.get("matches", False) else 0.0
         
         metrics_data = [
@@ -1047,8 +1074,8 @@ class PremiumMigrationVerifier:
             ['Data Integrity (SHA-256)',
              f'{source_hash[:16]}...' if source_hash else 'N/A',
              '✓ VERIFIED' if source_hash else '⚠ NOT AVAILABLE'],
-            ['Balance Sheet Accuracy', f'{balance_sheet_match:.1f}%', '✓ VERIFIED'],
-            ['Profit & Loss Accuracy', f'{pl_match:.1f}%', '✓ VERIFIED'],
+            ['Balance Sheet Accuracy', f'{balance_sheet_match:.1f}%', self._get_verification_status(balance_sheet_match)],
+            ['Profit & Loss Accuracy', f'{pl_match:.1f}%', self._get_verification_status(pl_match)],
             ['Trial Balance', 'Balanced' if trial_balance_match == 100 else 'Error', '✓ VERIFIED' if trial_balance_match == 100 else '✗ FAILED'],
             ['Data Encryption', 'AES-256-GCM', '✓ SECURE'],
         ]
@@ -1210,7 +1237,7 @@ class PremiumMigrationVerifier:
         
         cert_text = f"""
         This is to certify that the migration of {company_name}'s QuickBooks Desktop data to 
-        QuickBooks Online was performed on {datetime.now().strftime('%B %d, %Y')} using 
+        QuickBooks Online was performed on {datetime.now(timezone.utc).strftime('%B %d, %Y')} using 
         professional-grade migration software with the following security and accuracy standards:
         """
         
@@ -1241,7 +1268,7 @@ class PremiumMigrationVerifier:
         story.append(Paragraph("_" * 50, styles['Normal']))
         story.append(Paragraph("<b>Authorized Signature</b>", styles['Normal']))
         story.append(Paragraph(f"Migration Software: QuickBooks Premium Migration Tool v2.0", styles['Normal']))
-        story.append(Paragraph(f"Date: {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
+        story.append(Paragraph(f"Date: {datetime.now(timezone.utc).strftime('%B %d, %Y')}", styles['Normal']))
         
         story.append(Spacer(1, 0.3*inch))
         
@@ -1323,11 +1350,11 @@ class PremiumMigrationVerifier:
         for qbd_acc in qbd_accounts:
             name = qbd_acc.get("Name", "Unknown")
             name_lower = name.lower()
-            qbd_balance = Decimal(str(qbd_acc.get("Balance", 0)))
+            qbd_balance = self._safe_decimal(qbd_acc.get("Balance", 0))
             
             if name_lower in qbo_lookup:
                 qbo_acc = qbo_lookup[name_lower]
-                qbo_balance = Decimal(str(qbo_acc.get("CurrentBalance", 0)))
+                qbo_balance = self._safe_decimal(qbo_acc.get("CurrentBalance", 0))
                 matched_qbo_names.add(name_lower)
                 
                 variance = qbo_balance - qbd_balance
@@ -1365,7 +1392,7 @@ class PremiumMigrationVerifier:
         for qbo_acc in qbo_accounts:
             name = qbo_acc.get("Name", "Unknown")
             if name.lower() not in [a.get("Name", "").lower() for a in qbd_accounts]:
-                balance = Decimal(str(qbo_acc.get("CurrentBalance", 0)))
+                balance = self._safe_decimal(qbo_acc.get("CurrentBalance", 0))
                 if abs(balance) > tolerance:
                     drilldown["accounts_extra_in_qbo"].append({
                         "account_name": name,
@@ -1421,3 +1448,23 @@ class PremiumMigrationVerifier:
             return "MODERATE" # Transaction missing
         else:
             return "CRITICAL" # Major discrepancy
+
+    def _get_verification_status(self, match_pct: float) -> str:
+        """Calculate verification status based on match percentage."""
+        if match_pct >= 99.99:
+            return 'VERIFIED'
+        elif match_pct >= 95.0:
+            return 'VERIFIED WITH VARIANCE'
+        elif match_pct >= 80.0:
+            return 'PARTIAL MATCH'
+        else:
+            return 'FAILED VERIFICATION'
+
+    def _safe_decimal(self, value: Any) -> Decimal:
+        """Safely convert a value to Decimal, returning 0 on failure."""
+        if value is None:
+            return Decimal('0')
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal('0')

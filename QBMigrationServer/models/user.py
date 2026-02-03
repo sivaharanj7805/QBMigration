@@ -459,10 +459,12 @@ class User(UserMixin, db.Model):
             lock_until = lock_until.replace(tzinfo=timezone.utc)
 
         if now > lock_until:
-            # Lock expired, reset
+            # Lock expired, reset fields but don't commit
+            # Let the caller decide when to commit
             self.account_locked_until = None
             self.failed_login_attempts = 0
-            db.session.commit()
+            # Don't commit here - let the caller decide when to commit
+            # The changes will be committed with the next session commit
             return False  # Not locked anymore
 
         return True  # Still locked
@@ -493,7 +495,7 @@ class User(UserMixin, db.Model):
         self.failed_login_attempts = 0
         self.last_failed_login = None
         self.account_locked_until = None
-        self.last_login = now
+        # Use only last_login_at (last_login is redundant and kept for legacy compatibility)
         self.last_login_at = now  # For anomaly detection
         if ip_address:
             self.last_login_ip = ip_address

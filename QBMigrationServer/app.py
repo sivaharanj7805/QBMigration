@@ -645,6 +645,7 @@ def create_app(config_name='development'):
          expose_headers=['X-CSRF-Token'],  # Allow frontend to read CSRF token from response headers
          methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
          max_age=3600)  # Cache preflight for 1 hour (reduces OPTIONS requests)
+    app.config['ALLOWED_ORIGINS'] = allowed_origins
     app.logger.info(f'CORS enabled for origins: {allowed_origins}')
     
     # Setup rate limiting
@@ -672,6 +673,9 @@ def create_app(config_name='development'):
 
     # Exempt auth endpoints from CSRF (login/register are entry points, no session yet)
     # Also exempt health checks and webhook endpoints
+    # TODO: SECURITY - csrf.exempt(auth_bp) exempts the entire auth blueprint from CSRF.
+    # Ideally, only specific endpoints (login, register, forgot-password) should be exempt.
+    # This is too broad but changing it requires per-route @csrf.exempt decorators across all auth routes.
     csrf.exempt(auth_bp)
 
     # CSRF is automatically disabled for endpoints that:
@@ -765,7 +769,8 @@ def create_app(config_name='development'):
                 limit, window_seconds = 100, 60  # Default: 100 per minute
 
             response.headers['X-RateLimit-Limit'] = str(limit)
-            response.headers['X-RateLimit-Remaining'] = str(limit)  # Conservative default
+            # Removed misleading X-RateLimit-Remaining header - was always equal to limit
+            # Actual remaining count is tracked by the rate limiter middleware (flask-limiter)
             response.headers['X-RateLimit-Reset'] = str(int(datetime.now(timezone.utc).timestamp()) + window_seconds)
 
         return response
@@ -880,7 +885,7 @@ def create_app(config_name='development'):
     verify_aws_configuration(app)
 
     # Initialize WebSocket support
-    init_socketio(app, app.config.get('SECRET_KEY', 'dev-secret'))
+    init_socketio(app, app.config['SECRET_KEY'])  # No fallback - SECRET_KEY is always set by this point
 
     # Root endpoint
     @app.route('/')
@@ -952,11 +957,11 @@ def create_app(config_name='development'):
         are involved in health checks.
         """
         origin = request.headers.get('Origin')
-        if origin:
-            # Allow the requesting origin (supports www/non-www variants)
+        if origin and origin in app.config.get('ALLOWED_ORIGINS', allowed_origins):
+            # Allow only configured origins (supports www/non-www variants)
             response.headers['Access-Control-Allow-Origin'] = origin
-        else:
-            # Fallback to wildcard for non-browser requests
+        elif not origin:
+            # Fallback to wildcard for non-browser requests (health checks, monitoring tools)
             response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'

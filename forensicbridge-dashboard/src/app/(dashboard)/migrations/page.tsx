@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -370,15 +370,18 @@ export default function MigrationsPage() {
         return matchesSearch && matchesStatus;
     });
 
-    // Calculate stats
-    const stats: MigrationStats = {
-        total: migrations.length,
-        completed: migrations.filter((m: Migration) => m.status === "completed").length,
-        processing: migrations.filter(
-            (m: Migration) => m.status === "processing" || m.status === "in_progress"
-        ).length,
-        failed: migrations.filter((m: Migration) => m.status === "failed").length,
-    };
+    // Calculate stats from API response totals instead of filtered page data
+    const stats: MigrationStats = useMemo(() => {
+        if (!data) return { total: 0, completed: 0, processing: 0, failed: 0 };
+        return {
+            total: (data as Record<string, unknown>).total as number || data.count || 0,
+            completed: (data as Record<string, unknown>).completed_count as number || migrations.filter((m: Migration) => m.status === "completed").length,
+            processing: (data as Record<string, unknown>).processing_count as number || migrations.filter(
+                (m: Migration) => m.status === "processing" || m.status === "in_progress" || m.status === "provisioning"
+            ).length,
+            failed: (data as Record<string, unknown>).failed_count as number || migrations.filter((m: Migration) => m.status === "failed").length,
+        };
+    }, [data, migrations]);
 
     if (isLoading) {
         return (
@@ -472,6 +475,7 @@ export default function MigrationsPage() {
                         value={searchTerm}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
                         className="input pl-10"
+                        maxLength={200}
                         aria-label="Search migrations"
                     />
                 </div>

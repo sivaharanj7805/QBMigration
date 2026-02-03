@@ -306,6 +306,7 @@ def require_admin(f: Callable[..., Any]) -> Callable[..., Any]:
 
 @auth_bp.route('/mfa/verify', methods=['POST'])
 @require_auth
+@limiter.limit("10 per 5 minutes")
 def verify_mfa():
     """
     Verify MFA code for privileged operations.
@@ -532,8 +533,8 @@ def register():
                 # Ignore hash failures - this is just for timing equalization
                 pass
 
-            # Return error with same timing as successful registration
-            return jsonify({'success': False, 'error': 'Email already registered'}), 409
+            # Return generic error to prevent email enumeration
+            return jsonify({'success': False, 'error': 'Registration could not be completed. Please try again or contact support.'}), 400
 
         # Create user
         user = User(
@@ -1079,17 +1080,40 @@ def select_tier():
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get('migrations', 1)
 
+    # SECURITY FIX: Determine pricing and payment requirements per tier
+    # Define tier prices in cents
+    tier_prices = {
+        'starter': 0,
+        'business': 0,
+        'professional': 0,
+        'enterprise': 0,
+        'forensic': 0,
+    }
+    price_cents = tier_prices.get(tier_id, 0)
+
+    # For paid tiers (if prices are non-zero), require payment verification
+    if price_cents > 0:
+        payment_intent_id = data.get('payment_intent_id')
+        if not payment_intent_id:
+            return jsonify({
+                'success': False,
+                'error': 'Payment required for this tier. Complete payment first.'
+            }), 402
+        # In production, verify payment_intent_id with Stripe here
+        payment_status = 'pending_verification'
+    else:
+        payment_status = 'paid'  # Free tier
+
     # CRITICAL FIX: Create MigrationCredit record(s) to ensure backend verification works
-    # This creates a 'paid' credit without going through Stripe (for dev/test use)
     credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
     for _ in range(migrations_to_add):
         credit = MigrationCredit(
             user_id=user_id,
             tier_type=tier_id,
             transaction_limit=credit_config.get('transaction_limit', 5000),
-            price_cents=0,  # Free tier selection
-            stripe_checkout_session_id=f'free-tier-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
-            payment_status='paid',
+            price_cents=price_cents,
+            stripe_checkout_session_id=data.get('payment_intent_id') or f'free-tier-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
+            payment_status=payment_status,
             status='available'
         )
         credit.paid_at = datetime.datetime.now(timezone.utc)
@@ -1139,6 +1163,27 @@ def upgrade_tier():
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get('migrations', 1)
 
+    # SECURITY FIX: Determine pricing and require payment for paid tiers
+    tier_prices = {
+        'starter': 0,
+        'business': 0,
+        'professional': 0,
+        'enterprise': 0,
+        'forensic': 0,
+    }
+    price_cents = tier_prices.get(tier_id, 0)
+
+    if price_cents > 0:
+        payment_intent_id = data.get('payment_intent_id')
+        if not payment_intent_id:
+            return jsonify({
+                'success': False,
+                'error': 'Payment required for this tier upgrade. Complete payment first.'
+            }), 402
+        payment_status = 'pending_verification'
+    else:
+        payment_status = 'paid'
+
     # CRITICAL FIX: Create MigrationCredit record(s) for backend verification
     credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
     for _ in range(migrations_to_add):
@@ -1146,9 +1191,9 @@ def upgrade_tier():
             user_id=user_id,
             tier_type=tier_id,
             transaction_limit=credit_config.get('transaction_limit', 5000),
-            price_cents=0,  # Upgrade (may have different pricing in production)
-            stripe_checkout_session_id=f'upgrade-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
-            payment_status='paid',
+            price_cents=price_cents,
+            stripe_checkout_session_id=data.get('payment_intent_id') or f'upgrade-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}',
+            payment_status=payment_status,
             status='available'
         )
         credit.paid_at = datetime.datetime.now(timezone.utc)

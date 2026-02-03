@@ -17,6 +17,7 @@ import { authFetch } from "@/lib/auth";
 import { sanitize } from "@/lib/sanitize";
 import { useLoadingGuard } from "@/lib/hooks/useSecurityHooks";
 
+// API URL for authFetch calls (api client handles its own base URL internally)
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 // Destination type
@@ -61,7 +62,7 @@ interface ApiDiscrepancy {
 export default function MigrationDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const id = params?.id as string;
+    const id = typeof params?.id === 'string' ? params.id : '';
 
     // Real API hooks
     const { data: liveStatus, isLoading: statusLoading } = useLiveStatus(id);
@@ -282,6 +283,10 @@ export default function MigrationDetailPage() {
         );
     };
 
+    if (!id) {
+        return <div className="p-8 text-center text-gray-500">Invalid migration ID</div>;
+    }
+
     if (statusLoading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -408,10 +413,10 @@ export default function MigrationDetailPage() {
                 sourceBalance={trialBalance?.source_trial_balance ?? undefined}
                 destinationBalance={trialBalance?.destination_trial_balance ?? undefined}
                 discrepancy={trialBalance?.discrepancy ?? 0}
-                isBalanced={trialBalance?.is_balanced ?? (isCompleted && !discrepancyData?.has_discrepancies)}
+                isBalanced={trialBalance?.is_balanced ?? false}
                 forensicStatus={
                     (trialBalance?.forensic_status as "VERIFIED" | "PENDING" | "DISCREPANCY_DETECTED" | "NOT_AVAILABLE") ||
-                    (isCompleted ? "VERIFIED" : "PENDING")
+                    (isCompleted && trialBalance ? "VERIFIED" : "PENDING")
                 }
                 verificationTimestamp={trialBalance?.verification_timestamp ?? undefined}
                 sourceHash={trialBalance?.source_hash ?? undefined}

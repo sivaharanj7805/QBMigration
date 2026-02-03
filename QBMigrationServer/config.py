@@ -35,7 +35,11 @@ class Config:
     # ============================================================================
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
     if not SQLALCHEMY_DATABASE_URI:
-        logger.info("❌ ERROR: DATABASE_URL not found in environment!")
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError("DATABASE_URL must be set in production!")
+        else:
+            logger.warning("DATABASE_URL not set - using SQLite for development")
+            SQLALCHEMY_DATABASE_URI = 'sqlite:///qb_migration_dev.db'
     
     # Fix Heroku/Railway postgres:// URLs
 
@@ -74,7 +78,9 @@ class Config:
     AWS_REGION = os.getenv('AWS_REGION', 'ca-central-1')  # Canadian data residency per legal docs
     
     # S3
-    AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET', 'qb-migration-temp-files')
+    AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET')
+    if not AWS_S3_BUCKET and os.getenv('FLASK_ENV') == 'production':
+        raise ValueError("AWS_S3_BUCKET must be set in production!")
     AWS_S3_CODE_BUCKET = os.getenv('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')  # Bucket for migration worker code
     AWS_S3_ENCRYPTION = 'AES256'
     AWS_S3_FILE_TTL_HOURS = int(os.getenv('S3_FILE_TTL_HOURS', '24'))

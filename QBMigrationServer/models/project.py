@@ -109,7 +109,7 @@ class Project(db.Model):
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = db.Column(db.DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     owner = db.relationship('User', backref=db.backref('projects', lazy='dynamic'))
@@ -117,6 +117,8 @@ class Project(db.Model):
 
     def can_extract_transactions(self, transaction_count):
         """Check if the project can handle the given transaction count"""
+        if transaction_count < 0:
+            return False
         if self.transaction_limit == -1:  # Unlimited
             return True
         remaining = self.transaction_limit - self.transactions_used

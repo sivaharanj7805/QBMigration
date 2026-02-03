@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from models.database import db
 from models.migration import Migration
+from models.user import User
 from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
 from api.auth import require_auth
@@ -422,19 +423,45 @@ def start_migration(migration_id):
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
-        # Get migration
-        migration = Migration.query.filter_by(
+        # Verify user has available migration credits
+        user_id = _get_current_user_id()
+        user = db.session.get(User, user_id)
+
+        # Check credits
+        from models.migration_credit import MigrationCredit
+        available_credits = MigrationCredit.query.filter_by(
+            user_id=user_id,
+            status='available',
+            payment_status='paid'
+        ).all()
+        total_remaining = len(available_credits)
+
+        if total_remaining <= 0:
+            return jsonify({
+                'success': False,
+                'error': 'No migration credits available. Please purchase credits first.'
+            }), 402
+
+        # Use SELECT FOR UPDATE to prevent concurrent starts (race condition fix)
+        migration = db.session.query(Migration).filter_by(
             migration_id=migration_id,
-            user_id=_get_current_user_id()
-        ).first()
-        
+            user_id=user_id
+        ).with_for_update().first()
+
         if not migration:
             return jsonify({
                 'success': False,
                 'error': 'Migration not found'
             }), 404
-        
+
         # Check migration status
         if migration.status != 'uploaded':
             return jsonify({
@@ -579,6 +606,7 @@ def start_migration(migration_id):
 
 @migrations_bp.route('/api/migrations/<migration_id>/process', methods=['POST'])
 @require_auth
+@limiter.limit("5 per minute")
 def process_migration(migration_id):
     """
     Process migration - alias for start_migration
@@ -592,16 +620,23 @@ def process_migration(migration_id):
 def cancel_migration(migration_id):
     """
     Cancel running migration
-    
+
     Args:
         migration_id: Migration ID
-    
+
     Returns:
         200: Migration cancelled
         400: Migration cannot be cancelled
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         # Get migration
         migration = Migration.query.filter_by(
@@ -673,16 +708,23 @@ def cancel_migration(migration_id):
 def retry_migration(migration_id):
     """
     Retry failed migration
-    
+
     Args:
         migration_id: Migration ID
-    
+
     Returns:
         200: Migration retried
         400: Migration cannot be retried
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         # Get migration
         migration = Migration.query.filter_by(
@@ -756,15 +798,22 @@ def retry_migration(migration_id):
 def delete_migration(migration_id):
     """
     Delete migration record and cleanup resources
-    
+
     Args:
         migration_id: Migration ID
-    
+
     Returns:
         200: Migration deleted
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         # Get migration
         migration = Migration.query.filter_by(
@@ -828,22 +877,29 @@ def delete_migration(migration_id):
 def execute_migration_celery(migration_id):
     """
     Execute migration using Celery background worker (Option B).
-    
+
     This is an alternative to the AWS EC2-based execution.
     Requires Redis and Celery worker running.
-    
+
     Args:
         migration_id: Migration ID
-        
+
     Returns:
         202: Migration queued for execution
         400: Invalid state
         404: Migration not found
         500: Server error
     """
+    # HIGH-07 FIX: Validate UUID format before database query
+    if not validate_migration_id(migration_id):
+        return jsonify({
+            'success': False,
+            'error': 'Invalid migration ID format'
+        }), 400
+
     try:
         from tasks import run_migration_task
-        
+
         # Get migration
         migration = Migration.query.filter_by(
             migration_id=migration_id,
@@ -1009,11 +1065,6 @@ def get_migration_stats():
         db.session.rollback()
         db.session.remove()
         return jsonify({
-            'success': True,
-            'stats': {
-                'migrations_this_month': 0,
-                'total_records': '0',
-                'avg_duration': '--',
-                'success_rate': '100%'
-            }
-        }), 200  # Return defaults on error
+            'success': False,
+            'error': 'Failed to retrieve migration statistics'
+        }), 500
