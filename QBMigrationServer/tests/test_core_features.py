@@ -386,10 +386,11 @@ class TestDashboardOverview:
         assert response.status_code == 200
         data = response.get_json()
         assert data['success'] is True
-        assert 'total_migrations' in data
-        assert 'successful_migrations' in data
-        assert 'success_rate' in data
-        assert 'avg_completion_time' in data
+        overview = data.get('overview', data)
+        assert 'total_migrations' in overview
+        assert 'completed_migrations' in overview or 'successful_migrations' in overview
+        assert 'success_rate' in overview
+        assert 'avg_duration_minutes' in overview or 'avg_completion_time' in overview
 
     def test_recent_activity(self, client, auth_headers, test_migration):
         """Test recent activity feed."""

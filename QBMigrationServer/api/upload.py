@@ -639,7 +639,7 @@ def upload_ndjson_bundle():
         # Create migration record
         migration = Migration(
             migration_id=migration_id,
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             company_name=company_name,
             qb_file_name=company_info.get('qb_file_name', 'ndjson_bundle'),
             file_hash=company_fingerprint,
@@ -778,7 +778,7 @@ def initiate_chunked_upload():
         session_data = {
             'upload_id': upload_id,
             'session_id': session_id,
-            'user_id': current_user.id,
+            'user_id': int(current_user.get_id()),
             'total_chunks': total_chunks,
             'key_id': key_id,
             'algorithm': algorithm,
@@ -850,7 +850,7 @@ def upload_chunk():
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
@@ -947,7 +947,7 @@ def chunk_exists():
         if not session_data:
             return jsonify({'exists': False, 'chunk_hash': None}), 200
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'exists': False, 'chunk_hash': None}), 200
 
         chunk_info = session_data['chunks'].get(chunk_index)
@@ -1030,7 +1030,7 @@ def commit_chunked_upload():
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
 
-        if session_data['user_id'] != current_user.id:
+        if session_data['user_id'] != int(current_user.get_id()):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
@@ -1066,7 +1066,7 @@ def commit_chunked_upload():
         # Create migration record
         migration = Migration(
             migration_id=migration_id,
-            user_id=current_user.id,
+            user_id=int(current_user.get_id()),
             company_name=sanitize_input(metadata.get('company_name', 'Chunked Upload'), max_length=255),
             qb_file_name=sanitize_input(metadata.get('qb_file_name', 'chunked_upload.enc'), max_length=255),
             file_hash=file_hash,
@@ -1182,7 +1182,7 @@ def abort_chunked_upload():
             session_data = _chunked_uploads.pop(upload_id, None)
 
         if session_data:
-            if session_data['user_id'] != current_user.id:
+            if session_data['user_id'] != int(current_user.get_id()):
                 # Put it back - not authorized to abort this session
                 with _chunked_uploads_lock:
                     _chunked_uploads[upload_id] = session_data
@@ -1237,7 +1237,7 @@ def get_upload_status(migration_id):
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id,
-            user_id=current_user.id
+            user_id=int(current_user.get_id())
         ).first()
         
         if not migration:

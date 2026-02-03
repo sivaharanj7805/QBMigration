@@ -314,11 +314,17 @@ def create_app(config_name='development'):
 
     backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
     if not backup_key:
-        raise ValueError(
-            "CRITICAL: BACKUP_ENCRYPTION_KEY must be set. "
-            "This key is required for encrypting QBO OAuth tokens. "
-            "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
-        )
+        if env == 'production':
+            raise ValueError(
+                "CRITICAL: BACKUP_ENCRYPTION_KEY must be set in production. "
+                "This key is required for encrypting QBO OAuth tokens. "
+                "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+        else:
+            # Generate a key for development/testing
+            backup_key = Fernet.generate_key().decode()
+            app.config['BACKUP_ENCRYPTION_KEY'] = backup_key
+            logger.warning("Using generated BACKUP_ENCRYPTION_KEY for %s environment", env)
 
     # Validate it's a valid Fernet key by attempting to create a Fernet instance
     try:
@@ -628,7 +634,7 @@ def create_app(config_name='development'):
     def load_user(user_id):
         """Load user by ID for Flask-Login (session-based)"""
         try:
-            return User.query.get(int(user_id))
+            return db.session.get(User, int(user_id))
         except Exception as e:
             app.logger.error(f"Error loading user {user_id}: {str(e)}")
             return None
@@ -651,7 +657,14 @@ def create_app(config_name='development'):
                 if len(parts) == 2 and parts[0].lower() == 'bearer':
                     payload = decode_token(parts[1])
                     if payload and 'user_id' in payload:
-                        return User.query.get(int(payload['user_id']))
+                        user = db.session.get(User, int(payload['user_id']))
+                        if user:
+                            app.logger.debug(f"JWT auth success for user {payload['user_id']}")
+                        else:
+                            app.logger.warning(f"JWT auth: user {payload['user_id']} not found in DB")
+                        return user
+                    else:
+                        app.logger.warning(f"JWT auth: decode returned {payload}")
             except Exception as e:
                 app.logger.error(f"JWT header auth failed: {str(e)}")
 
@@ -661,7 +674,7 @@ def create_app(config_name='development'):
             try:
                 payload = decode_token(auth_cookie)
                 if payload and 'user_id' in payload:
-                    return User.query.get(int(payload['user_id']))
+                    return db.session.get(User, int(payload['user_id']))
             except Exception as e:
                 app.logger.error(f"JWT cookie auth failed: {str(e)}")
 
@@ -896,6 +909,32 @@ def create_app(config_name='development'):
     # 100/100 FIX: Removed duplicate security headers middleware
     # Security headers are now consolidated in the first add_security_headers function (line 514)
     # This prevents header conflicts and ensures consistent security policy
+
+    # Fix DetachedInstanceError: re-merge current_user into session if detached
+    @app.before_request
+    def ensure_user_in_session():
+        """Re-load Flask-Login user for each request and re-merge if detached.
+
+        Flask-Login caches the current user in g._login_user. In test
+        environments with a persistent app context, g survives across
+        requests, so a previous login_user() call leaks into later
+        requests. Clearing the cache forces Flask-Login to re-evaluate
+        authentication (session cookie, JWT header, etc.) on every
+        request, which is the correct production behavior as well.
+        """
+        from flask import g
+        # Force Flask-Login to re-authenticate on every request
+        g.pop('_login_user', None)
+
+        from flask_login import current_user as _cu
+        if _cu and hasattr(_cu, '_sa_instance_state'):
+            from sqlalchemy import inspect as sa_inspect
+            try:
+                state = sa_inspect(_cu)
+                if state.detached:
+                    db.session.add(_cu)
+            except Exception:
+                pass
 
     # SECURITY FIX: HTTPS redirect for production
     @app.before_request

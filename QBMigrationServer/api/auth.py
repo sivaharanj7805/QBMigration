@@ -201,7 +201,7 @@ def require_mfa(f: Callable[..., Any]) -> Callable[..., Any]:
         if not user_id:
             return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 404
 
@@ -263,7 +263,7 @@ def require_role(*allowed_roles):
             if not user_id:
                 return jsonify({'success': False, 'error': 'Authentication required'}), 401
 
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if not user:
                 return jsonify({'success': False, 'error': 'User not found'}), 404
 
@@ -333,7 +333,7 @@ def verify_mfa():
         return jsonify({'success': False, 'error': 'Invalid MFA code format'}), 400
 
     user_id = request.current_user.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -703,6 +703,10 @@ def login():
     session['email'] = user.email
     session['_fresh'] = True  # Mark session as freshly authenticated
 
+    # Establish Flask-Login session so @login_required works with session cookies
+    from flask_login import login_user
+    login_user(user)
+
     # SECURITY FIX: Bind session to browser fingerprint to detect hijacking
     _bind_session()
 
@@ -751,7 +755,7 @@ def get_current_user():
     from models.migration_credit import MigrationCredit
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -876,7 +880,7 @@ def logout():
     # Revoke QBO tokens if user has them (CRITICAL for 100/100 OAuth score)
     if user_id:
         try:
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if user and (user.qbo_access_token or user.qbo_refresh_token):
                 # Import here to avoid circular imports
                 from api.qbo import revoke_qbo_tokens
@@ -954,7 +958,7 @@ def validate_session():
     user_id = user_data.get('user_id')
 
     try:
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 401
 
@@ -1075,7 +1079,7 @@ def select_tier():
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1136,7 +1140,7 @@ def upgrade_tier():
         return jsonify({'success': False, 'error': f'Invalid tier: {tier_id}'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1180,7 +1184,7 @@ def upgrade_tier():
 def list_team_members():
     """List team members and pending invites"""
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1243,7 +1247,7 @@ def invite_team_member():
         return jsonify({'success': False, 'error': 'Email is required'}), 400
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1522,7 +1526,7 @@ def reset_password():
 
     # Get user
     user_id = payload.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1707,7 +1711,7 @@ def send_verification_email():
     }
     """
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1783,7 +1787,7 @@ def verify_email():
 
     # Get user
     user_id = payload.get('user_id')
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1833,7 +1837,7 @@ def get_verification_status():
     }
     """
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1946,7 +1950,7 @@ def sync_credits():
     from models.migration_credit import MigrationCredit
 
     user_id = request.current_user['user_id']
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404

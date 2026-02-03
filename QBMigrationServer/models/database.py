@@ -1,4 +1,6 @@
+import os
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import Session
 from datetime import datetime
 
 db = SQLAlchemy()
@@ -8,6 +10,16 @@ def init_db(app):
     db.init_app(app)
 
     with app.app_context():
+        # Prevent DetachedInstanceError in testing by keeping instances usable after commits
+        # This avoids Flask-Login's current_user becoming detached when endpoints
+        # access user attributes after session operations
+        if app.config.get('TESTING') or os.getenv('FLASK_ENV') == 'testing':
+            from sqlalchemy import event
+
+            @event.listens_for(Session, "after_begin")
+            def set_expire_on_commit(session, transaction, connection):
+                session.expire_on_commit = False
+
         db.create_all()
 
     return db

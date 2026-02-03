@@ -732,7 +732,18 @@ class User(UserMixin, db.Model):
     # ========================================================================
     
     def get_id(self):
-        """Required by Flask-Login"""
+        """Required by Flask-Login.
+
+        Uses SQLAlchemy identity key to avoid DetachedInstanceError
+        when the instance is not bound to a session.
+        """
+        from sqlalchemy import inspect as sa_inspect
+        try:
+            state = sa_inspect(self)
+            if state.identity:
+                return str(state.identity[0])
+        except Exception:
+            pass
         return str(self.id)
     
     @property

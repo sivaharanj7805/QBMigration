@@ -43,9 +43,9 @@ def get_license_secret():
     if license_secret:
         return license_secret
 
-    # Only allow fallback in development
-    if current_app.config.get('ENV') == 'development' or current_app.debug:
-        logger.warning("LICENSE_SECRET_KEY not set - using SECRET_KEY fallback (development mode only)")
+    # Only allow fallback in development/testing
+    if current_app.config.get('ENV') == 'development' or current_app.config.get('TESTING') or current_app.debug:
+        logger.warning("LICENSE_SECRET_KEY not set - using SECRET_KEY fallback (non-production mode)")
         return current_app.config.get('SECRET_KEY', 'dev-secret')
 
     # In production, require dedicated secret

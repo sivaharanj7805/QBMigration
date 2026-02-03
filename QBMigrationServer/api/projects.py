@@ -147,7 +147,7 @@ def create_project():
         # Sync User.migrations_used with MigrationCredit status
         # This ensures backwards compatibility with code that reads from User model
         from models.user import User
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         if user:
             user.migrations_used = (user.migrations_used or 0) + 1
 

@@ -328,7 +328,7 @@ def activate_session():
         active_count = 0
         for row in locked_activations:
             if row.device_fingerprint == fingerprint_hash:
-                existing = SessionActivation.query.get(row.id)
+                existing = db.session.get(SessionActivation, row.id)
             if row.status == 'active':
                 active_count += 1
 

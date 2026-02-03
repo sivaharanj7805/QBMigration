@@ -60,7 +60,7 @@ def connect_qbo():
         })
         auth_url = f"{INTUIT_AUTH_URL}?{auth_params}"
         
-        logger.info(f"User {current_user.id} initiating QBO OAuth flow")
+        logger.info(f"User {int(current_user.get_id())} initiating QBO OAuth flow")
         
         return redirect(auth_url)
         
@@ -145,7 +145,7 @@ def qbo_callback():
         
         db.session.commit()
         
-        logger.info(f"User {current_user.id} connected to QBO realm {realm_id}")
+        logger.info(f"User {int(current_user.get_id())} connected to QBO realm {realm_id}")
         
         # Redirect to frontend with success
         frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
@@ -260,7 +260,7 @@ def disconnect_qbo():
         
         db.session.commit()
         
-        logger.info(f"User {current_user.id} disconnected from QBO (realm: {realm_id})")
+        logger.info(f"User {int(current_user.get_id())} disconnected from QBO (realm: {realm_id})")
         
         return jsonify({
             'success': True,
@@ -362,7 +362,7 @@ def refresh_qbo_token():
         
         db.session.commit()
         
-        logger.info(f"User {current_user.id} refreshed QBO token")
+        logger.info(f"User {int(current_user.get_id())} refreshed QBO token")
         
         return jsonify({
             'success': True,
