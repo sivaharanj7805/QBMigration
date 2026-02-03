@@ -516,6 +516,10 @@ def create_app(config_name='development'):
     # Set WTF_CSRF_TIME_LIMIT for token validity (3600 seconds = 1 hour)
     app.config.setdefault('WTF_CSRF_TIME_LIMIT', 3600)
 
+    # Exempt auth endpoints from CSRF (login/register are entry points, no session yet)
+    # Also exempt health checks and webhook endpoints
+    csrf.exempt(auth_bp)
+
     # CSRF is automatically disabled for endpoints that:
     # - Don't use session cookies for auth (JWT Bearer token endpoints)
     # - Have their own verification (webhooks with HMAC signatures)
