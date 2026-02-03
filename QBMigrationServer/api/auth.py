@@ -643,7 +643,6 @@ def login():
         # FIX #37: Generate realistic hash to prevent timing attacks
         # This ensures login attempts for non-existent users take the same time as real users
         from argon2 import PasswordHasher
-        import os
         ph = PasswordHasher()
         # Generate a realistic fake hash with random salt
         fake_password = os.urandom(16).hex()
