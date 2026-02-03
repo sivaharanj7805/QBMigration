@@ -738,12 +738,18 @@ def login():
     # FIX: Use SameSite=None in production so the cookie is sent on cross-origin
     # requests (e.g., frontend on different subdomain). SameSite=None requires Secure=True.
     is_production = os.getenv('FLASK_ENV') == 'production'
+
+    # Use SameSite=None in production to allow cross-site authenticated requests from the dashboard
+    # Browsers require Secure when SameSite=None
+    cookie_samesite = 'None' if is_production else 'Lax'
+    cookie_secure = True if is_production else False
+
     response.set_cookie(
         'auth_token',
         token,
         httponly=True,
-        secure=is_production,
-        samesite='None' if is_production else 'Lax',
+        secure=cookie_secure,
+        samesite=cookie_samesite,
         max_age=86400,  # 24 hours
         path='/'
     )
@@ -907,15 +913,13 @@ def logout():
     # FIX: Match SameSite/Secure attributes from login so the cookie is properly cleared
     is_production = os.getenv('FLASK_ENV') == 'production'
     response = jsonify({'success': True, 'message': 'Logged out successfully'})
-    response.set_cookie(
-        'auth_token',
-        '',
-        httponly=True,
-        secure=is_production,
-        samesite='None' if is_production else 'Lax',
-        max_age=0,
-        path='/'
-    )
+
+    # Mirror cookie attributes used during login for proper deletion across browsers
+    is_production = os.getenv('FLASK_ENV') == 'production'
+    cookie_samesite = 'None' if is_production else 'Lax'
+    cookie_secure = True if is_production else False
+
+    response.delete_cookie('auth_token', path='/', samesite=cookie_samesite, secure=cookie_secure)
 
     return response
 
