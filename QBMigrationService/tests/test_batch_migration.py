@@ -2047,3 +2047,243 @@ class TestDedupAcrossLayers:
         assert fail == 0
         mock_qbo_client._make_request.assert_not_called()
         mock_transformer.transform_entity.assert_not_called()
+
+
+# ============================================================================
+# C# EXTRACTOR CAMELCASE FIELD HANDLING TESTS
+# ============================================================================
+
+class TestExtractSourceId:
+    """Tests for _extract_source_id helper — handles both PascalCase and camelCase."""
+
+    def test_pascal_list_id(self):
+        record = {'ListID': 'ACC-001', 'Name': 'Checking'}
+        assert MigrationOrchestrator._extract_source_id(record) == 'ACC-001'
+
+    def test_camel_list_id(self):
+        """C# extractor outputs listId, not ListID."""
+        record = {'listId': '80000001-1234', 'name': 'Savings'}
+        assert MigrationOrchestrator._extract_source_id(record) == '80000001-1234'
+
+    def test_pascal_txn_id(self):
+        record = {'TxnID': 'TXN-001', 'RefNumber': '1001'}
+        assert MigrationOrchestrator._extract_source_id(record) == 'TXN-001'
+
+    def test_camel_txn_id(self):
+        """C# extractor outputs txnId, not TxnID."""
+        record = {'txnId': '80000002-5678', 'refNumber': '1002'}
+        assert MigrationOrchestrator._extract_source_id(record) == '80000002-5678'
+
+    def test_qbo_style_id(self):
+        record = {'Id': '42', 'Name': 'QBO Entity'}
+        assert MigrationOrchestrator._extract_source_id(record) == '42'
+
+    def test_no_id_returns_none(self):
+        record = {'Name': 'No ID Entity'}
+        assert MigrationOrchestrator._extract_source_id(record) is None
+
+    def test_empty_record_returns_none(self):
+        assert MigrationOrchestrator._extract_source_id({}) is None
+
+    def test_prefers_pascal_list_id_over_camel(self):
+        """When both PascalCase and camelCase exist, PascalCase wins (already normalized)."""
+        record = {'ListID': 'PASCAL-ID', 'listId': 'camel-id'}
+        assert MigrationOrchestrator._extract_source_id(record) == 'PASCAL-ID'
+
+    def test_numeric_id_returned_as_string(self):
+        record = {'ListID': 12345}
+        assert MigrationOrchestrator._extract_source_id(record) == '12345'
+
+    def test_camel_list_id_falls_through_to_txn_id(self):
+        """Record with only txnId (no listId)."""
+        record = {'txnId': 'TXN-CAMEL', 'txnDate': '2024-01-01'}
+        assert MigrationOrchestrator._extract_source_id(record) == 'TXN-CAMEL'
+
+
+class TestGetParentIdCamelCase:
+    """Tests for _get_parent_id with C# extractor camelCase field names."""
+
+    def test_camel_parent_ref_list_id_flat(self):
+        """C# extractor outputs parentRefListId as a flat field."""
+        record = {'listId': 'ACC-002', 'parentRefListId': 'ACC-001'}
+        assert MigrationOrchestrator._get_parent_id(record) == 'ACC-001'
+
+    def test_camel_parent_ref_full_name_flat(self):
+        """C# extractor outputs parentRefFullName as a flat field."""
+        record = {'listId': 'CLS-002', 'parentRefFullName': 'Parent:Child'}
+        assert MigrationOrchestrator._get_parent_id(record) == 'Parent:Child'
+
+    def test_pascal_parent_ref_full_name(self):
+        """Already-normalized ParentRefFullName."""
+        record = {'ListID': 'CLS-002', 'ParentRefFullName': 'TopLevel'}
+        assert MigrationOrchestrator._get_parent_id(record) == 'TopLevel'
+
+    def test_dict_parent_ref_with_camel_list_id(self):
+        """parentRef dict with listId (camelCase) inside."""
+        record = {'listId': 'ACC-002', 'parentRef': {'listId': 'ACC-001'}}
+        assert MigrationOrchestrator._get_parent_id(record) == 'ACC-001'
+
+    def test_no_parent_camel_record(self):
+        """C# extractor record with no parent ref."""
+        record = {'listId': 'ACC-001', 'name': 'Root Account'}
+        assert MigrationOrchestrator._get_parent_id(record) is None
+
+    def test_camel_parent_ref_list_id_vs_pascal(self):
+        """Both parentRefListId and ParentRef_ListID — PascalCase wins (checked first)."""
+        record = {
+            'listId': 'ACC-003',
+            'ParentRef_ListID': 'PASCAL-PARENT',
+            'parentRefListId': 'CAMEL-PARENT'
+        }
+        assert MigrationOrchestrator._get_parent_id(record) == 'PASCAL-PARENT'
+
+
+class TestSplitParentChildLayersCamelCase:
+    """Tests for _split_parent_child_layers with C# extractor camelCase records."""
+
+    def test_camel_case_two_layers(self, orchestrator):
+        """Layering works with camelCase listId and parentRefListId."""
+        records = [
+            {'listId': 'C1', 'name': 'Child', 'parentRefListId': 'P1'},
+            {'listId': 'P1', 'name': 'Parent'},
+        ]
+        layers = orchestrator._split_parent_child_layers(records)
+        assert len(layers) == 2
+        # Layer 0 = root (P1), Layer 1 = child (C1)
+        layer0_ids = {r['listId'] for r in layers[0]}
+        layer1_ids = {r['listId'] for r in layers[1]}
+        assert 'P1' in layer0_ids
+        assert 'C1' in layer1_ids
+
+    def test_camel_case_three_layers(self, orchestrator):
+        """Three-level hierarchy with camelCase fields."""
+        records = [
+            {'listId': 'GC1', 'name': 'Grandchild', 'parentRefListId': 'C1'},
+            {'listId': 'C1', 'name': 'Child', 'parentRefListId': 'P1'},
+            {'listId': 'P1', 'name': 'Parent'},
+        ]
+        layers = orchestrator._split_parent_child_layers(records)
+        assert len(layers) == 3
+
+    def test_mixed_pascal_and_camel(self, orchestrator):
+        """Mix of PascalCase and camelCase records in same dataset."""
+        records = [
+            {'ListID': 'P1', 'Name': 'PascalParent'},
+            {'listId': 'C1', 'name': 'CamelChild', 'parentRefListId': 'P1'},
+            {'ListID': 'C2', 'Name': 'PascalChild', 'ParentRef': 'P1'},
+        ]
+        layers = orchestrator._split_parent_child_layers(records)
+        assert len(layers) == 2
+        # All three records should be correctly layered
+        root_ids = {MigrationOrchestrator._extract_source_id(r) for r in layers[0]}
+        child_ids = {MigrationOrchestrator._extract_source_id(r) for r in layers[1]}
+        assert root_ids == {'P1'}
+        assert child_ids == {'C1', 'C2'}
+
+    def test_camel_all_roots(self, orchestrator):
+        """All camelCase records are roots (no parent refs)."""
+        records = [
+            {'listId': 'A1', 'name': 'Account1'},
+            {'listId': 'A2', 'name': 'Account2'},
+        ]
+        layers = orchestrator._split_parent_child_layers(records)
+        assert len(layers) == 1
+        assert len(layers[0]) == 2
+
+
+class TestBatchCreateLayerCamelCase:
+    """Tests for _batch_create_layer dedup with camelCase source IDs."""
+
+    def test_dedup_with_camel_list_id(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Crash recovery dedup works when records have camelCase listId."""
+        records = [
+            {'listId': '80000001', 'name': 'Already Migrated'},
+            {'listId': '80000002', 'name': 'New Record'},
+        ]
+
+        # First record already migrated
+        def was_created_side_effect(entity_type, qbd_id):
+            if qbd_id == '80000001':
+                return '42'
+            return None
+        mock_qbo_client.was_entity_created.side_effect = was_created_side_effect
+
+        mock_transformer.transform_entity.return_value = {
+            'Name': 'New Record', 'AccountType': 'Bank'
+        }
+
+        # Mock batch response for the one new record
+        mock_qbo_client._make_request.return_value = {
+            'BatchItemResponse': [{
+                'bId': 'bid-0',
+                'Account': {'Id': '99', 'SyncToken': '0', 'Name': 'New Record'}
+            }]
+        }
+
+        existing_maps = {}
+        s, f, sk = orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Accounts', 'Account',
+            records, existing_maps, None, 'mig-001')
+
+        assert sk == 1   # 80000001 skipped (already migrated)
+        assert s == 1    # 80000002 created
+        assert existing_maps['Accounts']['80000001'] == '42'
+
+    def test_dedup_with_camel_txn_id(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Crash recovery dedup works with camelCase txnId."""
+        records = [
+            {'txnId': 'TXN-001', 'refNumber': '1001'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = '55'
+
+        existing_maps = {}
+        s, f, sk = orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Invoices', 'Invoice',
+            records, existing_maps, None, 'mig-002')
+
+        assert sk == 1
+        assert s == 0
+        assert existing_maps['Invoices']['TXN-001'] == '55'
+
+    def test_sequential_fallback_with_camel_source_id(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Sequential fallback (_migrate_entity) handles camelCase listId for dedup."""
+        records = [
+            {'listId': '80000001', 'name': 'Already Done'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = '42'
+
+        existing_maps = {}
+        # With 1 record, _migrate_entity_batch falls back to _migrate_entity
+        s, f, sk = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None, 'mig-003')
+
+        assert sk == 1
+        assert s == 0
+        assert existing_maps['Accounts']['80000001'] == '42'
+
+    def test_sequential_fallback_post_success_mapping_with_camel(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Sequential fallback correctly maps source_id after successful create with camelCase."""
+        records = [
+            {'listId': '80000001', 'name': 'New Account'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = None
+        mock_transformer.transform_entity.return_value = {
+            'Name': 'New Account', 'AccountType': 'Bank'
+        }
+        mock_qbo_client.create_entity.return_value = {'Id': '99', 'SyncToken': '0'}
+
+        existing_maps = {}
+        s, f, sk = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert s == 1
+        assert existing_maps['Accounts']['80000001'] == '99'

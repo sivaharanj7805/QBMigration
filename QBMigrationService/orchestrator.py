@@ -470,9 +470,9 @@ class MigrationOrchestrator:
         for record in source_data:
             try:
                 # Crash recovery: skip entities already created in a prior run
-                source_id = (
-                    record.get('ListID') or record.get('TxnID') or
-                    record.get('Id'))
+                # NOTE: Must check both PascalCase and camelCase because
+                # normalize_extractor_fields() hasn't run yet at this point.
+                source_id = self._extract_source_id(record)
                 if source_id:
                     existing_qbo_id = qbo_client.was_entity_created(
                         api_entity_type, source_id)
@@ -510,7 +510,7 @@ class MigrationOrchestrator:
 
                 if result and 'Id' in result:
                     # Track mapping for references
-                    source_id = record.get('ListID') or record.get('TxnID') or record.get('Id')
+                    source_id = self._extract_source_id(record)
                     if source_id:
                         if entity_name not in existing_maps:
                             existing_maps[entity_name] = {}
@@ -530,6 +530,25 @@ class MigrationOrchestrator:
     # ========================================================================
     # BATCH API MIGRATION (6-14x throughput improvement)
     # ========================================================================
+
+    @staticmethod
+    def _extract_source_id(record: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract the QBD source ID from a record, handling both PascalCase
+        (already-normalized data) and camelCase (raw C# extractor output).
+
+        The C# extractor outputs camelCase field names (listId, txnId) but
+        normalize_extractor_fields() converts them to PascalCase (ListID, TxnID).
+        This helper is called BEFORE normalization, so it must check both.
+
+        Returns:
+            Source ID string, or None if no ID field found
+        """
+        source_id = (
+            record.get('ListID') or record.get('listId') or
+            record.get('TxnID') or record.get('txnId') or
+            record.get('Id'))
+        return str(source_id) if source_id else None
 
     # Entity types with parent-child hierarchies that require layered processing.
     # Parents must be created before children so QBO assigns IDs we can reference.
@@ -689,9 +708,7 @@ class MigrationOrchestrator:
 
             # Track IDs from this layer for the next layer's parent lookups
             for record in current_layer:
-                record_id = (
-                    record.get('ListID') or record.get('TxnID') or
-                    record.get('Id') or record.get('Name'))
+                record_id = self._extract_source_id(record) or record.get('Name') or record.get('name')
                 if record_id:
                     created_ids.add(str(record_id))
 
@@ -706,8 +723,13 @@ class MigrationOrchestrator:
         Extract parent reference ID from a QBD record.
 
         Handles multiple field name formats from the C# extractor:
-        - Object-style: ParentRef.ListID, ParentRef.value
-        - Flat-style: ParentRef_ListID, ParentListID
+        - Object-style: ParentRef.ListID, ParentRef.value (dict)
+        - String-style: ParentRef = "80000001-..." (direct string)
+        - Flat-style PascalCase: ParentRef_ListID, ParentListID
+        - Flat-style camelCase: parentRefListId (raw C# extractor output)
+
+        Called BEFORE normalize_extractor_fields(), so must handle both
+        camelCase (raw C#) and PascalCase (already-normalized) fields.
 
         Returns:
             Parent ID string, or None if no parent reference exists
@@ -716,7 +738,8 @@ class MigrationOrchestrator:
         parent_ref = record.get('ParentRef') or record.get('parentRef')
         if isinstance(parent_ref, dict):
             pid = (
-                parent_ref.get('ListID') or parent_ref.get('listID') or
+                parent_ref.get('ListID') or parent_ref.get('listId') or
+                parent_ref.get('listID') or
                 parent_ref.get('value') or parent_ref.get('Value') or
                 parent_ref.get('FullName') or parent_ref.get('fullName'))
             if pid:
@@ -726,15 +749,19 @@ class MigrationOrchestrator:
         if isinstance(parent_ref, str) and parent_ref:
             return parent_ref
 
-        # Flat-style references from C# extractor
+        # Flat-style references — check both PascalCase (normalized)
+        # and camelCase (raw C# extractor output like parentRefListId)
         flat_id = (
             record.get('ParentRef_ListID') or
             record.get('parentRef_ListID') or
+            record.get('parentRefListId') or   # C# extractor camelCase
             record.get('ParentRef_listID') or
             record.get('ParentListID') or
             record.get('parentListID') or
             record.get('ParentRef_FullName') or
-            record.get('parentRef_FullName'))
+            record.get('parentRef_FullName') or
+            record.get('parentRefFullName') or  # C# extractor camelCase
+            record.get('ParentRefFullName'))
         if flat_id:
             return str(flat_id)
 
@@ -789,9 +816,9 @@ class MigrationOrchestrator:
         for record in records:
             try:
                 # Crash recovery: skip entities already created in a prior run
-                source_id = (
-                    record.get('ListID') or record.get('TxnID') or
-                    record.get('Id'))
+                # NOTE: Must check both PascalCase and camelCase because
+                # normalize_extractor_fields() hasn't run yet at this point.
+                source_id = self._extract_source_id(record)
                 if source_id:
                     existing_qbo_id = qbo_client.was_entity_created(
                         api_entity_type, source_id)
