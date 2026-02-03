@@ -8,7 +8,8 @@ File Upload API Endpoints
 """
 
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required, current_user
+from flask_login import login_required
+from api.auth import require_auth
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
@@ -118,7 +119,7 @@ def get_public_key():
 
 @upload_bp.route('', methods=['POST'])
 @limiter.limit("10 per minute")
-@login_required  # Use decorator instead of manual check
+@require_auth  # Use our custom auth decorator that sets request.current_user
 def upload_file():
     """
     Upload encrypted QuickBooks Desktop file
@@ -156,15 +157,18 @@ def upload_file():
         413: File too large
         500: Server error
     """
-    # CRITICAL FIX: Check authentication FIRST
-    if not current_user or not current_user.is_authenticated:
-        logger.warning(f"Unauthenticated upload attempt from {request.remote_addr}")
-        return jsonify({
-            'success': False,
-            'error': 'Authentication required'
-        }), 401
-    
+    # Auth is handled by @require_auth decorator which sets request.current_user
     try:
+        # Get user from current session (request.current_user is set by @require_auth)
+        from models.user import User
+        user_id = request.current_user.get('user_id')
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'error': 'User not found'
+            }), 401
+
         # Get request data
         data = request.get_json()
         if not data:
@@ -172,16 +176,16 @@ def upload_file():
                 'success': False,
                 'error': 'No data provided'
             }), 400
-        
+
         # DETECT FORMAT: v3.1 or original
         is_v31_format = 'encryption' in data and isinstance(data.get('encryption'), dict)
-        
+
         if is_v31_format:
             # NEW v3.1 FORMAT
-            return _handle_v31_upload(data, current_user)
+            return _handle_v31_upload(data, user)
         else:
             # ORIGINAL FORMAT (unchanged)
-            return _handle_original_upload(data, current_user)
+            return _handle_original_upload(data, user)
         
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")

@@ -329,12 +329,15 @@ class User(UserMixin, db.Model):
         # HIGH FIX: Validate JSON structure when loading password history
         # Prevents code injection or corruption attacks via malformed JSON
         # FIX: Use database-level locking for thread-safe password history access
+        from models.database import is_postgresql
         try:
-            # Acquire row-level lock to prevent concurrent modifications
-            db.session.execute(
-                db.text("SELECT password_history FROM users WHERE id = :user_id FOR SHARE"),
-                {"user_id": self.id}
-            )
+            # Acquire row-level lock to prevent concurrent modifications (PostgreSQL only)
+            # SQLite doesn't support FOR SHARE but has implicit locking
+            if is_postgresql():
+                db.session.execute(
+                    db.text("SELECT password_history FROM users WHERE id = :user_id FOR SHARE"),
+                    {"user_id": self.id}
+                )
 
             history = json.loads(self.password_history)
 
@@ -448,14 +451,21 @@ class User(UserMixin, db.Model):
             return False
 
         # Check if lock has expired
-        if datetime.now(timezone.utc) > self.account_locked_until:
+        # Handle both timezone-aware and naive datetimes
+        now = datetime.now(timezone.utc)
+        lock_until = self.account_locked_until
+        if lock_until.tzinfo is None:
+            # Make naive datetime timezone-aware (assume UTC)
+            lock_until = lock_until.replace(tzinfo=timezone.utc)
+
+        if now > lock_until:
             # Lock expired, reset
             self.account_locked_until = None
             self.failed_login_attempts = 0
             db.session.commit()
-            return True
+            return False  # Not locked anymore
 
-        return False
+        return True  # Still locked
     
     def record_failed_login(self):
         """
