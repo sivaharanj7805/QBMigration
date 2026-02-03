@@ -4,7 +4,7 @@ Each purchase creates one credit that can be used for one migration.
 """
 
 from datetime import datetime, timezone
-from models.database import db
+from models.database import db, is_postgresql
 
 
 class MigrationCredit(db.Model):
@@ -247,7 +247,10 @@ class MigrationCredit(db.Model):
             # RACE CONDITION FIX: Lock ALL user's credits first, then filter
             # This prevents another transaction from grabbing the same credit
             # between our SELECT and UPDATE
-            query = cls.query.filter_by(user_id=user_id).with_for_update(skip_locked=True)
+            # Note: FOR UPDATE only works with PostgreSQL; SQLite has implicit locking
+            query = cls.query.filter_by(user_id=user_id)
+            if is_postgresql():
+                query = query.with_for_update(skip_locked=True)
             all_credits = query.all()
 
             # Now filter to available/paid credits (already locked)

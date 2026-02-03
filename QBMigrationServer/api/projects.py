@@ -10,6 +10,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime, timezone
 
 from models import db, Project, Migration
+from models.database import is_postgresql
 from models.project import generate_session_id
 from models.migration_credit import MigrationCredit
 from api.auth import require_auth
@@ -85,13 +86,17 @@ def create_project():
 
         # Find an available credit for this user WITH ROW-LEVEL LOCK
         if credit_id:
-            # Use specific credit if provided (with lock)
-            credit = MigrationCredit.query.filter_by(
+            # Use specific credit if provided (with lock on PostgreSQL)
+            query = MigrationCredit.query.filter_by(
                 id=credit_id,
                 user_id=user_id,
                 status='available',
                 payment_status='paid'
-            ).with_for_update(skip_locked=True).first()
+            )
+            if is_postgresql():
+                credit = query.with_for_update(skip_locked=True).first()
+            else:
+                credit = query.first()
 
             if not credit:
                 db.session.rollback()

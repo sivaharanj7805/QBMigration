@@ -459,14 +459,17 @@ class Migration(db.Model):
         and both get processed.
         """
         from sqlalchemy import text
+        from models.database import is_postgresql
 
         try:
-            # RACE CONDITION FIX: Use database-level locking
+            # RACE CONDITION FIX: Use database-level locking (PostgreSQL only)
             # This prevents two concurrent requests from both processing the same webhook
-            db.session.execute(
-                text("SELECT id FROM migrations WHERE id = :id FOR UPDATE NOWAIT"),
-                {"id": self.id}
-            )
+            # SQLite has implicit locking at the database level
+            if is_postgresql():
+                db.session.execute(
+                    text("SELECT id FROM migrations WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": self.id}
+                )
         except Exception as lock_error:
             # Another transaction has the lock - webhook is being processed
             logger.warning(f"Webhook {webhook_id} - migration {self.id} is locked by another transaction: {lock_error}")

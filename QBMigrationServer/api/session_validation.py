@@ -297,19 +297,31 @@ def activate_session():
     # This ensures that concurrent requests don't both pass the device limit check
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
+    from models.database import is_postgresql
 
     try:
         # Lock existing activations for this session to prevent race conditions
         # This ensures only one request can check and create at a time
-        locked_activations = db.session.execute(
-            text("""
-                SELECT id, device_fingerprint, extraction_count, status
-                FROM session_activations
-                WHERE session_id = :session_id
-                FOR UPDATE
-            """),
-            {"session_id": session_id}
-        ).fetchall()
+        # PostgreSQL uses FOR UPDATE, SQLite has implicit database-level locking
+        if is_postgresql():
+            locked_activations = db.session.execute(
+                text("""
+                    SELECT id, device_fingerprint, extraction_count, status
+                    FROM session_activations
+                    WHERE session_id = :session_id
+                    FOR UPDATE
+                """),
+                {"session_id": session_id}
+            ).fetchall()
+        else:
+            locked_activations = db.session.execute(
+                text("""
+                    SELECT id, device_fingerprint, extraction_count, status
+                    FROM session_activations
+                    WHERE session_id = :session_id
+                """),
+                {"session_id": session_id}
+            ).fetchall()
 
         # Check for existing activation for this device
         existing = None

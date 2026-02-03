@@ -442,7 +442,9 @@ def validate_email(email: str) -> bool:
         from email_validator import validate_email as ev_validate, EmailNotValidError
         try:
             # Validate email format
-            valid = ev_validate(email)
+            # Skip DNS deliverability check in testing environment
+            check_deliverability = os.getenv('FLASK_ENV') != 'testing'
+            valid = ev_validate(email, check_deliverability=check_deliverability)
             return True
         except EmailNotValidError:
             return False
@@ -674,11 +676,11 @@ def login():
         return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
     
     # Successful login
-    user.record_successful_login()
+    client_ip = get_client_ip()
+    user.record_successful_login(ip_address=client_ip)
     db.session.commit()
 
     # FIX #39: Anomaly detection for suspicious login patterns
-    client_ip = get_client_ip()
     anomalies = check_login_anomalies(user.id, client_ip)
 
     if anomalies:
