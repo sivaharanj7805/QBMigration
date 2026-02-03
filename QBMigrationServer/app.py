@@ -635,23 +635,36 @@ def create_app(config_name='development'):
 
     @login_manager.request_loader
     def load_user_from_request(req):
-        """Load user from JWT Bearer token in Authorization header.
+        """Load user from JWT Bearer token in Authorization header or auth_token cookie.
 
         This bridges JWT auth with Flask-Login's @login_required decorator,
-        so endpoints using @login_required work with both session cookies
-        and JWT Bearer tokens.
+        so endpoints using @login_required work with both session cookies,
+        JWT Bearer tokens, and JWT cookies.
         """
+        from api.auth import decode_token
+
+        # First, try Authorization header
         auth_header = req.headers.get('Authorization')
         if auth_header:
             try:
                 parts = auth_header.split()
                 if len(parts) == 2 and parts[0].lower() == 'bearer':
-                    from api.auth import decode_token
                     payload = decode_token(parts[1])
                     if payload and 'user_id' in payload:
                         return User.query.get(int(payload['user_id']))
             except Exception as e:
-                app.logger.error(f"JWT request auth failed: {str(e)}")
+                app.logger.error(f"JWT header auth failed: {str(e)}")
+
+        # FIX: Also try auth_token cookie as fallback for cross-origin scenarios
+        auth_cookie = req.cookies.get('auth_token')
+        if auth_cookie:
+            try:
+                payload = decode_token(auth_cookie)
+                if payload and 'user_id' in payload:
+                    return User.query.get(int(payload['user_id']))
+            except Exception as e:
+                app.logger.error(f"JWT cookie auth failed: {str(e)}")
+
         return None
 
     @login_manager.unauthorized_handler
