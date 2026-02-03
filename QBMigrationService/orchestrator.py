@@ -364,7 +364,8 @@ class MigrationOrchestrator:
                         entity_name,
                         data[entity_name],
                         entity_id_mappings,  # Pass mappings dict
-                        oauth_mgr  # Auto-refresh tokens during long migrations
+                        oauth_mgr,  # Auto-refresh tokens during long migrations
+                        migration_id=migration_id  # For SQLite dedup & crash recovery
                     )
 
                     entity_counts[entity_name] = success
@@ -552,7 +553,8 @@ class MigrationOrchestrator:
         entity_name: str,
         source_data: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
-        oauth_manager: Optional['OAuthManager'] = None
+        oauth_manager: Optional['OAuthManager'] = None,
+        migration_id: Optional[str] = None
     ) -> Tuple[int, int, int]:
         """
         Batch-optimized migration for a single entity type.
@@ -577,6 +579,7 @@ class MigrationOrchestrator:
             source_data: List of source QBD records
             existing_maps: Maps of already-migrated entities (QBD ID → QBO ID)
             oauth_manager: OAuth manager for automatic token refresh
+            migration_id: Migration run ID for SQLite dedup & crash recovery
 
         Returns:
             Tuple of (success_count, fail_count, skipped_count)
@@ -603,7 +606,7 @@ class MigrationOrchestrator:
             for layer_idx, layer in enumerate(layers):
                 s, f, sk = self._batch_create_layer(
                     qbo_client, transformer, entity_name, api_entity_type,
-                    layer, existing_maps, oauth_manager)
+                    layer, existing_maps, oauth_manager, migration_id)
                 success_count += s
                 fail_count += f
                 skipped_count += sk
@@ -614,7 +617,7 @@ class MigrationOrchestrator:
             # Flat entity type — batch all at once
             success_count, fail_count, skipped_count = self._batch_create_layer(
                 qbo_client, transformer, entity_name, api_entity_type,
-                source_data, existing_maps, oauth_manager)
+                source_data, existing_maps, oauth_manager, migration_id)
 
         return success_count, fail_count, skipped_count
 
@@ -731,7 +734,8 @@ class MigrationOrchestrator:
         api_entity_type: str,
         records: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
-        oauth_manager: Optional['OAuthManager'] = None
+        oauth_manager: Optional['OAuthManager'] = None,
+        migration_id: Optional[str] = None
     ) -> Tuple[int, int, int]:
         """
         Transform and batch-create a set of records at the same dependency level.
@@ -752,6 +756,7 @@ class MigrationOrchestrator:
             records: Source QBD records to process
             existing_maps: ID mapping dict (updated in-place)
             oauth_manager: OAuth manager for token refresh
+            migration_id: Migration run ID for SQLite dedup & crash recovery
 
         Returns:
             Tuple of (success_count, fail_count, skipped_count)
@@ -769,16 +774,27 @@ class MigrationOrchestrator:
 
         for record in records:
             try:
+                # Crash recovery: skip entities already created in a prior run
+                source_id = (
+                    record.get('ListID') or record.get('TxnID') or
+                    record.get('Id'))
+                if source_id:
+                    existing_qbo_id = qbo_client.was_entity_created(
+                        api_entity_type, source_id)
+                    if existing_qbo_id:
+                        # Already migrated — restore mapping and skip
+                        if entity_name not in existing_maps:
+                            existing_maps[entity_name] = {}
+                        existing_maps[entity_name][source_id] = existing_qbo_id
+                        skipped_count += 1
+                        continue
+
                 transformed = transformer.transform_entity(
                     entity_name, record, id_mapping=existing_maps)
 
                 if not transformed:
                     skipped_count += 1
                     continue
-
-                source_id = (
-                    record.get('ListID') or record.get('TxnID') or
-                    record.get('Id'))
 
                 if transformed.get('_use_tax_service'):
                     # TaxService entities use a special endpoint and can't be
@@ -848,9 +864,10 @@ class MigrationOrchestrator:
 
         if max_workers <= 1 or len(batches) <= 1:
             # Sequential processing — single batch or single worker
-            for batch in batches:
+            for batch_idx, batch in enumerate(batches):
                 mappings, batch_fails = self._send_batch_request(
-                    qbo_client, api_entity_type, batch, oauth_manager)
+                    qbo_client, api_entity_type, batch, oauth_manager,
+                    migration_id, batch_idx)
                 success_count += len(mappings)
                 fail_count += batch_fails
                 # Update existing_maps with new IDs for downstream dependencies
@@ -866,10 +883,11 @@ class MigrationOrchestrator:
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {}
-                for batch in batches:
+                for batch_idx, batch in enumerate(batches):
                     future = executor.submit(
                         self._send_batch_request,
-                        qbo_client, api_entity_type, batch, oauth_manager)
+                        qbo_client, api_entity_type, batch, oauth_manager,
+                        migration_id, batch_idx)
                     futures[future] = batch
 
                 for future in as_completed(futures):
@@ -897,7 +915,9 @@ class MigrationOrchestrator:
         qbo_client: 'PremiumQBOClient',
         api_entity_type: str,
         batch_items: List[Tuple[Optional[str], Dict[str, Any]]],
-        oauth_manager: Optional['OAuthManager'] = None
+        oauth_manager: Optional['OAuthManager'] = None,
+        migration_id: Optional[str] = None,
+        batch_idx: int = 0
     ) -> Tuple[List[Tuple[Optional[str], str]], int]:
         """
         Send a single batch request to the QBO Batch API endpoint.
@@ -914,6 +934,8 @@ class MigrationOrchestrator:
             api_entity_type: Singular entity type (e.g., 'Account', 'Invoice')
             batch_items: List of (source_id, transformed_entity_data) tuples
             oauth_manager: OAuth manager for token refresh
+            migration_id: Migration run ID for SQLite tracking
+            batch_idx: Index of this batch within the layer (for idempotency)
 
         Returns:
             Tuple of:
@@ -942,9 +964,16 @@ class MigrationOrchestrator:
         if not batch_data["BatchItemRequest"]:
             return success_mappings, fail_count
 
+        # Idempotency key for crash recovery (matches _process_single_batch format)
+        idempotency_key = (
+            f"batch_{api_entity_type}_{batch_idx}_{migration_id}"
+            if migration_id else None)
+
         try:
             response = qbo_client._make_request(
-                "POST", "batch", batch_data, oauth_manager=oauth_manager)
+                "POST", "batch", batch_data,
+                oauth_manager=oauth_manager,
+                idempotency_key=idempotency_key)
 
             batch_responses = response.get("BatchItemResponse", [])
 
@@ -972,7 +1001,8 @@ class MigrationOrchestrator:
                             api_entity_type,
                             source_id or f"batch_{bid}",
                             qbo_id,
-                            sync_token=sync_token)
+                            migration_id,
+                            sync_token)
                     else:
                         fail_count += 1
 

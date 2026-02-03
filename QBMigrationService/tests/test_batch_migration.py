@@ -51,6 +51,8 @@ def mock_qbo_client():
     client._make_request = MagicMock()
     client.create_entity = MagicMock()
     client.create_tax_service = MagicMock()
+    # Dedup check — return None by default (not previously created)
+    client.was_entity_created = MagicMock(return_value=None)
     return client
 
 
@@ -1137,3 +1139,513 @@ class TestBatchOrchestratorIntegration:
             assert mock_batch.called
             assert not mock_seq.called
             assert result['success'] is True
+
+    def test_run_migration_passes_migration_id(self, orchestrator):
+        """run_migration passes migration_id kwarg to _migrate_entity_batch."""
+        with patch.object(orchestrator, '_init_encryption') as mock_enc, \
+             patch.object(orchestrator, '_init_oauth') as mock_oauth_init, \
+             patch.object(orchestrator, '_init_qbo_client') as mock_qbo_init, \
+             patch.object(orchestrator, '_init_transformer') as mock_tx_init, \
+             patch.object(orchestrator, '_init_verifier') as mock_ver_init, \
+             patch.object(orchestrator, '_migrate_entity_batch',
+                          return_value=(5, 0, 0)) as mock_batch:
+
+            mock_enc_mgr = MagicMock()
+            mock_enc_mgr.decrypt_chunked.return_value = json.dumps({
+                'Customers': [{'ListID': f'C-{i}', 'Name': f'C{i}'} for i in range(5)]
+            })
+            mock_enc.return_value = mock_enc_mgr
+
+            mock_oauth = MagicMock()
+            mock_oauth.get_valid_access_token.return_value = 'test_token'
+            mock_oauth_init.return_value = mock_oauth
+
+            mock_qbo = MagicMock()
+            mock_qbo.query_tax_agencies.return_value = []
+            mock_qbo_init.return_value = mock_qbo
+
+            mock_transformer = MagicMock()
+            mock_transformer.id_mapping = {'tax_agencies': {}}
+            mock_tx_init.return_value = mock_transformer
+
+            mock_verifier = MagicMock()
+            mock_verifier.verify_migration.return_value = {'status': 'OK'}
+            mock_ver_init.return_value = mock_verifier
+
+            orchestrator.run_migration(
+                encrypted_data=b"test",
+                encryption_metadata={'key': 'k', 'iv': 'i', 'tag': 't'},
+                company_name="Test Co"
+            )
+
+            # Verify migration_id was passed as a keyword argument
+            call_kwargs = mock_batch.call_args[1]
+            assert 'migration_id' in call_kwargs
+            assert call_kwargs['migration_id'] is not None
+            assert call_kwargs['migration_id'].startswith('mig_')
+
+
+# ============================================================================
+# DEDUPLICATION / CRASH RECOVERY TESTS
+# ============================================================================
+
+class TestBatchDeduplication:
+    """Tests for crash recovery dedup via was_entity_created."""
+
+    def test_already_migrated_entities_skipped(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Entities found in SQLite are skipped and their IDs restored."""
+        records = [
+            {'ListID': 'V-001', 'Name': 'Already Done'},
+            {'ListID': 'V-002', 'Name': 'New One'},
+        ]
+
+        # V-001 was already created in a prior run
+        mock_qbo_client.was_entity_created.side_effect = [
+            '999',  # V-001 already exists with QBO ID 999
+            None,   # V-002 not yet created
+        ]
+
+        mock_transformer.transform_entity.return_value = {'DisplayName': 'New One'}
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "200", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Vendors', 'Vendor',
+            records, existing_maps, None)
+
+        assert skip == 1  # V-001 was skipped
+        assert success == 1  # V-002 was created
+        # V-001's mapping was restored from SQLite
+        assert existing_maps['Vendors']['V-001'] == '999'
+        # V-002 was created fresh
+        assert existing_maps['Vendors']['V-002'] == '200'
+
+    def test_all_already_migrated(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """All entities already migrated — no batch request sent."""
+        records = [
+            {'ListID': 'V-001', 'Name': 'Done1'},
+            {'ListID': 'V-002', 'Name': 'Done2'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = '42'
+
+        success, fail, skip = orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Vendors', 'Vendor',
+            records, {}, None)
+
+        assert skip == 2
+        assert success == 0
+        assert fail == 0
+        mock_qbo_client._make_request.assert_not_called()
+        mock_transformer.transform_entity.assert_not_called()
+
+    def test_dedup_restores_mappings_for_downstream(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Restored dedup mappings are available for downstream entity types."""
+        records = [
+            {'ListID': 'CUST-001', 'Name': 'Acme'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = '555'
+
+        existing_maps = {}
+        orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Customers', 'Customer',
+            records, existing_maps, None)
+
+        # The restored ID should be in existing_maps for Invoices to reference
+        assert existing_maps['Customers']['CUST-001'] == '555'
+
+    def test_no_source_id_skips_dedup_check(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Records without ListID/TxnID/Id skip the dedup check."""
+        records = [
+            {'Name': 'No ID Record'},
+        ]
+
+        mock_transformer.transform_entity.return_value = {'DisplayName': 'No ID'}
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "100", "SyncToken": "0"}},
+            ]
+        }
+
+        success, fail, skip = orchestrator._batch_create_layer(
+            mock_qbo_client, mock_transformer, 'Vendors', 'Vendor',
+            records, {}, None)
+
+        assert success == 1
+        # was_entity_created should NOT have been called (no source_id)
+        mock_qbo_client.was_entity_created.assert_not_called()
+
+
+# ============================================================================
+# IDEMPOTENCY AND MIGRATION_ID TESTS
+# ============================================================================
+
+class TestBatchIdempotency:
+    """Tests for idempotency key and migration_id passthrough."""
+
+    def test_idempotency_key_sent(self, orchestrator, mock_qbo_client):
+        """_send_batch_request sends idempotency_key to _make_request."""
+        batch_items = [('CUST-001', {'DisplayName': 'Acme'})]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Customer": {"Id": "100", "SyncToken": "0"}},
+            ]
+        }
+
+        orchestrator._send_batch_request(
+            mock_qbo_client, 'Customer', batch_items, None,
+            migration_id='mig_abc123', batch_idx=7)
+
+        call_kwargs = mock_qbo_client._make_request.call_args[1]
+        assert call_kwargs['idempotency_key'] == 'batch_Customer_7_mig_abc123'
+
+    def test_no_migration_id_no_idempotency(self, orchestrator, mock_qbo_client):
+        """Without migration_id, idempotency_key is None."""
+        batch_items = [('CUST-001', {'DisplayName': 'Acme'})]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Customer": {"Id": "100", "SyncToken": "0"}},
+            ]
+        }
+
+        orchestrator._send_batch_request(
+            mock_qbo_client, 'Customer', batch_items, None,
+            migration_id=None, batch_idx=0)
+
+        call_kwargs = mock_qbo_client._make_request.call_args[1]
+        assert call_kwargs['idempotency_key'] is None
+
+    def test_migration_id_passed_to_record_created(
+            self, orchestrator, mock_qbo_client):
+        """record_created receives migration_id as 4th positional arg."""
+        batch_items = [('CUST-001', {'DisplayName': 'Acme'})]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Customer": {"Id": "100", "SyncToken": "0"}},
+            ]
+        }
+
+        orchestrator._send_batch_request(
+            mock_qbo_client, 'Customer', batch_items, None,
+            migration_id='mig_xyz', batch_idx=0)
+
+        # record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)
+        mock_qbo_client.record_created.assert_called_once_with(
+            'Customer', 'CUST-001', '100', 'mig_xyz', '0')
+
+
+# ============================================================================
+# REAL TRANSFORMER INTEGRATION TESTS (no mocks)
+# ============================================================================
+
+class TestBatchWithRealTransformer:
+    """
+    Tests the batch path using the REAL QBDataTransformer (not mocked).
+    Catches field-level issues like ID mapping key mismatches, ParentRef
+    resolution, and transform failures that mock-based tests miss.
+    """
+
+    @pytest.fixture
+    def real_transformer(self):
+        from data_transformer import QBDataTransformer
+        return QBDataTransformer(region='US')
+
+    def test_accounts_parent_child_id_mapping(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """
+        Full flow: Transform parent account → batch create → capture ID →
+        Transform child account → child resolves parent QBO ID.
+        """
+        records = [
+            {'ListID': 'P1', 'Name': 'Bank Accounts', 'AccountType': 'Bank',
+             'IsActive': True},
+            {'ListID': 'C1', 'Name': 'Checking', 'AccountType': 'Bank',
+             'IsActive': True, 'ParentRef': 'P1'},
+        ]
+
+        # Simulate QBO batch responses
+        mock_qbo_client._make_request.side_effect = [
+            # Layer 0 (root): Bank Accounts → QBO ID 500
+            {"BatchItemResponse": [
+                {"bId": "bid_0", "Account": {"Id": "500", "SyncToken": "0"}},
+            ]},
+            # Layer 1 (child): Checking → QBO ID 501
+            {"BatchItemResponse": [
+                {"bId": "bid_0", "Account": {"Id": "501", "SyncToken": "0"}},
+            ]},
+        ]
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert success == 2
+        assert fail == 0
+        assert existing_maps['Accounts']['P1'] == '500'
+        assert existing_maps['Accounts']['C1'] == '501'
+
+        # Verify the child's batch request included ParentRef
+        # The second _make_request call is the child batch
+        second_call = mock_qbo_client._make_request.call_args_list[1]
+        child_batch_data = second_call[0][2]  # 3rd positional arg = data
+        child_entity = child_batch_data['BatchItemRequest'][0]['Account']
+        # ParentRef should reference the parent's QBO ID (500)
+        assert child_entity.get('SubAccount') is True
+        assert child_entity.get('ParentRef', {}).get('value') == '500'
+
+    def test_customer_transform_and_batch(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """Customers with real transformer produce correct QBO format."""
+        records = [
+            {'ListID': 'CUST-001', 'Name': 'Acme Corp', 'IsActive': True,
+             'CompanyName': 'Acme Inc', 'Phone': '555-1234'},
+            {'ListID': 'CUST-002', 'Name': 'Global LLC', 'IsActive': True},
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Customer": {"Id": "10", "SyncToken": "0"}},
+                {"bId": "bid_1", "Customer": {"Id": "11", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Customers', records,
+            existing_maps, None)
+
+        assert success == 2
+        assert existing_maps['Customers']['CUST-001'] == '10'
+        assert existing_maps['Customers']['CUST-002'] == '11'
+
+        # Verify QBO format was correct
+        call_data = mock_qbo_client._make_request.call_args[0][2]
+        cust_1 = call_data['BatchItemRequest'][0]['Customer']
+        assert 'DisplayName' in cust_1
+
+    def test_cross_type_id_propagation(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """
+        IDs from Accounts phase are available when transforming Items.
+        Tests the full cross-entity-type ID mapping chain.
+        """
+        # Phase 1: Migrate accounts first
+        account_records = [
+            {'ListID': 'INC-001', 'Name': 'Sales Income',
+             'AccountType': 'Income', 'IsActive': True},
+            {'ListID': 'EXP-001', 'Name': 'Cost of Sales',
+             'AccountType': 'Cost of Goods Sold', 'IsActive': True},
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Account": {"Id": "700", "SyncToken": "0"}},
+                {"bId": "bid_1", "Account": {"Id": "701", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Accounts', account_records,
+            existing_maps, None)
+
+        assert existing_maps['Accounts']['INC-001'] == '700'
+        assert existing_maps['Accounts']['EXP-001'] == '701'
+
+        # Phase 2: Migrate items — they reference accounts via IncomeAccountRef
+        # Need 2+ records so the batch path runs (≤1 falls back to sequential)
+        item_records = [
+            {'ListID': 'ITEM-001', 'Name': 'Widget', 'ItemType': 'Inventory',
+             'IsActive': True, 'UnitPrice': '25.00',
+             'QuantityOnHand': '10', 'AsOfDate': '2024-01-01',
+             'IncomeAccountRef': 'INC-001',
+             'ExpenseAccountRef': 'EXP-001'},
+            {'ListID': 'ITEM-002', 'Name': 'Gadget', 'ItemType': 'Service',
+             'IsActive': True, 'UnitPrice': '15.00'},
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Item": {"Id": "800", "SyncToken": "0"}},
+                {"bId": "bid_1", "Item": {"Id": "801", "SyncToken": "0"}},
+            ]
+        }
+
+        orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Items', item_records,
+            existing_maps, None)
+
+        assert existing_maps['Items']['ITEM-001'] == '800'
+        assert existing_maps['Items']['ITEM-002'] == '801'
+
+        # Verify the Inventory item's IncomeAccountRef was resolved to QBO ID
+        call_data = mock_qbo_client._make_request.call_args[0][2]
+        item_entities = {
+            req['bId']: req['Item']
+            for req in call_data['BatchItemRequest']
+            if 'Item' in req
+        }
+        inv_item = item_entities.get('bid_0', {})
+        income_ref = inv_item.get('IncomeAccountRef', {})
+        assert income_ref.get('value') == '700'
+
+    def test_vendor_batch_with_real_transformer(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """Vendors produce valid QBO format through batch pipeline."""
+        records = [
+            {'ListID': 'VEND-001', 'Name': 'Supply Corp', 'IsActive': True,
+             'CompanyName': 'Supply Corp LLC'},
+            {'ListID': 'VEND-002', 'Name': 'Parts Inc', 'IsActive': True},
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "300", "SyncToken": "0"}},
+                {"bId": "bid_1", "Vendor": {"Id": "301", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Vendors', records,
+            existing_maps, None)
+
+        assert success == 2
+        assert fail == 0
+
+        call_data = mock_qbo_client._make_request.call_args[0][2]
+        vendor_1 = call_data['BatchItemRequest'][0]['Vendor']
+        assert 'DisplayName' in vendor_1
+
+    def test_taxcode_routes_to_tax_service(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """
+        TaxCode entities with real transformer set _use_tax_service flag
+        and are routed to create_tax_service, not the batch endpoint.
+        """
+        # Pre-populate tax agency mapping (normally done during run_migration)
+        real_transformer.id_mapping['tax_agencies']['AGENCY-001'] = '1'
+
+        records = [
+            {'ListID': 'TC-001', 'Name': 'CA Sales Tax',
+             'TaxRates': [
+                 {'Name': 'CA State', 'Rate': '7.25', 'AgencyRef': 'AGENCY-001',
+                  'ApplicableOn': 'Sales'}
+             ]},
+            {'ListID': 'TC-002', 'Name': 'OR Sales Tax',
+             'TaxRates': [
+                 {'Name': 'OR State', 'Rate': '0', 'AgencyRef': 'AGENCY-001',
+                  'ApplicableOn': 'Sales'}
+             ]},
+        ]
+
+        mock_qbo_client.create_tax_service.side_effect = [
+            {'TaxCodeId': '50'},
+            {'TaxCodeId': '51'},
+        ]
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'TaxCodes', records,
+            existing_maps, None)
+
+        assert success == 2
+        assert fail == 0
+        # TaxService route, not batch endpoint
+        mock_qbo_client._make_request.assert_not_called()
+        assert mock_qbo_client.create_tax_service.call_count == 2
+        assert existing_maps['TaxCodes']['TC-001'] == '50'
+        assert existing_maps['TaxCodes']['TC-002'] == '51'
+
+    def test_taxagency_returns_none_all_skipped(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """TaxAgency entities return None from transformer — all skipped."""
+        records = [
+            {'ListID': 'TA-001', 'Name': 'IRS'},
+            {'ListID': 'TA-002', 'Name': 'State Board'},
+        ]
+
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'TaxAgencies', records,
+            {}, None)
+
+        assert success == 0
+        assert fail == 0
+        assert skip == 2
+        mock_qbo_client._make_request.assert_not_called()
+
+    def test_invoice_skipped_without_customer_ref(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """
+        Invoices without a valid CustomerRef mapping are skipped by the
+        real transformer (returns None), not sent to QBO.
+        """
+        records = [
+            {'TxnID': 'INV-001', 'RefNumber': '1001',
+             'CustomerRef': 'NONEXISTENT', 'TxnDate': '2024-01-15',
+             'InvoiceLines': []},
+            {'TxnID': 'INV-002', 'RefNumber': '1002',
+             'CustomerRef': 'NONEXISTENT', 'TxnDate': '2024-01-16',
+             'InvoiceLines': []},
+        ]
+
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Invoices', records,
+            {}, None)
+
+        # Both should be skipped (no customer mapping)
+        assert success == 0
+        assert skip == 2
+        mock_qbo_client._make_request.assert_not_called()
+
+    def test_mixed_success_and_skip_with_real_transformer(
+            self, orchestrator, mock_qbo_client, real_transformer):
+        """Some entities transform successfully, others skip."""
+        # Pre-populate customer and item mappings so valid invoice can resolve
+        real_transformer.id_mapping['customers']['CUST-001'] = '10'
+        real_transformer.id_mapping['items']['SVC-001'] = '50'
+
+        records = [
+            # This one has a valid customer ref and valid line item
+            {'TxnID': 'INV-001', 'RefNumber': '1001',
+             'CustomerRef': 'CUST-001', 'TxnDate': '2024-01-15',
+             'InvoiceLines': [
+                 {'Amount': '100.00', 'Description': 'Service',
+                  'ItemRef': 'SVC-001', 'Quantity': '1', 'Rate': '100.00'}
+             ]},
+            # This one references a nonexistent customer — will be skipped
+            {'TxnID': 'INV-002', 'RefNumber': '1002',
+             'CustomerRef': 'NONEXISTENT', 'TxnDate': '2024-01-16',
+             'InvoiceLines': [
+                 {'Amount': '50.00', 'ItemRef': 'SVC-001'}
+             ]},
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Invoice": {"Id": "900", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, real_transformer, 'Invoices', records,
+            existing_maps, None)
+
+        assert success == 1
+        assert skip >= 1  # At least INV-002 skipped
+        assert existing_maps.get('Invoices', {}).get('INV-001') == '900'
