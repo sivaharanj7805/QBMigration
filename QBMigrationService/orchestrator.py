@@ -139,7 +139,7 @@ class MigrationOrchestrator:
             )
         else:
             # Update access token in case it was refreshed
-            self._qbo_client.access_token = access_token
+            self._qbo_client._base_access_token = access_token
         return self._qbo_client
 
     def _init_transformer(self) -> 'QBDataTransformer':
@@ -220,20 +220,45 @@ class MigrationOrchestrator:
             normalized_data = {}
             for key, value in data.items():
                 key_map = {
+                    # Master lists
                     'account': 'Accounts', 'accounts': 'Accounts',
                     'customer': 'Customers', 'customers': 'Customers',
                     'vendor': 'Vendors', 'vendors': 'Vendors',
                     'item': 'Items', 'items': 'Items',
+                    'employee': 'Employees', 'employees': 'Employees',
+                    # Configuration lists
+                    'class': 'Classes', 'classes': 'Classes',
+                    'department': 'Departments', 'departments': 'Departments',
+                    'term': 'Terms', 'terms': 'Terms',
+                    'paymentmethod': 'PaymentMethods', 'paymentmethods': 'PaymentMethods',
+                    'taxcode': 'TaxCodes', 'taxcodes': 'TaxCodes',
+                    'salestaxcodes': 'TaxCodes',
+                    'taxrate': 'TaxRates', 'taxrates': 'TaxRates',
+                    'taxagency': 'TaxAgencies', 'taxagencies': 'TaxAgencies',
+                    'companycurrency': 'CompanyCurrencies', 'companycurrencies': 'CompanyCurrencies',
+                    'currencies': 'CompanyCurrencies',
+                    # Transactions
                     'invoice': 'Invoices', 'invoices': 'Invoices',
                     'bill': 'Bills', 'bills': 'Bills',
                     'payment': 'Payments', 'payments': 'Payments',
-                    'employee': 'Employees', 'employees': 'Employees',
+                    'receivepayments': 'Payments',
+                    'estimate': 'Estimates', 'estimates': 'Estimates',
+                    'salesreceipt': 'SalesReceipts', 'salesreceipts': 'SalesReceipts',
+                    'creditmemo': 'CreditMemos', 'creditmemos': 'CreditMemos',
+                    'vendorcredit': 'VendorCredits', 'vendorcredits': 'VendorCredits',
+                    'billpayment': 'BillPayments', 'billpayments': 'BillPayments',
+                    'purchaseorder': 'PurchaseOrders', 'purchaseorders': 'PurchaseOrders',
+                    'purchase': 'Purchases', 'purchases': 'Purchases',
+                    'checks': 'Purchases', 'creditcardcharges': 'Purchases',
                     'journalentry': 'JournalEntries', 'journalentries': 'JournalEntries',
                     'deposit': 'Deposits', 'deposits': 'Deposits',
                     'transfer': 'Transfers', 'transfers': 'Transfers',
-                    'estimate': 'Estimates', 'estimates': 'Estimates',
-                    'creditmemo': 'CreditMemos', 'creditmemos': 'CreditMemos',
-                    'purchaseorder': 'PurchaseOrders', 'purchaseorders': 'PurchaseOrders',
+                    'refundreceipt': 'RefundReceipts', 'refundreceipts': 'RefundReceipts',
+                    'timeactivity': 'TimeActivities', 'timeactivities': 'TimeActivities',
+                    'inventoryadjustment': 'InventoryAdjustments', 'inventoryadjustments': 'InventoryAdjustments',
+                    'taxpayment': 'TaxPayments', 'taxpayments': 'TaxPayments',
+                    'salestaxpayments': 'TaxPayments',
+                    'attachable': 'Attachables', 'attachables': 'Attachables',
                 }
                 mapped = key_map.get(key.lower(), key)
                 normalized_data[mapped] = value
@@ -253,23 +278,74 @@ class MigrationOrchestrator:
             
             qbo_client = self._init_qbo_client(access_token)
             transformer = self._init_transformer()
-            
+
+            # Step 3b: Query existing TaxAgencies from QBO (read-only entities)
+            # TaxAgency cannot be created via API — must map to existing ones
+            try:
+                existing_agencies = qbo_client.query_tax_agencies(
+                    oauth_manager=oauth_mgr)
+                for agency in existing_agencies:
+                    agency_id = agency.get('Id')
+                    agency_name = agency.get('DisplayName', '')
+                    if agency_id and agency_name:
+                        transformer.id_mapping['tax_agencies'][agency_name] = agency_id
+                logger.info(
+                    f"Found {len(existing_agencies)} existing TaxAgencies in QBO")
+            except Exception as e:
+                logger.warning(f"Could not query TaxAgencies: {e}")
+
             # Step 4: Migrate entities (20-85%)
             entity_id_mappings = {}  # Separate dict for ID mappings
             entity_counts = {}       # Separate dict for counts
             total_failed = 0
             total_skipped = 0
 
-            # Entity migration order (respects dependencies)
+            # Entity migration order - respects dependencies (parents before children)
+            # Follows data_transformer._get_transformation_order() phases:
+            #   Phase 1: Configuration lists (must exist before referencing entities)
+            #   Phase 2: Chart of accounts
+            #   Phase 3: Master lists (customers, vendors, items)
+            #   Phase 4: Opening balances
+            #   Phase 5: Transactions (depend on accounts + master lists)
+            #   Phase 6: Attachments (reference all other entities)
             entity_order = [
-                ('Accounts', 20, 30),
-                ('Customers', 30, 40),
-                ('Vendors', 40, 50),
-                ('Items', 50, 60),
-                ('Employees', 60, 65),
-                ('Invoices', 65, 75),
-                ('Bills', 75, 80),
-                ('Payments', 80, 85)
+                # Phase 1: Configuration (20-25%)
+                ('CompanyCurrencies', 20, 21),
+                ('TaxAgencies', 21, 22),
+                ('TaxRates', 22, 22),
+                ('TaxCodes', 22, 23),
+                ('Terms', 23, 23),
+                ('PaymentMethods', 23, 24),
+                ('Classes', 24, 25),
+                ('Departments', 25, 25),
+                # Phase 2: Chart of Accounts (25-35%)
+                ('Accounts', 25, 35),
+                # Phase 3: Master Lists (35-50%)
+                ('Customers', 35, 42),
+                ('Vendors', 42, 47),
+                ('Employees', 47, 49),
+                ('Items', 49, 55),
+                # Phase 4: Opening Balances (55-60%)
+                ('JournalEntries', 55, 58),
+                ('InventoryAdjustments', 58, 60),
+                # Phase 5: Transactions (60-82%)
+                ('Estimates', 60, 62),
+                ('Invoices', 62, 67),
+                ('SalesReceipts', 67, 69),
+                ('PurchaseOrders', 69, 70),
+                ('Purchases', 70, 72),
+                ('Bills', 72, 75),
+                ('Payments', 75, 77),
+                ('BillPayments', 77, 78),
+                ('Deposits', 78, 79),
+                ('Transfers', 79, 80),
+                ('CreditMemos', 80, 81),
+                ('VendorCredits', 81, 81),
+                ('RefundReceipts', 81, 82),
+                ('TimeActivities', 82, 83),
+                ('TaxPayments', 83, 84),
+                # Phase 6: Attachments (84-85%)
+                ('Attachables', 84, 85),
             ]
 
             for entity_name, start_pct, end_pct in entity_order:
@@ -359,6 +435,32 @@ class MigrationOrchestrator:
         fail_count = 0
         skipped_count = 0
 
+        # CRITICAL FIX: QBO API endpoints are singular (e.g., 'account', not 'accounts')
+        # entity_name comes from entity_order as plural ('Accounts', 'Customers', etc.)
+        # but create_entity() uses entity_type.lower() as the API endpoint
+        PLURAL_TO_SINGULAR = {
+            # Configuration
+            'CompanyCurrencies': 'CompanyCurrency', 'TaxAgencies': 'TaxAgency',
+            'TaxRates': 'TaxRate', 'TaxCodes': 'TaxCode',
+            'Terms': 'Term', 'PaymentMethods': 'PaymentMethod',
+            'Classes': 'Class', 'Departments': 'Department',
+            # Master lists
+            'Accounts': 'Account', 'Customers': 'Customer', 'Vendors': 'Vendor',
+            'Items': 'Item', 'Employees': 'Employee',
+            # Transactions
+            'Invoices': 'Invoice', 'Bills': 'Bill', 'Payments': 'Payment',
+            'Estimates': 'Estimate', 'Deposits': 'Deposit', 'Transfers': 'Transfer',
+            'JournalEntries': 'JournalEntry', 'CreditMemos': 'CreditMemo',
+            'PurchaseOrders': 'PurchaseOrder', 'SalesReceipts': 'SalesReceipt',
+            'BillPayments': 'BillPayment', 'VendorCredits': 'VendorCredit',
+            'RefundReceipts': 'RefundReceipt', 'TimeActivities': 'TimeActivity',
+            'InventoryAdjustments': 'InventoryAdjustment',
+            'Purchases': 'Purchase', 'TaxPayments': 'TaxPayment',
+            # Attachments
+            'Attachables': 'Attachable',
+        }
+        api_entity_type = PLURAL_TO_SINGULAR.get(entity_name, entity_name)
+
         for record in source_data:
             try:
                 # Transform to QBO format
@@ -374,7 +476,17 @@ class MigrationOrchestrator:
                     continue
 
                 # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
-                result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
+                # CRITICAL FIX: Use singular entity type for QBO API endpoint
+                # Route TaxCode to TaxService endpoint (different payload/URL)
+                if transformed.get('_use_tax_service'):
+                    tax_code_name = transformed.pop('TaxCode', '')
+                    tax_rate_details = transformed.pop('TaxRateDetails', [])
+                    transformed.pop('_use_tax_service', None)
+                    result = qbo_client.create_tax_service(
+                        tax_code_name, tax_rate_details,
+                        oauth_manager=oauth_manager)
+                else:
+                    result = qbo_client.create_entity(api_entity_type, transformed, oauth_manager=oauth_manager)
 
                 if result and 'Id' in result:
                     # Track mapping for references

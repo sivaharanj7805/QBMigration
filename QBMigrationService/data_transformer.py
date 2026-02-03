@@ -101,6 +101,10 @@ class QBDataTransformer:
         
         # ID mappings (QBD → QBO)
         self.id_mapping = defaultdict(dict)
+
+        # TaxRate cache: QBD rate ID → {Name, Rate, AgencyRef, ApplicableOn}
+        # Populated by transform_taxrate(), consumed by transform_taxcode()
+        self._tax_rate_cache: Dict[str, Dict] = {}
         
         # DisplayName tracking (cross-entity uniqueness)
         self.used_display_names: Set[str] = set()
@@ -350,8 +354,9 @@ class QBDataTransformer:
         transformer.used_display_names = set(shared_names.keys())
         
         # Copy shared id_mapping to local (for fast reads)
+        # Normalize keys to lowercase for consistent lookup via map_id()
         for et, mappings in shared_id_mapping.items():
-            transformer.id_mapping[et] = dict(mappings)
+            transformer.id_mapping[et.lower()] = dict(mappings)
         
         # Get transformation method
         method_name = f'transform_{entity_type.lower()}'
@@ -391,10 +396,11 @@ class QBDataTransformer:
         
         # Sync id_mapping back to shared state
         for et, mappings in transformer.id_mapping.items():
-            if et not in shared_id_mapping:
-                shared_id_mapping[et] = {}
+            key = et.lower()
+            if key not in shared_id_mapping:
+                shared_id_mapping[key] = {}
             for qbd_id, qbo_id in mappings.items():
-                shared_id_mapping[et][qbd_id] = qbo_id
+                shared_id_mapping[key][qbd_id] = qbo_id
         
         return transformed, stats
     
@@ -416,10 +422,14 @@ class QBDataTransformer:
             Transformed entity or None if skipped
         """
         # Update id_mapping if provided
+        # CRITICAL FIX: Orchestrator stores real QBO IDs with PascalCase keys
+        # (e.g., 'Customers'), but map_id()/map_id_required() look up with
+        # lowercase keys (e.g., 'customers'). Normalize to lowercase on merge
+        # so real QBO IDs replace temp IDs in the correct bucket.
         if id_mapping:
             for et, mappings in id_mapping.items():
                 if isinstance(mappings, dict):
-                    self.id_mapping[et].update(mappings)
+                    self.id_mapping[et.lower()].update(mappings)
 
         # Map entity type variations
         type_mapping = {
@@ -447,6 +457,8 @@ class QBDataTransformer:
             return None
 
         try:
+            # CRITICAL FIX: Normalize field names from C# extractor camelCase
+            entity = self.normalize_extractor_fields(entity, normalized_type)
             transform_func = getattr(self, method_name)
             result = transform_func(entity)
             if result:
@@ -477,6 +489,8 @@ class QBDataTransformer:
         transformed = []
         for entity in entities:
             try:
+                # CRITICAL FIX: Normalize field names from C# extractor camelCase
+                entity = self.normalize_extractor_fields(entity, entity_type)
                 result = transform_func(entity)
                 if result:
                     transformed.append(result)
@@ -500,6 +514,7 @@ class QBDataTransformer:
         # 250+ QB Desktop → QB Online account type mappings
         self.account_mapping = {
             # Bank accounts
+            'bank': ('Bank', None),
             'checking': ('Bank', 'Checking'),
             'savings': ('Bank', 'Savings'),
             'money market': ('Bank', 'MoneyMarket'),
@@ -622,7 +637,12 @@ class QBDataTransformer:
         logger.info("="*60)
         logger.info("STARTING QB DESKTOP → ONLINE TRANSFORMATION")
         logger.info("="*60)
-        
+
+        # CRITICAL FIX: Normalize top-level keys from C# extractor format
+        # C# outputs 'accounts', 'customers' (camelCase plural)
+        # Transform expects 'Account', 'Customer' (PascalCase singular)
+        qb_data = self.normalize_data_keys(qb_data)
+
         result = {
             'metadata': {
                 'version': self.VERSION,
@@ -634,16 +654,16 @@ class QBDataTransformer:
             'trial_balance': {},
             'manual_review': []
         }
-        
+
         # Transformation order (parents before children)
         order = self._get_transformation_order()
-        
+
         for entity_type in order:
             if entity_type not in qb_data:
                 continue
-                
+
             logger.info(f"\n🔄 Processing {entity_type}...")
-            
+
             entities = qb_data[entity_type]
             if not isinstance(entities, list):
                 entities = [entities]
@@ -656,6 +676,9 @@ class QBDataTransformer:
             transformed = []
             for entity in entities:
                 try:
+                    # CRITICAL FIX: Normalize field names from C# extractor camelCase
+                    entity = self.normalize_extractor_fields(entity, entity_type)
+
                     method = getattr(self, f'transform_{entity_type.lower()}', None)
                     if method:
                         qbo_entity = method(entity)
@@ -841,11 +864,14 @@ class QBDataTransformer:
                     else:
                         # MM/DD/YYYY format (US, CA)
                         m, d, y = parts
-                    
+
                     try:
-                        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                        # CRITICAL FIX: Validate date components before formatting
+                        # Previous code accepted 99/99/9999 as valid
+                        m_int, d_int, y_int = int(m), int(d), int(y)
+                        if 1 <= m_int <= 12 and 1 <= d_int <= 31 and 1900 <= y_int <= 2100:
+                            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
                     except (ValueError, TypeError):
-                        # FIX #1: Specific exception instead of bare except
                         pass
         
         # FIX #9: Return a default date or log warning instead of None
@@ -1100,6 +1126,24 @@ class QBDataTransformer:
             return value.lower() not in ('false', '0', 'no', 'n', 'inactive')
         return bool(value)
 
+    def _require_lines(self, qbo: Dict, entity_type: str, qbd: Dict) -> bool:
+        """Validate that a transaction has at least one line item.
+
+        QBO API rejects transactions with empty Line arrays. The C# extractor
+        uses NullValueHandling.Ignore, so if line extraction fails or there are
+        no lines, the collection is omitted entirely from JSON. After normalization,
+        the transform method's for-loop simply doesn't execute, leaving Line=[].
+
+        Returns True if lines exist, False if empty (skips entity + adds to review).
+        """
+        if qbo.get('Line'):
+            return True
+        name = qbd.get('RefNumber') or qbd.get('TxnID') or qbd.get('Name') or 'Unknown'
+        self.add_manual_review(entity_type, str(name),
+                               reason=f"No line items - QBO requires at least one Line entry")
+        self.stats['total_skipped'] += 1
+        return False
+
     def _store_entity_mapping(self, entity_type: str, qbd: Dict) -> None:
         """Store QBD to QBO ID mapping after successful transformation."""
         qbd_id = qbd.get('ListID') or qbd.get('TxnID') or qbd.get('Id') or qbd.get('Name')
@@ -1170,6 +1214,337 @@ class QBDataTransformer:
                     sorted_entities.append(entity)
 
         return sorted_entities
+
+    # ========================================================================
+    # C# EXTRACTOR FIELD NORMALIZATION
+    # ========================================================================
+    #
+    # CRITICAL FIX: The C# QBDataExtractor uses [JsonProperty] annotations
+    # with camelCase names (e.g., "listId", "accountType", "billAddressAddr1")
+    # but our transform methods expect PascalCase (e.g., "ListID", "AccountType")
+    # and nested address dicts (e.g., "BillAddress": {"Addr1": ...}).
+    #
+    # This normalization layer bridges the gap. It is IDEMPOTENT - data that
+    # is already in PascalCase passes through unchanged.
+    # ========================================================================
+
+    # Field name mapping: C# camelCase [JsonProperty] → expected PascalCase
+    _FIELD_MAP = {
+        # Identity fields
+        'listId': 'ListID', 'txnId': 'TxnID', 'txnLineId': 'TxnLineID',
+        'name': 'Name', 'fullName': 'FullName', 'nameOriginal': 'NameOriginal',
+        'isActive': 'IsActive',
+
+        # Contact/person fields
+        'companyName': 'CompanyName', 'companyNameOriginal': 'CompanyNameOriginal',
+        'firstName': 'FirstName', 'middleName': 'MiddleName', 'lastName': 'LastName',
+        'salutation': 'Salutation', 'email': 'Email', 'emailOriginal': 'EmailOriginal',
+        'phone': 'Phone', 'altPhone': 'AltPhone', 'fax': 'Fax', 'mobile': 'Mobile',
+        'contact': 'Contact', 'altContact': 'AltContact', 'notes': 'Notes',
+
+        # Financial fields
+        'balance': 'Balance', 'totalBalance': 'TotalBalance',
+        'accountNumber': 'AccountNumber', 'creditLimit': 'CreditLimit',
+        'sublevel': 'Sublevel',
+
+        # Account-specific fields
+        'accountType': 'AccountType', 'desc': 'Description',
+        'descOriginal': 'DescriptionOriginal',
+        'bankNumber': 'BankNumber', 'specialAccountType': 'SpecialAccountType',
+        'isTaxAccount': 'IsTaxAccount',
+        'cashFlowClassification': 'CashFlowClassification',
+
+        # Item-specific fields
+        'type': 'ItemType',
+        'salesDescription': 'Description',
+        'salesPrice': 'UnitPrice',
+        'purchaseDescription': 'PurchaseDescription',
+        'purchaseCost': 'PurchaseCost',
+        'quantityOnHand': 'QuantityOnHand',
+        'averageCost': 'AverageCost',
+        'reorderPoint': 'ReorderPoint',
+        'barCodeValue': 'BarCodeValue',
+        'isTaxIncluded': 'IsTaxIncluded',
+
+        # Transaction fields
+        'txnNumber': 'TxnNumber', 'refNumber': 'RefNumber',
+        'txnDate': 'TxnDate', 'dueDate': 'DueDate', 'shipDate': 'ShipDate',
+        'memo': 'Memo', 'subtotal': 'Subtotal',
+        'amount': 'Amount', 'amountDue': 'AmountDue', 'totalAmount': 'TotalAmount',
+        'salesTaxTotal': 'SalesTaxTotal', 'appliedAmount': 'AppliedAmount',
+        'balanceRemaining': 'BalanceRemaining', 'creditRemaining': 'CreditRemaining',
+        'isPaid': 'IsPaid', 'isPending': 'IsPending',
+        'isFinanceCharge': 'IsFinanceCharge',
+        'isToBePrinted': 'IsToBePrinted', 'isToBeEmailed': 'IsToBeEmailed',
+        'isManuallyClosed': 'IsManuallyClosed', 'isFullyReceived': 'IsFullyReceived',
+        'isFullyInvoiced': 'IsFullyInvoiced', 'isAdjustment': 'IsAdjustment',
+        'poNumber': 'PONumber', 'fob': 'FOB',
+
+        # Reference fields (camelCase xxxRefListId → PascalCase XxxRef)
+        'parentRefListId': 'ParentRef', 'parentRefFullName': 'ParentRefFullName',
+        'customerRefListId': 'CustomerRef', 'customerRefFullName': 'CustomerRefFullName',
+        'vendorRefListId': 'VendorRef', 'vendorRefFullName': 'VendorRefFullName',
+        'arAccountRefListId': 'ARAccountRef',
+        'arAccountRefFullName': 'ARAccountRefFullName',
+        'apAccountRefListId': 'APAccountRef',
+        'termsRefListId': 'TermRef', 'termsRefFullName': 'TermRefFullName',
+        'incomeAccountRefListId': 'IncomeAccountRef',
+        'incomeAccountRefFullName': 'IncomeAccountRefFullName',
+        'cogsAccountRefListId': 'ExpenseAccountRef',
+        'cogsAccountRefFullName': 'ExpenseAccountRefFullName',
+        'assetAccountRefListId': 'AssetAccountRef',
+        'assetAccountRefFullName': 'AssetAccountRefFullName',
+        'expenseAccountRefFullName': 'ExpenseAccountRefFullName',
+        'salesTaxCodeRefListId': 'SalesTaxCodeRef',
+        'salesTaxCodeRefFullName': 'SalesTaxCodeRefFullName',
+        'payeeEntityRefListId': 'PayeeRef',
+        'payeeEntityRefFullName': 'PayeeRefFullName',
+        'bankAccountRefListId': 'BankAccountRef',
+        'depositToAccountRefListId': 'DepositToAccountRef',
+        'paymentMethodRefListId': 'PaymentMethodRef',
+        'paymentMethodRefFullName': 'PaymentMethodRefFullName',
+        'customerMsgRefListId': 'CustomerMsgRef',
+        'customerMsgRefFullName': 'CustomerMsgRefFullName',
+        'classRefListId': 'ClassRef', 'classRefFullName': 'ClassRefFullName',
+        'salesRepRefListId': 'SalesRepRef',
+        'salesRepRefFullName': 'SalesRepRefFullName',
+        'shipMethodRefFullName': 'ShipMethodRef',
+        'currencyRefListId': 'CurrencyRef',
+        'currencyRefFullName': 'CurrencyRefFullName',
+        'accountRefListId': 'AccountRef', 'accountRefFullName': 'AccountRefFullName',
+        'itemRefListId': 'ItemRef', 'itemRefFullName': 'ItemRefFullName',
+        'priceLevelRefListId': 'PriceLevelRef',
+        'billingRateRefListId': 'BillingRateRef',
+        'customerTypeRefListId': 'CustomerTypeRef',
+        'customerTypeRefFullName': 'CustomerTypeRefFullName',
+        'vendorTypeRefListId': 'VendorTypeRef',
+        'jobTypeRefListId': 'JobTypeRef',
+        'itemSalesTaxRefListId': 'ItemSalesTaxRef',
+        'prefPaymentMethodRefListId': 'PrefPaymentMethodRef',
+        'entityRefListId': 'EntityRef', 'entityRefFullName': 'EntityRefFullName',
+
+        # Employee fields
+        'ssn': 'SSN', 'employeeType': 'EmployeeType',
+        'hiredDate': 'HiredDate', 'releasedDate': 'ReleasedDate',
+        'birthDate': 'BirthDate', 'gender': 'Gender',
+
+        # Customer job fields
+        'jobStatus': 'JobStatus', 'jobStartDate': 'JobStartDate',
+        'jobProjectedEndDate': 'JobProjectedEndDate',
+        'jobEndDate': 'JobEndDate', 'jobDesc': 'JobDesc',
+        'resaleNumber': 'ResaleNumber',
+
+        # Vendor-specific
+        'vendorTaxIdent': 'VendorTaxIdent',
+        'isVendorEligibleFor1099': 'Is1099',
+
+        # Terms fields
+        'discountPct': 'DiscountPct', 'dueDays': 'DueDays',
+        'discountDays': 'DiscountDays',
+        'dayOfMonthDue': 'DayOfMonthDue', 'dueNextMonthDays': 'DueNextMonthDays',
+
+        # Tax fields
+        'isTaxable': 'IsTaxable', 'description': 'Description',
+        'taxRate': 'TaxRate',
+
+        # Currency fields
+        'currencyCode': 'CurrencyCode', 'currencyFormat': 'CurrencyFormat',
+        'exchangeRate': 'ExchangeRate',
+        'isUserDefinedCurrency': 'IsUserDefinedCurrency',
+
+        # Payment method
+        'paymentMethodType': 'PaymentMethodType',
+
+        # Line item fields
+        'quantity': 'Quantity', 'unitOfMeasure': 'UnitOfMeasure',
+        'rate': 'Rate', 'ratePercent': 'RatePercent',
+        'serviceDate': 'ServiceDate',
+        'journalLineType': 'JournalLineType',
+        'receivedQuantity': 'ReceivedQuantity',
+        'isBillable': 'IsBillable', 'billingStatus': 'BillingStatus',
+
+        # Integrity/audit fields
+        'integrityHash': 'IntegrityHash',
+        'sha256IntegrityHash': 'IntegrityHash',
+        'editSequence': 'EditSequence',
+        'timeCreated': 'TimeCreated', 'timeModified': 'TimeModified',
+
+        # Schema metadata
+        'schemaVersion': 'SchemaVersion',
+        'extractionVersion': 'ExtractionVersion',
+        'extractedAt': 'ExtractedAt', 'sessionId': 'SessionID',
+    }
+
+    # Address prefixes used by C# flat field naming
+    _ADDRESS_PREFIXES = {
+        'billAddress': 'BillAddress',
+        'shipAddress': 'ShipAddress',
+        'vendorAddress': 'VendorAddress',
+        'employeeAddress': 'EmployeeAddress',
+    }
+
+    # Address sub-field suffixes
+    _ADDRESS_SUFFIXES = (
+        'Addr1', 'Addr2', 'Addr3', 'Addr4', 'Addr5',
+        'City', 'State', 'PostalCode', 'Country', 'Note',
+    )
+
+    # Top-level entity key mapping: C# camelCase plural → PascalCase singular
+    _ENTITY_KEY_MAP = {
+        'accounts': 'Account', 'customers': 'Customer',
+        'vendors': 'Vendor', 'employees': 'Employee',
+        'items': 'Item', 'classes': 'Class',
+        'paymentMethods': 'PaymentMethod', 'terms': 'Term',
+        'salesTaxCodes': 'TaxCode', 'currencies': 'CompanyCurrency',
+        'invoices': 'Invoice', 'bills': 'Bill',
+        'billPayments': 'BillPayment', 'receivePayments': 'Payment',
+        'creditMemos': 'CreditMemo', 'salesReceipts': 'SalesReceipt',
+        'estimates': 'Estimate', 'journalEntries': 'JournalEntry',
+        'checks': 'Purchase', 'creditCardCharges': 'Purchase',
+        'deposits': 'Deposit', 'inventoryAdjustments': 'InventoryAdjustment',
+        'transfers': 'Transfer', 'vendorCredits': 'VendorCredit',
+        'purchaseOrders': 'PurchaseOrder',
+        'salesTaxPayments': 'TaxPayment',
+        'salesOrders': 'SalesOrder',
+        'customerTypes': 'CustomerType', 'vendorTypes': 'VendorType',
+        'jobTypes': 'JobType', 'customerMessages': 'CustomerMessage',
+        'dateDrivenTerms': 'DateDrivenTerm',
+        'salesTaxGroups': 'SalesTaxGroup',
+        'priceLevels': 'PriceLevel', 'salesReps': 'SalesRep',
+        'shipMethods': 'ShipMethod',
+    }
+
+    # Line item key mapping per entity type
+    _LINE_KEY_MAP = {
+        'invoice': 'InvoiceLines',
+        'bill': '_split_bill_lines',  # Special: split into ExpenseLines + ItemLines
+        'journalentry': 'JournalEntryLines',
+        'creditmemo': 'CreditMemoLines',
+        'purchaseorder': 'POLines',
+        'salesreceipt': 'SalesReceiptLines',
+        'estimate': 'EstimateLines',
+        'deposit': 'DepositLines',
+        'inventoryadjustment': 'AdjustmentLines',
+        'refundreceipt': 'RefundLines',
+        'purchase': 'ExpenseLines',
+    }
+
+    @staticmethod
+    def normalize_extractor_fields(entity: Dict, entity_type: str = '') -> Dict:
+        """
+        Normalize C# QBDataExtractor camelCase JSON output to PascalCase format.
+
+        The C# extractor uses [JsonProperty] annotations with camelCase names,
+        but transform methods expect PascalCase. This normalization is IDEMPOTENT -
+        data already in PascalCase passes through unchanged.
+
+        Also reconstructs flat address fields into nested dicts and maps
+        'lines' arrays to entity-specific line item keys.
+        """
+        if not isinstance(entity, dict):
+            return entity
+
+        normalized = {}
+        address_data = {}
+
+        for key, value in entity.items():
+            if value is None:
+                continue
+
+            # Check for flat address fields (e.g., billAddressAddr1 → BillAddress.Addr1)
+            handled_as_address = False
+            for prefix, target_key in QBDataTransformer._ADDRESS_PREFIXES.items():
+                for suffix in QBDataTransformer._ADDRESS_SUFFIXES:
+                    if key == f'{prefix}{suffix}':
+                        if target_key not in address_data:
+                            address_data[target_key] = {}
+                        address_data[target_key][suffix] = value
+                        handled_as_address = True
+                        break
+                if handled_as_address:
+                    break
+
+            if handled_as_address:
+                continue
+
+            # Map field name (camelCase → PascalCase)
+            mapped_key = QBDataTransformer._FIELD_MAP.get(key, key)
+            # Don't overwrite existing PascalCase keys with camelCase values
+            if mapped_key not in normalized:
+                normalized[mapped_key] = value
+
+        # Add reconstructed nested address dicts
+        for addr_key, addr_fields in address_data.items():
+            if addr_fields and addr_key not in normalized:
+                normalized[addr_key] = addr_fields
+
+        # Map vendor address to generic 'Address' expected by transform_vendor
+        if 'VendorAddress' in normalized and 'Address' not in normalized:
+            normalized['Address'] = normalized['VendorAddress']
+
+        # Handle 'lines' field → entity-specific line key
+        lines_raw = None
+        if 'lines' in entity:
+            lines_raw = entity['lines']
+        elif 'Lines' in normalized and isinstance(normalized.get('Lines'), list):
+            lines_raw = normalized.pop('Lines')
+
+        if lines_raw and isinstance(lines_raw, list):
+            # Normalize each line item recursively
+            norm_lines = []
+            for line in lines_raw:
+                if isinstance(line, dict):
+                    norm_lines.append(
+                        QBDataTransformer.normalize_extractor_fields(line)
+                    )
+                else:
+                    norm_lines.append(line)
+
+            et_lower = entity_type.lower() if entity_type else ''
+            line_key = QBDataTransformer._LINE_KEY_MAP.get(et_lower, 'Lines')
+
+            if line_key == '_split_bill_lines':
+                # Bills: split into ExpenseLines (account-based) and ItemLines
+                expense_lines = []
+                item_lines = []
+                for line in norm_lines:
+                    if line.get('ItemRef') or line.get('ItemRefFullName'):
+                        item_lines.append(line)
+                    else:
+                        expense_lines.append(line)
+                if expense_lines and 'ExpenseLines' not in normalized:
+                    normalized['ExpenseLines'] = expense_lines
+                if item_lines and 'ItemLines' not in normalized:
+                    normalized['ItemLines'] = item_lines
+            else:
+                if line_key not in normalized:
+                    normalized[line_key] = norm_lines
+
+        return normalized
+
+    @staticmethod
+    def normalize_data_keys(qb_data: Dict) -> Dict:
+        """
+        Normalize top-level entity collection keys from C# extractor format.
+
+        C# outputs: 'accounts', 'customers', 'vendors', etc. (camelCase plural)
+        Transform expects: 'Account', 'Customer', 'Vendor', etc. (PascalCase singular)
+
+        IDEMPOTENT: Already-correct keys pass through unchanged.
+        """
+        if not isinstance(qb_data, dict):
+            return qb_data
+
+        normalized = {}
+        for key, value in qb_data.items():
+            mapped = QBDataTransformer._ENTITY_KEY_MAP.get(key, key)
+            if mapped not in normalized:
+                normalized[mapped] = value
+            elif mapped in normalized and isinstance(value, list) and isinstance(normalized[mapped], list):
+                # Merge lists for keys that map to the same entity (e.g., checks + creditCardCharges → Purchase)
+                normalized[mapped].extend(value)
+
+        return normalized
 
     # ========================================================================
     # ENTITY TRANSFORMATION METHODS (31 TOTAL)
@@ -1392,6 +1767,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'Bill', qbd):
+            return None
         self._store_entity_mapping('bills', qbd)
         return qbo
 
@@ -1450,6 +1827,8 @@ class QBDataTransformer:
                     }]
                 })
 
+        if not self._require_lines(qbo, 'BillPayment', qbd):
+            return None
         self._store_entity_mapping('billpayments', qbd)
         return qbo
 
@@ -1489,6 +1868,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'CreditMemo', qbd):
+            return None
         self._store_entity_mapping('creditmemos', qbd)
         return qbo
 
@@ -1533,9 +1914,24 @@ class QBDataTransformer:
         return qbo
 
     def transform_attachable(self, qbd: Dict) -> Dict:
-        """Transform Attachable."""
+        """Transform Attachable (metadata only — file upload requires multipart)."""
+        filename = qbd.get('FileName', 'attachment.pdf')
+
+        # Derive ContentType from file extension
+        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+        content_type_map = {
+            'pdf': 'application/pdf', 'png': 'image/png',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'gif': 'image/gif', 'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'csv': 'text/csv', 'txt': 'text/plain',
+        }
+
         qbo = {
-            'FileName': qbd.get('FileName', 'attachment.pdf'),
+            'FileName': filename,
+            'ContentType': content_type_map.get(ext, 'application/octet-stream'),
             'Note': qbd.get('Note', '')
         }
 
@@ -1608,6 +2004,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'Estimate', qbd):
+            return None
         self._store_entity_mapping('estimates', qbd)
         return qbo
 
@@ -1674,6 +2072,8 @@ class QBDataTransformer:
 
                 qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Invoice', qbd):
+            return None
         self._store_entity_mapping('invoices', qbd)
         return qbo
 
@@ -1682,7 +2082,8 @@ class QBDataTransformer:
         """Transform Item - Handles 8 different types!"""
         item_type = qbd.get('ItemType', 'Service')
     
-        # Item type mapping
+        # Item type mapping - supports both QBD SDK format (ItemInventory)
+        # and simplified format (Inventory) from different data sources
         type_map = {
             'ItemInventory': 'Inventory',
             'ItemService': 'Service',
@@ -1690,7 +2091,12 @@ class QBDataTransformer:
             'ItemInventoryAssembly': 'Inventory',  # Special handling
             'ItemGroup': 'Bundle',
             'ItemDiscount': 'Service',
-            'ItemFixedAsset': 'NonInventory'
+            'ItemFixedAsset': 'NonInventory',
+            # Direct type names (from IIF parser and simplified exports)
+            'Inventory': 'Inventory',
+            'Service': 'Service',
+            'NonInventory': 'NonInventory',
+            'Bundle': 'Bundle',
         }
     
         qbo_type = type_map.get(item_type)
@@ -1938,6 +2344,8 @@ class QBDataTransformer:
 
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Deposit', qbd):
+            return None
         self._store_entity_mapping('deposits', qbd)
         return qbo
 
@@ -2002,6 +2410,8 @@ class QBDataTransformer:
                 qbo_line['ItemAdjustmentLineDetail']['ItemRef'] = {'value': item_id}
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'InventoryAdjustment', qbd):
+            return None
         self._store_entity_mapping('inventoryadjustments', qbd)
         return qbo
 
@@ -2065,6 +2475,8 @@ class QBDataTransformer:
                 'warning': f'Journal entry out of balance: Debits={debit_total}, Credits={credit_total}'
             })
 
+        if not self._require_lines(qbo, 'JournalEntry', qbd):
+            return None
         self._store_entity_mapping('journalentries', qbd)
         return qbo
 
@@ -2161,6 +2573,8 @@ class QBDataTransformer:
                 qbo_line['AccountBasedExpenseLineDetail']['AccountRef'] = {'value': acct_id}
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Purchase', qbd):
+            return None
         self._store_entity_mapping('purchases', qbd)
         return qbo
 
@@ -2204,6 +2618,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'PurchaseOrder', qbd):
+            return None
         self._store_entity_mapping('purchaseorders', qbd)
         return qbo
 
@@ -2220,6 +2636,16 @@ class QBDataTransformer:
             'Name': self.sanitize_name(qbd.get('Name', 'Payment')),
             'Active': self._to_bool(qbd.get('IsActive', True))
         }
+
+        # Classify credit card types (QBO uses CREDIT_CARD vs NON_CREDIT_CARD)
+        pm_type = (qbd.get('PaymentMethodType') or qbd.get('Type') or '').lower()
+        if any(cc in name for cc in ['visa', 'master', 'amex', 'discover', 'credit']):
+            qbo['Type'] = 'CREDIT_CARD'
+        elif pm_type in ('creditcard', 'credit card', 'credit_card'):
+            qbo['Type'] = 'CREDIT_CARD'
+        else:
+            qbo['Type'] = 'NON_CREDIT_CARD'
+
         self._store_entity_mapping('payment_methods', qbd)
         return qbo
 
@@ -2265,6 +2691,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'RefundReceipt', qbd):
+            return None
         self._store_entity_mapping('refundreceipts', qbd)
         return qbo
 
@@ -2317,6 +2745,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'SalesReceipt', qbd):
+            return None
         self._store_entity_mapping('salesreceipts', qbd)
         return qbo
 
@@ -2357,53 +2787,105 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_taxagency(self, qbd: Dict) -> Dict:
-        """Transform TaxAgency."""
-        qbo = {
-            'DisplayName': self.sanitize_name(qbd.get('Name', 'Tax Agency'))
-        }
+    def transform_taxagency(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TaxAgency — READ-ONLY in QBO, cannot be created via API.
+
+        TaxAgency entities must already exist in QBO. This method stores the
+        ID mapping (if a QBO match was found) but returns None to skip creation.
+        The orchestrator handles querying existing agencies before migration.
+        """
         self._store_entity_mapping('tax_agencies', qbd)
-        return qbo
+        # Return None — TaxAgency is read-only in QBO API
+        return None
 
 
     def transform_taxcode(self, qbd: Dict) -> Optional[Dict]:
-        """Transform TaxCode (skip defaults)."""
+        """Transform TaxCode for QBO TaxService endpoint.
+
+        QBO does NOT support POST /taxcode. TaxCodes must be created via
+        POST /taxservice/taxcode with a completely different payload:
+        {
+            "TaxCode": "name",
+            "TaxRateDetails": [{"TaxRateName", "RateValue", "TaxAgencyId", "TaxApplicableOn"}]
+        }
+
+        Returns a dict with '_use_tax_service': True flag so the orchestrator
+        routes it to create_tax_service() instead of create_entity().
+        """
         name = (qbd.get('Name') or '').upper()
 
-        # Skip default codes
+        # Skip default codes that already exist in QBO
         if name in {'TAX', 'NON'}:
             return None
 
-        qbo = {
-            'Name': self.sanitize_name(qbd.get('Name', 'Tax')),
-            'Taxable': qbd.get('IsTaxable', True)
-        }
+        tax_code_name = self.sanitize_name(qbd.get('Name', 'Tax'))
 
-        if qbd.get('TaxRates'):
-            tax_rate_details = []
-            for rate in qbd['TaxRates']:
-                mapped_id = self.map_id('tax_rates', rate)
-                if mapped_id:
-                    tax_rate_details.append({'TaxRateRef': {'value': mapped_id}})
-            if tax_rate_details:
-                qbo['SalesTaxRateList'] = {'TaxRateDetail': tax_rate_details}
+        # Build TaxRateDetails from embedded rate data
+        tax_rate_details = []
+        for rate_data in qbd.get('TaxRates', []):
+            if isinstance(rate_data, dict):
+                # Rate data has full info
+                agency_id = self.map_id('tax_agencies', rate_data.get('AgencyRef'))
+                tax_rate_details.append({
+                    'TaxRateName': self.sanitize_name(
+                        rate_data.get('Name', f'{tax_code_name} Rate')),
+                    'RateValue': str(self.to_decimal(rate_data.get('Rate', 0))),
+                    'TaxAgencyId': agency_id or '1',
+                    'TaxApplicableOn': rate_data.get('ApplicableOn', 'Sales'),
+                })
+            elif isinstance(rate_data, str):
+                # Rate data is just a reference ID — look up from stored rates
+                stored_rate = self._tax_rate_cache.get(rate_data, {})
+                agency_id = self.map_id(
+                    'tax_agencies', stored_rate.get('AgencyRef'))
+                tax_rate_details.append({
+                    'TaxRateName': self.sanitize_name(
+                        stored_rate.get('Name', f'{tax_code_name} Rate')),
+                    'RateValue': str(self.to_decimal(
+                        stored_rate.get('Rate', 0))),
+                    'TaxAgencyId': agency_id or '1',
+                    'TaxApplicableOn': stored_rate.get(
+                        'ApplicableOn', 'Sales'),
+                })
+
+        if not tax_rate_details:
+            # No rate details — add to manual review
+            self.add_manual_review(
+                'TaxCode', tax_code_name,
+                reason='No TaxRateDetails available — QBO TaxService requires '
+                       'at least one rate. Configure manually in QBO.')
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            '_use_tax_service': True,  # Flag for orchestrator routing
+            'TaxCode': tax_code_name,
+            'TaxRateDetails': tax_rate_details,
+        }
 
         self._store_entity_mapping('tax_codes', qbd)
         return qbo
 
 
-    def transform_taxrate(self, qbd: Dict) -> Dict:
-        """Transform TaxRate."""
-        qbo = {
-            'Name': self.sanitize_name(qbd.get('Name', 'Tax Rate')),
-            'RateValue': self.to_decimal(qbd.get('Rate', 0)),
-            'Active': self._to_bool(qbd.get('IsActive', True))
-        }
-        mapped_id = self.map_id('tax_agencies', qbd.get('AgencyRef'))
-        if mapped_id:
-            qbo['AgencyRef'] = {'value': mapped_id}
+    def transform_taxrate(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TaxRate — cache for TaxCode creation, skip standalone create.
+
+        QBO does NOT support POST /taxrate. TaxRates are created as part of
+        TaxCode via the TaxService endpoint. This method caches the rate data
+        for use by transform_taxcode() and returns None to skip standalone creation.
+        """
+        # Cache rate data for transform_taxcode to reference
+        qbd_id = qbd.get('ListID') or qbd.get('Id') or qbd.get('Name')
+        if qbd_id:
+            self._tax_rate_cache[str(qbd_id)] = {
+                'Name': qbd.get('Name', 'Tax Rate'),
+                'Rate': qbd.get('Rate', qbd.get('RateValue', 0)),
+                'AgencyRef': qbd.get('AgencyRef'),
+                'ApplicableOn': qbd.get('ApplicableOn', 'Sales'),
+            }
         self._store_entity_mapping('tax_rates', qbd)
-        return qbo
+        # Return None — TaxRate is created via TaxService with TaxCode
+        return None
 
 
     def transform_term(self, qbd: Dict) -> Optional[Dict]:
@@ -2422,7 +2904,7 @@ class QBDataTransformer:
         if qbd.get('DueDays') is not None:
             try:
                 qbo['DueDays'] = int(float(str(qbd['DueDays'])))
-                qbo['Type'] = 'STANDARD'
+                # Note: 'Type' is read-only in QBO — auto-determined from DueDays
             except (ValueError, TypeError):
                 pass
 
@@ -2439,32 +2921,54 @@ class QBDataTransformer:
         return qbo
 
 
-    def transform_timeactivity(self, qbd: Dict) -> Dict:
-        """Transform TimeActivity."""
+    def transform_timeactivity(self, qbd: Dict) -> Optional[Dict]:
+        """Transform TimeActivity.
+
+        QBO requires: NameOf, EmployeeRef/VendorRef (matching NameOf), Hours, Minutes.
+        Skip entities missing required fields rather than sending incomplete payloads.
+        """
+        name_of = qbd.get('NameOf', 'Employee')
         qbo = {
-            'NameOf': qbd.get('NameOf', 'Employee'),
+            'NameOf': name_of,
             'TxnDate': self.format_date(qbd.get('TxnDate'))
         }
 
-        if qbo['NameOf'] == 'Employee':
+        # Required: EmployeeRef or VendorRef depending on NameOf
+        has_person_ref = False
+        if name_of == 'Employee':
             mapped_id = self.map_id('employees', qbd.get('EmployeeRef'))
             if mapped_id:
                 qbo['EmployeeRef'] = {'value': mapped_id}
+                has_person_ref = True
         else:
             mapped_id = self.map_id('vendors', qbd.get('VendorRef'))
             if mapped_id:
                 qbo['VendorRef'] = {'value': mapped_id}
+                has_person_ref = True
 
+        if not has_person_ref:
+            ref_type = 'EmployeeRef' if name_of == 'Employee' else 'VendorRef'
+            name = qbd.get('TxnID') or qbd.get('Name') or 'Unknown'
+            self.add_manual_review('TimeActivity', str(name),
+                                   reason=f'Missing required {ref_type}')
+            self.stats['total_skipped'] += 1
+            return None
+
+        # Required: Hours and Minutes
+        hours = 0
+        minutes = 0
         if qbd.get('Hours') is not None:
             try:
-                qbo['Hours'] = int(float(str(qbd['Hours'])))
+                hours = int(float(str(qbd['Hours'])))
             except (ValueError, TypeError):
                 pass
         if qbd.get('Minutes') is not None:
             try:
-                qbo['Minutes'] = int(float(str(qbd['Minutes'])))
+                minutes = int(float(str(qbd['Minutes'])))
             except (ValueError, TypeError):
                 pass
+        qbo['Hours'] = hours
+        qbo['Minutes'] = minutes
 
         if qbd.get('CustomerRef'):
             mapped_id = self.map_id('customers', qbd['CustomerRef'])
@@ -2573,6 +3077,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'VendorCredit', qbd):
+            return None
         self._store_entity_mapping('vendorcredits', qbd)
         return qbo
 
