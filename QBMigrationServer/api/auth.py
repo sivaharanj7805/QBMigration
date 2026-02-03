@@ -927,6 +927,31 @@ def validate_session():
         logger.error(f"Session validation error: {e}")
         return jsonify({'success': False, 'error': 'Session validation failed'}), 401
 
+    # Look up user
+    user = User.query.filter_by(email=email).first()
+
+    if user and user.is_active:
+        # Generate reset token
+        reset_token = _generate_password_reset_token(user.id, user.email)
+
+        # Store token JTI in user record for one-time use validation
+        # This would require a database field, so for now we rely on JWT expiry
+
+        # Send reset email
+        _send_password_reset_email(email, reset_token)
+
+        logger.info(f"Password reset requested for {hash_email(email)}")
+    else:
+        # User doesn't exist - still perform timing-consistent operations
+        import os
+        from argon2 import PasswordHasher
+        ph = PasswordHasher()
+        # Perform fake hash to match timing
+        try:
+            fake_password = os.urandom(16).hex()
+            _ = ph.hash(fake_password)
+        except Exception:
+            pass
 
 # =============================================================================
 # TIER SELECTION & MANAGEMENT
