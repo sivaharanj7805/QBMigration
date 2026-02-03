@@ -4,7 +4,7 @@ import { WhitelabelPreview } from "@/components/settings/WhitelabelPreview";
 import { TeamManagement } from "@/components/settings/TeamManagement";
 import { useState, useEffect } from "react";
 import { Palette, Bell, Shield, CreditCard, Users, Loader2 } from "lucide-react";
-import { getAuthState } from "@/lib/auth";
+import { getAuthState, authFetch } from "@/lib/auth";
 
 type SettingsTab = "branding" | "notifications" | "security" | "billing" | "team";
 
@@ -43,9 +43,11 @@ export default function SettingsPage() {
         tierName: "Starter",
         features: []
     });
+    const [whitelabelConfig, setWhitelabelConfig] = useState<Partial<WhitelabelConfig> | undefined>(undefined);
 
     useEffect(() => {
         loadUserData();
+        loadWhitelabelConfig();
     }, []);
 
     // FIX: Auto-dismiss error after 5 seconds
@@ -71,12 +73,7 @@ export default function SettingsPage() {
             }
 
             // Try to fetch subscription from API
-            const response = await fetch(`${API_URL}/api/auth/me`, {
-                credentials: 'include',
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                }
-            });
+            const response = await authFetch(`${API_URL}/api/auth/me`);
 
             if (response.ok) {
                 const data = await response.json();
@@ -112,17 +109,28 @@ export default function SettingsPage() {
         }
     };
 
+    const loadWhitelabelConfig = async () => {
+        try {
+            const response = await authFetch(`${API_URL}/api/settings/whitelabel`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success && data.config) {
+                    setWhitelabelConfig(data.config);
+                }
+            }
+        } catch (err) {
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to load whitelabel config:", err);
+            }
+        }
+    };
+
     const handleSaveWhitelabel = async (config: WhitelabelConfig) => {
         setSaveStatus("saving");
         setSaveError(null); // Clear previous errors
         try {
-            const response = await fetch(`${API_URL}/api/settings/whitelabel`, {
+            const response = await authFetch(`${API_URL}/api/settings/whitelabel`, {
                 method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-                },
                 body: JSON.stringify(config),
             });
 
@@ -224,6 +232,7 @@ export default function SettingsPage() {
             <div>
                 {activeTab === "branding" && (
                     <WhitelabelPreview
+                        initialConfig={whitelabelConfig}
                         onSave={handleSaveWhitelabel}
                     />
                 )}
