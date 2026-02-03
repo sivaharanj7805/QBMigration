@@ -139,7 +139,7 @@ class MigrationOrchestrator:
             )
         else:
             # Update access token in case it was refreshed
-            self._qbo_client.access_token = access_token
+            self._qbo_client._base_access_token = access_token
         return self._qbo_client
 
     def _init_transformer(self) -> 'QBDataTransformer':
@@ -359,6 +359,23 @@ class MigrationOrchestrator:
         fail_count = 0
         skipped_count = 0
 
+        # CRITICAL FIX: QBO API endpoints are singular (e.g., 'account', not 'accounts')
+        # entity_name comes from entity_order as plural ('Accounts', 'Customers', etc.)
+        # but create_entity() uses entity_type.lower() as the API endpoint
+        PLURAL_TO_SINGULAR = {
+            'Accounts': 'Account', 'Customers': 'Customer', 'Vendors': 'Vendor',
+            'Items': 'Item', 'Employees': 'Employee', 'Invoices': 'Invoice',
+            'Bills': 'Bill', 'Payments': 'Payment', 'Estimates': 'Estimate',
+            'Deposits': 'Deposit', 'Transfers': 'Transfer',
+            'JournalEntries': 'JournalEntry', 'CreditMemos': 'CreditMemo',
+            'PurchaseOrders': 'PurchaseOrder', 'SalesReceipts': 'SalesReceipt',
+            'BillPayments': 'BillPayment', 'VendorCredits': 'VendorCredit',
+            'RefundReceipts': 'RefundReceipt', 'TimeActivities': 'TimeActivity',
+            'InventoryAdjustments': 'InventoryAdjustment',
+            'Purchases': 'Purchase', 'Attachables': 'Attachable',
+        }
+        api_entity_type = PLURAL_TO_SINGULAR.get(entity_name, entity_name)
+
         for record in source_data:
             try:
                 # Transform to QBO format
@@ -374,7 +391,8 @@ class MigrationOrchestrator:
                     continue
 
                 # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
-                result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
+                # CRITICAL FIX: Use singular entity type for QBO API endpoint
+                result = qbo_client.create_entity(api_entity_type, transformed, oauth_manager=oauth_manager)
 
                 if result and 'Id' in result:
                     # Track mapping for references

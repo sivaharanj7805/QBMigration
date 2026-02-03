@@ -314,14 +314,21 @@ class PremiumMigrationVerifier:
         self.decimal_places = Decimal('0.01')
 
     def _reset(self):
-        """Reset mutable state for fresh verification."""
+        """Reset mutable state for fresh verification.
+        CRITICAL FIX: Must include all keys that __init__ creates, because
+        verify_customers/vendors/invoices write to self.report["summary"],
+        and trial_balance writes to self.report["critical_metrics"].
+        Previous _reset() was missing 'summary', 'details', 'critical_metrics',
+        causing KeyError when verification methods tried to access them.
+        """
         self.report = {
-            'entity_counts': {},
-            'trial_balance': {},
-            'warnings': [],
-            'errors': [],
-            'issues': [],
-            'verification_status': 'pending'
+            "migration_date": datetime.now(timezone.utc).isoformat(),
+            "summary": {},
+            "details": {},
+            "warnings": [],
+            "errors": [],
+            "critical_metrics": {},
+            "verification_status": "pending"
         }
     
     # ========================================================================
@@ -880,17 +887,20 @@ class PremiumMigrationVerifier:
             self.report['verification_status'] = 'WARNING'
 
         # Verify entity counts
+        # CRITICAL FIX: Check all three key forms since orchestrator uses
+        # title-case plural ('Customers'), transformer uses singular ('Customer'),
+        # and some callers use lowercase ('customers')
         entity_checks = [
-            ('Customer', 'customers'),
-            ('Vendor', 'vendors'),
-            ('Account', 'accounts'),
-            ('Item', 'items'),
-            ('Invoice', 'invoices'),
+            ('Customer', 'customers', 'Customers'),
+            ('Vendor', 'vendors', 'Vendors'),
+            ('Account', 'accounts', 'Accounts'),
+            ('Item', 'items', 'Items'),
+            ('Invoice', 'invoices', 'Invoices'),
         ]
 
-        for qbo_type, key in entity_checks:
-            if key in entities or qbo_type in entities:
-                entity_list = entities.get(key) or entities.get(qbo_type) or []
+        for qbo_type, key_lower, key_plural in entity_checks:
+            if key_lower in entities or qbo_type in entities or key_plural in entities:
+                entity_list = entities.get(key_lower) or entities.get(qbo_type) or entities.get(key_plural) or []
                 expected_count = len(entity_list)
 
                 if expected_count > 0:
@@ -905,7 +915,7 @@ class PremiumMigrationVerifier:
                             # Generic count check
                             actual_count = self.client.query_count(qbo_type, oauth_manager=oauth_manager)
                             result = actual_count >= expected_count
-                            self.report["summary"][key] = {
+                            self.report["summary"][key_lower] = {
                                 "expected": expected_count,
                                 "actual": actual_count,
                                 "success": result

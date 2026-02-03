@@ -381,17 +381,21 @@ class PremiumQBOClient:
     def update_synctoken(self, entity_type: str, qbo_id: str, new_synctoken: str):
         """
         FIX #33: Update SyncToken after successful update
+        DEADLOCK FIX: Acquire db_lock FIRST, then synctoken_lock to match
+        lock ordering in record_created() and get_synctoken().
+        Previous code acquired synctoken_lock first, causing deadlock risk.
         """
-        with self.synctoken_lock:
-            self.synctoken_cache[(entity_type, qbo_id)] = new_synctoken
-        
         with self.db_lock:
+            # Update cache under consistent lock ordering (db_lock → synctoken_lock)
+            with self.synctoken_lock:
+                self.synctoken_cache[(entity_type, qbo_id)] = new_synctoken
+
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             try:
                 with conn:
                     cursor = conn.cursor()
                     cursor.execute('''
-                        UPDATE migrated_entities 
+                        UPDATE migrated_entities
                         SET sync_token = ?
                         WHERE entity_type = ? AND qbo_id = ?
                     ''', (new_synctoken, entity_type, qbo_id))
@@ -642,7 +646,7 @@ class PremiumQBOClient:
                     oauth_manager.refresh_access_token()
                     new_token = oauth_manager.get_access_token()
                     if new_token:
-                        self.access_token = new_token
+                        self._base_access_token = new_token
                     return self._make_request(method, endpoint, data, retries, oauth_manager, idempotency_key, correlation_id, _auth_refreshed=True)
                 else:
                     raise Exception(f"Authentication failed (TID: {intuit_tid}, CID: {correlation_id})")
@@ -1382,7 +1386,8 @@ class PremiumQBOClient:
             "deleted": deleted,
             "failed": failed,
             "total": len(entities)
-        }    
+        }
+
     def query_raw(self, query: str, oauth_manager: Optional[Any] = None) -> List[Dict]:
         """
         $25M FIX: Execute a raw SQL-like query against QBO API
