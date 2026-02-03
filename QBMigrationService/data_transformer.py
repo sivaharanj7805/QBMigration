@@ -447,6 +447,8 @@ class QBDataTransformer:
             return None
 
         try:
+            # CRITICAL FIX: Normalize field names from C# extractor camelCase
+            entity = self.normalize_extractor_fields(entity, normalized_type)
             transform_func = getattr(self, method_name)
             result = transform_func(entity)
             if result:
@@ -477,6 +479,8 @@ class QBDataTransformer:
         transformed = []
         for entity in entities:
             try:
+                # CRITICAL FIX: Normalize field names from C# extractor camelCase
+                entity = self.normalize_extractor_fields(entity, entity_type)
                 result = transform_func(entity)
                 if result:
                     transformed.append(result)
@@ -623,7 +627,12 @@ class QBDataTransformer:
         logger.info("="*60)
         logger.info("STARTING QB DESKTOP → ONLINE TRANSFORMATION")
         logger.info("="*60)
-        
+
+        # CRITICAL FIX: Normalize top-level keys from C# extractor format
+        # C# outputs 'accounts', 'customers' (camelCase plural)
+        # Transform expects 'Account', 'Customer' (PascalCase singular)
+        qb_data = self.normalize_data_keys(qb_data)
+
         result = {
             'metadata': {
                 'version': self.VERSION,
@@ -635,16 +644,16 @@ class QBDataTransformer:
             'trial_balance': {},
             'manual_review': []
         }
-        
+
         # Transformation order (parents before children)
         order = self._get_transformation_order()
-        
+
         for entity_type in order:
             if entity_type not in qb_data:
                 continue
-                
+
             logger.info(f"\n🔄 Processing {entity_type}...")
-            
+
             entities = qb_data[entity_type]
             if not isinstance(entities, list):
                 entities = [entities]
@@ -657,6 +666,9 @@ class QBDataTransformer:
             transformed = []
             for entity in entities:
                 try:
+                    # CRITICAL FIX: Normalize field names from C# extractor camelCase
+                    entity = self.normalize_extractor_fields(entity, entity_type)
+
                     method = getattr(self, f'transform_{entity_type.lower()}', None)
                     if method:
                         qbo_entity = method(entity)
@@ -1174,6 +1186,337 @@ class QBDataTransformer:
                     sorted_entities.append(entity)
 
         return sorted_entities
+
+    # ========================================================================
+    # C# EXTRACTOR FIELD NORMALIZATION
+    # ========================================================================
+    #
+    # CRITICAL FIX: The C# QBDataExtractor uses [JsonProperty] annotations
+    # with camelCase names (e.g., "listId", "accountType", "billAddressAddr1")
+    # but our transform methods expect PascalCase (e.g., "ListID", "AccountType")
+    # and nested address dicts (e.g., "BillAddress": {"Addr1": ...}).
+    #
+    # This normalization layer bridges the gap. It is IDEMPOTENT - data that
+    # is already in PascalCase passes through unchanged.
+    # ========================================================================
+
+    # Field name mapping: C# camelCase [JsonProperty] → expected PascalCase
+    _FIELD_MAP = {
+        # Identity fields
+        'listId': 'ListID', 'txnId': 'TxnID', 'txnLineId': 'TxnLineID',
+        'name': 'Name', 'fullName': 'FullName', 'nameOriginal': 'NameOriginal',
+        'isActive': 'IsActive',
+
+        # Contact/person fields
+        'companyName': 'CompanyName', 'companyNameOriginal': 'CompanyNameOriginal',
+        'firstName': 'FirstName', 'middleName': 'MiddleName', 'lastName': 'LastName',
+        'salutation': 'Salutation', 'email': 'Email', 'emailOriginal': 'EmailOriginal',
+        'phone': 'Phone', 'altPhone': 'AltPhone', 'fax': 'Fax', 'mobile': 'Mobile',
+        'contact': 'Contact', 'altContact': 'AltContact', 'notes': 'Notes',
+
+        # Financial fields
+        'balance': 'Balance', 'totalBalance': 'TotalBalance',
+        'accountNumber': 'AccountNumber', 'creditLimit': 'CreditLimit',
+        'sublevel': 'Sublevel',
+
+        # Account-specific fields
+        'accountType': 'AccountType', 'desc': 'Description',
+        'descOriginal': 'DescriptionOriginal',
+        'bankNumber': 'BankNumber', 'specialAccountType': 'SpecialAccountType',
+        'isTaxAccount': 'IsTaxAccount',
+        'cashFlowClassification': 'CashFlowClassification',
+
+        # Item-specific fields
+        'type': 'ItemType',
+        'salesDescription': 'Description',
+        'salesPrice': 'UnitPrice',
+        'purchaseDescription': 'PurchaseDescription',
+        'purchaseCost': 'PurchaseCost',
+        'quantityOnHand': 'QuantityOnHand',
+        'averageCost': 'AverageCost',
+        'reorderPoint': 'ReorderPoint',
+        'barCodeValue': 'BarCodeValue',
+        'isTaxIncluded': 'IsTaxIncluded',
+
+        # Transaction fields
+        'txnNumber': 'TxnNumber', 'refNumber': 'RefNumber',
+        'txnDate': 'TxnDate', 'dueDate': 'DueDate', 'shipDate': 'ShipDate',
+        'memo': 'Memo', 'subtotal': 'Subtotal',
+        'amount': 'Amount', 'amountDue': 'AmountDue', 'totalAmount': 'TotalAmount',
+        'salesTaxTotal': 'SalesTaxTotal', 'appliedAmount': 'AppliedAmount',
+        'balanceRemaining': 'BalanceRemaining', 'creditRemaining': 'CreditRemaining',
+        'isPaid': 'IsPaid', 'isPending': 'IsPending',
+        'isFinanceCharge': 'IsFinanceCharge',
+        'isToBePrinted': 'IsToBePrinted', 'isToBeEmailed': 'IsToBeEmailed',
+        'isManuallyClosed': 'IsManuallyClosed', 'isFullyReceived': 'IsFullyReceived',
+        'isFullyInvoiced': 'IsFullyInvoiced', 'isAdjustment': 'IsAdjustment',
+        'poNumber': 'PONumber', 'fob': 'FOB',
+
+        # Reference fields (camelCase xxxRefListId → PascalCase XxxRef)
+        'parentRefListId': 'ParentRef', 'parentRefFullName': 'ParentRefFullName',
+        'customerRefListId': 'CustomerRef', 'customerRefFullName': 'CustomerRefFullName',
+        'vendorRefListId': 'VendorRef', 'vendorRefFullName': 'VendorRefFullName',
+        'arAccountRefListId': 'ARAccountRef',
+        'arAccountRefFullName': 'ARAccountRefFullName',
+        'apAccountRefListId': 'APAccountRef',
+        'termsRefListId': 'TermRef', 'termsRefFullName': 'TermRefFullName',
+        'incomeAccountRefListId': 'IncomeAccountRef',
+        'incomeAccountRefFullName': 'IncomeAccountRefFullName',
+        'cogsAccountRefListId': 'ExpenseAccountRef',
+        'cogsAccountRefFullName': 'ExpenseAccountRefFullName',
+        'assetAccountRefListId': 'AssetAccountRef',
+        'assetAccountRefFullName': 'AssetAccountRefFullName',
+        'expenseAccountRefFullName': 'ExpenseAccountRefFullName',
+        'salesTaxCodeRefListId': 'SalesTaxCodeRef',
+        'salesTaxCodeRefFullName': 'SalesTaxCodeRefFullName',
+        'payeeEntityRefListId': 'PayeeRef',
+        'payeeEntityRefFullName': 'PayeeRefFullName',
+        'bankAccountRefListId': 'BankAccountRef',
+        'depositToAccountRefListId': 'DepositToAccountRef',
+        'paymentMethodRefListId': 'PaymentMethodRef',
+        'paymentMethodRefFullName': 'PaymentMethodRefFullName',
+        'customerMsgRefListId': 'CustomerMsgRef',
+        'customerMsgRefFullName': 'CustomerMsgRefFullName',
+        'classRefListId': 'ClassRef', 'classRefFullName': 'ClassRefFullName',
+        'salesRepRefListId': 'SalesRepRef',
+        'salesRepRefFullName': 'SalesRepRefFullName',
+        'shipMethodRefFullName': 'ShipMethodRef',
+        'currencyRefListId': 'CurrencyRef',
+        'currencyRefFullName': 'CurrencyRefFullName',
+        'accountRefListId': 'AccountRef', 'accountRefFullName': 'AccountRefFullName',
+        'itemRefListId': 'ItemRef', 'itemRefFullName': 'ItemRefFullName',
+        'priceLevelRefListId': 'PriceLevelRef',
+        'billingRateRefListId': 'BillingRateRef',
+        'customerTypeRefListId': 'CustomerTypeRef',
+        'customerTypeRefFullName': 'CustomerTypeRefFullName',
+        'vendorTypeRefListId': 'VendorTypeRef',
+        'jobTypeRefListId': 'JobTypeRef',
+        'itemSalesTaxRefListId': 'ItemSalesTaxRef',
+        'prefPaymentMethodRefListId': 'PrefPaymentMethodRef',
+        'entityRefListId': 'EntityRef', 'entityRefFullName': 'EntityRefFullName',
+
+        # Employee fields
+        'ssn': 'SSN', 'employeeType': 'EmployeeType',
+        'hiredDate': 'HiredDate', 'releasedDate': 'ReleasedDate',
+        'birthDate': 'BirthDate', 'gender': 'Gender',
+
+        # Customer job fields
+        'jobStatus': 'JobStatus', 'jobStartDate': 'JobStartDate',
+        'jobProjectedEndDate': 'JobProjectedEndDate',
+        'jobEndDate': 'JobEndDate', 'jobDesc': 'JobDesc',
+        'resaleNumber': 'ResaleNumber',
+
+        # Vendor-specific
+        'vendorTaxIdent': 'VendorTaxIdent',
+        'isVendorEligibleFor1099': 'Is1099',
+
+        # Terms fields
+        'discountPct': 'DiscountPct', 'dueDays': 'DueDays',
+        'discountDays': 'DiscountDays',
+        'dayOfMonthDue': 'DayOfMonthDue', 'dueNextMonthDays': 'DueNextMonthDays',
+
+        # Tax fields
+        'isTaxable': 'IsTaxable', 'description': 'Description',
+        'taxRate': 'TaxRate',
+
+        # Currency fields
+        'currencyCode': 'CurrencyCode', 'currencyFormat': 'CurrencyFormat',
+        'exchangeRate': 'ExchangeRate',
+        'isUserDefinedCurrency': 'IsUserDefinedCurrency',
+
+        # Payment method
+        'paymentMethodType': 'PaymentMethodType',
+
+        # Line item fields
+        'quantity': 'Quantity', 'unitOfMeasure': 'UnitOfMeasure',
+        'rate': 'Rate', 'ratePercent': 'RatePercent',
+        'serviceDate': 'ServiceDate',
+        'journalLineType': 'JournalLineType',
+        'receivedQuantity': 'ReceivedQuantity',
+        'isBillable': 'IsBillable', 'billingStatus': 'BillingStatus',
+
+        # Integrity/audit fields
+        'integrityHash': 'IntegrityHash',
+        'sha256IntegrityHash': 'IntegrityHash',
+        'editSequence': 'EditSequence',
+        'timeCreated': 'TimeCreated', 'timeModified': 'TimeModified',
+
+        # Schema metadata
+        'schemaVersion': 'SchemaVersion',
+        'extractionVersion': 'ExtractionVersion',
+        'extractedAt': 'ExtractedAt', 'sessionId': 'SessionID',
+    }
+
+    # Address prefixes used by C# flat field naming
+    _ADDRESS_PREFIXES = {
+        'billAddress': 'BillAddress',
+        'shipAddress': 'ShipAddress',
+        'vendorAddress': 'VendorAddress',
+        'employeeAddress': 'EmployeeAddress',
+    }
+
+    # Address sub-field suffixes
+    _ADDRESS_SUFFIXES = (
+        'Addr1', 'Addr2', 'Addr3', 'Addr4', 'Addr5',
+        'City', 'State', 'PostalCode', 'Country', 'Note',
+    )
+
+    # Top-level entity key mapping: C# camelCase plural → PascalCase singular
+    _ENTITY_KEY_MAP = {
+        'accounts': 'Account', 'customers': 'Customer',
+        'vendors': 'Vendor', 'employees': 'Employee',
+        'items': 'Item', 'classes': 'Class',
+        'paymentMethods': 'PaymentMethod', 'terms': 'Term',
+        'salesTaxCodes': 'TaxCode', 'currencies': 'CompanyCurrency',
+        'invoices': 'Invoice', 'bills': 'Bill',
+        'billPayments': 'BillPayment', 'receivePayments': 'Payment',
+        'creditMemos': 'CreditMemo', 'salesReceipts': 'SalesReceipt',
+        'estimates': 'Estimate', 'journalEntries': 'JournalEntry',
+        'checks': 'Purchase', 'creditCardCharges': 'Purchase',
+        'deposits': 'Deposit', 'inventoryAdjustments': 'InventoryAdjustment',
+        'transfers': 'Transfer', 'vendorCredits': 'VendorCredit',
+        'purchaseOrders': 'PurchaseOrder',
+        'salesTaxPayments': 'TaxPayment',
+        'salesOrders': 'SalesOrder',
+        'customerTypes': 'CustomerType', 'vendorTypes': 'VendorType',
+        'jobTypes': 'JobType', 'customerMessages': 'CustomerMessage',
+        'dateDrivenTerms': 'DateDrivenTerm',
+        'salesTaxGroups': 'SalesTaxGroup',
+        'priceLevels': 'PriceLevel', 'salesReps': 'SalesRep',
+        'shipMethods': 'ShipMethod',
+    }
+
+    # Line item key mapping per entity type
+    _LINE_KEY_MAP = {
+        'invoice': 'InvoiceLines',
+        'bill': '_split_bill_lines',  # Special: split into ExpenseLines + ItemLines
+        'journalentry': 'JournalEntryLines',
+        'creditmemo': 'CreditMemoLines',
+        'purchaseorder': 'POLines',
+        'salesreceipt': 'SalesReceiptLines',
+        'estimate': 'EstimateLines',
+        'deposit': 'DepositLines',
+        'inventoryadjustment': 'AdjustmentLines',
+        'refundreceipt': 'RefundLines',
+        'purchase': 'ExpenseLines',
+    }
+
+    @staticmethod
+    def normalize_extractor_fields(entity: Dict, entity_type: str = '') -> Dict:
+        """
+        Normalize C# QBDataExtractor camelCase JSON output to PascalCase format.
+
+        The C# extractor uses [JsonProperty] annotations with camelCase names,
+        but transform methods expect PascalCase. This normalization is IDEMPOTENT -
+        data already in PascalCase passes through unchanged.
+
+        Also reconstructs flat address fields into nested dicts and maps
+        'lines' arrays to entity-specific line item keys.
+        """
+        if not isinstance(entity, dict):
+            return entity
+
+        normalized = {}
+        address_data = {}
+
+        for key, value in entity.items():
+            if value is None:
+                continue
+
+            # Check for flat address fields (e.g., billAddressAddr1 → BillAddress.Addr1)
+            handled_as_address = False
+            for prefix, target_key in QBDataTransformer._ADDRESS_PREFIXES.items():
+                for suffix in QBDataTransformer._ADDRESS_SUFFIXES:
+                    if key == f'{prefix}{suffix}':
+                        if target_key not in address_data:
+                            address_data[target_key] = {}
+                        address_data[target_key][suffix] = value
+                        handled_as_address = True
+                        break
+                if handled_as_address:
+                    break
+
+            if handled_as_address:
+                continue
+
+            # Map field name (camelCase → PascalCase)
+            mapped_key = QBDataTransformer._FIELD_MAP.get(key, key)
+            # Don't overwrite existing PascalCase keys with camelCase values
+            if mapped_key not in normalized:
+                normalized[mapped_key] = value
+
+        # Add reconstructed nested address dicts
+        for addr_key, addr_fields in address_data.items():
+            if addr_fields and addr_key not in normalized:
+                normalized[addr_key] = addr_fields
+
+        # Map vendor address to generic 'Address' expected by transform_vendor
+        if 'VendorAddress' in normalized and 'Address' not in normalized:
+            normalized['Address'] = normalized['VendorAddress']
+
+        # Handle 'lines' field → entity-specific line key
+        lines_raw = None
+        if 'lines' in entity:
+            lines_raw = entity['lines']
+        elif 'Lines' in normalized and isinstance(normalized.get('Lines'), list):
+            lines_raw = normalized.pop('Lines')
+
+        if lines_raw and isinstance(lines_raw, list):
+            # Normalize each line item recursively
+            norm_lines = []
+            for line in lines_raw:
+                if isinstance(line, dict):
+                    norm_lines.append(
+                        QBDataTransformer.normalize_extractor_fields(line)
+                    )
+                else:
+                    norm_lines.append(line)
+
+            et_lower = entity_type.lower() if entity_type else ''
+            line_key = QBDataTransformer._LINE_KEY_MAP.get(et_lower, 'Lines')
+
+            if line_key == '_split_bill_lines':
+                # Bills: split into ExpenseLines (account-based) and ItemLines
+                expense_lines = []
+                item_lines = []
+                for line in norm_lines:
+                    if line.get('ItemRef') or line.get('ItemRefFullName'):
+                        item_lines.append(line)
+                    else:
+                        expense_lines.append(line)
+                if expense_lines and 'ExpenseLines' not in normalized:
+                    normalized['ExpenseLines'] = expense_lines
+                if item_lines and 'ItemLines' not in normalized:
+                    normalized['ItemLines'] = item_lines
+            else:
+                if line_key not in normalized:
+                    normalized[line_key] = norm_lines
+
+        return normalized
+
+    @staticmethod
+    def normalize_data_keys(qb_data: Dict) -> Dict:
+        """
+        Normalize top-level entity collection keys from C# extractor format.
+
+        C# outputs: 'accounts', 'customers', 'vendors', etc. (camelCase plural)
+        Transform expects: 'Account', 'Customer', 'Vendor', etc. (PascalCase singular)
+
+        IDEMPOTENT: Already-correct keys pass through unchanged.
+        """
+        if not isinstance(qb_data, dict):
+            return qb_data
+
+        normalized = {}
+        for key, value in qb_data.items():
+            mapped = QBDataTransformer._ENTITY_KEY_MAP.get(key, key)
+            if mapped not in normalized:
+                normalized[mapped] = value
+            elif mapped in normalized and isinstance(value, list) and isinstance(normalized[mapped], list):
+                # Merge lists for keys that map to the same entity (e.g., checks + creditCardCharges → Purchase)
+                normalized[mapped].extend(value)
+
+        return normalized
 
     # ========================================================================
     # ENTITY TRANSFORMATION METHODS (31 TOTAL)
