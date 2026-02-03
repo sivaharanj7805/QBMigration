@@ -500,6 +500,7 @@ class QBDataTransformer:
         # 250+ QB Desktop → QB Online account type mappings
         self.account_mapping = {
             # Bank accounts
+            'bank': ('Bank', None),
             'checking': ('Bank', 'Checking'),
             'savings': ('Bank', 'Savings'),
             'money market': ('Bank', 'MoneyMarket'),
@@ -841,11 +842,14 @@ class QBDataTransformer:
                     else:
                         # MM/DD/YYYY format (US, CA)
                         m, d, y = parts
-                    
+
                     try:
-                        return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+                        # CRITICAL FIX: Validate date components before formatting
+                        # Previous code accepted 99/99/9999 as valid
+                        m_int, d_int, y_int = int(m), int(d), int(y)
+                        if 1 <= m_int <= 12 and 1 <= d_int <= 31 and 1900 <= y_int <= 2100:
+                            return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
                     except (ValueError, TypeError):
-                        # FIX #1: Specific exception instead of bare except
                         pass
         
         # FIX #9: Return a default date or log warning instead of None
@@ -1682,7 +1686,8 @@ class QBDataTransformer:
         """Transform Item - Handles 8 different types!"""
         item_type = qbd.get('ItemType', 'Service')
     
-        # Item type mapping
+        # Item type mapping - supports both QBD SDK format (ItemInventory)
+        # and simplified format (Inventory) from different data sources
         type_map = {
             'ItemInventory': 'Inventory',
             'ItemService': 'Service',
@@ -1690,7 +1695,12 @@ class QBDataTransformer:
             'ItemInventoryAssembly': 'Inventory',  # Special handling
             'ItemGroup': 'Bundle',
             'ItemDiscount': 'Service',
-            'ItemFixedAsset': 'NonInventory'
+            'ItemFixedAsset': 'NonInventory',
+            # Direct type names (from IIF parser and simplified exports)
+            'Inventory': 'Inventory',
+            'Service': 'Service',
+            'NonInventory': 'NonInventory',
+            'Bundle': 'Bundle',
         }
     
         qbo_type = type_map.get(item_type)
