@@ -469,6 +469,20 @@ class MigrationOrchestrator:
 
         for record in source_data:
             try:
+                # Crash recovery: skip entities already created in a prior run
+                source_id = (
+                    record.get('ListID') or record.get('TxnID') or
+                    record.get('Id'))
+                if source_id:
+                    existing_qbo_id = qbo_client.was_entity_created(
+                        api_entity_type, source_id)
+                    if existing_qbo_id:
+                        if entity_name not in existing_maps:
+                            existing_maps[entity_name] = {}
+                        existing_maps[entity_name][source_id] = existing_qbo_id
+                        skipped_count += 1
+                        continue
+
                 # Transform to QBO format
                 # AUDIT FIX: Use the correct transform method
                 transformed = transformer.transform_entity(
@@ -1025,6 +1039,16 @@ class MigrationOrchestrator:
                     logger.warning(
                         f"Batch item {bid} ({api_entity_type}): "
                         f"unexpected response format")
+
+            # If QBO returned fewer responses than items sent, count
+            # the missing items as failures so counts stay consistent
+            accounted = len(success_mappings) + fail_count
+            unaccounted = len(batch_items) - accounted
+            if unaccounted > 0:
+                fail_count += unaccounted
+                logger.warning(
+                    f"Batch response for {api_entity_type} missing "
+                    f"{unaccounted} of {len(batch_items)} items")
 
         except Exception as e:
             # Entire batch request failed — count all items as failed

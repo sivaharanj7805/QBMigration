@@ -1649,3 +1649,401 @@ class TestBatchWithRealTransformer:
         assert success == 1
         assert skip >= 1  # At least INV-002 skipped
         assert existing_maps.get('Invoices', {}).get('INV-001') == '900'
+
+
+# ============================================================================
+# CORNER CASE: SEQUENTIAL FALLBACK CRASH RECOVERY
+# ============================================================================
+
+class TestSequentialFallbackCrashRecovery:
+    """
+    When source_data has ≤1 record, _migrate_entity_batch falls back to
+    the sequential _migrate_entity path. That path must also perform
+    crash recovery via was_entity_created().
+    """
+
+    def test_single_record_fallback_skips_already_migrated(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Single-record fallback checks was_entity_created and skips."""
+        records = [{'ListID': 'ACC-001', 'Name': 'Checking'}]
+
+        mock_qbo_client.was_entity_created.return_value = '42'
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert skip == 1
+        assert success == 0
+        assert fail == 0
+        # The restored mapping should be in existing_maps
+        assert existing_maps['Accounts']['ACC-001'] == '42'
+        # create_entity should NOT have been called
+        mock_qbo_client.create_entity.assert_not_called()
+        mock_transformer.transform_entity.assert_not_called()
+
+    def test_single_record_fallback_creates_when_not_migrated(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Single-record fallback creates entity when not previously migrated."""
+        records = [{'ListID': 'ACC-001', 'Name': 'Checking'}]
+
+        mock_qbo_client.was_entity_created.return_value = None
+        mock_transformer.transform_entity.return_value = {
+            'Name': 'Checking', 'AccountType': 'Bank'}
+        mock_qbo_client.create_entity.return_value = {
+            'Id': '99', 'SyncToken': '0'}
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert success == 1
+        assert fail == 0
+        assert existing_maps['Accounts']['ACC-001'] == '99'
+        mock_qbo_client.create_entity.assert_called_once()
+
+    def test_empty_records_returns_zeros(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Empty source_data returns (0, 0, 0) without calling any APIs."""
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Vendors', [],
+            {}, None)
+
+        assert success == 0
+        assert fail == 0
+        assert skip == 0
+        mock_qbo_client._make_request.assert_not_called()
+        mock_qbo_client.create_entity.assert_not_called()
+
+
+# ============================================================================
+# CORNER CASE: MISSING / EXTRA BATCH RESPONSES
+# ============================================================================
+
+class TestBatchResponseAccounting:
+    """
+    QBO may return fewer BatchItemResponse entries than we sent.
+    Missing items must be counted as failures.
+    """
+
+    def test_missing_responses_counted_as_failures(
+            self, orchestrator, mock_qbo_client):
+        """If QBO returns fewer responses, missing items are failed."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+            ('V-002', {'DisplayName': 'Vendor 2'}),
+            ('V-003', {'DisplayName': 'Vendor 3'}),
+        ]
+
+        # QBO only returns 1 response for 3 items sent
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "100", "SyncToken": "0"}},
+            ]
+        }
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        assert len(mappings) == 1
+        assert fail_count == 2  # V-002 and V-003 unaccounted
+
+    def test_all_responses_present_no_extra_failures(
+            self, orchestrator, mock_qbo_client):
+        """When all responses are present, no extra failures counted."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+            ('V-002', {'DisplayName': 'Vendor 2'}),
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "100", "SyncToken": "0"}},
+                {"bId": "bid_1", "Vendor": {"Id": "101", "SyncToken": "0"}},
+            ]
+        }
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        assert len(mappings) == 2
+        assert fail_count == 0
+
+    def test_partial_success_partial_fault_fully_accounted(
+            self, orchestrator, mock_qbo_client):
+        """Mix of successes and faults — all items accounted for."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+            ('V-002', {'DisplayName': 'Vendor 2'}),
+            ('V-003', {'DisplayName': 'Vendor 3'}),
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "100", "SyncToken": "0"}},
+                {"bId": "bid_1", "Fault": {
+                    "Error": [{"Message": "Duplicate name"}]}},
+                {"bId": "bid_2", "Vendor": {"Id": "102", "SyncToken": "0"}},
+            ]
+        }
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        assert len(mappings) == 2  # V-001 and V-003
+        assert fail_count == 1  # V-002 faulted
+        # Total accounted = 2 + 1 = 3 = len(batch_items), so no extra
+
+    def test_network_error_all_items_failed(
+            self, orchestrator, mock_qbo_client):
+        """Network exception counts all items as failed."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+            ('V-002', {'DisplayName': 'Vendor 2'}),
+        ]
+
+        mock_qbo_client._make_request.side_effect = ConnectionError("timeout")
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        assert len(mappings) == 0
+        assert fail_count == 2
+
+    def test_extra_bids_in_response_ignored_gracefully(
+            self, orchestrator, mock_qbo_client):
+        """Extra bIds in response that we didn't send don't cause errors."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+        ]
+
+        # QBO returns 2 responses but we only sent 1
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"Id": "100", "SyncToken": "0"}},
+                {"bId": "bid_99", "Vendor": {"Id": "999", "SyncToken": "0"}},
+            ]
+        }
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        # bid_0 matched, bid_99 is extra (source_id=None)
+        assert len(mappings) == 2  # Both are "successes" per response
+        # No unaccounted items (2 success + 0 fail >= 1 sent)
+        # Extra response doesn't cause negative unaccounted
+
+    def test_response_with_no_id_counted_as_failure(
+            self, orchestrator, mock_qbo_client):
+        """Entity in response but no 'Id' field is counted as failure."""
+        batch_items = [
+            ('V-001', {'DisplayName': 'Vendor 1'}),
+        ]
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Vendor": {"SyncToken": "0"}},  # No Id
+            ]
+        }
+
+        mappings, fail_count = orchestrator._send_batch_request(
+            mock_qbo_client, 'Vendor', batch_items, None)
+
+        assert len(mappings) == 0
+        assert fail_count == 1
+
+
+# ============================================================================
+# CORNER CASE: LAYER PROCESSING EDGE CASES
+# ============================================================================
+
+class TestLayerProcessingEdgeCases:
+    """Edge cases in parent-child layer splitting and processing."""
+
+    def test_deeply_nested_hierarchy(self, orchestrator):
+        """5 levels of parent-child nesting resolves correctly."""
+        records = [
+            {'ListID': 'L5', 'Name': 'Level 5', 'ParentRef': 'L4'},
+            {'ListID': 'L4', 'Name': 'Level 4', 'ParentRef': 'L3'},
+            {'ListID': 'L3', 'Name': 'Level 3', 'ParentRef': 'L2'},
+            {'ListID': 'L2', 'Name': 'Level 2', 'ParentRef': 'L1'},
+            {'ListID': 'L1', 'Name': 'Level 1'},  # root
+        ]
+
+        layers = orchestrator._split_parent_child_layers(records)
+
+        assert len(layers) == 5
+        # Root is in first layer
+        assert layers[0][0]['ListID'] == 'L1'
+        # Deepest child is in last layer
+        assert layers[4][0]['ListID'] == 'L5'
+
+    def test_multiple_roots_multiple_children(self, orchestrator):
+        """Multiple roots each with children split into 2 layers."""
+        records = [
+            {'ListID': 'R1', 'Name': 'Root 1'},
+            {'ListID': 'R2', 'Name': 'Root 2'},
+            {'ListID': 'C1', 'Name': 'Child of R1', 'ParentRef': 'R1'},
+            {'ListID': 'C2', 'Name': 'Child of R2', 'ParentRef': 'R2'},
+        ]
+
+        layers = orchestrator._split_parent_child_layers(records)
+
+        assert len(layers) == 2
+        root_ids = {r['ListID'] for r in layers[0]}
+        child_ids = {r['ListID'] for r in layers[1]}
+        assert root_ids == {'R1', 'R2'}
+        assert child_ids == {'C1', 'C2'}
+
+    def test_all_records_are_children_of_missing_parents(self, orchestrator):
+        """When all parents are missing, records dumped into single layer."""
+        records = [
+            {'ListID': 'C1', 'Name': 'Orphan 1', 'ParentRef': 'MISSING'},
+            {'ListID': 'C2', 'Name': 'Orphan 2', 'ParentRef': 'MISSING'},
+        ]
+
+        layers = orchestrator._split_parent_child_layers(records)
+
+        # All placed in one layer (orphan handling)
+        assert len(layers) == 1
+        assert len(layers[0]) == 2
+
+    def test_parent_child_with_batch_creates_layers_sequentially(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """
+        Parent layer batch completes before child layer starts.
+        Verifies layer ordering: parent QBO IDs available for children.
+        """
+        records = [
+            {'ListID': 'P1', 'Name': 'Parent'},
+            {'ListID': 'C1', 'Name': 'Child', 'ParentRef': 'P1'},
+        ]
+
+        mock_transformer.transform_entity.return_value = {'Name': 'Entity'}
+
+        # Track call order
+        call_order = []
+
+        def track_make_request(*args, **kwargs):
+            data = args[2] if len(args) > 2 else kwargs.get('data', {})
+            batch_items = data.get('BatchItemRequest', [])
+            bids = [item.get('bId') for item in batch_items]
+            call_order.append(bids)
+
+            responses = []
+            for item in batch_items:
+                bid = item['bId']
+                responses.append({
+                    "bId": bid,
+                    "Account": {"Id": f"QBO-{bid}", "SyncToken": "0"}
+                })
+            return {"BatchItemResponse": responses}
+
+        mock_qbo_client._make_request.side_effect = track_make_request
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert success == 2
+        # Layer 0 (parent) processed before Layer 1 (child)
+        assert len(call_order) == 2
+        assert call_order[0] == ['bid_0']  # Parent layer
+        assert call_order[1] == ['bid_0']  # Child layer
+
+    def test_single_layer_for_flat_entity_types(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Flat entity types (Invoices, Bills) skip layer splitting."""
+        records = [
+            {'TxnID': 'INV-001', 'RefNumber': '1001'},
+            {'TxnID': 'INV-002', 'RefNumber': '1002'},
+        ]
+
+        mock_transformer.transform_entity.return_value = {
+            'CustomerRef': {'value': '10'}, 'Line': []}
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Invoice": {"Id": "500", "SyncToken": "0"}},
+                {"bId": "bid_1", "Invoice": {"Id": "501", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Invoices', records,
+            existing_maps, None)
+
+        assert success == 2
+        # Only 1 _make_request call (no layer splitting)
+        assert mock_qbo_client._make_request.call_count == 1
+
+
+# ============================================================================
+# CORNER CASE: DEDUP ACROSS DEPENDENCY LAYERS
+# ============================================================================
+
+class TestDedupAcrossLayers:
+    """Crash recovery between dependency layers within a single entity type."""
+
+    def test_parent_already_migrated_child_still_creates(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """
+        Parent was migrated in prior run (deduped), child is new.
+        The restored parent mapping must be available for child transform.
+        """
+        records = [
+            {'ListID': 'P1', 'Name': 'Parent'},
+            {'ListID': 'C1', 'Name': 'Child', 'ParentRef': 'P1'},
+        ]
+
+        # P1 already created with QBO ID 42
+        def was_entity_created(entity_type, qbd_id):
+            if qbd_id == 'P1':
+                return '42'
+            return None
+
+        mock_qbo_client.was_entity_created.side_effect = was_entity_created
+
+        mock_transformer.transform_entity.return_value = {
+            'Name': 'Child', 'ParentRef': {'value': '42'}}
+
+        mock_qbo_client._make_request.return_value = {
+            "BatchItemResponse": [
+                {"bId": "bid_0", "Account": {"Id": "99", "SyncToken": "0"}},
+            ]
+        }
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert skip == 1   # P1 deduped
+        assert success == 1  # C1 created
+        assert existing_maps['Accounts']['P1'] == '42'
+        assert existing_maps['Accounts']['C1'] == '99'
+
+    def test_all_layers_already_migrated(
+            self, orchestrator, mock_qbo_client, mock_transformer):
+        """Full parent-child hierarchy already migrated — no API calls."""
+        records = [
+            {'ListID': 'P1', 'Name': 'Parent'},
+            {'ListID': 'C1', 'Name': 'Child', 'ParentRef': 'P1'},
+        ]
+
+        mock_qbo_client.was_entity_created.return_value = '42'
+
+        existing_maps = {}
+        success, fail, skip = orchestrator._migrate_entity_batch(
+            mock_qbo_client, mock_transformer, 'Accounts', records,
+            existing_maps, None)
+
+        assert skip == 2
+        assert success == 0
+        assert fail == 0
+        mock_qbo_client._make_request.assert_not_called()
+        mock_transformer.transform_entity.assert_not_called()
