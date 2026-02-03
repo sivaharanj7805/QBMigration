@@ -249,7 +249,6 @@ class CasewareExporter:
             'Account Description',
             'Type',
             'Lead Sheet Code',
-            'Prior Year Balance',
             'Current Year Balance',
             'Debit',
             'Credit',
@@ -266,18 +265,32 @@ class CasewareExporter:
                 logger.warning(f"Skipping non-dict account: {type(account).__name__}")
                 continue
             
-            # Extract account details
-            acct_num = self._sanitize_csv_value(account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', ''))
-            acct_name = self._sanitize_csv_value(account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account'))
+            # Extract raw account details (before sanitization)
+            raw_acct_num = str(account.get('accountNumber') or account.get('AccountNumber') or account.get('AcctNum', ''))
+            raw_acct_name = str(account.get('name') or account.get('Name') or account.get('FullName', 'Unknown Account'))
             acct_type = account.get('accountType') or account.get('AccountType', 'Other')
             balance = self._to_decimal(account.get('balance') or account.get('Balance') or account.get('CurrentBalance', 0))
-            
+
+            # Hash on ORIGINAL values for verification
+            hash_data = {
+                'AccountNumber': raw_acct_num,
+                'Name': raw_acct_name,
+                'Type': acct_type,
+                'Balance': str(balance),
+                'AsOfDate': as_of_date
+            }
+            integrity_hash = self.compute_sha256_hash(hash_data)
+
+            # THEN sanitize for CSV output
+            acct_num = self._sanitize_csv_value(raw_acct_num)
+            acct_name = self._sanitize_csv_value(raw_acct_name)
+
             # Determine type code
             type_code = self.leadsheet_mapper.get_type_code(acct_type)
 
             # FIX #33: Get Lead Sheet code from locale-aware mapper
             lead_sheet = self.leadsheet_mapper.get_lead_sheet_code(acct_type)
-            
+
             # Determine debit/credit
             if acct_type in self.DEBIT_TYPES:
                 debit = balance if balance >= 0 else Decimal('0')
@@ -285,19 +298,10 @@ class CasewareExporter:
             else:
                 credit = balance if balance >= 0 else Decimal('0')
                 debit = abs(balance) if balance < 0 else Decimal('0')
-            
+
             total_debits += debit
             total_credits += credit
-            
-            # Compute integrity hash
-            hash_data = {
-                'AccountNumber': acct_num,
-                'Name': acct_name,
-                'Type': acct_type,
-                'Balance': str(balance),
-                'AsOfDate': as_of_date
-            }
-            integrity_hash = self.compute_sha256_hash(hash_data)
+
             # CRITICAL FIX: Thread-safe stats update
             with self._stats_lock:
                 self.stats['hashes_generated'] += 1
@@ -307,7 +311,6 @@ class CasewareExporter:
                 acct_name,
                 type_code,
                 lead_sheet,
-                '',  # Prior year balance (can be populated from prior period data)
                 f"{balance:.2f}",
                 f"{debit:.2f}",
                 f"{credit:.2f}",
@@ -322,7 +325,6 @@ class CasewareExporter:
         rows.append([
             '',
             'TOTALS',
-            '',
             '',
             '',
             '',
@@ -576,11 +578,10 @@ COLUMN MAPPING:
    Column 1: Account Description -> Map to: Account Description
    Column 2: Type               -> Map to: (Ignore - for reference)
    Column 3: Lead Sheet Code    -> Map to: Lead Sheet
-   Column 4: Prior Year Balance -> Map to: Prior Year Balance
-   Column 5: Current Year Balance -> Map to: Current Balance
-   Column 6: Debit              -> Map to: Debit
-   Column 7: Credit             -> Map to: Credit
-   Column 8: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
+   Column 4: Current Year Balance -> Map to: Current Balance
+   Column 5: Debit              -> Map to: Debit
+   Column 6: Credit             -> Map to: Credit
+   Column 7: Forensic_Integrity_Hash -> Map to: (Ignore - for verification)
 
 ================================================================================
                      STEP 2: IMPORT GENERAL LEDGER
@@ -673,7 +674,7 @@ For technical support: support@forensicbridge.com
                     "has_header": True,
                     "columns": [
                         "Account Number", "Account Description", "Type",
-                        "Lead Sheet Code", "Prior Year Balance",
+                        "Lead Sheet Code",
                         "Current Year Balance", "Debit", "Credit",
                         "Forensic_Integrity_Hash"
                     ]
@@ -831,9 +832,9 @@ For technical support: support@forensicbridge.com
     # All transaction types to collect
     TXN_TYPES = [
         'invoices', 'bills', 'receivePayments', 'billPayments',
-        'creditMemos', 'salesReceipts', 'estimates',
+        'creditMemos', 'salesReceipts',
         'journalEntries', 'checks', 'deposits', 'transfers',
-        'vendorCredits', 'purchaseOrders', 'salesOrders',
+        'vendorCredits',
         'refundReceipts', 'inventoryAdjustments', 'taxPayments'
     ]
     
@@ -891,6 +892,17 @@ For technical support: support@forensicbridge.com
             logger.warning(f"Could not convert value to Decimal: {value}, error: {e}")
             return Decimal('0')
     
+    def _singularize(self, name: str) -> str:
+        """Singularize entity type name for lookup."""
+        name = name.lower()
+        if name.endswith('ies'):
+            return name[:-3] + 'y'  # journalentries -> journalentry
+        elif name.endswith('ses'):
+            return name[:-2]  # purchases -> purchase
+        elif name.endswith('s') and not name.endswith('ss'):
+            return name[:-1]  # invoices -> invoice, bills -> bill
+        return name
+
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """FIX #5: Parse date string to datetime object with multiple format support."""
         if not date_str:
@@ -936,7 +948,8 @@ For technical support: support@forensicbridge.com
 
         # Check first character
         if str_value[0] in DANGEROUS_CHARS:
-            str_value = "'" + str_value
+            str_value = str_value[1:]  # Remove the dangerous leading character
+            logger.debug(f"Stripped CSV injection character from value")
 
         return str_value
     
@@ -944,20 +957,21 @@ For technical support: support@forensicbridge.com
     CONTRA_ACCOUNT_MAP = {
         'invoice': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
         'payment': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
-        'receivepayment': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
+        'receivepayment': ('1000', 'Cash/Bank', 'Bank'),
         'bill': ('2000', 'Accounts Payable', 'Accounts Payable'),
         'billpayment': ('2000', 'Accounts Payable', 'Accounts Payable'),
         'salesreceipt': ('1000', 'Undeposited Funds', 'Bank'),
         'creditmemo': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
         'vendorcredit': ('2000', 'Accounts Payable', 'Accounts Payable'),
         'refundreceipt': ('1000', 'Undeposited Funds', 'Bank'),
-        'deposit': ('1200', 'Accounts Receivable', 'Accounts Receivable'),
+        'deposit': ('4000', 'Income/Various', 'Income'),
         'check': ('1000', 'Cash/Bank', 'Bank'),
         'expense': ('1000', 'Cash/Bank', 'Bank'),
         'purchase': ('1000', 'Cash/Bank', 'Bank'),
         'transfer': ('1000', 'Transfer Account', 'Bank'),
         'taxpayment': ('2100', 'Tax Payable', 'Other Current Liability'),
         'charge': ('2000', 'Accounts Payable', 'Accounts Payable'),
+        'inventoryadjustment': ('5100', 'Inventory Adjustment', 'CostOfGoodsSold'),
     }
 
     def _create_gl_rows(self, txn: Dict, line_item: Optional[Dict], txn_date: str) -> List[List]:
@@ -1052,7 +1066,7 @@ For technical support: support@forensicbridge.com
         rows = [primary_row]
 
         # Double-entry: create the offsetting contra entry
-        txn_type_lower = (txn_type or '').lower().rstrip('s')
+        txn_type_lower = self._singularize(txn_type or '')
         contra_info = self.CONTRA_ACCOUNT_MAP.get(txn_type_lower)
 
         if contra_info and (debit > 0 or credit > 0):
@@ -1091,7 +1105,7 @@ For technical support: support@forensicbridge.com
                 formatted_date,
                 ref_number,
                 memo[:255] if memo else '',
-                f"{amount:.2f}",
+                f"{-amount:.2f}",
                 f"{contra_debit:.2f}",
                 f"{contra_credit:.2f}",
                 contra_hash
@@ -1115,9 +1129,9 @@ For technical support: support@forensicbridge.com
         - Invoices increase A/R (debit)
         - Journal entries need special handling (have explicit debit/credit)
         """
-        # Normalize: lowercase and strip trailing 's' for plural->singular matching
-        # This handles 'invoices'->'invoice', 'bills'->'bill', etc.
-        txn_type_lower = (txn_type or '').lower().rstrip('s')
+        # Normalize: singularize for plural->singular matching
+        # This handles 'invoices'->'invoice', 'journalEntries'->'journalentry', etc.
+        txn_type_lower = self._singularize(txn_type or '')
 
         # Debit transactions (increase asset or reduce liability)
         debit_types = {

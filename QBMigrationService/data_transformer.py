@@ -507,48 +507,48 @@ class QBDataTransformer:
             'cash and cash equivalents': ('Bank', 'CashOnHand'),
 
             # AR
-            'accounts receivable': ('Accounts Receivable', 'AccountsReceivable'),
+            'accounts receivable': ('AccountsReceivable', 'AccountsReceivable'),
 
             # Current Assets
-            'other current asset': ('Other Current Assets', None),
-            'inventory': ('Other Current Assets', 'Inventory'),
-            'prepaid expenses': ('Other Current Assets', 'PrepaidExpenses'),
-            'employee advances': ('Other Current Assets', None),
-            'loans to others': ('Other Current Assets', None),
-            'security deposits': ('Other Current Assets', None),
-            'undeposited funds': ('Other Current Assets', 'UndepositedFunds'),
-            'trust account': ('Other Current Assets', None),
+            'other current asset': ('OtherCurrentAsset', None),
+            'inventory': ('OtherCurrentAsset', 'Inventory'),
+            'prepaid expenses': ('OtherCurrentAsset', 'PrepaidExpenses'),
+            'employee advances': ('OtherCurrentAsset', None),
+            'loans to others': ('OtherCurrentAsset', None),
+            'security deposits': ('OtherCurrentAsset', None),
+            'undeposited funds': ('OtherCurrentAsset', 'UndepositedFunds'),
+            'trust account': ('OtherCurrentAsset', None),
 
             # Fixed Assets
-            'fixed asset': ('Fixed Assets', 'Furniture'),
-            'buildings': ('Fixed Assets', None),
-            'equipment': ('Fixed Assets', None),
-            'furniture': ('Fixed Assets', 'Furniture'),
-            'land': ('Fixed Assets', None),
-            'vehicles': ('Fixed Assets', None),
-            'accumulated depreciation': ('Fixed Assets', 'AccumulatedDepreciation'),
+            'fixed asset': ('FixedAsset', 'Furniture'),
+            'buildings': ('FixedAsset', None),
+            'equipment': ('FixedAsset', None),
+            'furniture': ('FixedAsset', 'Furniture'),
+            'land': ('FixedAsset', None),
+            'vehicles': ('FixedAsset', None),
+            'accumulated depreciation': ('FixedAsset', 'AccumulatedDepreciation'),
             
             # Other Assets
-            'other asset': ('Other Assets', None),
-            'long-term assets': ('Other Assets', None),
+            'other asset': ('OtherAsset', None),
+            'long-term assets': ('OtherAsset', None),
             
             # AP
-            'accounts payable': ('Accounts Payable', 'AccountsPayable'),
+            'accounts payable': ('AccountsPayable', 'AccountsPayable'),
 
             # Credit Cards
-            'credit card': ('Credit Card', 'CreditCard'),
+            'credit card': ('CreditCard', 'CreditCard'),
             
             # Current Liabilities
-            'other current liability': ('Other Current Liabilities', None),
-            'sales tax payable': ('Other Current Liabilities', None),
-            'payroll liabilities': ('Other Current Liabilities', None),
-            'notes payable': ('Other Current Liabilities', None),
-            'line of credit': ('Other Current Liabilities', None),
+            'other current liability': ('OtherCurrentLiability', None),
+            'sales tax payable': ('OtherCurrentLiability', None),
+            'payroll liabilities': ('OtherCurrentLiability', None),
+            'notes payable': ('OtherCurrentLiability', None),
+            'line of credit': ('OtherCurrentLiability', None),
             
             # Long-term Liabilities
-            'long-term liability': ('Long Term Liabilities', None),
-            'mortgage': ('Long Term Liabilities', None),
-            'loans': ('Long Term Liabilities', None),
+            'long-term liability': ('LongTermLiability', None),
+            'mortgage': ('LongTermLiability', None),
+            'loans': ('LongTermLiability', None),
             
             # Equity
             'equity': ('Equity', None),
@@ -565,17 +565,17 @@ class QBDataTransformer:
             'sales': ('Income', None),
             'service income': ('Income', None),
             'discounts given': ('Income', None),
-            'other income': ('Other Income', None),
-            'interest income': ('Other Income', 'InterestEarned'),
-            'dividend income': ('Other Income', None),
-            'exchange gain or loss': ('Other Income', None),
+            'other income': ('OtherIncome', None),
+            'interest income': ('OtherIncome', 'InterestEarned'),
+            'dividend income': ('OtherIncome', None),
+            'exchange gain or loss': ('OtherIncome', None),
             
             # COGS
-            'cost of goods sold': ('Cost of Goods Sold', 'SuppliesMaterialsCogs'),
-            'materials': ('Cost of Goods Sold', None),
-            'labor': ('Cost of Goods Sold', None),
-            'shipping': ('Cost of Goods Sold', None),
-            'cost of labor': ('Cost of Goods Sold', 'CostOfLaborCos'),
+            'cost of goods sold': ('CostOfGoodsSold', 'SuppliesMaterialsCogs'),
+            'materials': ('CostOfGoodsSold', None),
+            'labor': ('CostOfGoodsSold', None),
+            'shipping': ('CostOfGoodsSold', None),
+            'cost of labor': ('CostOfGoodsSold', 'CostOfLaborCos'),
             
             # Expenses
             'expense': ('Expense', None),
@@ -602,7 +602,7 @@ class QBDataTransformer:
             'wages': ('Expense', None),
             
             # Other Expense
-            'other expense': ('Other Expense', None),
+            'other expense': ('OtherExpense', None),
         }
     
     # ========================================================================
@@ -1191,16 +1191,16 @@ class QBDataTransformer:
             # Unknown account type - add to manual review
             logger.warning(
                 f"Unknown account type '{account_type}' for account '{account_name}' "
-                f"- defaulting to 'Other Current Assets' for safety"
+                f"- defaulting to 'OtherCurrentAsset' for safety"
             )
             self.add_manual_review(
                 entity_type='Account',
                 name=account_name,
                 reason=f"Unknown account type: '{qbd.get('AccountType', '')}' - verify classification"
             )
-            # Default to 'Other Current Assets' which is safer than 'Expense'
+            # Default to 'OtherCurrentAsset' which is safer than 'Expense'
             # (Expense would affect P&L incorrectly for balance sheet accounts)
-            qbo_type_info = ('Other Current Assets', None)
+            qbo_type_info = ('OtherCurrentAsset', None)
 
         qbo = {
             'Name': self.sanitize_name(account_name),
@@ -1215,7 +1215,7 @@ class QBDataTransformer:
             qbo['Description'] = qbd['Description'][:1000]
 
         if qbd.get('AccountNumber'):
-            qbo['AcctNum'] = qbd['AccountNumber']
+            qbo['AcctNum'] = qbd['AccountNumber'][:7]
 
         if qbd.get('ParentRef'):
             parent_id = self.map_id('accounts', qbd['ParentRef'])
@@ -1235,13 +1235,13 @@ class QBDataTransformer:
         # Expenses: Increase with debits, decrease with credits
         DEBIT_NORMAL_ACCOUNT_TYPES = {
             'Bank',
-            'Accounts Receivable',
-            'Other Current Assets',
-            'Fixed Assets',
-            'Other Assets',
-            'Cost of Goods Sold',
+            'AccountsReceivable',
+            'OtherCurrentAsset',
+            'FixedAsset',
+            'OtherAsset',
+            'CostOfGoodsSold',
             'Expense',
-            'Other Expense',
+            'OtherExpense',
             # AUDIT FIX: Missing account types that are debit-normal
             'Inventory',              # Asset - debit normal
             'Prepaid Expenses',       # Asset - debit normal (non-standard but used)
@@ -1298,10 +1298,15 @@ class QBDataTransformer:
             qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
 
         if qbd.get('Phone'):
-            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:30]}
 
         if qbd.get('BillAddress'):
             qbo['BillAddr'] = self._transform_address(qbd['BillAddress'])
+
+        if qbd.get('ShipAddress'):
+            qbo['ShipAddr'] = self._transform_address(qbd['ShipAddress'])
+        elif qbd.get('ShipTo'):
+            qbo['ShipAddr'] = self._transform_address(qbd['ShipTo'])
 
         if qbd.get('ParentRef'):
             parent_id = self.map_id('customers', qbd['ParentRef'])
@@ -1361,7 +1366,7 @@ class QBDataTransformer:
             qbo['DueDate'] = self.format_date(qbd['DueDate'])
 
         if qbd.get('RefNumber'):
-            qbo['DocNumber'] = qbd['RefNumber']
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
 
         for line in qbd.get('ExpenseLines', []):
             account_id = self.map_id('accounts', line.get('AccountRef'))
@@ -1424,6 +1429,15 @@ class QBDataTransformer:
                     qbo['CheckPayment'] = {
                         'BankAccountRef': {'value': bank_id}
                     }
+        elif qbd.get('PayType') == 'CreditCard':
+            qbo['PayType'] = 'CreditCard'
+            cc_ref = qbd.get('CreditCardAccountRef') or qbd.get('CreditCardAccount')
+            if cc_ref:
+                cc_id = self.map_id('accounts', cc_ref)
+                if cc_id:
+                    qbo['CreditCardPayment'] = {'CCAccountRef': {'value': cc_id}}
+        else:
+            qbo['PayType'] = 'Check'  # Default
 
         for applied in qbd.get('AppliedToBills', []):
             bill_id = self.map_id('bills', applied.get('BillRef'))
@@ -1527,12 +1541,14 @@ class QBDataTransformer:
 
         if qbd.get('EntityRef'):
             entity_ref_type = qbd['EntityRef'].get('Type', 'Invoice').lower() + 's'
-            qbo['AttachableRef'] = [{
-                'EntityRef': {
-                    'type': qbd['EntityRef'].get('Type', 'Invoice'),
-                    'value': self.map_id(entity_ref_type, qbd['EntityRef'].get('Id'))
-                }
-            }]
+            mapped_id = self.map_id(entity_ref_type, qbd['EntityRef'].get('Id'))
+            if mapped_id:
+                qbo['AttachableRef'] = [{
+                    'EntityRef': {
+                        'type': qbd['EntityRef'].get('Type', 'Invoice'),
+                        'value': mapped_id
+                    }
+                }]
 
         self._store_entity_mapping('attachables', qbd)
         return qbo
@@ -1577,7 +1593,7 @@ class QBDataTransformer:
         }
 
         if qbd.get('RefNumber'):
-            qbo['DocNumber'] = qbd['RefNumber']
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
 
         for line in qbd.get('EstimateLines', []):
             item_id = self.map_id('items', line.get('ItemRef'))
@@ -1620,7 +1636,7 @@ class QBDataTransformer:
         }
 
         if qbd.get('RefNumber'):
-            qbo['DocNumber'] = qbd['RefNumber']
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
 
         if qbd.get('DueDate'):
             qbo['DueDate'] = self.format_date(qbd['DueDate'])
@@ -1703,11 +1719,17 @@ class QBDataTransformer:
             qbo['InvStartDate'] = self.format_date(qbd.get('AsOfDate'))
 
             if qbd.get('AssetAccountRef'):
-                qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
+                mapped_id = self.map_id('accounts', qbd['AssetAccountRef'])
+                if mapped_id:
+                    qbo['AssetAccountRef'] = {'value': mapped_id}
             if qbd.get('IncomeAccountRef'):
-                qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
+                mapped_id = self.map_id('accounts', qbd['IncomeAccountRef'])
+                if mapped_id:
+                    qbo['IncomeAccountRef'] = {'value': mapped_id}
             if qbd.get('ExpenseAccountRef'):
-                qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['ExpenseAccountRef'])}
+                mapped_id = self.map_id('accounts', qbd['ExpenseAccountRef'])
+                if mapped_id:
+                    qbo['ExpenseAccountRef'] = {'value': mapped_id}
 
         self._store_entity_mapping('items', qbd)
         return qbo
@@ -1788,13 +1810,19 @@ class QBDataTransformer:
             qbo['Description'] = qbd['Description'][:4000]
 
         if qbd.get('IncomeAccountRef'):
-            qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
+            mapped_id = self.map_id('accounts', qbd['IncomeAccountRef'])
+            if mapped_id:
+                qbo['IncomeAccountRef'] = {'value': mapped_id}
 
         if qbd.get('COGSAccountRef'):
-            qbo['ExpenseAccountRef'] = {'value': self.map_id('accounts', qbd['COGSAccountRef'])}
+            mapped_id = self.map_id('accounts', qbd['COGSAccountRef'])
+            if mapped_id:
+                qbo['ExpenseAccountRef'] = {'value': mapped_id}
 
         if qbd.get('AssetAccountRef'):
-            qbo['AssetAccountRef'] = {'value': self.map_id('accounts', qbd['AssetAccountRef'])}
+            mapped_id = self.map_id('accounts', qbd['AssetAccountRef'])
+            if mapped_id:
+                qbo['AssetAccountRef'] = {'value': mapped_id}
 
         if qbd.get('SalesPrice'):
             qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
@@ -1837,7 +1865,9 @@ class QBDataTransformer:
             qbo['UnitPrice'] = self.to_decimal(qbd['SalesPrice'])
 
         if qbd.get('IncomeAccountRef'):
-            qbo['IncomeAccountRef'] = {'value': self.map_id('accounts', qbd['IncomeAccountRef'])}
+            mapped_id = self.map_id('accounts', qbd['IncomeAccountRef'])
+            if mapped_id:
+                qbo['IncomeAccountRef'] = {'value': mapped_id}
 
         self.manual_review.append({
             'type': 'ASSEMBLY_CONVERTED_TO_SERVICE',
@@ -1880,26 +1910,32 @@ class QBDataTransformer:
     def transform_deposit(self, qbd: Dict) -> Dict:
         """Transform Deposit."""
         qbo = {
-            'DepositToAccountRef': {'value': self.map_id('accounts', qbd.get('DepositToAccountRef'))},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
+        mapped_id = self.map_id('accounts', qbd.get('DepositToAccountRef'))
+        if mapped_id:
+            qbo['DepositToAccountRef'] = {'value': mapped_id}
+
         for line in qbd.get('DepositLines', []):
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
             qbo_line = {
                 'Amount': self.to_decimal(line.get('Amount', 0)),
                 'DetailType': 'DepositLineDetail',
-                'DepositLineDetail': {
-                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-                }
+                'DepositLineDetail': {}
             }
-        
+            if acct_id:
+                qbo_line['DepositLineDetail']['AccountRef'] = {'value': acct_id}
+
             if line.get('LinkedTxn'):
-                qbo_line['LinkedTxn'] = [{
-                    'TxnId': self.map_id('payments', line['LinkedTxn'].get('TxnId')),
-                    'TxnType': 'Payment'
-                }]
-        
+                txn_id = self.map_id('payments', line['LinkedTxn'].get('TxnId'))
+                if txn_id:
+                    qbo_line['LinkedTxn'] = [{
+                        'TxnId': txn_id,
+                        'TxnType': 'Payment'
+                    }]
+
             qbo['Line'].append(qbo_line)
 
         self._store_entity_mapping('deposits', qbd)
@@ -1924,7 +1960,7 @@ class QBDataTransformer:
             qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
     
         if qbd.get('Phone'):
-            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:30]}
     
         # SSN - MUST BE MASKED for privacy
         # CRITICAL FIX: Actually mask SSN instead of just commenting about it
@@ -1946,19 +1982,25 @@ class QBDataTransformer:
     def transform_inventoryadjustment(self, qbd: Dict) -> Dict:
         """Transform InventoryAdjustment."""
         qbo = {
-            'AdjustAccountRef': {'value': self.map_id('accounts', qbd.get('AdjustAccountRef'))},
             'TxnDate': self.format_date(qbd.get('TxnDate')),
             'Line': []
         }
-    
+
+        mapped_id = self.map_id('accounts', qbd.get('AdjustAccountRef'))
+        if mapped_id:
+            qbo['AdjustAccountRef'] = {'value': mapped_id}
+
         for line in qbd.get('AdjustmentLines', []):
-            qbo['Line'].append({
+            item_id = self.map_id('items', line.get('ItemRef'))
+            qbo_line = {
                 'DetailType': 'ItemAdjustmentLineDetail',
                 'ItemAdjustmentLineDetail': {
-                    'ItemRef': {'value': self.map_id('items', line.get('ItemRef'))},
                     'QtyDiff': self.to_decimal(line.get('QuantityDifference', 0))
                 }
-            })
+            }
+            if item_id:
+                qbo_line['ItemAdjustmentLineDetail']['ItemRef'] = {'value': item_id}
+            qbo['Line'].append(qbo_line)
 
         self._store_entity_mapping('inventoryadjustments', qbd)
         return qbo
@@ -1986,7 +2028,7 @@ class QBDataTransformer:
         }
     
         if qbd.get('RefNumber'):
-            qbo['DocNumber'] = qbd['RefNumber']
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
     
         debit_total = Decimal('0')
         credit_total = Decimal('0')
@@ -1995,14 +2037,16 @@ class QBDataTransformer:
             amount = self.to_decimal(line.get('Amount', 0))
             posting_type = line.get('PostingType', 'Debit')
         
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
             qbo_line = {
                 'Amount': amount,
                 'DetailType': 'JournalEntryLineDetail',
                 'JournalEntryLineDetail': {
-                    'PostingType': posting_type,
-                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
+                    'PostingType': posting_type
                 }
             }
+            if acct_id:
+                qbo_line['JournalEntryLineDetail']['AccountRef'] = {'value': acct_id}
         
             if line.get('Description'):
                 qbo_line['Description'] = line['Description'][:4000]
@@ -2094,22 +2138,28 @@ class QBDataTransformer:
         }
 
         if qbd.get('AccountRef'):
-            qbo['AccountRef'] = {'value': self.map_id('accounts', qbd['AccountRef'])}
+            mapped_id = self.map_id('accounts', qbd['AccountRef'])
+            if mapped_id:
+                qbo['AccountRef'] = {'value': mapped_id}
 
         if qbd.get('VendorRef'):
-            qbo['EntityRef'] = {
-                'Type': 'Vendor',
-                'value': self.map_id('vendors', qbd['VendorRef'])
-            }
+            mapped_id = self.map_id('vendors', qbd['VendorRef'])
+            if mapped_id:
+                qbo['EntityRef'] = {
+                    'Type': 'Vendor',
+                    'value': mapped_id
+                }
 
         for line in qbd.get('ExpenseLines', []):
-            qbo['Line'].append({
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
+            qbo_line = {
                 'DetailType': 'AccountBasedExpenseLineDetail',
                 'Amount': self.to_decimal(line.get('Amount', 0)),
-                'AccountBasedExpenseLineDetail': {
-                    'AccountRef': {'value': self.map_id('accounts', line.get('AccountRef'))}
-                }
-            })
+                'AccountBasedExpenseLineDetail': {}
+            }
+            if acct_id:
+                qbo_line['AccountBasedExpenseLineDetail']['AccountRef'] = {'value': acct_id}
+            qbo['Line'].append(qbo_line)
 
         self._store_entity_mapping('purchases', qbd)
         return qbo
@@ -2290,7 +2340,7 @@ class QBDataTransformer:
             qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
 
         if qbd.get('Phone'):
-            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:20]}
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:30]}
 
         if qbd.get('Address'):
             qbo['BillAddr'] = self._transform_address(qbd['Address'])
@@ -2330,12 +2380,13 @@ class QBDataTransformer:
         }
 
         if qbd.get('TaxRates'):
-            qbo['SalesTaxRateList'] = {
-                'TaxRateDetail': [
-                    {'TaxRateRef': {'value': self.map_id('tax_rates', rate)}}
-                    for rate in qbd['TaxRates']
-                ]
-            }
+            tax_rate_details = []
+            for rate in qbd['TaxRates']:
+                mapped_id = self.map_id('tax_rates', rate)
+                if mapped_id:
+                    tax_rate_details.append({'TaxRateRef': {'value': mapped_id}})
+            if tax_rate_details:
+                qbo['SalesTaxRateList'] = {'TaxRateDetail': tax_rate_details}
 
         self._store_entity_mapping('tax_codes', qbd)
         return qbo
@@ -2346,9 +2397,11 @@ class QBDataTransformer:
         qbo = {
             'Name': self.sanitize_name(qbd.get('Name', 'Tax Rate')),
             'RateValue': self.to_decimal(qbd.get('Rate', 0)),
-            'AgencyRef': {'value': self.map_id('tax_agencies', qbd.get('AgencyRef'))},
             'Active': self._to_bool(qbd.get('IsActive', True))
         }
+        mapped_id = self.map_id('tax_agencies', qbd.get('AgencyRef'))
+        if mapped_id:
+            qbo['AgencyRef'] = {'value': mapped_id}
         self._store_entity_mapping('tax_rates', qbd)
         return qbo
 
@@ -2394,9 +2447,13 @@ class QBDataTransformer:
         }
 
         if qbo['NameOf'] == 'Employee':
-            qbo['EmployeeRef'] = {'value': self.map_id('employees', qbd.get('EmployeeRef'))}
+            mapped_id = self.map_id('employees', qbd.get('EmployeeRef'))
+            if mapped_id:
+                qbo['EmployeeRef'] = {'value': mapped_id}
         else:
-            qbo['VendorRef'] = {'value': self.map_id('vendors', qbd.get('VendorRef'))}
+            mapped_id = self.map_id('vendors', qbd.get('VendorRef'))
+            if mapped_id:
+                qbo['VendorRef'] = {'value': mapped_id}
 
         if qbd.get('Hours') is not None:
             try:
@@ -2410,10 +2467,14 @@ class QBDataTransformer:
                 pass
 
         if qbd.get('CustomerRef'):
-            qbo['CustomerRef'] = {'value': self.map_id('customers', qbd['CustomerRef'])}
+            mapped_id = self.map_id('customers', qbd['CustomerRef'])
+            if mapped_id:
+                qbo['CustomerRef'] = {'value': mapped_id}
 
         if qbd.get('ItemRef'):
-            qbo['ItemRef'] = {'value': self.map_id('items', qbd['ItemRef'])}
+            mapped_id = self.map_id('items', qbd['ItemRef'])
+            if mapped_id:
+                qbo['ItemRef'] = {'value': mapped_id}
 
         qbo['BillableStatus'] = qbd.get('BillableStatus', 'NotBillable')
 

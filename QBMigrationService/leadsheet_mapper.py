@@ -389,11 +389,29 @@ class LeadSheetMapper:
         else:
             default_code = 'X9'
 
-        # Try exact match first, then title case, then normalized title case
-        return (codes.get(account_type) or
-                codes.get(account_type.title()) or
-                codes.get(account_type.lower().replace(' ', '').title()) or
-                default_code)
+        # Normalize: try exact, then title case, then add/remove trailing 's'
+        normalized = account_type.strip()
+        code = codes.get(normalized)
+        if not code:
+            code = codes.get(normalized.title())
+        if not code:
+            # Try plural
+            code = codes.get(normalized + 's')
+        if not code:
+            # Try singular (remove trailing s)
+            if normalized.endswith('s'):
+                code = codes.get(normalized[:-1])
+        if not code:
+            # Try title-cased plural
+            code = codes.get(normalized.title() + 's')
+        if not code:
+            # Try title-cased singular
+            if normalized.title().endswith('s'):
+                code = codes.get(normalized.title()[:-1])
+        if not code:
+            code = default_code
+
+        return code
 
     def get_type_code(self, account_type: str) -> str:
         """

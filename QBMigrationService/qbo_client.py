@@ -347,32 +347,35 @@ class PremiumQBOClient:
     def get_synctoken(self, entity_type: str, qbo_id: str) -> str:
         """
         FIX #33, #124: Retrieve current SyncToken for entity
+        FIX: Acquire db_lock FIRST, then synctoken_lock to match lock ordering
+        in record_created() and prevent deadlocks.
         """
-        # Check cache first
-        with self.synctoken_lock:
-            if (entity_type, qbo_id) in self.synctoken_cache:
-                return self.synctoken_cache[(entity_type, qbo_id)]
-        
-        # Query database
         with self.db_lock:
+            with self.synctoken_lock:
+                # Check cache first
+                cache_key = (entity_type, str(qbo_id))
+                if cache_key in self.synctoken_cache:
+                    return self.synctoken_cache[cache_key]
+
+            # Fall back to DB lookup (still under db_lock)
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             cursor = conn.cursor()
-            
+
             cursor.execute('''
                 SELECT sync_token FROM migrated_entities
                 WHERE entity_type = ? AND qbo_id = ?
             ''', (entity_type, qbo_id))
-            
+
             result = cursor.fetchone()
             conn.close()
-            
+
             if result:
                 sync_token = result[0] or "0"
-                # Update cache
+                # Update cache (acquire synctoken_lock under db_lock)
                 with self.synctoken_lock:
-                    self.synctoken_cache[(entity_type, qbo_id)] = sync_token
+                    self.synctoken_cache[(entity_type, str(qbo_id))] = sync_token
                 return sync_token
-            
+
             return "0"
     
     def update_synctoken(self, entity_type: str, qbo_id: str, new_synctoken: str):
@@ -548,7 +551,8 @@ class PremiumQBOClient:
         retries: int = 0,
         oauth_manager: Optional[Any] = None,
         idempotency_key: Optional[str] = None,
-        correlation_id: Optional[str] = None
+        correlation_id: Optional[str] = None,
+        _auth_refreshed: bool = False
     ) -> Dict:
         """
         ENHANCED: Request with configurable timeout and correlation ID support
@@ -596,7 +600,8 @@ class PremiumQBOClient:
             elif method == "GET":
                 response = self.session.get(url, headers=headers, timeout=request_timeout)
             elif method == "DELETE":
-                response = self.session.delete(url, headers=headers, json=data, timeout=request_timeout)
+                logger.warning("QBO uses POST for deletes, not DELETE. Use delete_entity() instead.")
+                raise ValueError("QBO API does not support HTTP DELETE. Use POST with ?operation=delete via delete_entity()")
             else:
                 raise ValueError(f"Unsupported method: {method}")
             
@@ -630,10 +635,15 @@ class PremiumQBOClient:
             
             elif response.status_code == 401:
                 # FIX #263: Token might be expired, refresh and retry
-                if retries == 0 and oauth_manager:
+                # FIX: Use _auth_refreshed flag instead of retries==0 so
+                # unrelated retries (timeout, 503) don't block token refresh
+                if not _auth_refreshed and oauth_manager:
                     logger.warning(f"[{correlation_id}] Token expired (401), refreshing...")
                     oauth_manager.refresh_access_token()
-                    return self._make_request(method, endpoint, data, retries + 1, oauth_manager, idempotency_key, correlation_id)
+                    new_token = oauth_manager.get_access_token()
+                    if new_token:
+                        self.access_token = new_token
+                    return self._make_request(method, endpoint, data, retries, oauth_manager, idempotency_key, correlation_id, _auth_refreshed=True)
                 else:
                     raise Exception(f"Authentication failed (TID: {intuit_tid}, CID: {correlation_id})")
             
@@ -654,7 +664,7 @@ class PremiumQBOClient:
                 logger.error(f"QBO permission denied (403) for {method} {endpoint}")
                 raise PermissionError(f"QBO API permission denied for {endpoint}")
 
-            elif response.status_code in getattr(config, 'RETRYABLE_STATUS_CODES', {503}):
+            elif response.status_code in getattr(config, 'RETRYABLE_STATUS_CODES', {429, 500, 502, 503, 504}):
                 if retries < max_retries:
                     wait_time = self._calculate_backoff(retries)
                     logger.warning(f"[{correlation_id}] Server error ({response.status_code}). Retry {retries+1}/{max_retries} in {wait_time}s... (TID: {intuit_tid})")
@@ -890,7 +900,12 @@ class PremiumQBOClient:
                 "operation": "create",
                 entity_type: entity_data
             })
-        
+
+        # FIX: Don't send empty BatchItemRequest after dedup filters everything
+        if not batch_data["BatchItemRequest"]:
+            logger.info(f"All {len(batch)} entities in batch already migrated, skipping")
+            return [], []  # Return empty succeeded/failed
+
         try:
             response = self._make_request(
                 "POST",
@@ -1550,7 +1565,7 @@ class PremiumQBOClient:
                         migration_id=migration_id
                     )
 
-                succeeded_count = len(result.get('succeeded', []))
+                succeeded_count = result.get('succeeded_count', 0)
                 failed_items = result.get('failed', [])
                 failed_count = len(failed_items)
 

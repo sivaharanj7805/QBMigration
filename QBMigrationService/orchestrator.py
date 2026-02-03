@@ -127,17 +127,19 @@ class MigrationOrchestrator:
         return self._oauth_manager
 
     def _init_qbo_client(self, access_token: str) -> 'PremiumQBOClient':
-        """Initialize QBO client with token"""
+        """Initialize or update QBO client with current access token."""
         if self._qbo_client is None:
             from qbo_client import PremiumQBOClient
             import config as svc_config
 
-            # Build base_url from config (includes realm_id)
             self._qbo_client = PremiumQBOClient(
                 access_token=access_token,
                 base_url=svc_config.BASE_URL,
                 db_path=str(svc_config.DATA_DIR / "migration_state.db")
             )
+        else:
+            # Update access token in case it was refreshed
+            self._qbo_client.access_token = access_token
         return self._qbo_client
 
     def _init_transformer(self) -> 'QBDataTransformer':
@@ -198,17 +200,45 @@ class MigrationOrchestrator:
             iv = encryption_metadata.get('iv')
             if not iv:
                 raise ValueError("Missing 'iv' in encryption metadata")
+            tag = encryption_metadata.get('tag')
+            if not tag:
+                raise ValueError("Missing 'tag' in encryption metadata - required for authenticated decryption")
 
             decrypted_json = enc_mgr.decrypt_chunked(
                 encrypted_data,
                 key=aes_key,
                 iv=iv,
-                tag=encryption_metadata.get('tag')
+                tag=tag
             )
             
             data = json.loads(decrypted_json)
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected JSON object from decrypted data, got {type(data).__name__}")
             logger.info(f"Decrypted {len(decrypted_json):,} bytes")
-            
+
+            # Normalize data keys to match entity_order format
+            normalized_data = {}
+            for key, value in data.items():
+                key_map = {
+                    'account': 'Accounts', 'accounts': 'Accounts',
+                    'customer': 'Customers', 'customers': 'Customers',
+                    'vendor': 'Vendors', 'vendors': 'Vendors',
+                    'item': 'Items', 'items': 'Items',
+                    'invoice': 'Invoices', 'invoices': 'Invoices',
+                    'bill': 'Bills', 'bills': 'Bills',
+                    'payment': 'Payments', 'payments': 'Payments',
+                    'employee': 'Employees', 'employees': 'Employees',
+                    'journalentry': 'JournalEntries', 'journalentries': 'JournalEntries',
+                    'deposit': 'Deposits', 'deposits': 'Deposits',
+                    'transfer': 'Transfers', 'transfers': 'Transfers',
+                    'estimate': 'Estimates', 'estimates': 'Estimates',
+                    'creditmemo': 'CreditMemos', 'creditmemos': 'CreditMemos',
+                    'purchaseorder': 'PurchaseOrders', 'purchaseorders': 'PurchaseOrders',
+                }
+                mapped = key_map.get(key.lower(), key)
+                normalized_data[mapped] = value
+            data = normalized_data
+
             # Step 2: OAuth refresh (10%)
             self._report_progress(10, "Authenticating with QuickBooks Online")
             
@@ -228,6 +258,7 @@ class MigrationOrchestrator:
             entity_id_mappings = {}  # Separate dict for ID mappings
             entity_counts = {}       # Separate dict for counts
             total_failed = 0
+            total_skipped = 0
 
             # Entity migration order (respects dependencies)
             entity_order = [
@@ -246,7 +277,7 @@ class MigrationOrchestrator:
                     self._report_progress(start_pct, f"Migrating {entity_name}")
 
                     # RELIABILITY FIX: Pass oauth_mgr for automatic token refresh on 401
-                    success, failed = self._migrate_entity(
+                    success, failed, skipped = self._migrate_entity(
                         qbo_client,
                         transformer,
                         entity_name,
@@ -257,7 +288,8 @@ class MigrationOrchestrator:
 
                     entity_counts[entity_name] = success
                     total_failed += failed
-                    logger.info(f"Migrated {success} {entity_name} ({failed} failed)")
+                    total_skipped += skipped
+                    logger.info(f"Migrated {success} {entity_name} ({failed} failed, {skipped} skipped)")
 
             # Step 5: Verify migration (85-95%)
             self._report_progress(85, "Verifying migration")
@@ -308,7 +340,7 @@ class MigrationOrchestrator:
         source_data: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
         oauth_manager: Optional['OAuthManager'] = None
-    ) -> Tuple[int, int]:
+    ) -> Tuple[int, int, int]:
         """
         Migrate a single entity type.
 
@@ -321,10 +353,11 @@ class MigrationOrchestrator:
             oauth_manager: OAuth manager for automatic token refresh (RELIABILITY FIX)
 
         Returns:
-            Tuple of (success_count, fail_count)
+            Tuple of (success_count, fail_count, skipped_count)
         """
         success_count = 0
         fail_count = 0
+        skipped_count = 0
 
         for record in source_data:
             try:
@@ -336,28 +369,31 @@ class MigrationOrchestrator:
                     id_mapping=existing_maps
                 )
 
-                if transformed:
-                    # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
-                    result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
+                if not transformed:
+                    skipped_count += 1
+                    continue
 
-                    if result and 'Id' in result:
-                        # Track mapping for references
-                        source_id = record.get('ListID') or record.get('TxnID') or record.get('Id')
-                        if source_id:
-                            if entity_name not in existing_maps:
-                                existing_maps[entity_name] = {}
-                            existing_maps[entity_name][source_id] = result['Id']
+                # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
+                result = qbo_client.create_entity(entity_name, transformed, oauth_manager=oauth_manager)
 
-                        success_count += 1
-                    else:
-                        fail_count += 1
+                if result and 'Id' in result:
+                    # Track mapping for references
+                    source_id = record.get('ListID') or record.get('TxnID') or record.get('Id')
+                    if source_id:
+                        if entity_name not in existing_maps:
+                            existing_maps[entity_name] = {}
+                        existing_maps[entity_name][source_id] = result['Id']
+
+                    success_count += 1
+                else:
+                    fail_count += 1
 
             except Exception as e:
                 fail_count += 1
                 logger.warning(f"Failed to migrate {entity_name} record: {str(e)}")
                 continue
 
-        return success_count, fail_count
+        return success_count, fail_count, skipped_count
     
     def run_migration_from_s3(
         self,
@@ -375,10 +411,14 @@ class MigrationOrchestrator:
             Migration result dict
         """
         import boto3
-        
-        # Parse S3 URI
-        parts = s3_uri.replace('s3://', '').split('/', 1)
+
+        # Parse S3 URI (case-insensitive prefix check)
+        if not s3_uri.lower().startswith('s3://'):
+            raise ValueError(f"Invalid S3 URI format (must start with s3://): {s3_uri}")
+        parts = s3_uri[5:].split('/', 1)  # Skip 's3://' regardless of case
         bucket = parts[0]
+        if not bucket:
+            raise ValueError(f"Invalid S3 URI - empty bucket name: {s3_uri}")
         if len(parts) < 2 or not parts[1]:
             raise ValueError(f"Invalid S3 URI - missing object key: {s3_uri}")
         key = parts[1]

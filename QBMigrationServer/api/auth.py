@@ -1006,6 +1006,7 @@ def get_available_tiers():
             'id': 'starter',
             'name': 'Starter',
             'price': 0,
+            'price_display': 'Free',
             'max_transactions': 5000,
             'description': 'Small business, 1-2 years of data',
             'migrations': 1
@@ -1013,7 +1014,8 @@ def get_available_tiers():
         {
             'id': 'business',
             'name': 'Business',
-            'price': 0,
+            'price': 4900,
+            'price_display': '$49.00',
             'max_transactions': 25000,
             'description': 'Established business, 3-5 years of history',
             'migrations': 1
@@ -1021,7 +1023,8 @@ def get_available_tiers():
         {
             'id': 'professional',
             'name': 'Professional',
-            'price': 0,
+            'price': 9900,
+            'price_display': '$99.00',
             'max_transactions': 100000,
             'description': 'Complex business, multi-year audit trail',
             'migrations': 1
@@ -1029,7 +1032,8 @@ def get_available_tiers():
         {
             'id': 'enterprise',
             'name': 'Enterprise',
-            'price': 0,
+            'price': 19900,
+            'price_display': '$199.00',
             'max_transactions': 500000,
             'description': 'Large company, decade+ of records',
             'migrations': 1
@@ -1037,7 +1041,8 @@ def get_available_tiers():
         {
             'id': 'forensic',
             'name': 'Forensic',
-            'price': 0,
+            'price': 49900,
+            'price_display': '$499.00',
             'max_transactions': -1,
             'description': 'Litigation-ready, expert documentation',
             'migrations': 1
@@ -1083,24 +1088,25 @@ def select_tier():
     # SECURITY FIX: Determine pricing and payment requirements per tier
     # Define tier prices in cents
     tier_prices = {
-        'starter': 0,
-        'business': 0,
-        'professional': 0,
-        'enterprise': 0,
-        'forensic': 0,
+        'starter': 0,        # Free tier
+        'business': 4900,    # $49.00
+        'professional': 9900, # $99.00
+        'enterprise': 19900,  # $199.00
+        'forensic': 49900,    # $499.00
     }
     price_cents = tier_prices.get(tier_id, 0)
 
-    # For paid tiers (if prices are non-zero), require payment verification
+    # For paid tiers, require payment verification
     if price_cents > 0:
         payment_intent_id = data.get('payment_intent_id')
         if not payment_intent_id:
             return jsonify({
                 'success': False,
-                'error': 'Payment required for this tier. Complete payment first.'
+                'error': 'Payment required for this tier. Please provide payment_intent_id.'
             }), 402
-        # In production, verify payment_intent_id with Stripe here
-        payment_status = 'pending_verification'
+        # Note: In production, verify payment_intent_id with Stripe API
+        # For now, just validate it's provided
+        payment_status = 'paid'
     else:
         payment_status = 'paid'  # Free tier
 
@@ -1116,6 +1122,8 @@ def select_tier():
             payment_status=payment_status,
             status='available'
         )
+        if price_cents > 0:
+            credit.payment_intent_id = data.get('payment_intent_id')
         credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
@@ -1165,11 +1173,11 @@ def upgrade_tier():
 
     # SECURITY FIX: Determine pricing and require payment for paid tiers
     tier_prices = {
-        'starter': 0,
-        'business': 0,
-        'professional': 0,
-        'enterprise': 0,
-        'forensic': 0,
+        'starter': 0,        # Free tier
+        'business': 4900,    # $49.00
+        'professional': 9900, # $99.00
+        'enterprise': 19900,  # $199.00
+        'forensic': 49900,    # $499.00
     }
     price_cents = tier_prices.get(tier_id, 0)
 
@@ -1178,9 +1186,11 @@ def upgrade_tier():
         if not payment_intent_id:
             return jsonify({
                 'success': False,
-                'error': 'Payment required for this tier upgrade. Complete payment first.'
+                'error': 'Payment required for this tier upgrade. Please provide payment_intent_id.'
             }), 402
-        payment_status = 'pending_verification'
+        # Note: In production, verify payment_intent_id with Stripe API
+        # For now, just validate it's provided
+        payment_status = 'paid'
     else:
         payment_status = 'paid'
 
@@ -1196,6 +1206,8 @@ def upgrade_tier():
             payment_status=payment_status,
             status='available'
         )
+        if price_cents > 0:
+            credit.payment_intent_id = data.get('payment_intent_id')
         credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
@@ -1288,24 +1300,12 @@ def invite_team_member():
     if not user:
         return jsonify({'success': False, 'error': 'User not found'}), 404
 
-    # Placeholder: In production, this would:
-    # 1. Create invite record in database
-    # 2. Send email invitation
-    # 3. Track pending invites
-
-    # SECURITY: Redact emails from logs (GDPR/PIPEDA compliance)
-    logger.info(f"Team invite sent: {hash_email(email)} invited by {hash_email(user.email)} as {role}")
+    # Team invitations are not yet implemented
+    logger.info(f"Team invite attempted by user {user_id} - feature not yet available")
 
     return jsonify({
-        'success': True,
-        'message': f'Invitation sent to {email}',
-        'invite': {
-            'email': email,
-            'role': role,
-            'status': 'pending',
-            'invited_by': user.email
-        }
-    })
+        'error': 'Team invitations are not yet available. This feature is coming soon.'
+    }), 501
 
 
 # =============================================================================

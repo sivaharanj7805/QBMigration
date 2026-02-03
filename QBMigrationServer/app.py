@@ -671,11 +671,10 @@ def create_app(config_name='development'):
     # Set WTF_CSRF_TIME_LIMIT for token validity (3600 seconds = 1 hour)
     app.config.setdefault('WTF_CSRF_TIME_LIMIT', 3600)
 
-    # Exempt auth endpoints from CSRF (login/register are entry points, no session yet)
-    # Also exempt health checks and webhook endpoints
-    # TODO: SECURITY - csrf.exempt(auth_bp) exempts the entire auth blueprint from CSRF.
-    # Ideally, only specific endpoints (login, register, forgot-password) should be exempt.
-    # This is too broad but changing it requires per-route @csrf.exempt decorators across all auth routes.
+    # SECURITY NOTE: Auth blueprint is CSRF-exempt because login/register are
+    # unauthenticated. Authenticated state-changing endpoints (select-tier,
+    # upgrade-tier, team/invite) should ideally have CSRF protection.
+    # TODO: Implement per-route CSRF exemption when upgrading CSRF library.
     csrf.exempt(auth_bp)
 
     # CSRF is automatically disabled for endpoints that:

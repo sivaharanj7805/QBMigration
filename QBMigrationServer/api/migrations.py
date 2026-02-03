@@ -2,9 +2,11 @@ from flask import Blueprint, request, jsonify, current_app
 from models.database import db
 from models.migration import Migration
 from models.user import User
+from models.migration_credit import MigrationCredit
 from utils.aws_manager import AWSMigrationManager
 from extensions import limiter
 from api.auth import require_auth
+from datetime import datetime
 import logging
 import re
 
@@ -237,12 +239,14 @@ def list_migrations():
                 'progress_percent': migration.progress_percent,
                 'created_at': migration.created_at.isoformat() if migration.created_at else None,
                 'completed_at': migration.completed_at.isoformat() if migration.completed_at else None,
-                's3_uri': migration.s3_uri
+                'has_file': bool(migration.s3_uri),
             }
 
             # Add optional fields only if they exist
-            if hasattr(migration, 'error_message'):
-                migration_dict['error_message'] = migration.error_message
+            if hasattr(migration, 'get_error_message') and callable(migration.get_error_message):
+                migration_dict['error_message'] = migration.get_error_message()
+            elif hasattr(migration, 'error_message_encrypted'):
+                migration_dict['error_message'] = migration.error_message_encrypted
             if hasattr(migration, 'updated_at') and migration.updated_at:
                 migration_dict['updated_at'] = migration.updated_at.isoformat()
 
@@ -436,7 +440,6 @@ def start_migration(migration_id):
         user = db.session.get(User, user_id)
 
         # Check credits
-        from models.migration_credit import MigrationCredit
         available_credits = MigrationCredit.query.filter_by(
             user_id=user_id,
             status='available',
@@ -582,7 +585,17 @@ def start_migration(migration_id):
             if hasattr(migration, 'aws_instance_id'):
                 migration.aws_instance_id = instance_id
             db.session.commit()
-        
+
+        # Consume one migration credit
+        available_credit = MigrationCredit.query.filter_by(
+            user_id=user_id, status='available'
+        ).with_for_update().first()
+        if available_credit:
+            available_credit.status = 'used'
+            available_credit.used_at = datetime.utcnow()
+            available_credit.migration_id = migration.id
+            db.session.commit()
+
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
         
         return jsonify({
@@ -766,8 +779,8 @@ def retry_migration(migration_id):
         migration.progress_percent = 0
         if hasattr(migration, 'current_step'):
             migration.current_step = None
-        if hasattr(migration, 'error_message'):
-            migration.error_message = None
+        if hasattr(migration, 'error_message_encrypted'):
+            migration.error_message_encrypted = None
         if hasattr(migration, 'error_code'):
             migration.error_code = None
         db.session.commit()
@@ -933,7 +946,7 @@ def execute_migration_celery(migration_id):
         # Queue the migration task
         task = run_migration_task.delay(
             migration_id=migration_id,
-            encrypted_file_path=migration.s3_uri or migration.file_path,
+            encrypted_file_path=migration.s3_uri,
             user_id=_get_current_user_id(),
             oauth_tokens=oauth_tokens
         )
@@ -1031,7 +1044,7 @@ def get_migration_stats():
             Migration.status == 'completed'
         ).count()
         
-        success_rate = (successful / total_finished * 100) if total_finished > 0 else 100
+        success_rate = f"{(successful / total_finished * 100):.1f}%" if total_finished > 0 else "--"
         
         # Format average duration
         if avg_duration > 0:
@@ -1055,7 +1068,7 @@ def get_migration_stats():
                 'migrations_this_month': migrations_this_month,
                 'total_records': records_str,
                 'avg_duration': avg_duration_str,
-                'success_rate': f"{success_rate:.1f}%"
+                'success_rate': success_rate
             }
         }), 200
         

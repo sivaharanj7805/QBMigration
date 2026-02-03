@@ -46,6 +46,7 @@ class IIFParser:
         self.data = {key: [] for key in self.RECORD_TYPES.values()}
         self.headers = {}
         self.errors = []
+        self._current_transaction = None
         self.stats = {
             'total_lines': 0,
             'parsed_records': 0,
@@ -91,8 +92,13 @@ class IIFParser:
         if not os.path.isfile(real_path):
             raise ValueError(f"Invalid file path (not a file): {file_path}")
 
-        with open(real_path, 'r', encoding='utf-8', errors='replace') as f:
-            return self.parse_content(f.read())
+        try:
+            with open(real_path, 'r', encoding='cp1252') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            with open(real_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        return self.parse_content(content)
     
     def parse_content(self, content: str) -> Dict[str, Any]:
         """Parse IIF content string"""
@@ -100,6 +106,7 @@ class IIFParser:
         self.data = {key: [] for key in self.RECORD_TYPES.values()}
         self.headers = {}
         self.errors = []
+        self._current_transaction = None
         self.stats = {'total_lines': 0, 'parsed_records': 0, 'skipped_lines': 0, 'errors': 0}
 
         lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
@@ -119,21 +126,46 @@ class IIFParser:
                 # Header line defines columns
                 if record_type.startswith('!'):
                     header_type = record_type[1:]  # Remove the !
-                    self.headers[header_type] = fields[1:]
-                    
-                # Transaction split line (must be checked before general RECORD_TYPES)
+                    self.headers[header_type] = [h.strip().upper() for h in fields[1:]]
+
+                # Transaction line - start a new transaction block
+                elif record_type == 'TRNS':
+                    headers = self.headers.get('TRNS', [])
+                    record = {}
+                    for i, value in enumerate(fields[1:], 0):
+                        if i < len(headers):
+                            record[headers[i]] = value.strip()
+                        else:
+                            record[f'field_{i}'] = value.strip()
+                    record['_source_line'] = line_num
+                    record['_record_type'] = 'TRNS'
+                    self._current_transaction = record
+                    self._current_transaction['_splits'] = []
+                    self.stats['parsed_records'] += 1
+
+                # Transaction split line
                 elif record_type == 'SPL':
                     headers = self.headers.get('SPL', [])
                     record = {}
                     for i, value in enumerate(fields[1:], 0):
                         if i < len(headers):
                             record[headers[i]] = value.strip()
+                        else:
+                            record[f'field_{i}'] = value.strip()
                     record['_source_line'] = line_num
                     record['_record_type'] = 'SPL'
+                    if self._current_transaction is not None:
+                        self._current_transaction['_splits'].append(record)
                     self.data['transaction_splits'].append(record)
                     self.stats['parsed_records'] += 1
 
-                # Data line
+                # End of transaction block - commit the grouped transaction
+                elif record_type == 'ENDTRNS':
+                    if self._current_transaction is not None:
+                        self.data['transactions'].append(self._current_transaction)
+                        self._current_transaction = None
+
+                # Data line (all other record types)
                 elif record_type in self.RECORD_TYPES:
                     data_key = self.RECORD_TYPES[record_type]
                     headers = self.headers.get(record_type, [])
@@ -149,10 +181,6 @@ class IIFParser:
                     record['_record_type'] = record_type
                     self.data[data_key].append(record)
                     self.stats['parsed_records'] += 1
-                    
-                elif record_type == 'ENDTRNS':
-                    # End of transaction marker
-                    pass
                     
                 else:
                     self.stats['skipped_lines'] += 1
@@ -348,6 +376,29 @@ class QuickBooksExportParser:
         return 'unknown'
 
 
+def _parse_address_line3(baddr3: str) -> dict:
+    """Parse IIF BADDR3 'City, State ZIP' into components."""
+    import re
+    result = {'City': '', 'CountrySubDivisionCode': '', 'PostalCode': ''}
+    if not baddr3:
+        return result
+    # Try "City, State ZIP" format
+    match = re.match(r'^(.+?),\s*(\w{2})\s+(\d{5}(?:-\d{4})?)$', baddr3)
+    if match:
+        result['City'] = match.group(1).strip()
+        result['CountrySubDivisionCode'] = match.group(2)
+        result['PostalCode'] = match.group(3)
+    else:
+        # Try "City, State" without ZIP
+        match2 = re.match(r'^(.+?),\s*(.+)$', baddr3)
+        if match2:
+            result['City'] = match2.group(1).strip()
+            result['CountrySubDivisionCode'] = match2.group(2).strip()
+        else:
+            result['City'] = baddr3  # Fall back to entire string as city
+    return result
+
+
 def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Transform parsed IIF data to QuickBooks Online format
@@ -364,6 +415,7 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     
     # Transform customers
     for cust in iif_data.get('data', {}).get('customers', []):
+        addr3_parts = _parse_address_line3(cust.get('BADDR3', ''))
         qbo_data['customers'].append({
             'DisplayName': cust.get('NAME', ''),
             'CompanyName': cust.get('COMPANYNAME', ''),
@@ -374,9 +426,10 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
             'BillAddr': {
                 'Line1': cust.get('BADDR1', ''),
                 'Line2': cust.get('BADDR2', ''),
-                'City': cust.get('BADDR3', ''),
-                'CountrySubDivisionCode': cust.get('BADDR4', ''),
-                'PostalCode': cust.get('BADDR5', ''),
+                'City': addr3_parts['City'],
+                'CountrySubDivisionCode': addr3_parts['CountrySubDivisionCode'],
+                'PostalCode': addr3_parts['PostalCode'],
+                'Country': cust.get('BADDR4', ''),
             },
             '_source': 'iif_import',
             '_original_id': cust.get('NAME', '')
@@ -384,6 +437,7 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     
     # Transform vendors
     for vend in iif_data.get('data', {}).get('vendors', []):
+        addr3_parts = _parse_address_line3(vend.get('BADDR3', ''))
         qbo_data['vendors'].append({
             'DisplayName': vend.get('NAME', ''),
             'CompanyName': vend.get('COMPANYNAME', ''),
@@ -391,6 +445,14 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
             'FamilyName': vend.get('LASTNAME', ''),
             'PrimaryEmailAddr': {'Address': vend.get('EMAIL', '')},
             'PrimaryPhone': {'FreeFormNumber': vend.get('PHONE1', '')},
+            'BillAddr': {
+                'Line1': vend.get('BADDR1', ''),
+                'Line2': vend.get('BADDR2', ''),
+                'City': addr3_parts['City'],
+                'CountrySubDivisionCode': addr3_parts['CountrySubDivisionCode'],
+                'PostalCode': addr3_parts['PostalCode'],
+                'Country': vend.get('BADDR4', ''),
+            },
             '_source': 'iif_import',
             '_original_id': vend.get('NAME', '')
         })
@@ -399,17 +461,25 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     for acct in iif_data.get('data', {}).get('accounts', []):
         acct_type_map = {
             'BANK': 'Bank',
-            'AR': 'Accounts Receivable',
-            'AP': 'Accounts Payable',
-            'CCARD': 'Credit Card',
-            'INC': 'Income',
-            'EXP': 'Expense',
-            'FIXASSET': 'Fixed Asset',
-            'OASSET': 'Other Asset',
-            'OCURLIAB': 'Other Current Liability',
-            'LTLIAB': 'Long Term Liability',
+            'AR': 'AccountsReceivable',
+            'OCASSET': 'OtherCurrentAsset',
+            'FIXASSET': 'FixedAsset',
+            'OASSET': 'OtherAsset',
+            'AP': 'AccountsPayable',
+            'CCARD': 'CreditCard',
+            'OCURLIAB': 'OtherCurrentLiability',
+            'LTLIAB': 'LongTermLiability',
             'EQUITY': 'Equity',
-            'COGS': 'Cost of Goods Sold',
+            'INC': 'Income',
+            'OINC': 'OtherIncome',
+            'OTHERINC': 'OtherIncome',
+            'COGS': 'CostOfGoodsSold',
+            'EXP': 'Expense',
+            'OEXP': 'OtherExpense',
+            'OTHEREXP': 'OtherExpense',
+            'EXINC': 'OtherIncome',
+            'EXEXP': 'OtherExpense',
+            'NONPOSTING': 'NonPosting',
         }
         
         qbo_data['accounts'].append({
@@ -422,17 +492,20 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
     
     # Transform items
     for item in iif_data.get('data', {}).get('items', []):
-        item_type = item.get('INVITEMTYPE', 'SERV')
+        item_type = item.get('INVITEMTYPE', 'SERVICE')
         type_map = {
+            'SERVICE': 'Service',
             'SERV': 'Service',
-            'PART': 'NonInventory',
             'INVENTORY': 'Inventory',
-            'ASSEMBLY': 'Inventory',
+            'NON-INVENTORY': 'NonInventory',
+            'PART': 'NonInventory',
             'OTHCHARGE': 'Service',
-            'DISCOUNT': 'Service',
-            'PAYMENT': 'Service',
             'SUBTOTAL': 'Service',
-            'GROUP': 'Bundle',
+            'DISCOUNT': 'Service',
+            'GROUP': 'Group',
+            'ASSEMBLY': 'Inventory',
+            'PAYMENT': 'Service',
+            'TAX': 'Service',
             'FIXEDASSET': 'NonInventory',
         }
         qbo_type = type_map.get(item_type, 'Service')

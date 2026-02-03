@@ -309,9 +309,20 @@ class PremiumMigrationVerifier:
             "errors": [],
             "critical_metrics": {}
         }
-        
+
         # Decimal for financial calculations
         self.decimal_places = Decimal('0.01')
+
+    def _reset(self):
+        """Reset mutable state for fresh verification."""
+        self.report = {
+            'entity_counts': {},
+            'trial_balance': {},
+            'warnings': [],
+            'errors': [],
+            'issues': [],
+            'verification_status': 'pending'
+        }
     
     # ========================================================================
     # PREMIUM FEATURE #1: TRIAL BALANCE VERIFICATION
@@ -852,12 +863,21 @@ class PremiumMigrationVerifier:
         Returns:
             Dict with verification results including 'passed' boolean and 'issues' list
         """
+        # Reset state for fresh verification (supports reuse)
+        self._reset()
+
         logger.info("\n" + "=" * 80)
         logger.info("  MIGRATION VERIFICATION")
         logger.info("=" * 80)
 
         issues = []
         passed = True
+
+        # Check for empty migration
+        total_source = sum(len(v) if isinstance(v, list) else 0 for v in entities.values())
+        if total_source == 0:
+            issues.append("No entities found in source data - migration may be empty")
+            self.report['verification_status'] = 'WARNING'
 
         # Verify entity counts
         entity_checks = [
