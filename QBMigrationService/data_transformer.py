@@ -1116,6 +1116,24 @@ class QBDataTransformer:
             return value.lower() not in ('false', '0', 'no', 'n', 'inactive')
         return bool(value)
 
+    def _require_lines(self, qbo: Dict, entity_type: str, qbd: Dict) -> bool:
+        """Validate that a transaction has at least one line item.
+
+        QBO API rejects transactions with empty Line arrays. The C# extractor
+        uses NullValueHandling.Ignore, so if line extraction fails or there are
+        no lines, the collection is omitted entirely from JSON. After normalization,
+        the transform method's for-loop simply doesn't execute, leaving Line=[].
+
+        Returns True if lines exist, False if empty (skips entity + adds to review).
+        """
+        if qbo.get('Line'):
+            return True
+        name = qbd.get('RefNumber') or qbd.get('TxnID') or qbd.get('Name') or 'Unknown'
+        self.add_manual_review(entity_type, str(name),
+                               reason=f"No line items - QBO requires at least one Line entry")
+        self.stats['total_skipped'] += 1
+        return False
+
     def _store_entity_mapping(self, entity_type: str, qbd: Dict) -> None:
         """Store QBD to QBO ID mapping after successful transformation."""
         qbd_id = qbd.get('ListID') or qbd.get('TxnID') or qbd.get('Id') or qbd.get('Name')
@@ -1739,6 +1757,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'Bill', qbd):
+            return None
         self._store_entity_mapping('bills', qbd)
         return qbo
 
@@ -1797,6 +1817,8 @@ class QBDataTransformer:
                     }]
                 })
 
+        if not self._require_lines(qbo, 'BillPayment', qbd):
+            return None
         self._store_entity_mapping('billpayments', qbd)
         return qbo
 
@@ -1836,6 +1858,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'CreditMemo', qbd):
+            return None
         self._store_entity_mapping('creditmemos', qbd)
         return qbo
 
@@ -1955,6 +1979,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'Estimate', qbd):
+            return None
         self._store_entity_mapping('estimates', qbd)
         return qbo
 
@@ -2021,6 +2047,8 @@ class QBDataTransformer:
 
                 qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Invoice', qbd):
+            return None
         self._store_entity_mapping('invoices', qbd)
         return qbo
 
@@ -2291,6 +2319,8 @@ class QBDataTransformer:
 
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Deposit', qbd):
+            return None
         self._store_entity_mapping('deposits', qbd)
         return qbo
 
@@ -2355,6 +2385,8 @@ class QBDataTransformer:
                 qbo_line['ItemAdjustmentLineDetail']['ItemRef'] = {'value': item_id}
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'InventoryAdjustment', qbd):
+            return None
         self._store_entity_mapping('inventoryadjustments', qbd)
         return qbo
 
@@ -2418,6 +2450,8 @@ class QBDataTransformer:
                 'warning': f'Journal entry out of balance: Debits={debit_total}, Credits={credit_total}'
             })
 
+        if not self._require_lines(qbo, 'JournalEntry', qbd):
+            return None
         self._store_entity_mapping('journalentries', qbd)
         return qbo
 
@@ -2514,6 +2548,8 @@ class QBDataTransformer:
                 qbo_line['AccountBasedExpenseLineDetail']['AccountRef'] = {'value': acct_id}
             qbo['Line'].append(qbo_line)
 
+        if not self._require_lines(qbo, 'Purchase', qbd):
+            return None
         self._store_entity_mapping('purchases', qbd)
         return qbo
 
@@ -2557,6 +2593,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'PurchaseOrder', qbd):
+            return None
         self._store_entity_mapping('purchaseorders', qbd)
         return qbo
 
@@ -2618,6 +2656,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'RefundReceipt', qbd):
+            return None
         self._store_entity_mapping('refundreceipts', qbd)
         return qbo
 
@@ -2670,6 +2710,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'SalesReceipt', qbd):
+            return None
         self._store_entity_mapping('salesreceipts', qbd)
         return qbo
 
@@ -2734,7 +2776,7 @@ class QBDataTransformer:
 
         if qbd.get('TaxRates'):
             tax_rate_details = []
-            for rate in qbd['TaxRates']:
+            for rate in qbd.get('TaxRates', []):
                 mapped_id = self.map_id('tax_rates', rate)
                 if mapped_id:
                     tax_rate_details.append({'TaxRateRef': {'value': mapped_id}})
@@ -2926,6 +2968,8 @@ class QBDataTransformer:
                     }
                 })
 
+        if not self._require_lines(qbo, 'VendorCredit', qbd):
+            return None
         self._store_entity_mapping('vendorcredits', qbd)
         return qbo
 

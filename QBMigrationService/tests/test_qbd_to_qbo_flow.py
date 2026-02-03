@@ -837,11 +837,11 @@ class TestErrorHandling:
     """Test missing required refs, invalid account types, etc."""
 
     def test_invoice_without_customer_ref_produces_null_ref(self, transformer):
-        """Invoice with no CustomerRef produces a null CustomerRef value.
+        """Invoice with no CustomerRef and no line items is skipped.
 
-        When CustomerRef is None, map_id_required treats it as an optional
-        reference and returns (None, True). The invoice is still created
-        but with CustomerRef={'value': None}.
+        Even though map_id_required treats None CustomerRef as optional
+        (returns (None, True)), the empty Line array causes the invoice
+        to be skipped — QBO rejects transactions with no line items.
         """
         invoice = {
             'RefNumber': '999',
@@ -850,10 +850,8 @@ class TestErrorHandling:
             'TxnID': 'INV-BAD',
         }
         result = transformer.transform_invoice(invoice)
-        # When CustomerRef is omitted, map_id_required returns (None, True)
-        # so invoice is created with CustomerRef.value = None
-        assert result is not None
-        assert result['CustomerRef']['value'] is None
+        # Empty Line array → skipped (QBO requires at least one line)
+        assert result is None
 
     def test_invoice_with_unmapped_customer_ref_skipped(self, transformer):
         """Invoice referencing non-existent customer ID should be skipped."""
@@ -913,10 +911,11 @@ class TestErrorHandling:
             mock_qbo_client.create_entity('Customer', {'DisplayName': 'Dup'})
 
     def test_bill_without_vendor_ref_produces_null_ref(self, transformer):
-        """Bill with missing vendor reference produces null VendorRef.
+        """Bill with missing vendor ref and no line items is skipped.
 
-        When VendorRef is None, map_id_required treats it as optional
-        and returns (None, True). The bill is still created.
+        Even though map_id_required treats None VendorRef as optional
+        (returns (None, True)), the empty Line array causes the bill
+        to be skipped — QBO rejects transactions with no line items.
         """
         bill = {
             'RefNumber': 'BILL-BAD',
@@ -925,8 +924,8 @@ class TestErrorHandling:
             'TxnID': 'BILL-BAD',
         }
         result = transformer.transform_bill(bill)
-        assert result is not None
-        assert result['VendorRef']['value'] is None
+        # Empty Line array → skipped (QBO requires at least one line)
+        assert result is None
 
 
 # ============================================================================
