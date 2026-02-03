@@ -101,7 +101,7 @@ class Migration(db.Model):
     live_status_data = db.Column(db.Text)   # JSON: Detailed phase tracking, logs
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     started_at = db.Column(db.DateTime)
     completed_at = db.Column(db.DateTime)
     expires_at = db.Column(db.DateTime)

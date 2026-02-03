@@ -7,7 +7,7 @@ Enterprise-grade test quality with comprehensive validation
 from http import client
 import pytest
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models.user import User
 from models.migration import Migration
 from flask import current_app
@@ -498,7 +498,7 @@ class TestMigrationModel:
         
         # VERIFY: Timestamps
         assert migration.created_at is not None, "created_at not set"
-        assert migration.created_at <= datetime.utcnow(), "created_at in future"
+        assert migration.created_at <= datetime.now(timezone.utc), "created_at in future"
         
         # VERIFY: Can retrieve from database
         found = db_session.query(Migration).filter_by(migration_id=migration.migration_id).first()

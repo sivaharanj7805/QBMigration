@@ -75,7 +75,7 @@ class User(UserMixin, db.Model):
     account_locked_until = db.Column(db.DateTime)
     
     # Security - Password Management
-    password_changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    password_changed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     password_history = db.Column(db.Text)  # JSON array of previous password hashes
     must_change_password = db.Column(db.Boolean, default=False)
     
@@ -88,8 +88,8 @@ class User(UserMixin, db.Model):
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime)
     last_login_at = db.Column(db.DateTime)  # For anomaly detection
     last_login_ip = db.Column(db.String(45))  # For anomaly detection (supports IPv6)

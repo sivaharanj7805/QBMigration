@@ -41,7 +41,7 @@ class MigrationCredit(db.Model):
     transactions_used = db.Column(db.Integer, default=0)  # Actual transactions processed
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     paid_at = db.Column(db.DateTime)
     used_at = db.Column(db.DateTime)
     

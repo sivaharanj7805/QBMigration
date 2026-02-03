@@ -74,12 +74,12 @@ class License(db.Model):
     expires_at = db.Column(db.DateTime)
     
     # Purchase Info
-    purchase_date = db.Column(db.DateTime, default=datetime.utcnow)
+    purchase_date = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     order_id = db.Column(db.String(100))  # External order reference
-    
+
     # Audit
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     user = db.relationship('User', backref=db.backref('licenses', lazy='dynamic'))
@@ -374,8 +374,8 @@ class LicenseActivation(db.Model):
     notes = db.Column(db.Text)
     
     # Timestamp
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
     def __repr__(self):
         return f'<LicenseActivation {self.action} for License {self.license_id}>'
     

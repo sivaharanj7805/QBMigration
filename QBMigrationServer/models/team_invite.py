@@ -34,7 +34,7 @@ class TeamInvite(db.Model):
     accepted_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
     
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = db.Column(db.DateTime)
     accepted_at = db.Column(db.DateTime)
     

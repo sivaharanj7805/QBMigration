@@ -83,7 +83,7 @@ def list_reports():
                     'id': f'{m.migration_id}_variance',
                     'type': 'variance',
                     'name': 'Variance Report',
-                    'date': datetime.fromtimestamp(os.path.getmtime(variance_path)).strftime('%Y-%m-%d'),
+                    'date': datetime.fromtimestamp(os.path.getmtime(variance_path), tz=timezone.utc).strftime('%Y-%m-%d'),
                     'status': 'ready',
                     'description': 'Side-by-side P&L and Balance Sheet comparison'
                 })
@@ -96,7 +96,7 @@ def list_reports():
                     'id': f'{m.migration_id}_certificate',
                     'type': 'certificate',
                     'name': 'Audit Certificate',
-                    'date': datetime.fromtimestamp(os.path.getmtime(cert_path)).strftime('%Y-%m-%d'),
+                    'date': datetime.fromtimestamp(os.path.getmtime(cert_path), tz=timezone.utc).strftime('%Y-%m-%d'),
                     'status': 'ready',
                     'description': 'Professional PDF with SHA-256 verification'
                 })
