@@ -143,6 +143,19 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
             }
             return f(*args, **kwargs)
 
+        # FIX: Check for JWT token in auth_token cookie as fallback
+        # This handles cross-origin scenarios where session cookies may not be sent
+        auth_cookie = request.cookies.get('auth_token')
+        if auth_cookie:
+            try:
+                payload = decode_token(auth_cookie)
+                if payload:
+                    request.current_user = payload
+                    return f(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"Cookie auth failed with {type(e).__name__}: {str(e)}")
+                # Cookie is invalid, continue to return 401
+
         return jsonify({'success': False, 'error': 'No authorization provided'}), 401
     return decorated
 
@@ -694,9 +707,15 @@ def login():
     # Generate token
     token = create_token(user.id, user.email)
 
-    return jsonify({
+    # Generate CSRF token for the frontend
+    from flask_wtf.csrf import generate_csrf
+    csrf_token = generate_csrf()
+
+    # Create response with user data
+    response = jsonify({
         'success': True,
         'token': token,
+        'csrf_token': csrf_token,
         'user': {
             'id': user.id,
             'email': user.email,
@@ -705,6 +724,22 @@ def login():
             'company_name': user.company_name
         }
     })
+
+    # FIX: Set JWT token as httpOnly cookie for secure cross-origin auth
+    # This ensures the token is sent with subsequent requests even when
+    # session cookies face cross-origin restrictions
+    is_production = os.getenv('FLASK_ENV') == 'production'
+    response.set_cookie(
+        'auth_token',
+        token,
+        httponly=True,
+        secure=is_production,
+        samesite='Lax',
+        max_age=86400,  # 24 hours
+        path='/'
+    )
+
+    return response
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -859,7 +894,11 @@ def logout():
 
     logger.info(f"User {user_id} logged out successfully")
 
-    return jsonify({'success': True, 'message': 'Logged out successfully'})
+    # Create response and clear the auth_token cookie
+    response = jsonify({'success': True, 'message': 'Logged out successfully'})
+    response.delete_cookie('auth_token', path='/')
+
+    return response
 
 
 # =============================================================================
