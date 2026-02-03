@@ -61,7 +61,8 @@ def _validate_session_binding() -> Tuple[bool, str]:
     # Check User-Agent binding
     stored_ua_fp = session.get('_ua_fingerprint')
     if stored_ua_fp:
-        logger.info()
+        # FIX: Get current fingerprint before comparison
+        current_ua_fp = _get_user_agent_fingerprint()
         if stored_ua_fp != current_ua_fp:
             # Potential session hijacking attempt
             user_id = session.get('user_id')
@@ -856,6 +857,101 @@ def logout():
 
     return jsonify({'success': True, 'message': 'Logged out successfully'})
 
+
+# =============================================================================
+# CSRF TOKEN ENDPOINT
+# =============================================================================
+
+@auth_bp.route('/csrf-token', methods=['GET'])
+def get_csrf_token():
+    """
+    Get a CSRF token for the current session.
+
+    The frontend should call this endpoint to get a CSRF token for
+    protecting state-changing requests (POST, PUT, DELETE).
+
+    The token is returned in the response body and also set as a
+    response header for convenience.
+
+    Returns:
+        JSON with csrf_token and expiration info
+    """
+    from flask_wtf.csrf import generate_csrf
+
+    # Generate CSRF token (Flask-WTF handles session binding)
+    token = generate_csrf()
+
+    # Token validity from config (default 1 hour)
+    expires_in = current_app.config.get('WTF_CSRF_TIME_LIMIT', 3600)
+
+    response = jsonify({
+        'success': True,
+        'csrf_token': token,
+        'expires_in': expires_in
+    })
+
+    # Also include token in response header for convenience
+    response.headers['X-CSRF-Token'] = token
+
+    return response
+
+
+@auth_bp.route('/validate', methods=['GET'])
+@require_auth
+def validate_session():
+    """
+    Validate the current session is still active.
+
+    Returns user info if session is valid, 401 if not.
+    Used by frontend to check if user is still logged in.
+    """
+    user_data = request.current_user
+    user_id = user_data.get('user_id')
+
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 401
+
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'company_name': user.company_name
+            }
+        })
+    except Exception as e:
+        logger.error(f"Session validation error: {e}")
+        return jsonify({'success': False, 'error': 'Session validation failed'}), 401
+
+    # Look up user
+    user = User.query.filter_by(email=email).first()
+
+    if user and user.is_active:
+        # Generate reset token
+        reset_token = _generate_password_reset_token(user.id, user.email)
+
+        # Store token JTI in user record for one-time use validation
+        # This would require a database field, so for now we rely on JWT expiry
+
+        # Send reset email
+        _send_password_reset_email(email, reset_token)
+
+        logger.info(f"Password reset requested for {hash_email(email)}")
+    else:
+        # User doesn't exist - still perform timing-consistent operations
+        import os
+        from argon2 import PasswordHasher
+        ph = PasswordHasher()
+        # Perform fake hash to match timing
+        try:
+            fake_password = os.urandom(16).hex()
+            _ = ph.hash(fake_password)
+        except Exception:
+            pass
 
 # =============================================================================
 # TIER SELECTION & MANAGEMENT

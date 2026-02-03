@@ -1,31 +1,19 @@
 # ForensicBridge Security Notice
 
-## Security Deep Clean - February 2, 2026
+## Key Rotation Notice - February 2, 2026
 
 ### Summary
 
-Comprehensive security hardening completed for M&A acquisition readiness. All encryption keys have been rotated and sensitive data removed from git history.
+All encryption keys have been rotated as part of security hardening for acquisition readiness.
 
 ### Actions Taken
 
-1. **Removed `.master_key` from git history** ✅
+1. **Removed `.master_key` from git history**
    - File: `QBMigrationService/.master_key`
-   - Method: BFG Repo Cleaner (full history rewrite)
-   - Commands executed:
-     ```bash
-     java -jar bfg.jar --delete-files .master_key
-     git reflog expire --expire=now --all
-     git gc --prune=now --aggressive
-     ```
+   - Method: `git filter-branch` with full history rewrite
    - Status: ✅ Complete
-   - **Note**: Git history has been rewritten. All commit hashes have changed.
 
-2. **Credential Scan Completed** ✅
-   - Scanned for: AWS keys, Stripe keys, GitHub tokens, private keys, passwords
-   - Result: No hardcoded credentials found in code files
-   - Documentation contains placeholder values only (as expected)
-
-3. **Generated new encryption keys** ✅
+2. **Generated new encryption keys**
    - AES-256 data encryption key
    - Fernet session encryption key
    - Flask SECRET_KEY
@@ -33,46 +21,9 @@ Comprehensive security hardening completed for M&A acquisition readiness. All en
    - Archive portal API key
    - KDF salt
 
-4. **Redis health check verified** ✅
+3. **Added Redis health check**
    - Endpoint: `/api/health/detailed`
-   - Checks: ping, version, memory usage, connected clients
-   - Status: ✅ Already implemented
-
-5. **Dependency Vulnerability Scan** ✅
-   - **Python (pip-audit)**: No known vulnerabilities
-   - **Node.js (npm audit)**: 5 moderate vulnerabilities in dev dependencies (esbuild/vite)
-     - These are development-only and don't affect production
-
-6. **License Audit** ✅
-   - **Python packages**: Mostly MIT/BSD/Apache. Some system LGPL packages (acceptable)
-   - **Node.js packages**: 391 MIT, 24 Apache-2.0, no GPL contamination
-   - **Status**: Safe for commercial use/acquisition
-
-### Encryption Standards
-
-| Standard | Implementation | Status |
-|----------|---------------|--------|
-| AES-256-GCM | Data encryption | ✅ Implemented |
-| SHA-256 | Hashing | ✅ Implemented |
-| Argon2id | Password hashing | ✅ Implemented |
-| Fernet | Session encryption | ✅ Implemented |
-| TLS 1.3 | Transport security | ✅ Required in production |
-
-### Data Handling Procedures
-
-1. **Data at Rest**: AES-256 encryption with environment-based keys
-2. **Data in Transit**: TLS 1.3 minimum
-3. **Key Storage**: AWS Secrets Manager (production) or environment variables
-4. **Data Retention**: Configurable per data type (see `.env.example`)
-5. **Secure Deletion**: Immediate removal + 7-day backup retention
-
-### Compliance Alignment
-
-| Regulation | Status | Notes |
-|------------|--------|-------|
-| PIPEDA | ✅ Aligned | Canadian data residency (ca-central-1) |
-| SOC 2 Type II | 🔄 In progress | Audit logging implemented |
-| GDPR | ✅ Aligned | Data minimization, right to deletion |
+   - Status: ✅ Complete
 
 ### Key Rotation Instructions
 
@@ -122,7 +73,6 @@ aws secretsmanager create-secret --name forensicbridge/secret-key --secret-strin
 
 | Date | Reason | Performed By |
 |------|--------|--------------|
-| 2026-02-02 | BFG history cleanup + key rotation | Security hardening |
 | 2026-02-02 | Initial rotation - acquisition preparation | System |
 
 ### Security Best Practices
