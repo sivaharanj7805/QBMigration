@@ -487,7 +487,7 @@ class BackupManager:
                     continue
                 
                 filepath = os.path.join(self.backup_dir, filename)
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                file_time = datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc)
                 
                 if file_time < cutoff_date:
                     os.remove(filepath)
@@ -533,7 +533,7 @@ class BackupManager:
                     'filename': filename,
                     'path': filepath,
                     'size': os.path.getsize(filepath),
-                    'created': datetime.fromtimestamp(os.path.getmtime(filepath)),
+                    'created': datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc),
                     'location': 'local',
                     'encrypted': filename.endswith('.encrypted')
                 })

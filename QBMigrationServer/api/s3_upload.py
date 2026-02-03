@@ -162,7 +162,7 @@ def complete_upload():
         return jsonify({'error': 'Hash mismatch'}), 400
     
     # FIX #39: Anomaly detection for large file uploads
-    file_size = migration.encrypted_data_size_bytes or 0
+    file_size = migration.data_size_bytes or 0
     if file_size > 0:
         anomalies = check_upload_anomalies(user_id, file_size)
 

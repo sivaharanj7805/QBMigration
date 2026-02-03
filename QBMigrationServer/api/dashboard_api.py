@@ -202,9 +202,10 @@ def get_live_status(migration_id):
         # Add completion data if done
         if migration.status == 'completed' and migration.completed_at:
             response['completed_at'] = migration.completed_at.isoformat()
-            created = migration.created_at.replace(tzinfo=timezone.utc) if migration.created_at.tzinfo is None else migration.created_at
-            completed = migration.completed_at.replace(tzinfo=timezone.utc) if migration.completed_at.tzinfo is None else migration.completed_at
-            response['duration_seconds'] = (completed - created).total_seconds()
+            if migration.created_at:
+                created = migration.created_at.replace(tzinfo=timezone.utc) if migration.created_at.tzinfo is None else migration.created_at
+                completed = migration.completed_at.replace(tzinfo=timezone.utc) if migration.completed_at.tzinfo is None else migration.completed_at
+                response['duration_seconds'] = (completed - created).total_seconds()
         
         # Add error info if failed
         if migration.status == 'failed':

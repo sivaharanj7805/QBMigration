@@ -815,24 +815,30 @@ exit $EXIT_CODE
             instance_id: EC2 instance ID (optional)
             
         Returns:
-            bool: Success status
+            dict: Cleanup results with keys instance_terminated, s3_deleted, secret_deleted
         """
         try:
-            cleanup_success = True
-            
+            instance_terminated = False
+            s3_deleted = False
+            secret_deleted = False
+
             # 1. Delete S3 files
             logger.info(f"Cleaning up S3 files for migration {migration_id}...")
-            if not self.delete_s3_file(migration_id):
+            if self.delete_s3_file(migration_id):
+                s3_deleted = True
+            else:
                 logger.warning("S3 cleanup had issues")
-                cleanup_success = False
-            
+
             # 2. Terminate EC2 instance
             if instance_id:
                 logger.info(f"Terminating EC2 instance {instance_id}...")
-                if not self.terminate_instance(instance_id):
+                if self.terminate_instance(instance_id):
+                    instance_terminated = True
+                else:
                     logger.warning("Instance termination had issues")
-                    cleanup_success = False
-            
+            else:
+                instance_terminated = True  # No instance to terminate
+
             # 3. Delete Secrets Manager secret
             secret_name = f"qb-migration/{migration_id}"
             try:
@@ -842,24 +848,35 @@ exit $EXIT_CODE
                     ForceDeleteWithoutRecovery=True
                 )
                 logger.info(f"✓ Secret deleted: {secret_name}")
+                secret_deleted = True
             except ClientError as e:
-                if e.response['Error']['Code'] != 'ResourceNotFoundException':
+                if e.response['Error']['Code'] == 'ResourceNotFoundException':
+                    secret_deleted = True  # Already gone
+                else:
                     logger.warning(f"Failed to delete secret: {str(e)}")
-                    cleanup_success = False
-            
+
             # 4. Publish cleanup metric
             self._publish_metric('MigrationCleanup', 1, 'Count')
-            
+
+            cleanup_success = all([instance_terminated, s3_deleted, secret_deleted])
             if cleanup_success:
                 logger.info(f"✓ Complete cleanup successful for migration {migration_id}")
             else:
                 logger.warning(f"⚠ Cleanup completed with warnings for migration {migration_id}")
-            
-            return cleanup_success
-            
+
+            return {
+                'instance_terminated': instance_terminated,
+                's3_deleted': s3_deleted,
+                'secret_deleted': secret_deleted
+            }
+
         except Exception as e:
             logger.exception(f"Failed to cleanup migration: {str(e)}")
-            return False
+            return {
+                'instance_terminated': False,
+                's3_deleted': False,
+                'secret_deleted': False
+            }
     
     # ============================================================================
     # CLOUDWATCH METRICS
