@@ -813,22 +813,116 @@ def upload_ndjson_bundle():
 # CHUNKED UPLOAD ENDPOINTS (v4.3)
 # ============================================================================
 
-# In-memory storage for chunked upload sessions.
-# In production, consider Redis or database for persistence across restarts.
-_chunked_uploads = {}
-_chunked_uploads_lock = threading.Lock()
-CHUNKED_UPLOAD_EXPIRY_SECONDS = 24 * 60 * 60  # 24 hours
+# PRODUCTION FIX: Redis-backed storage for chunked upload sessions
+# Survives process restarts, worker recycling, and deployments
+CHUNKED_UPLOAD_EXPIRY_SECONDS = 4 * 60 * 60  # 4 hours (reduced from 24 for security)
+MAX_CONCURRENT_UPLOADS = 100  # Limit concurrent sessions to prevent OOM
+REDIS_UPLOAD_PREFIX = "chunked_upload:"
+REDIS_UPLOAD_SET = "chunked_upload_sessions"
+
+
+def _get_redis_client():
+    """Get Redis client for chunked upload storage."""
+    try:
+        import redis
+        redis_url = current_app.config.get('REDIS_URL', 'redis://localhost:6379/0')
+        return redis.from_url(redis_url, decode_responses=True)
+    except Exception as e:
+        logger.error(f"Failed to connect to Redis: {e}")
+        return None
+
+
+def _get_upload_session(upload_id: str) -> dict:
+    """Retrieve upload session from Redis."""
+    r = _get_redis_client()
+    if not r:
+        return None
+    try:
+        data = r.get(f"{REDIS_UPLOAD_PREFIX}{upload_id}")
+        if data:
+            return json.loads(data)
+    except Exception as e:
+        logger.error(f"Failed to get upload session {upload_id}: {e}")
+    return None
+
+
+def _set_upload_session(upload_id: str, session_data: dict):
+    """Store upload session in Redis with expiry."""
+    r = _get_redis_client()
+    if not r:
+        raise RuntimeError("Redis not available for chunked uploads")
+
+    # Check concurrent upload limit
+    try:
+        current_count = r.scard(REDIS_UPLOAD_SET)
+        if current_count and current_count >= MAX_CONCURRENT_UPLOADS:
+            raise ValueError(f"Too many concurrent uploads ({current_count}). Please try again later.")
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.warning(f"Failed to check upload count: {e}")
+
+    try:
+        r.setex(
+            f"{REDIS_UPLOAD_PREFIX}{upload_id}",
+            CHUNKED_UPLOAD_EXPIRY_SECONDS,
+            json.dumps(session_data)
+        )
+        r.sadd(REDIS_UPLOAD_SET, upload_id)
+        r.expire(REDIS_UPLOAD_SET, CHUNKED_UPLOAD_EXPIRY_SECONDS)
+    except Exception as e:
+        logger.error(f"Failed to store upload session {upload_id}: {e}")
+        raise
+
+
+def _update_upload_session(upload_id: str, session_data: dict):
+    """Update an existing upload session in Redis."""
+    r = _get_redis_client()
+    if not r:
+        return False
+    try:
+        # Get remaining TTL to preserve it
+        ttl = r.ttl(f"{REDIS_UPLOAD_PREFIX}{upload_id}")
+        if ttl and ttl > 0:
+            r.setex(
+                f"{REDIS_UPLOAD_PREFIX}{upload_id}",
+                ttl,
+                json.dumps(session_data)
+            )
+            return True
+    except Exception as e:
+        logger.error(f"Failed to update upload session {upload_id}: {e}")
+    return False
+
+
+def _delete_upload_session(upload_id: str):
+    """Remove upload session from Redis."""
+    r = _get_redis_client()
+    if not r:
+        return
+    try:
+        r.delete(f"{REDIS_UPLOAD_PREFIX}{upload_id}")
+        r.srem(REDIS_UPLOAD_SET, upload_id)
+    except Exception as e:
+        logger.error(f"Failed to delete upload session {upload_id}: {e}")
 
 
 def _cleanup_expired_uploads():
-    """Remove expired chunked uploads to prevent memory leaks"""
-    with _chunked_uploads_lock:
-        now = time.time()
-        expired = [k for k, v in _chunked_uploads.items()
-                   if now - v.get('created_at', 0) > CHUNKED_UPLOAD_EXPIRY_SECONDS]
-        for k in expired:
-            del _chunked_uploads[k]
-            logger.info(f"Cleaned up expired chunked upload: {k}")
+    """Remove expired chunked uploads (Redis handles this via TTL, but clean up set)"""
+    r = _get_redis_client()
+    if not r:
+        return
+    try:
+        # Get all session IDs from the set
+        session_ids = r.smembers(REDIS_UPLOAD_SET)
+        if session_ids:
+            for upload_id in session_ids:
+                # Check if the key still exists (not expired)
+                if not r.exists(f"{REDIS_UPLOAD_PREFIX}{upload_id}"):
+                    r.srem(REDIS_UPLOAD_SET, upload_id)
+                    logger.info(f"Cleaned up expired chunked upload from set: {upload_id}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup expired uploads: {e}")
 
 
 @upload_bp.route('/initiate', methods=['POST'])
@@ -887,8 +981,8 @@ def initiate_chunked_upload():
             'expires_at': expires_at,
         }
 
-        with _chunked_uploads_lock:
-            _chunked_uploads[upload_id] = session_data
+        # Store in Redis (replaces in-memory storage)
+        _set_upload_session(upload_id, session_data)
 
         logger.info(f"Chunked upload initiated: {upload_id}, {total_chunks} chunks, session: {session_id}")
 
@@ -939,9 +1033,8 @@ def upload_chunk():
         chunk_index = int(chunk_index_str)
         total_chunks = int(total_chunks_str)
 
-        # Validate upload session
-        with _chunked_uploads_lock:
-            session_data = _chunked_uploads.get(upload_id)
+        # Validate upload session (from Redis)
+        session_data = _get_upload_session(upload_id)
 
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
@@ -950,8 +1043,7 @@ def upload_chunk():
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
-            with _chunked_uploads_lock:
-                _chunked_uploads.pop(upload_id, None)
+            _delete_upload_session(upload_id)
             return jsonify({'success': False, 'error': 'Upload session expired'}), 410
 
         # Get chunk file data
@@ -987,14 +1079,13 @@ def upload_chunk():
         if not result:
             return jsonify({'success': False, 'error': 'Failed to store chunk'}), 500
 
-        # Track chunk in session
-        with _chunked_uploads_lock:
-            if upload_id in _chunked_uploads:
-                _chunked_uploads[upload_id]['chunks'][chunk_index] = {
-                    'hash': computed_hash,
-                    's3_key': result.get('key', ''),
-                    'size': len(chunk_data)
-                }
+        # Track chunk in session (update Redis)
+        session_data['chunks'][chunk_index] = {
+            'hash': computed_hash,
+            's3_key': result.get('key', ''),
+            'size': len(chunk_data)
+        }
+        _update_upload_session(upload_id, session_data)
 
         logger.debug(f"Chunk {chunk_index}/{total_chunks} stored for upload {upload_id}")
 
@@ -1034,8 +1125,8 @@ def chunk_exists():
 
         chunk_index = int(chunk_index_str)
 
-        with _chunked_uploads_lock:
-            session_data = _chunked_uploads.get(upload_id)
+        # Get session from Redis
+        session_data = _get_upload_session(upload_id)
 
         if not session_data:
             return jsonify({'exists': False, 'chunk_hash': None}), 200
@@ -1043,7 +1134,7 @@ def chunk_exists():
         if session_data['user_id'] != int(request.current_user['user_id']):
             return jsonify({'exists': False, 'chunk_hash': None}), 200
 
-        chunk_info = session_data['chunks'].get(chunk_index)
+        chunk_info = session_data['chunks'].get(str(chunk_index))  # JSON keys are strings
 
         if chunk_info:
             return jsonify({
@@ -1113,9 +1204,8 @@ def commit_chunked_upload():
         if not upload_id:
             return jsonify({'success': False, 'error': 'upload_id is required'}), 400
 
-        # Validate upload session
-        with _chunked_uploads_lock:
-            session_data = _chunked_uploads.get(upload_id)
+        # Validate upload session (from Redis)
+        session_data = _get_upload_session(upload_id)
 
         if not session_data:
             return jsonify({'success': False, 'error': 'Upload session not found'}), 404
@@ -1124,15 +1214,15 @@ def commit_chunked_upload():
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
         if time.time() > session_data['expires_at']:
-            with _chunked_uploads_lock:
-                _chunked_uploads.pop(upload_id, None)
+            _delete_upload_session(upload_id)
             return jsonify({'success': False, 'error': 'Upload session expired'}), 410
 
         # Verify all chunks are present
         total_chunks = session_data['total_chunks']
         received_chunks = session_data['chunks']
 
-        missing_chunks = [i for i in range(total_chunks) if i not in received_chunks]
+        # JSON keys are strings, so check both int and string keys
+        missing_chunks = [i for i in range(total_chunks) if str(i) not in received_chunks and i not in received_chunks]
 
         if missing_chunks:
             return jsonify({
@@ -1216,9 +1306,8 @@ def commit_chunked_upload():
 
         db.session.commit()
 
-        # Clean up in-memory session
-        with _chunked_uploads_lock:
-            _chunked_uploads.pop(upload_id, None)
+        # Clean up Redis session
+        _delete_upload_session(upload_id)
 
         logger.info(f"Chunked upload committed: {upload_id} -> migration {migration_id}")
 
@@ -1265,15 +1354,15 @@ def abort_chunked_upload():
         if not upload_id:
             return jsonify({'success': False, 'error': 'upload_id is required'}), 400
 
-        with _chunked_uploads_lock:
-            session_data = _chunked_uploads.pop(upload_id, None)
+        # Get session from Redis
+        session_data = _get_upload_session(upload_id)
 
         if session_data:
             if session_data['user_id'] != int(request.current_user['user_id']):
-                # Put it back - not authorized to abort this session
-                with _chunked_uploads_lock:
-                    _chunked_uploads[upload_id] = session_data
                 return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+            # Delete the session from Redis
+            _delete_upload_session(upload_id)
 
             chunks_count = len(session_data['chunks'])
             logger.info(f"Chunked upload aborted: {upload_id}, reason: {reason}, "

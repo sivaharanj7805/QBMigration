@@ -81,8 +81,12 @@ class User(UserMixin, db.Model):
     
     # Security - Multi-Factor Authentication
     mfa_enabled = db.Column(db.Boolean, default=False)
-    mfa_secret = db.Column(db.String(32))  # TOTP secret
-    backup_codes = db.Column(db.Text)  # JSON array of backup codes
+    # SECURITY FIX: MFA secrets encrypted at rest to prevent exposure on DB breach
+    _mfa_secret_encrypted = db.Column('mfa_secret_encrypted', db.Text, nullable=True)
+    _backup_codes_encrypted = db.Column('backup_codes_encrypted', db.Text, nullable=True)
+    # Legacy columns for migration (will be dropped after data migration)
+    mfa_secret = db.Column(db.String(32), nullable=True)  # DEPRECATED: Use _mfa_secret_encrypted
+    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: Use _backup_codes_encrypted
     
     # Security - Device Fingerprinting
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
@@ -503,70 +507,148 @@ class User(UserMixin, db.Model):
     # ========================================================================
     # MULTI-FACTOR AUTHENTICATION
     # ========================================================================
-    
+
+    def _get_mfa_secret(self) -> str:
+        """Get decrypted MFA secret (prefers encrypted, falls back to legacy)."""
+        # Try encrypted first
+        if self._mfa_secret_encrypted:
+            try:
+                from cryptography.fernet import Fernet
+                from flask import current_app
+                key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+                if key:
+                    f = Fernet(key.encode() if isinstance(key, str) else key)
+                    return f.decrypt(self._mfa_secret_encrypted.encode()).decode()
+            except Exception:
+                pass
+        # Fall back to legacy unencrypted column
+        return self.mfa_secret
+
+    def _set_mfa_secret(self, value: str):
+        """Set encrypted MFA secret."""
+        if value is None:
+            self._mfa_secret_encrypted = None
+            self.mfa_secret = None
+            return
+        try:
+            from cryptography.fernet import Fernet
+            from flask import current_app
+            key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+            if key:
+                f = Fernet(key.encode() if isinstance(key, str) else key)
+                self._mfa_secret_encrypted = f.encrypt(value.encode()).decode()
+                self.mfa_secret = None  # Clear legacy column
+                return
+        except Exception:
+            pass
+        # Fall back to legacy if encryption fails
+        self.mfa_secret = value
+
+    def _get_backup_codes(self) -> list:
+        """Get decrypted backup codes (prefers encrypted, falls back to legacy)."""
+        # Try encrypted first
+        if self._backup_codes_encrypted:
+            try:
+                from cryptography.fernet import Fernet
+                from flask import current_app
+                key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+                if key:
+                    f = Fernet(key.encode() if isinstance(key, str) else key)
+                    return json.loads(f.decrypt(self._backup_codes_encrypted.encode()).decode())
+            except Exception:
+                pass
+        # Fall back to legacy unencrypted column
+        if self.backup_codes:
+            try:
+                return json.loads(self.backup_codes)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def _set_backup_codes(self, value: list):
+        """Set encrypted backup codes."""
+        if value is None:
+            self._backup_codes_encrypted = None
+            self.backup_codes = None
+            return
+        try:
+            from cryptography.fernet import Fernet
+            from flask import current_app
+            key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+            if key:
+                f = Fernet(key.encode() if isinstance(key, str) else key)
+                self._backup_codes_encrypted = f.encrypt(json.dumps(value).encode()).decode()
+                self.backup_codes = None  # Clear legacy column
+                return
+        except Exception:
+            pass
+        # Fall back to legacy if encryption fails
+        self.backup_codes = json.dumps(value)
+
     def enable_2fa(self):
         """
         Enable 2FA for user
-        
+
         Returns:
             tuple: (secret, qr_code_url, backup_codes)
         """
         # Generate TOTP secret
         secret = pyotp.random_base32()
-        self.mfa_secret = secret
-        
+        self._set_mfa_secret(secret)
+
         # Generate QR code URL
         totp = pyotp.TOTP(secret)
         qr_url = totp.provisioning_uri(
             name=self.email,
             issuer_name='QB Migration'
         )
-        
+
         # Generate backup codes
         backup_codes = [secrets.token_hex(4).upper() for _ in range(10)]
-        self.backup_codes = json.dumps(backup_codes)
-        
+        self._set_backup_codes(backup_codes)
+
         # Enable 2FA
         self.mfa_enabled = True
-        
+
         return secret, qr_url, backup_codes
-    
+
     def disable_2fa(self):
         """Disable 2FA for user"""
         self.mfa_enabled = False
-        self.mfa_secret = None
-        self.backup_codes = None
-    
+        self._set_mfa_secret(None)
+        self._set_backup_codes(None)
+
     def verify_2fa_token(self, token):
         """
         Verify 2FA token
-        
+
         Args:
             token: TOTP token or backup code
-            
+
         Returns:
             bool: True if valid, False otherwise
         """
-        if not self.mfa_enabled or not self.mfa_secret:
+        mfa_secret = self._get_mfa_secret()
+        if not self.mfa_enabled or not mfa_secret:
             return False
-        
+
         # Try TOTP verification
-        totp = pyotp.TOTP(self.mfa_secret)
+        totp = pyotp.TOTP(mfa_secret)
         if totp.verify(token, valid_window=1):
             return True
-        
+
         # Try backup codes
-        if self.backup_codes:
+        backup_codes = self._get_backup_codes()
+        if backup_codes:
             try:
-                codes = json.loads(self.backup_codes)
-                if token.upper() in codes:
+                if token.upper() in backup_codes:
                     # Remove used backup code
-                    codes.remove(token.upper())
-                    self.backup_codes = json.dumps(codes)
+                    backup_codes.remove(token.upper())
+                    self._set_backup_codes(backup_codes)
                     return True
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (TypeError, ValueError):
                 pass
-        
+
         return False
     
     # ========================================================================

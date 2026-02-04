@@ -7,9 +7,8 @@
 #   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #   Testing:     docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d
 #
+# NOTE: version key removed - deprecated in Docker Compose v2+
 # =============================================================================
-
-version: '3.8'
 
 services:
   # ---------------------------------------------------------------------------
@@ -66,8 +65,9 @@ services:
     image: postgres:15-alpine
     container_name: qbmigration-postgres
     restart: unless-stopped
+    # SECURITY FIX: Only expose to localhost by default, use POSTGRES_EXPOSE_PORT for custom binding
     ports:
-      - "5432:5432"
+      - "${POSTGRES_EXPOSE_PORT:-127.0.0.1:5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -78,7 +78,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-qbmigration}
       - PGDATA=/var/lib/postgresql/data/pgdata
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qbmigration -d qbmigration"]
+      # PRODUCTION FIX: Use environment variables for username and database
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qbmigration} -d ${POSTGRES_DB:-qbmigration}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -101,7 +102,8 @@ services:
     # CRITICAL FIX: Require REDIS_PASSWORD - no empty default allowed in production
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required for Redis authentication}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      # SECURITY FIX: Don't expose password in process list - use shell to hide it
+      test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

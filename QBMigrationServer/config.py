@@ -151,8 +151,17 @@ class Config:
     SESSION_COOKIE_DOMAIN = os.getenv('SESSION_COOKIE_DOMAIN', None)
     
     # Rate Limiting
+    # SECURITY FIX: Require Redis in production for cross-worker rate limiting
     RATELIMIT_ENABLED = True
-    RATELIMIT_STORAGE_URL = os.getenv('REDIS_URL', 'memory://')
+    RATELIMIT_STORAGE_URL = os.getenv('REDIS_URL')
+    if not RATELIMIT_STORAGE_URL:
+        if os.getenv('FLASK_ENV') == 'production':
+            raise ValueError(
+                "REDIS_URL must be set in production for rate limiting! "
+                "In-memory rate limiting is per-worker and ineffective."
+            )
+        RATELIMIT_STORAGE_URL = 'memory://'
+        logger.warning("Using in-memory rate limiting (development only)")
     RATELIMIT_STRATEGY = 'fixed-window'
     RATELIMIT_HEADERS_ENABLED = True
     
@@ -219,7 +228,10 @@ class Config:
     CLOUDWATCH_LOG_GROUP = os.getenv('CLOUDWATCH_LOG_GROUP', '/aws/qb-migration')
     CLOUDWATCH_LOG_STREAM = os.getenv('CLOUDWATCH_LOG_STREAM', 'app-logs')
     
-    ALERT_EMAIL = os.getenv('ALERT_EMAIL', 'admin@yourcompany.com')
+    # PRODUCTION FIX: No placeholder email - must be set explicitly
+    ALERT_EMAIL = os.getenv('ALERT_EMAIL')
+    if not ALERT_EMAIL and os.getenv('FLASK_ENV') == 'production':
+        logger.warning("ALERT_EMAIL not set - migration failure alerts will not be sent")
     ALERT_ON_MIGRATION_FAILURE_COUNT = 3
     ALERT_ON_STUCK_MIGRATION_HOURS = 4
     

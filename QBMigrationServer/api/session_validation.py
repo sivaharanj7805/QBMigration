@@ -104,10 +104,18 @@ def check_rate_limit(session_id, ip_address):
 
 
 def hash_fingerprint(fingerprint):
-    """Hash the device fingerprint for storage"""
+    """
+    Hash the device fingerprint for storage using HMAC-SHA256.
+
+    SECURITY FIX: Uses HMAC with app secret instead of plain SHA-256.
+    This prevents rainbow table attacks on low-entropy fingerprints.
+    """
     if not fingerprint:
         return None
-    return hashlib.sha256(fingerprint.encode()).hexdigest()
+    import hmac
+    from flask import current_app
+    secret = current_app.config['SECRET_KEY'].encode()
+    return hmac.new(secret, fingerprint.encode(), hashlib.sha256).hexdigest()
 
 
 @session_validation_bp.route('/validate', methods=['POST'])
@@ -640,8 +648,18 @@ def complete_extraction():
 @session_validation_bp.route('/status/<session_id>', methods=['GET'])
 def session_status(session_id):
     """
-    Get the current status of a session (public endpoint for dashboard).
+    Get the current status of a session.
+
+    SECURITY: This endpoint requires authentication to prevent information disclosure.
+    Exposes project names, client names, and tier information.
     """
+    # SECURITY FIX: Require authentication for session status
+    from flask_login import current_user
+    if not current_user.is_authenticated:
+        return jsonify({
+            'error': 'Authentication required',
+            'message': 'Please log in to view session status'
+        }), 401
     project = Project.query.filter_by(session_id=session_id).first()
 
     if not project:

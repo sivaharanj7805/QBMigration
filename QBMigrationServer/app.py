@@ -371,13 +371,24 @@ def auto_migrate_database(app):
                 ("last_webhook_at", "TIMESTAMP"),
                 ("verification_results", "TEXT"),
             ]
+            # PRODUCTION FIX: Track migration errors instead of silently swallowing them
+            migration_errors = []
             for col_name, col_type in migration_columns:
                 try:
                     conn.execute(text(
                         f"ALTER TABLE migrations ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
                     ))
-                except Exception:
-                    pass  # Column already exists
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    # Only ignore "already exists" errors
+                    if 'already exists' in error_msg or 'duplicate column' in error_msg:
+                        pass  # Column already exists - expected
+                    else:
+                        migration_errors.append(f"{col_name}: {e}")
+                        app.logger.warning(f"Failed to add column {col_name} to migrations: {e}")
+
+            if migration_errors:
+                app.logger.error(f"Schema migration had {len(migration_errors)} errors: {migration_errors[:5]}")
 
             # FIX: Create whitelabel_settings table if missing (fixes /api/settings/whitelabel 404/500)
             conn.execute(text("""
@@ -995,35 +1006,40 @@ def create_app(config_name='development'):
             response = jsonify(health_status)
             return _add_cors_headers_to_health_response(response), 503
 
-        # RELIABILITY FIX: Check database connection pool health
-        try:
-            # Query pg_stat_activity to check active vs total connections
-            result = db.session.execute(text("""
-                SELECT
-                    (SELECT count(*) FROM pg_stat_activity) as active_connections,
-                    (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
-            """))
-            row = result.fetchone()
-            active_connections = row[0]
-            max_connections = row[1]
+        # PRODUCTION FIX: Only check connection pool when ?detailed=true to reduce DB load
+        # pg_stat_activity query adds unnecessary overhead on every health check
+        if request.args.get('detailed') == 'true':
+            try:
+                # Only run expensive query if PostgreSQL (fails on SQLite)
+                db_url = str(app.config.get('SQLALCHEMY_DATABASE_URI', ''))
+                if 'postgresql' in db_url:
+                    # Query pg_stat_activity to check active vs total connections
+                    result = db.session.execute(text("""
+                        SELECT
+                            (SELECT count(*) FROM pg_stat_activity) as active_connections,
+                            (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+                    """))
+                    row = result.fetchone()
+                    active_connections = row[0]
+                    max_connections = row[1]
 
-            # Calculate pool usage percentage
-            pool_usage_pct = (active_connections / max_connections) * 100 if max_connections > 0 else 0
+                    # Calculate pool usage percentage
+                    pool_usage_pct = (active_connections / max_connections) * 100 if max_connections > 0 else 0
 
-            if pool_usage_pct >= 90:
-                health_status['checks']['connection_pool'] = f'critical ({active_connections}/{max_connections})'
-                health_status['status'] = 'degraded'
-                app.logger.warning(f"Connection pool critical: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
-            elif pool_usage_pct >= 75:
-                health_status['checks']['connection_pool'] = f'warning ({active_connections}/{max_connections})'
-                app.logger.info(f"Connection pool high: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
-            else:
-                health_status['checks']['connection_pool'] = f'healthy ({active_connections}/{max_connections})'
-
-        except Exception as e:
-            # If pool check fails, log but don't fail health check (might not be PostgreSQL)
-            app.logger.warning(f"Connection pool check failed (not PostgreSQL?): {str(e)}")
-            health_status['checks']['connection_pool'] = 'unknown'
+                    if pool_usage_pct >= 90:
+                        health_status['checks']['connection_pool'] = f'critical ({active_connections}/{max_connections})'
+                        health_status['status'] = 'degraded'
+                        app.logger.warning(f"Connection pool critical: {active_connections}/{max_connections} ({pool_usage_pct:.1f}%)")
+                    elif pool_usage_pct >= 75:
+                        health_status['checks']['connection_pool'] = f'warning ({active_connections}/{max_connections})'
+                    else:
+                        health_status['checks']['connection_pool'] = f'healthy ({active_connections}/{max_connections})'
+                else:
+                    health_status['checks']['connection_pool'] = 'not_postgresql'
+            except Exception as e:
+                # If pool check fails, log but don't fail health check
+                app.logger.warning(f"Connection pool check failed: {str(e)}")
+                health_status['checks']['connection_pool'] = 'unknown'
 
         # Check AWS S3 access
         try:
