@@ -60,12 +60,20 @@ class CasewareExporter:
 
     VERSION = "1.0.0"
 
-    # Account type classification for debit/credit determination
+    # Account type classification for debit/credit determination.
+    # Includes both QBD names (spaced, plural: 'Other Current Assets')
+    # and QBO names (camelCase, singular: 'OtherCurrentAsset') since
+    # input data may arrive in either format.
     DEBIT_TYPES = {
+        # QBD format
         'Bank', 'Accounts Receivable', 'Other Current Assets',
         'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
         'Expense', 'Other Expense', 'Inventory',
         'Undeposited Funds', 'Prepaid Expenses',
+        # QBO format
+        'AccountsReceivable', 'OtherCurrentAsset', 'FixedAsset',
+        'OtherAsset', 'CostOfGoodsSold', 'OtherExpense',
+        # Overlap (same in both formats)
         'Other Current Asset', 'Fixed Asset', 'Other Asset',
     }
 

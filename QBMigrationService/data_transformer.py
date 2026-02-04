@@ -119,6 +119,7 @@ class QBDataTransformer:
         self.stats = {
             'total_processed': 0,
             'total_skipped': 0,
+            'dropped_lines': 0,
             'by_entity_type': defaultdict(int),
             'errors': [],
             'warnings': []
@@ -818,7 +819,15 @@ class QBDataTransformer:
             
             # ISO format is always preferred and unambiguous
             if re.match(r'^\d{4}-\d{2}-\d{2}', date_value):
-                return date_value.split('T')[0]
+                iso_part = date_value.split('T')[0]
+                # Validate the date is real (rejects Feb 31, Apr 31, etc.)
+                try:
+                    from datetime import datetime as dt
+                    dt.strptime(iso_part, '%Y-%m-%d')
+                    return iso_part
+                except ValueError:
+                    logger.warning(f"Invalid ISO date: {iso_part}")
+                    return None
             
             # Try auto-detection using config settings
             # FIX #2: Proper config fallback with defaults
@@ -878,10 +887,12 @@ class QBDataTransformer:
                         m, d, y = parts
 
                     try:
-                        # CRITICAL FIX: Validate date components before formatting
-                        # Previous code accepted 99/99/9999 as valid
+                        # Validate with datetime to reject impossible dates
+                        # (Feb 31, Apr 31, etc.)
+                        from datetime import datetime as dt
                         m_int, d_int, y_int = int(m), int(d), int(y)
-                        if 1 <= m_int <= 12 and 1 <= d_int <= 31 and 1900 <= y_int <= 2100:
+                        dt(y_int, m_int, d_int)  # Raises ValueError for invalid dates
+                        if 1900 <= y_int <= 2100:
                             return f"{y}-{m.zfill(2)}-{d.zfill(2)}"
                     except (ValueError, TypeError):
                         pass
@@ -2357,6 +2368,7 @@ class QBDataTransformer:
 
             # A deposit line needs at least an AccountRef or LinkedTxn
             if not acct_id and not linked_txn_id:
+                self.stats['dropped_lines'] += 1
                 logger.debug(f"Deposit: dropping line — no AccountRef or LinkedTxn mapped")
                 continue
 
@@ -2432,6 +2444,7 @@ class QBDataTransformer:
         for line in qbd.get('AdjustmentLines', []):
             item_id = self.map_id('items', line.get('ItemRef'))
             if not item_id:
+                self.stats['dropped_lines'] += 1
                 logger.debug(f"InventoryAdjustment: dropping line — unmapped ItemRef: {line.get('ItemRef')}")
                 continue
             qbo_line = {
@@ -2482,6 +2495,7 @@ class QBDataTransformer:
 
             acct_id = self.map_id('accounts', line.get('AccountRef'))
             if not acct_id:
+                self.stats['dropped_lines'] += 1
                 logger.debug(f"JournalEntry: dropping line — unmapped AccountRef: {line.get('AccountRef')}")
                 continue
             qbo_line = {
@@ -2602,6 +2616,7 @@ class QBDataTransformer:
         for line in qbd.get('ExpenseLines', []):
             acct_id = self.map_id('accounts', line.get('AccountRef'))
             if not acct_id:
+                self.stats['dropped_lines'] += 1
                 logger.debug(f"Purchase: dropping expense line — unmapped AccountRef: {line.get('AccountRef')}")
                 continue
             qbo_line = {

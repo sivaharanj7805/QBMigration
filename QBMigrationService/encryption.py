@@ -402,8 +402,10 @@ class EncryptionManager:
                 padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
                 
                 # Remove PKCS7 padding
+                if not padded_plaintext:
+                    raise ValueError("Decryption produced empty plaintext")
                 padding_length = padded_plaintext[-1]
-                
+
                 # SECURITY: Validate padding to prevent padding oracle attacks
                 if padding_length < 1 or padding_length > 16:
                     raise ValueError("Invalid PKCS7 padding")

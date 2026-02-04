@@ -583,7 +583,7 @@ class PremiumQBOClient:
         
         # TESTING REPORT: Add correlation ID header
         if correlation_id:
-            headers[config.CORRELATION_ID_HEADER] = correlation_id
+            headers[getattr(config, 'CORRELATION_ID_HEADER', 'X-Correlation-ID')] = correlation_id
         
         # FIX #312: Add idempotency key if provided
         if idempotency_key:

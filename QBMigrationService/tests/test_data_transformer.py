@@ -503,5 +503,166 @@ class TestEdgeCases:
         assert 'Müller' in result['DisplayName'] or 'Muller' in result['DisplayName']
 
 
+class TestLineSkippingValidation:
+    """Tests for line items being correctly skipped when required refs are unmapped."""
+
+    @pytest.fixture
+    def transformer(self):
+        t = QBDataTransformer()
+        # Pre-populate some ID mappings so we can test mapped vs unmapped
+        t.store_mapping('accounts', 'ACCT-1', 'qbo-acct-1')
+        t.store_mapping('items', 'ITEM-1', 'qbo-item-1')
+        t.store_mapping('invoices', 'INV-1', 'qbo-inv-1')
+        t.store_mapping('payments', 'PAY-1', 'qbo-pay-1')
+        t.store_mapping('customers', 'CUST-1', 'qbo-cust-1')
+        return t
+
+    def test_purchase_skips_lines_without_account_ref(self, transformer):
+        qbd = {
+            'PaymentType': 'Cash',
+            'TxnDate': '2024-01-15',
+            'ExpenseLines': [
+                {'AccountRef': 'ACCT-1', 'Amount': '100'},
+                {'AccountRef': 'UNMAPPED', 'Amount': '200'},
+                {'AccountRef': 'ACCT-1', 'Amount': '50'},
+            ]
+        }
+        result = transformer.transform_purchase(qbd)
+        assert result is not None
+        assert len(result['Line']) == 2
+        assert transformer.stats['dropped_lines'] == 1
+
+    def test_purchase_returns_none_when_all_lines_unmapped(self, transformer):
+        qbd = {
+            'PaymentType': 'Cash',
+            'TxnDate': '2024-01-15',
+            'ExpenseLines': [
+                {'AccountRef': 'UNMAPPED-1', 'Amount': '100'},
+                {'AccountRef': 'UNMAPPED-2', 'Amount': '200'},
+            ]
+        }
+        result = transformer.transform_purchase(qbd)
+        assert result is None
+
+    def test_inventoryadjustment_skips_lines_without_item_ref(self, transformer):
+        qbd = {
+            'TxnDate': '2024-01-15',
+            'AdjustmentLines': [
+                {'ItemRef': 'ITEM-1', 'QuantityDifference': '5'},
+                {'ItemRef': 'UNMAPPED', 'QuantityDifference': '3'},
+            ]
+        }
+        result = transformer.transform_inventoryadjustment(qbd)
+        assert result is not None
+        assert len(result['Line']) == 1
+        assert transformer.stats['dropped_lines'] == 1
+
+    def test_journalentry_skips_lines_without_account_ref(self, transformer):
+        qbd = {
+            'TxnDate': '2024-01-15',
+            'JournalEntryLines': [
+                {'AccountRef': 'ACCT-1', 'Amount': '500', 'PostingType': 'Debit'},
+                {'AccountRef': 'UNMAPPED', 'Amount': '500', 'PostingType': 'Credit'},
+                {'AccountRef': 'ACCT-1', 'Amount': '500', 'PostingType': 'Credit'},
+            ]
+        }
+        result = transformer.transform_journalentry(qbd)
+        assert result is not None
+        assert len(result['Line']) == 2
+        assert transformer.stats['dropped_lines'] == 1
+
+    def test_deposit_skips_lines_without_account_or_linked_txn(self, transformer):
+        qbd = {
+            'TxnDate': '2024-01-15',
+            'DepositLines': [
+                {'AccountRef': 'ACCT-1', 'Amount': '100'},
+                {'AccountRef': 'UNMAPPED', 'Amount': '200'},  # No LinkedTxn either
+                {'AccountRef': None, 'Amount': '50', 'LinkedTxn': {'TxnId': 'PAY-1'}},
+            ]
+        }
+        result = transformer.transform_deposit(qbd)
+        assert result is not None
+        assert len(result['Line']) == 2
+        assert transformer.stats['dropped_lines'] == 1
+
+    def test_deposit_keeps_line_with_linked_txn_but_no_account(self, transformer):
+        qbd = {
+            'TxnDate': '2024-01-15',
+            'DepositLines': [
+                {'Amount': '100', 'LinkedTxn': {'TxnId': 'PAY-1'}},
+            ]
+        }
+        result = transformer.transform_deposit(qbd)
+        assert result is not None
+        assert len(result['Line']) == 1
+        assert 'LinkedTxn' in result['Line'][0]
+
+    def test_payment_returns_none_when_no_invoice_mapped(self, transformer):
+        qbd = {
+            'RefNumber': 'PAY-100',
+            'TxnDate': '2024-01-15',
+            'CustomerRef': 'CUST-1',
+            'AppliedToInvoices': [
+                {'InvoiceRef': 'UNMAPPED-INV', 'Amount': '500'},
+            ]
+        }
+        result = transformer.transform_payment(qbd)
+        assert result is None
+
+    def test_payment_keeps_lines_with_mapped_invoices(self, transformer):
+        qbd = {
+            'RefNumber': 'PAY-100',
+            'TxnDate': '2024-01-15',
+            'CustomerRef': 'CUST-1',
+            'AppliedToInvoices': [
+                {'InvoiceRef': 'INV-1', 'Amount': '500'},
+                {'InvoiceRef': 'UNMAPPED-INV', 'Amount': '200'},
+            ]
+        }
+        result = transformer.transform_payment(qbd)
+        assert result is not None
+        assert len(result['Line']) == 1
+
+
+class TestFormatDateValidation:
+    """Tests for date validation rejecting impossible dates."""
+
+    @pytest.fixture
+    def transformer(self):
+        return QBDataTransformer()
+
+    def test_rejects_feb_31(self, transformer):
+        result = transformer.format_date('2024-02-31')
+        assert result is None
+
+    def test_rejects_apr_31(self, transformer):
+        result = transformer.format_date('2024-04-31')
+        assert result is None
+
+    def test_accepts_valid_leap_day(self, transformer):
+        result = transformer.format_date('2024-02-29')
+        assert result == '2024-02-29'
+
+    def test_rejects_non_leap_feb_29(self, transformer):
+        result = transformer.format_date('2023-02-29')
+        assert result is None
+
+    def test_accepts_valid_date(self, transformer):
+        result = transformer.format_date('2024-12-15')
+        assert result == '2024-12-15'
+
+    def test_rejects_month_13(self, transformer):
+        result = transformer.format_date('2024-13-01')
+        assert result is None
+
+    def test_legacy_format_rejects_feb_31(self, transformer):
+        result = transformer.format_date('02/31/2024')
+        assert result is None
+
+    def test_legacy_format_accepts_valid(self, transformer):
+        result = transformer.format_date('01/15/2024')
+        assert result == '2024-01-15'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v', '--tb=short'])

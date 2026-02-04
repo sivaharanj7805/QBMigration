@@ -87,9 +87,11 @@ class MigrationOrchestrator:
         self.realm_id = realm_id
         self.qbo_environment = qbo_environment
         self.progress_callback = progress_callback or (lambda p, m: None)
-        
-        logging.basicConfig(level=log_level)
-        
+
+        # Set level on our own logger only — don't call basicConfig() which
+        # overwrites the caller's logging configuration.
+        logger.setLevel(log_level)
+
         # Will be initialized lazily
         self._encryption_manager = None
         self._oauth_manager = None
