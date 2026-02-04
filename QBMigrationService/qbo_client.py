@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from threading import Lock
 from decimal import Decimal
 from pathlib import Path
@@ -118,8 +119,8 @@ class PremiumQBOClient:
         self.failed_items: List[Dict] = []
         self.failed_items_lock = Lock()
         
-        # Graceful shutdown flag (FIX #251, #386)
-        self.shutdown_requested = False
+        # Graceful shutdown flag — threading.Event is inherently thread-safe
+        self._shutdown_event = threading.Event()
         self._register_signal_handlers()
     
     @staticmethod
@@ -160,8 +161,6 @@ class PremiumQBOClient:
         FIX #251, #386: Graceful shutdown on SIGTERM/SIGINT
         AUDIT FIX: Only register from main thread to avoid ValueError
         """
-        import threading
-
         # Signal handlers can only be registered from the main thread
         if threading.current_thread() is not threading.main_thread():
             logger.debug("Skipping signal handler registration (not main thread)")
@@ -169,7 +168,7 @@ class PremiumQBOClient:
 
         def shutdown_handler(signum, frame):
             logger.warning("Shutdown signal received. Completing current requests...")
-            self.shutdown_requested = True
+            self._shutdown_event.set()
 
         try:
             signal.signal(signal.SIGTERM, shutdown_handler)
@@ -179,8 +178,8 @@ class PremiumQBOClient:
             logger.debug(f"Could not register signal handlers: {e}")
     
     def _check_shutdown(self):
-        """Check if shutdown was requested"""
-        if self.shutdown_requested:
+        """Check if shutdown was requested (thread-safe via Event)"""
+        if self._shutdown_event.is_set():
             logger.warning("Shutdown requested, stopping operations")
             raise KeyboardInterrupt("Graceful shutdown")
     
@@ -914,15 +913,18 @@ class PremiumQBOClient:
     
     def _enforce_batch_rate_limit(self):
         """Enforce 40 batch requests per minute per realm"""
+        sleep_time = 0
         with self._batch_timestamps_lock:
             now = time.time()
             # Remove timestamps older than 60 seconds
             self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
             if len(self._batch_timestamps) >= 40:
                 sleep_time = 60 - (now - self._batch_timestamps[0])
-                if sleep_time > 0:
-                    logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
-                    time.sleep(sleep_time)
+        # Sleep OUTSIDE lock so other threads aren't blocked during the wait
+        if sleep_time > 0:
+            logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
+            time.sleep(sleep_time)
+        with self._batch_timestamps_lock:
             self._batch_timestamps.append(time.time())
 
     def _process_single_batch(
@@ -1360,8 +1362,8 @@ class PremiumQBOClient:
                 if results:
                     all_results = self.query(entity_type, oauth_manager=oauth_manager)
                     return len(all_results)
-            except Exception:
-                pass
+            except Exception as fallback_err:
+                logger.warning(f"Query count fallback also failed for {entity_type}: {fallback_err}")
             return 0
 
     def query(

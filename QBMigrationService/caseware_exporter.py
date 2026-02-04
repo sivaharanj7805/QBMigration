@@ -1098,6 +1098,8 @@ For technical support: support@forensicbridge.com
                 'credit': str(contra_credit)
             })
 
+            # Contra amount is opposite sign; use abs to avoid -0.00
+            contra_amount = -amount if amount != 0 else Decimal('0')
             contra_row = [
                 contra_acct_num,
                 contra_acct_name,
@@ -1105,7 +1107,7 @@ For technical support: support@forensicbridge.com
                 formatted_date,
                 ref_number,
                 memo[:255] if memo else '',
-                f"{-amount:.2f}",
+                f"{contra_amount:.2f}",
                 f"{contra_debit:.2f}",
                 f"{contra_credit:.2f}",
                 contra_hash

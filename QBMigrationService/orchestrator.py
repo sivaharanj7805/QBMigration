@@ -1106,10 +1106,12 @@ class MigrationOrchestrator:
         data_response = s3.head_object(Bucket=bucket, Key=key)
         company_name = data_response.get('Metadata', {}).get('company-name', 'Unknown')
 
-        # Get encryption metadata
-        if 'encrypted_data.bin' not in key:
-            raise ValueError(f"S3 key does not follow expected pattern (expected 'encrypted_data.bin' in key): {key}")
-        metadata_key = key.replace('encrypted_data.bin', 'encryption_metadata.json')
+        # Get encryption metadata — use endswith so keys like
+        # 'migrations/123/encrypted_data.bin' work but stray substrings
+        # like 'encrypted_data.bin.bak' don't
+        if not key.endswith('encrypted_data.bin'):
+            raise ValueError(f"S3 key does not follow expected pattern (must end with 'encrypted_data.bin'): {key}")
+        metadata_key = key[:-len('encrypted_data.bin')] + 'encryption_metadata.json'
         response = s3.get_object(Bucket=bucket, Key=metadata_key)
         encryption_metadata = json.loads(response['Body'].read().decode('utf-8'))
 
