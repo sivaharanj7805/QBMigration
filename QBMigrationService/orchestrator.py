@@ -195,7 +195,8 @@ class MigrationOrchestrator:
         migration_id = f"mig_{uuid.uuid4().hex[:16]}"
         
         logger.info(f"Starting migration {migration_id} for {company_name}")
-        
+        transformer = None  # Initialize before try so except block can access it
+
         try:
             # Step 1: Decrypt data (5%)
             self._report_progress(5, "Decrypting data")
@@ -266,6 +267,25 @@ class MigrationOrchestrator:
                     'taxpayment': 'TaxPayments', 'taxpayments': 'TaxPayments',
                     'salestaxpayments': 'TaxPayments',
                     'attachable': 'Attachables', 'attachables': 'Attachables',
+                    # New entity types
+                    'salesorder': 'SalesOrders', 'salesorders': 'SalesOrders',
+                    'itemreceipt': 'ItemReceipts', 'itemreceipts': 'ItemReceipts',
+                    'charge': 'Charges', 'charges': 'Charges',
+                    'othername': 'OtherNames', 'othernames': 'OtherNames',
+                    'datedriventerm': 'DateDrivenTerms', 'datedriventerms': 'DateDrivenTerms',
+                    'lead': 'Leads', 'leads': 'Leads',
+                    'buildassembly': 'BuildAssemblies', 'buildassemblies': 'BuildAssemblies',
+                    'inventorytransfer': 'InventoryTransfers', 'inventorytransfers': 'InventoryTransfers',
+                    'dataextension': 'DataExtensions', 'dataextensions': 'DataExtensions',
+                    'salesrep': 'SalesReps', 'salesreps': 'SalesReps',
+                    'customermessage': 'CustomerMessages', 'customermessages': 'CustomerMessages',
+                    'jobtype': 'JobTypes', 'jobtypes': 'JobTypes',
+                    'vendortype': 'VendorTypes', 'vendortypes': 'VendorTypes',
+                    'pricelevel': 'PriceLevels', 'pricelevels': 'PriceLevels',
+                    'salestaxgroup': 'SalesTaxGroups', 'salestaxgroups': 'SalesTaxGroups',
+                    'shipmethod': 'ShipMethods', 'shipmethods': 'ShipMethods',
+                    'inventorysite': 'InventorySites', 'inventorysites': 'InventorySites',
+                    'customertype': 'CustomerTypes', 'customertypes': 'CustomerTypes',
                 }
                 mapped = key_map.get(key.lower(), key)
                 normalized_data[mapped] = value
@@ -316,32 +336,49 @@ class MigrationOrchestrator:
             #   Phase 5: Transactions (depend on accounts + master lists)
             #   Phase 6: Attachments (reference all other entities)
             entity_order = [
+                # Phase 0: Skip-with-logging types (no QBO creation, just log)
+                # These run first so their ID mappings are available if needed
+                ('SalesReps', 20, 20),
+                ('CustomerMessages', 20, 20),
+                ('JobTypes', 20, 20),
+                ('VendorTypes', 20, 20),
+                ('PriceLevels', 20, 20),
+                ('ShipMethods', 20, 20),
+                ('DataExtensions', 20, 20),
+                ('InventorySites', 20, 20),
+                ('SalesTaxGroups', 20, 20),
                 # Phase 1: Configuration (20-25%)
                 ('CompanyCurrencies', 20, 21),
                 ('TaxAgencies', 21, 22),
                 ('TaxRates', 22, 22),
                 ('TaxCodes', 22, 23),
                 ('Terms', 23, 23),
+                ('DateDrivenTerms', 23, 23),
                 ('PaymentMethods', 23, 24),
                 ('Classes', 24, 25),
                 ('Departments', 25, 25),
                 # Phase 2: Chart of Accounts (25-35%)
                 ('Accounts', 25, 35),
                 # Phase 3: Master Lists (35-50%)
-                ('Customers', 35, 42),
-                ('Vendors', 42, 47),
-                ('Employees', 47, 49),
+                ('Customers', 35, 40),
+                ('Leads', 40, 41),       # -> inactive Customer
+                ('Vendors', 41, 45),
+                ('OtherNames', 45, 46),  # -> Vendor
+                ('Employees', 46, 49),
                 ('Items', 49, 55),
                 # Phase 4: Opening Balances (55-60%)
                 ('JournalEntries', 55, 58),
                 ('InventoryAdjustments', 58, 60),
-                # Phase 5: Transactions (60-82%)
+                # Phase 5: Transactions (60-84%)
                 ('Estimates', 60, 62),
-                ('Invoices', 62, 67),
-                ('SalesReceipts', 67, 69),
+                ('SalesOrders', 62, 63),   # -> Estimate
+                ('Invoices', 63, 67),
+                ('Charges', 67, 68),       # -> Invoice
+                ('SalesReceipts', 68, 69),
                 ('PurchaseOrders', 69, 70),
                 ('Purchases', 70, 72),
-                ('Bills', 72, 75),
+                ('Bills', 72, 74),
+                ('ItemReceipts', 74, 75),  # -> Bill
                 ('Payments', 75, 77),
                 ('BillPayments', 77, 78),
                 ('Deposits', 78, 79),
@@ -351,6 +388,9 @@ class MigrationOrchestrator:
                 ('RefundReceipts', 81, 82),
                 ('TimeActivities', 82, 83),
                 ('TaxPayments', 83, 84),
+                # Phase 5b: Skip-only transactions (no QBO equivalent)
+                ('BuildAssemblies', 84, 84),
+                ('InventoryTransfers', 84, 84),
                 # Phase 6: Attachments (84-85%)
                 ('Attachables', 84, 85),
             ]
@@ -429,13 +469,25 @@ class MigrationOrchestrator:
             
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             
-            return {
+            # Preserve partial progress and manual_review even on failure
+            error_result = {
                 'success': False,
                 'migration_id': migration_id,
                 'error': str(e),
                 'duration_seconds': duration,
                 'failed_at': datetime.now(timezone.utc).isoformat()
             }
+            # Include manual_review if transformer was initialized before crash
+            try:
+                if transformer and hasattr(transformer, 'manual_review'):
+                    error_result['manual_review'] = transformer.manual_review
+                if transformer and hasattr(transformer, 'stats'):
+                    ts = dict(transformer.stats)
+                    ts['by_entity_type'] = dict(ts.get('by_entity_type', {}))
+                    error_result['transformer_stats'] = ts
+            except Exception:
+                pass  # Don't let diagnostic collection mask the real error
+            return error_result
     
     def _migrate_entity(
         self,

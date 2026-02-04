@@ -452,6 +452,17 @@ class QBDataTransformer:
             'TaxAgencies': 'taxagency', 'TaxRates': 'taxrate', 'TaxCodes': 'taxcode',
             'Terms': 'term', 'PaymentMethods': 'paymentmethod',
             'CustomerTypes': 'customertype', 'JournalCodes': 'journalcode',
+            # New entity types with QBO equivalents or skip-with-logging
+            'SalesOrders': 'salesorder', 'ItemReceipts': 'itemreceipt',
+            'Charges': 'charge', 'OtherNames': 'othername',
+            'DateDrivenTerms': 'datedriventerm', 'Leads': 'lead',
+            'BuildAssemblies': 'buildassembly',
+            'InventoryTransfers': 'inventorytransfer',
+            'DataExtensions': 'dataextension', 'SalesReps': 'salesrep',
+            'CustomerMessages': 'customermessage', 'JobTypes': 'jobtype',
+            'VendorTypes': 'vendortype', 'PriceLevels': 'pricelevel',
+            'SalesTaxGroups': 'salestaxgroup', 'ShipMethods': 'shipmethod',
+            'InventorySites': 'inventorysite',
         }
 
         normalized_type = type_mapping.get(entity_type, entity_type.lower())
@@ -3223,6 +3234,409 @@ class QBDataTransformer:
             return None
         self._store_entity_mapping('vendorcredits', qbd)
         return qbo
+
+    # ========================================================================
+    # NEW ENTITY TRANSFORMS: QBD types mapped to closest QBO equivalents
+    # ========================================================================
+
+    def transform_salesorder(self, qbd: Dict) -> Optional[Dict]:
+        """Transform SalesOrder -> Estimate.
+
+        QBO has no SalesOrder entity. Estimates are the closest equivalent:
+        they represent pending customer commitments with line items.
+        """
+        doc_number = qbd.get('RefNumber', 'Unknown')
+
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef'),
+            entity_name=f"Customer for SalesOrder",
+            parent_entity_type='SalesOrder',
+            parent_entity_name=doc_number
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'CustomerRef': {'value': customer_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': [],
+            'PrivateNote': f"Migrated from QBD Sales Order {doc_number}"[:4000]
+        }
+
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
+
+        if qbd.get('DueDate'):
+            qbo['ExpirationDate'] = self.format_date(qbd['DueDate'])
+
+        if qbd.get('TermRef'):
+            term_id = self.map_id('terms', qbd['TermRef'])
+            if term_id:
+                qbo['SalesTermRef'] = {'value': term_id}
+
+        if qbd.get('Memo'):
+            qbo['PrivateNote'] = f"[Sales Order] {qbd['Memo']}"[:4000]
+
+        # SalesOrder lines use same structure as Invoice lines
+        for line in qbd.get('SalesOrderLines', qbd.get('InvoiceLines', [])):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'DetailType': 'SalesItemLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'SalesItemLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
+        if not self._require_lines(qbo, 'SalesOrder', qbd):
+            return None
+        self._store_entity_mapping('salesorders', qbd)
+        return qbo
+
+    def transform_itemreceipt(self, qbd: Dict) -> Optional[Dict]:
+        """Transform ItemReceipt -> Bill.
+
+        QBO has no ItemReceipt entity. An ItemReceipt records goods received
+        against a PO before the vendor bill arrives. We create a Bill to
+        preserve the AP balance and inventory impact.
+        """
+        doc_number = qbd.get('RefNumber', 'Unknown')
+
+        vendor_id, vendor_valid = self.map_id_required(
+            entity_type='vendors',
+            qbd_id=qbd.get('VendorRef'),
+            entity_name=f"Vendor for ItemReceipt",
+            parent_entity_type='ItemReceipt',
+            parent_entity_name=doc_number
+        )
+
+        if not vendor_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
+        qbo = {
+            'VendorRef': {'value': vendor_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': [],
+            'PrivateNote': f"Migrated from QBD Item Receipt {doc_number}"[:4000]
+        }
+
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
+
+        if qbd.get('DueDate'):
+            qbo['DueDate'] = self.format_date(qbd['DueDate'])
+
+        if qbd.get('APAccountRef'):
+            ap_id = self.map_id('accounts', qbd['APAccountRef'])
+            if ap_id:
+                qbo['APAccountRef'] = {'value': ap_id}
+
+        if qbd.get('Memo'):
+            qbo['PrivateNote'] = f"[Item Receipt] {qbd['Memo']}"[:4000]
+
+        # Expense lines
+        for line in qbd.get('ExpenseLines', []):
+            acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if acct_id:
+                qbo['Line'].append({
+                    'DetailType': 'AccountBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'AccountBasedExpenseLineDetail': {
+                        'AccountRef': {'value': acct_id}
+                    }
+                })
+
+        # Item lines
+        for line in qbd.get('ItemLines', qbd.get('ItemReceiptLines', [])):
+            item_id = self.map_id('items', line.get('ItemRef'))
+            if item_id:
+                qbo['Line'].append({
+                    'DetailType': 'ItemBasedExpenseLineDetail',
+                    'Amount': self.to_decimal(line.get('Amount', 0)),
+                    'ItemBasedExpenseLineDetail': {
+                        'ItemRef': {'value': item_id},
+                        'Qty': self.to_decimal(line.get('Quantity', 1)),
+                        'UnitPrice': self.to_decimal(line.get('Rate', 0))
+                    }
+                })
+
+        if not self._require_lines(qbo, 'ItemReceipt', qbd):
+            return None
+        self._store_entity_mapping('itemreceipts', qbd)
+        return qbo
+
+    def transform_charge(self, qbd: Dict) -> Optional[Dict]:
+        """Transform Charge -> Invoice.
+
+        QBO has no Charge entity (Delayed Charges exist in UI but not API).
+        A QBD Charge is a statement charge against a customer, so we create
+        an Invoice to preserve the AR impact.
+        """
+        doc_number = qbd.get('RefNumber', qbd.get('TxnID', 'Unknown'))
+
+        customer_id, customer_valid = self.map_id_required(
+            entity_type='customers',
+            qbd_id=qbd.get('CustomerRef') or qbd.get('CustomerRefListID'),
+            entity_name=f"Customer for Charge",
+            parent_entity_type='Charge',
+            parent_entity_name=doc_number
+        )
+
+        if not customer_valid:
+            self.stats['total_skipped'] += 1
+            return None
+
+        amount = self.to_decimal(qbd.get('Amount', qbd.get('BalanceRemaining', 0)))
+
+        qbo = {
+            'CustomerRef': {'value': customer_id},
+            'TxnDate': self.format_date(qbd.get('TxnDate')),
+            'Line': [],
+            'PrivateNote': f"Migrated from QBD Statement Charge {doc_number}"[:4000]
+        }
+
+        if qbd.get('RefNumber'):
+            qbo['DocNumber'] = qbd['RefNumber'][:21]
+
+        if qbd.get('DueDate'):
+            qbo['DueDate'] = self.format_date(qbd['DueDate'])
+
+        if qbd.get('Memo') or qbd.get('Description'):
+            qbo['PrivateNote'] = f"[Charge] {qbd.get('Memo') or qbd.get('Description')}"[:4000]
+
+        # Build a single line from the charge amount
+        item_id = self.map_id('items', qbd.get('ItemRef') or qbd.get('ItemRefListID'))
+        line = {
+            'DetailType': 'SalesItemLineDetail',
+            'Amount': amount,
+            'SalesItemLineDetail': {
+                'Qty': self.to_decimal(qbd.get('Quantity', 1)),
+                'UnitPrice': self.to_decimal(qbd.get('Rate', amount))
+            }
+        }
+        if item_id:
+            line['SalesItemLineDetail']['ItemRef'] = {'value': item_id}
+
+        if qbd.get('Description'):
+            line['Description'] = qbd['Description'][:4000]
+
+        qbo['Line'].append(line)
+
+        self._store_entity_mapping('charges', qbd)
+        return qbo
+
+    def transform_othername(self, qbd: Dict) -> Dict:
+        """Transform OtherName -> Vendor.
+
+        QBO has no OtherName entity. Intuit's own migration tool converts
+        OtherName entries to Vendors. These often represent owners, partners,
+        or financial institutions referenced by checks/journal entries.
+        """
+        qbo = {
+            'DisplayName': self.ensure_unique_display_name(
+                qbd.get('Name', 'OtherName'), 'vendor'),
+            'Active': self._to_bool(qbd.get('IsActive', True)),
+            'Notes': 'Migrated from QBD OtherName list'
+        }
+
+        if qbd.get('CompanyName'):
+            qbo['CompanyName'] = qbd['CompanyName'][:100]
+
+        if qbd.get('FirstName'):
+            qbo['GivenName'] = qbd['FirstName'][:25]
+        if qbd.get('LastName'):
+            qbo['FamilyName'] = qbd['LastName'][:25]
+
+        if qbd.get('Email'):
+            qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
+
+        if qbd.get('Phone'):
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:30]}
+
+        if qbd.get('Address'):
+            qbo['BillAddr'] = self._transform_address(qbd['Address'])
+
+        self._store_entity_mapping('othernames', qbd)
+        return qbo
+
+    def transform_datedriventerm(self, qbd: Dict) -> Optional[Dict]:
+        """Transform DateDrivenTerm -> Term (Type=DateDriven).
+
+        QBO's Term entity natively supports date-driven terms. When DueDays
+        is omitted and DayOfMonthDue is set, QBO auto-sets Type=DateDriven.
+        """
+        name = (qbd.get('Name') or '').strip()
+        if not name:
+            return None
+
+        # Skip if matches a default term name
+        if name.lower() in {'due on receipt', 'net 15', 'net 30', 'net 60'}:
+            return None
+
+        qbo = {
+            'Name': self.sanitize_name(name),
+            'Active': self._to_bool(qbd.get('IsActive', True))
+        }
+
+        # Date-driven fields (omit DueDays to trigger DateDriven type)
+        if qbd.get('DayOfMonthDue') is not None:
+            try:
+                qbo['DayOfMonthDue'] = int(float(str(qbd['DayOfMonthDue'])))
+            except (ValueError, TypeError):
+                pass
+
+        if qbd.get('DueNextMonthDays') is not None:
+            try:
+                qbo['DueNextMonthDays'] = int(float(str(qbd['DueNextMonthDays'])))
+            except (ValueError, TypeError):
+                pass
+
+        if qbd.get('DiscountDayOfMonth') is not None:
+            try:
+                qbo['DiscountDayOfMonth'] = int(float(str(qbd['DiscountDayOfMonth'])))
+            except (ValueError, TypeError):
+                pass
+
+        if qbd.get('DiscountPercent') is not None:
+            qbo['DiscountPercent'] = self.to_decimal(qbd['DiscountPercent'])
+
+        self._store_entity_mapping('datedriventerms', qbd)
+        return qbo
+
+    def transform_lead(self, qbd: Dict) -> Dict:
+        """Transform Lead -> Customer (Active=false).
+
+        QBO has no Lead entity. Create as an inactive Customer so the
+        contact data is preserved without cluttering the active list.
+        """
+        name = qbd.get('Name') or qbd.get('CompanyName') or 'Lead'
+
+        qbo = {
+            'DisplayName': self.ensure_unique_display_name(name, 'customer'),
+            'Active': False,
+            'Notes': f"Migrated from QBD Lead - Status: {qbd.get('Status', 'Unknown')}"
+        }
+
+        if qbd.get('CompanyName'):
+            qbo['CompanyName'] = qbd['CompanyName'][:100]
+
+        if qbd.get('FirstName'):
+            qbo['GivenName'] = qbd['FirstName'][:25]
+        if qbd.get('LastName'):
+            qbo['FamilyName'] = qbd['LastName'][:25]
+
+        if qbd.get('Email'):
+            qbo['PrimaryEmailAddr'] = {'Address': qbd['Email'][:100]}
+
+        if qbd.get('Phone'):
+            qbo['PrimaryPhone'] = {'FreeFormNumber': qbd['Phone'][:30]}
+
+        self._store_entity_mapping('leads', qbd)
+        return qbo
+
+    # --- Skip-with-logging transforms for types with no QBO equivalent ---
+
+    def transform_inventorytransfer(self, qbd: Dict) -> Optional[Dict]:
+        """InventoryTransfer: No QBO equivalent (site-to-site movement). Skip with logging."""
+        logger.info(
+            f"Skipping InventoryTransfer (no QBO equivalent): "
+            f"{qbd.get('RefNumber', qbd.get('TxnID', 'Unknown'))} "
+            f"from={qbd.get('FromInventorySiteRef', '?')} to={qbd.get('ToInventorySiteRef', '?')}")
+        self.add_manual_review('InventoryTransfer', qbd.get('RefNumber', 'Unknown'),
+                               'No QBO equivalent — site-to-site inventory transfer')
+        return None
+
+    def transform_dataextension(self, qbd: Dict) -> Optional[Dict]:
+        """DataExtension: No standalone QBO equivalent. Skip with logging."""
+        logger.info(
+            f"Skipping DataExtension (no QBO equivalent): "
+            f"{qbd.get('DataExtName', qbd.get('Name', 'Unknown'))}")
+        return None
+
+    def transform_salesrep(self, qbd: Dict) -> Optional[Dict]:
+        """SalesRep: Reference entity pointing to Employee/Vendor. Skip standalone."""
+        # Store the mapping so transaction transforms can resolve SalesRepRef
+        self._store_entity_mapping('salesreps', qbd)
+        logger.info(
+            f"Skipping SalesRep creation (no QBO equivalent): "
+            f"{qbd.get('Initial', qbd.get('Name', 'Unknown'))} "
+            f"-> {qbd.get('SalesRepEntityRefFullName', '?')}")
+        return None
+
+    def transform_customermessage(self, qbd: Dict) -> Optional[Dict]:
+        """CustomerMessage: Read-only in QBO API (cannot create). Skip."""
+        # Store mapping so transaction transforms can embed message text
+        self._store_entity_mapping('customermessages', qbd)
+        logger.info(f"Skipping CustomerMessage (read-only in QBO): {qbd.get('Name', 'Unknown')}")
+        return None
+
+    def transform_jobtype(self, qbd: Dict) -> Optional[Dict]:
+        """JobType: Read-only in QBO API (cannot create). Skip."""
+        self._store_entity_mapping('jobtypes', qbd)
+        logger.info(f"Skipping JobType (read-only in QBO): {qbd.get('Name', 'Unknown')}")
+        return None
+
+    def transform_vendortype(self, qbd: Dict) -> Optional[Dict]:
+        """VendorType: No QBO equivalent. Skip."""
+        self._store_entity_mapping('vendortypes', qbd)
+        logger.info(f"Skipping VendorType (no QBO equivalent): {qbd.get('Name', 'Unknown')}")
+        return None
+
+    def transform_pricelevel(self, qbd: Dict) -> Optional[Dict]:
+        """PriceLevel: No QBO equivalent (QBO has Price Rules but no API). Skip."""
+        self._store_entity_mapping('pricelevels', qbd)
+        logger.info(
+            f"Skipping PriceLevel (no QBO equivalent): "
+            f"{qbd.get('Name', 'Unknown')} ({qbd.get('PriceLevelType', '?')})")
+        return None
+
+    def transform_salestaxgroup(self, qbd: Dict) -> Optional[Dict]:
+        """SalesTaxGroup: Would need TaxService API. Skip with manual review flag."""
+        name = qbd.get('Name', 'Unknown')
+        logger.info(f"Skipping SalesTaxGroup (requires manual TaxService setup): {name}")
+        self.add_manual_review('SalesTaxGroup', name,
+                               'Tax group must be recreated manually via QBO TaxService or UI')
+        self._store_entity_mapping('salestaxgroups', qbd)
+        return None
+
+    def transform_shipmethod(self, qbd: Dict) -> Optional[Dict]:
+        """ShipMethod: No standalone QBO entity. Used as string on transactions. Skip."""
+        # Store mapping so transaction transforms can resolve ShipMethodRef
+        self._store_entity_mapping('shipmethods', qbd)
+        logger.info(f"Skipping ShipMethod (string-only in QBO): {qbd.get('Name', 'Unknown')}")
+        return None
+
+    def transform_inventorysite(self, qbd: Dict) -> Optional[Dict]:
+        """InventorySite: No QBO equivalent (Desktop Enterprise only). Skip."""
+        logger.info(
+            f"Skipping InventorySite (no QBO equivalent): "
+            f"{qbd.get('Name', 'Unknown')} (default={qbd.get('IsDefaultSite', False)})")
+        self.add_manual_review('InventorySite', qbd.get('Name', 'Unknown'),
+                               'No QBO equivalent — consider third-party inventory app')
+        return None
+
+    def transform_buildassembly(self, qbd: Dict) -> Optional[Dict]:
+        """BuildAssembly transaction: No QBO equivalent for the build action.
+
+        The assembly *item* is handled by transform_item -> _transform_assembly.
+        The build *transaction* (converting raw materials to finished goods)
+        has no QBO equivalent. Log for manual review.
+        """
+        ref = qbd.get('RefNumber', qbd.get('TxnID', 'Unknown'))
+        logger.info(
+            f"Skipping BuildAssembly transaction (no QBO equivalent): {ref} "
+            f"item={qbd.get('ItemInventoryAssemblyRef', '?')} qty={qbd.get('QuantityToBuild', '?')}")
+        self.add_manual_review('BuildAssembly', ref,
+                               'Build transaction has no QBO equivalent — '
+                               'assembly items migrated as Bundles, but build actions are skipped')
+        return None
 
     # ========================================================================
     # CASEWARE MODE: AUDIT BUNDLE GENERATION
