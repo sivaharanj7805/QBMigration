@@ -459,6 +459,18 @@ class QBDataTransformer:
         try:
             # CRITICAL FIX: Normalize field names from C# extractor camelCase
             entity = self.normalize_extractor_fields(entity, normalized_type)
+
+            # AUDIT FIX: Store QBD→temp ID mapping BEFORE calling the transform
+            # method. Many transform methods return None early (for QBO defaults,
+            # missing refs, empty lines) without storing the mapping. This causes
+            # downstream entities to lose references via map_id() returning None.
+            # By storing here, every entity's QBD ID is mapped regardless of
+            # whether the transform succeeds, so downstream lookups find it.
+            # NOTE: Use entity_type.lower() (e.g., 'accounts', 'customers') to
+            # match the keys used by map_id() lookups, NOT normalized_type + 's'
+            # which produces wrong plurals ('classs', 'journalentrys').
+            self._store_entity_mapping(entity_type.lower(), entity)
+
             transform_func = getattr(self, method_name)
             result = transform_func(entity)
             if result:
@@ -1427,6 +1439,7 @@ class QBDataTransformer:
         'inventoryadjustment': 'AdjustmentLines',
         'refundreceipt': 'RefundLines',
         'purchase': 'ExpenseLines',
+        'vendorcredit': 'ExpenseLines',
     }
 
     @staticmethod
@@ -1605,9 +1618,12 @@ class QBDataTransformer:
         balance = self.to_decimal(qbd.get('Balance', 0))
         abs_balance = abs(balance)
 
-        # COMPREHENSIVE: All QB debit-normal account types per accounting standards
+        # COMPREHENSIVE: All QBO debit-normal AccountType values per accounting standards
         # Assets: Increase with debits, decrease with credits
         # Expenses: Increase with debits, decrease with credits
+        # NOTE: Only main AccountType values belong here. Subtypes like 'Inventory',
+        # 'Prepaid Expenses', 'Undeposited Funds' are AccountSubType values that
+        # never appear in qbo['AccountType'] — they fall under 'OtherCurrentAsset'.
         DEBIT_NORMAL_ACCOUNT_TYPES = {
             'Bank',
             'AccountsReceivable',
@@ -1617,10 +1633,6 @@ class QBDataTransformer:
             'CostOfGoodsSold',
             'Expense',
             'OtherExpense',
-            # AUDIT FIX: Missing account types that are debit-normal
-            'Inventory',              # Asset - debit normal
-            'Prepaid Expenses',       # Asset - debit normal (non-standard but used)
-            'Undeposited Funds',      # Asset - debit normal
         }
         is_debit_type = qbo['AccountType'] in DEBIT_NORMAL_ACCOUNT_TYPES
 
@@ -1953,10 +1965,23 @@ class QBDataTransformer:
     # This is Part 1 of 3
     
     def _transform_address(self, addr: Dict) -> Dict:
-        """Transform address."""
+        """Transform address.
+
+        QBO supports Line1-5 for address lines. QBD has Addr1-5 plus Note.
+        Addr3-5 are concatenated into remaining QBO lines; Note is appended
+        to the last used line so no address data is silently dropped.
+        """
         qbo_addr = {}
         if addr.get('Addr1'): qbo_addr['Line1'] = addr['Addr1'][:500]
         if addr.get('Addr2'): qbo_addr['Line2'] = addr['Addr2'][:500]
+        if addr.get('Addr3'): qbo_addr['Line3'] = addr['Addr3'][:500]
+        if addr.get('Addr4'): qbo_addr['Line4'] = addr['Addr4'][:500]
+        # Addr5 and Note share Line5 — concatenate if both present
+        line5_parts = []
+        if addr.get('Addr5'): line5_parts.append(addr['Addr5'])
+        if addr.get('Note'): line5_parts.append(addr['Note'])
+        if line5_parts:
+            qbo_addr['Line5'] = ', '.join(line5_parts)[:500]
         if addr.get('City'): qbo_addr['City'] = addr['City'][:255]
         if addr.get('State'): qbo_addr['CountrySubDivisionCode'] = addr['State'][:255]
         if addr.get('PostalCode'): qbo_addr['PostalCode'] = addr['PostalCode'][:30]

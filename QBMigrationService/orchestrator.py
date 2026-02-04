@@ -100,7 +100,10 @@ class MigrationOrchestrator:
     def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback"""
         logger.info(f"[{percent}%] {message}")
-        self.progress_callback(percent, message)
+        try:
+            self.progress_callback(percent, message)
+        except Exception as e:
+            logger.warning(f"progress_callback failed: {e}")
 
     def _init_encryption(self) -> 'EncryptionManager':
         """Initialize encryption manager"""
@@ -441,31 +444,8 @@ class MigrationOrchestrator:
         fail_count = 0
         skipped_count = 0
 
-        # CRITICAL FIX: QBO API endpoints are singular (e.g., 'account', not 'accounts')
-        # entity_name comes from entity_order as plural ('Accounts', 'Customers', etc.)
-        # but create_entity() uses entity_type.lower() as the API endpoint
-        PLURAL_TO_SINGULAR = {
-            # Configuration
-            'CompanyCurrencies': 'CompanyCurrency', 'TaxAgencies': 'TaxAgency',
-            'TaxRates': 'TaxRate', 'TaxCodes': 'TaxCode',
-            'Terms': 'Term', 'PaymentMethods': 'PaymentMethod',
-            'Classes': 'Class', 'Departments': 'Department',
-            # Master lists
-            'Accounts': 'Account', 'Customers': 'Customer', 'Vendors': 'Vendor',
-            'Items': 'Item', 'Employees': 'Employee',
-            # Transactions
-            'Invoices': 'Invoice', 'Bills': 'Bill', 'Payments': 'Payment',
-            'Estimates': 'Estimate', 'Deposits': 'Deposit', 'Transfers': 'Transfer',
-            'JournalEntries': 'JournalEntry', 'CreditMemos': 'CreditMemo',
-            'PurchaseOrders': 'PurchaseOrder', 'SalesReceipts': 'SalesReceipt',
-            'BillPayments': 'BillPayment', 'VendorCredits': 'VendorCredit',
-            'RefundReceipts': 'RefundReceipt', 'TimeActivities': 'TimeActivity',
-            'InventoryAdjustments': 'InventoryAdjustment',
-            'Purchases': 'Purchase', 'TaxPayments': 'TaxPayment',
-            # Attachments
-            'Attachables': 'Attachable',
-        }
-        api_entity_type = PLURAL_TO_SINGULAR.get(entity_name, entity_name)
+        # Use class-level PLURAL_TO_SINGULAR constant (avoid duplicate definition)
+        api_entity_type = self.PLURAL_TO_SINGULAR.get(entity_name, entity_name)
 
         for record in source_data:
             try:
@@ -1182,7 +1162,7 @@ if __name__ == '__main__':
 
     # SECURITY FIX: Align signature algorithm with server expectations
     # Server expects: HMAC-SHA256(migration_id:timestamp)
-    webhook_timestamp = datetime.now(timezone.utc).isoformat() + 'Z'
+    webhook_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     message = f"{args.migration_id}:{webhook_timestamp}"
 
     signature = hmac.new(

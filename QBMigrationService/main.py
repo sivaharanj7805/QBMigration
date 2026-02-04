@@ -40,6 +40,7 @@ from config import (
 from encryption import EncryptionManager
 from data_transformer import QBDataTransformer
 from qbo_client import QBOClient
+from oauth_manager import OAuthManager
 from verifier import PremiumMigrationVerifier
 from audit_logger import AuditLogger
 from security import SecurityManager, SecurityError
@@ -234,12 +235,44 @@ class MigrationOrchestrator:
                 qbo_plan=qbo_plan
             )
 
+            # Initialize OAuth manager for automatic token refresh during long migrations
+            oauth_mgr = None
+            client_id = os.getenv('QBO_CLIENT_ID')
+            client_secret = os.getenv('QBO_CLIENT_SECRET')
+            refresh_token = os.getenv('QBO_REFRESH_TOKEN')
+            if client_id and client_secret and refresh_token:
+                try:
+                    from config import (
+                        OAUTH_TOKEN_URL, OAUTH_INTROSPECT_URL,
+                        OAUTH_REVOKE_URL, DATA_DIR,
+                        TOKEN_REFRESH_BUFFER_SECONDS
+                    )
+                    oauth_mgr = OAuthManager(
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        refresh_token=refresh_token,
+                        oauth_token_url=OAUTH_TOKEN_URL,
+                        oauth_introspect_url=OAUTH_INTROSPECT_URL,
+                        oauth_revoke_url=OAUTH_REVOKE_URL,
+                        data_dir=DATA_DIR,
+                        token_refresh_buffer_seconds=TOKEN_REFRESH_BUFFER_SECONDS,
+                    )
+                    logger.info("OAuth manager initialized for automatic token refresh")
+                except Exception as oauth_err:
+                    logger.warning(
+                        f"Could not initialize OAuth manager: {oauth_err}. "
+                        f"Token refresh disabled — long migrations may fail.")
+            else:
+                logger.warning(
+                    "QBO_CLIENT_ID, QBO_CLIENT_SECRET, or QBO_REFRESH_TOKEN not set. "
+                    "Token refresh disabled — long migrations may fail.")
+
             # CRITICAL FIX: Wrap batch_upload in try/except
             try:
                 upload_result = qbo_client.batch_upload(
                     transformed_data['entities'],
                     self.migration_id,
-                    oauth_manager=None,  # TODO: Add OAuth manager for token refresh
+                    oauth_manager=oauth_mgr,
                     use_optimized=True
                 )
             except Exception as upload_error:
