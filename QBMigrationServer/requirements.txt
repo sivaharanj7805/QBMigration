@@ -80,3 +80,31 @@ prometheus-flask-exporter==0.23.0
 python-dateutil==2.8.2
 pytz==2024.1
 chardet==5.2.0  # For encoding detection in file uploads
+
+# =============================================================================
+# OBSERVABILITY (100/100 FIX)
+# =============================================================================
+
+# Prometheus Metrics
+prometheus-client==0.19.0
+
+# OpenTelemetry Core
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+
+# OpenTelemetry Instrumentation
+opentelemetry-instrumentation-flask==0.43b0
+opentelemetry-instrumentation-sqlalchemy==0.43b0
+opentelemetry-instrumentation-requests==0.43b0
+opentelemetry-instrumentation-redis==0.43b0
+opentelemetry-instrumentation-celery==0.43b0
+
+# OpenTelemetry Exporters (install as needed)
+opentelemetry-exporter-otlp==1.22.0
+# opentelemetry-exporter-jaeger==1.21.0  # Optional: Jaeger
+# opentelemetry-exporter-zipkin==1.22.0  # Optional: Zipkin
+
+# Test Coverage
+coverage[toml]==7.4.0
+pytest-timeout==2.2.0
+pytest-xdist==3.5.0  # Parallel test execution

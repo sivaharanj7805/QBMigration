@@ -897,6 +897,33 @@ def create_app(config_name='development'):
     # Initialize WebSocket support
     init_socketio(app, app.config['SECRET_KEY'])  # No fallback - SECRET_KEY is always set by this point
 
+    # Initialize Prometheus metrics (100/100 FIX)
+    try:
+        from utils.metrics import init_metrics
+        init_metrics(app)
+        app.logger.info('Prometheus metrics initialized at /metrics')
+    except ImportError:
+        app.logger.info('Prometheus metrics disabled (prometheus_client not installed)')
+    except Exception as e:
+        app.logger.warning(f'Failed to initialize Prometheus metrics: {str(e)}')
+
+    # Initialize OpenTelemetry distributed tracing (100/100 FIX)
+    try:
+        from utils.tracing import init_tracing
+        init_tracing(app)
+    except ImportError:
+        app.logger.info('OpenTelemetry tracing disabled (opentelemetry not installed)')
+    except Exception as e:
+        app.logger.warning(f'Failed to initialize OpenTelemetry tracing: {str(e)}')
+
+    # Initialize SOC2-compliant audit logging (100/100 FIX)
+    try:
+        from utils.audit_logger import init_audit_logging
+        init_audit_logging(app)
+        app.logger.info('SOC2 audit logging initialized (logs/audit.log)')
+    except Exception as e:
+        app.logger.warning(f'Failed to initialize audit logging: {str(e)}')
+
     # Root endpoint
     @app.route('/')
     def index():
