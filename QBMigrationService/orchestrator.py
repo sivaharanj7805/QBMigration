@@ -100,12 +100,12 @@ class MigrationOrchestrator:
         self._verifier = None
     
     def _report_progress(self, percent: int, message: str) -> None:
-        """Report progress to callback"""
+        """Report progress to callback."""
         logger.info(f"[{percent}%] {message}")
         try:
             self.progress_callback(percent, message)
         except Exception as e:
-            logger.warning(f"progress_callback failed: {e}")
+            logger.error(f"progress_callback failed: {e} — caller may not see status updates")
 
     def _init_encryption(self) -> 'EncryptionManager':
         """Initialize encryption manager"""
@@ -393,16 +393,34 @@ class MigrationOrchestrator:
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
+            # Collect transformer diagnostics for the caller
+            transformer_stats = dict(transformer.stats)
+            # Convert defaultdict to regular dict for JSON serialization
+            transformer_stats['by_entity_type'] = dict(transformer_stats.get('by_entity_type', {}))
+
             result = {
                 'success': True,
                 'migration_id': migration_id,
                 'company_name': company_name,
                 'entities_migrated': entity_counts,  # Use counts, not mappings
+                'total_failed': total_failed,
+                'total_skipped': total_skipped,
                 'verification': verification_result,
+                'manual_review': transformer.manual_review,
+                'transformer_stats': transformer_stats,
                 'duration_seconds': duration,
                 'completed_at': datetime.now(timezone.utc).isoformat()
             }
-            
+
+            if transformer.manual_review:
+                logger.warning(
+                    f"Migration {migration_id}: {len(transformer.manual_review)} "
+                    f"entities flagged for manual review")
+            if transformer.stats.get('unsupported_entities'):
+                logger.warning(
+                    f"Migration {migration_id}: {transformer.stats['unsupported_entities']} "
+                    f"entities skipped (no transform method)")
+
             logger.info(f"Migration {migration_id} completed in {duration:.1f}s")
             return result
             
@@ -1068,11 +1086,30 @@ class MigrationOrchestrator:
                     f"{unaccounted} of {len(batch_items)} items")
 
         except Exception as e:
-            # Entire batch request failed — count all items as failed
-            fail_count += len(batch_items)
+            # Entire batch request failed — fall back to sequential creates
             logger.error(
                 f"Batch request failed for {api_entity_type} "
-                f"({len(batch_items)} items): {e}")
+                f"({len(batch_items)} items): {e} — retrying individually")
+            for source_id, entity_data in batch_items:
+                try:
+                    result = qbo_client.create_entity(
+                        api_entity_type, entity_data,
+                        oauth_manager=oauth_manager)
+                    if result and 'Id' in result:
+                        qbo_id = result['Id']
+                        success_mappings.append((source_id, qbo_id))
+                        qbo_client.record_created(
+                            api_entity_type,
+                            source_id or f"fallback_{len(success_mappings)}",
+                            qbo_id, migration_id,
+                            result.get('SyncToken', '0'))
+                    else:
+                        fail_count += 1
+                except Exception as individual_err:
+                    fail_count += 1
+                    logger.warning(
+                        f"Individual create also failed for {api_entity_type} "
+                        f"({source_id}): {individual_err}")
 
         return success_mappings, fail_count
 

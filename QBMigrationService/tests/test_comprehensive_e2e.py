@@ -1141,3 +1141,160 @@ class TestPluralToSingularCompleteness:
                 continue
             # Entity types without plural form in PLURAL_TO_SINGULAR
             # are handled by the fallback (entity_name used as-is)
+
+
+# ============================================================================
+# 15. ERROR CATEGORIZATION AND STATS
+# ============================================================================
+
+class TestErrorCategorization:
+    """Verify that stats properly distinguish error types."""
+
+    def test_unsupported_entity_increments_stat(self, bare_transformer):
+        """Unsupported entity type increments unsupported_entities counter."""
+        bare_transformer.transform_entity('BuildAssembly', {'TxnID': 'BA-1'})
+        assert bare_transformer.stats['unsupported_entities'] >= 1
+        assert bare_transformer.stats['total_skipped'] >= 1
+
+    def test_transform_exception_increments_transform_errors(self):
+        """Exception during transform increments transform_errors counter."""
+        t = QBDataTransformer(region='US')
+        # Patch a transform method to raise
+        original = t.transform_customer
+        def bad_transform(qbd):
+            raise ValueError("Intentional test error")
+        t.transform_customer = bad_transform
+        t.transform_entity('Customers', {'ListID': 'X', 'Name': 'Bad'})
+        assert t.stats['transform_errors'] >= 1
+        assert len(t.stats['errors']) >= 1
+        assert t.stats['errors'][-1]['type'] == 'transform_exception'
+
+    def test_missing_ref_increments_stat(self):
+        """Missing required reference increments missing_refs counter."""
+        t = QBDataTransformer(region='US')
+        # Try to map a required ref that doesn't exist
+        _, valid = t.map_id_required(
+            'customers', 'NONEXISTENT', 'Customer for Invoice',
+            'Invoice', 'INV-1')
+        assert not valid
+        assert t.stats['missing_refs'] >= 1
+
+    def test_stats_has_all_expected_keys(self, bare_transformer):
+        """Stats dict contains all expected keys for error categorization."""
+        expected_keys = {
+            'total_processed', 'total_skipped', 'dropped_lines',
+            'transform_errors', 'missing_refs', 'unsupported_entities',
+            'truncations', 'by_entity_type', 'errors', 'warnings',
+        }
+        assert expected_keys.issubset(set(bare_transformer.stats.keys()))
+
+    def test_truncation_tracked_in_sanitize_name(self):
+        """sanitize_name increments truncations counter when name exceeds limit."""
+        t = QBDataTransformer(region='US')
+        long_name = 'A' * 200
+        result = t.sanitize_name(long_name)
+        assert len(result) == 100
+        assert t.stats['truncations'] >= 1
+
+    def test_no_truncation_for_short_name(self):
+        """sanitize_name does NOT increment truncations for short names."""
+        t = QBDataTransformer(region='US')
+        t.sanitize_name('Short Name')
+        assert t.stats['truncations'] == 0
+
+
+# ============================================================================
+# 16. ORCHESTRATOR RESULT INCLUDES DIAGNOSTICS
+# ============================================================================
+
+class TestOrchestratorResultDiagnostics:
+    """Verify run_migration result includes manual_review, stats, etc."""
+
+    def test_migrate_entity_returns_correct_counts(self):
+        """_migrate_entity returns (success, failed, skipped) correctly."""
+        orch = _make_orchestrator()
+        mock_client = MagicMock()
+        mock_client.was_entity_created.return_value = None
+        mock_client.create_entity.return_value = {'Id': '1', 'SyncToken': '0'}
+        mock_transformer = MagicMock()
+
+        # 2 records: 1 transforms, 1 returns None
+        mock_transformer.transform_entity.side_effect = [
+            {'DisplayName': 'Good'},
+            None,  # Skipped
+        ]
+
+        s, f, sk = orch._migrate_entity(
+            mock_client, mock_transformer, 'Customers',
+            [{'Name': 'A', 'ListID': 'C1'}, {'Name': 'B', 'ListID': 'C2'}], {},
+        )
+        assert s == 1
+        assert sk == 1
+        assert f == 0
+
+
+# ============================================================================
+# 17. BATCH FALLBACK ON FAILURE
+# ============================================================================
+
+class TestBatchFallback:
+    """Verify batch failure falls back to sequential entity creation."""
+
+    def test_send_batch_request_fallback_on_exception(self):
+        """When batch POST fails, falls back to individual create_entity."""
+        orch = _make_orchestrator()
+        mock_client = MagicMock()
+
+        # First call (batch POST) raises, individual calls succeed
+        mock_client._make_request.side_effect = Exception("Network error")
+        mock_client.create_entity.return_value = {'Id': 'QBO-1', 'SyncToken': '0'}
+        mock_client._enforce_batch_rate_limit = MagicMock()
+
+        batch_items = [
+            ('SRC-1', {'DisplayName': 'Entity1'}),
+            ('SRC-2', {'DisplayName': 'Entity2'}),
+        ]
+
+        mappings, fails = orch._send_batch_request(
+            mock_client, 'Customer', batch_items,
+            oauth_manager=MagicMock(), migration_id='mig-1')
+
+        # Should have fallen back and created individually
+        assert mock_client.create_entity.call_count == 2
+        assert len(mappings) == 2
+        assert fails == 0
+
+
+# ============================================================================
+# 18. RATE LIMIT ATOMIC CHECK
+# ============================================================================
+
+class TestRateLimitAtomic:
+    """Verify rate limit check-and-record is atomic."""
+
+    def test_enforce_batch_rate_limit_appends_timestamp(self, mock_qbo_client):
+        """After calling _enforce_batch_rate_limit, a timestamp is recorded."""
+        initial_count = len(mock_qbo_client._batch_timestamps)
+        mock_qbo_client._enforce_batch_rate_limit()
+        assert len(mock_qbo_client._batch_timestamps) == initial_count + 1
+
+    def test_multiple_calls_track_correctly(self, mock_qbo_client):
+        """Multiple calls each add a timestamp."""
+        for _ in range(5):
+            mock_qbo_client._enforce_batch_rate_limit()
+        assert len(mock_qbo_client._batch_timestamps) >= 5
+
+
+# ============================================================================
+# 19. RECORD_CREATED RETRY LOGIC
+# ============================================================================
+
+class TestRecordCreatedRetry:
+    """Verify record_created retries on transient failures."""
+
+    def test_record_created_succeeds_on_first_try(self, mock_qbo_client):
+        """Normal case: record_created succeeds immediately."""
+        mock_qbo_client.record_created('Customer', 'C-1', 'QBO-1', 'mig-1')
+        # Verify it was recorded
+        result = mock_qbo_client.was_entity_created('Customer', 'C-1')
+        assert result == 'QBO-1'

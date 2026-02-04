@@ -120,6 +120,10 @@ class QBDataTransformer:
             'total_processed': 0,
             'total_skipped': 0,
             'dropped_lines': 0,
+            'transform_errors': 0,       # Exceptions during transform (bugs/crashes)
+            'missing_refs': 0,            # Skipped due to unmapped parent references
+            'unsupported_entities': 0,    # Skipped because no transform method exists
+            'truncations': 0,             # Fields truncated to fit QBO limits
             'by_entity_type': defaultdict(int),
             'errors': [],
             'warnings': []
@@ -454,7 +458,11 @@ class QBDataTransformer:
         method_name = f'transform_{normalized_type}'
 
         if not hasattr(self, method_name):
-            logger.warning(f"No transform method for entity type: {entity_type}")
+            logger.error(
+                f"No transform method for entity type: {entity_type} "
+                f"(method '{method_name}' not found) — entity will be SKIPPED")
+            self.stats['unsupported_entities'] += 1
+            self.stats['total_skipped'] += 1
             return None
 
         try:
@@ -479,8 +487,15 @@ class QBDataTransformer:
                 self.stats['by_entity_type'][entity_type] += 1
             return result
         except Exception as e:
-            logger.warning(f"Transform failed for {entity_type}: {e}")
+            logger.error(f"Transform EXCEPTION for {entity_type}: {e}", exc_info=True)
+            self.stats['transform_errors'] += 1
             self.stats['total_skipped'] += 1
+            self.stats['errors'].append({
+                'entity': entity_type,
+                'name': entity.get('Name', entity.get('ListID', 'Unknown')),
+                'error': str(e),
+                'type': 'transform_exception'
+            })
             return None
 
     def _transform_entity_batch(self, entities: Any, entity_type: str) -> List[Dict]:
@@ -788,14 +803,17 @@ class QBDataTransformer:
         self.used_display_names.add(name.lower())
         return name
     
-    def sanitize_name(self, name: str) -> str:
+    def sanitize_name(self, name: str, max_len: int = 100) -> str:
         """Sanitize name for QB Online."""
         if not name:
             return ""
         name = html.unescape(name).strip()
         name = re.sub(r'[^\w\s\-\'&.,/()@#]', '', name)
         name = re.sub(r'\s+', ' ', name)
-        return name[:100]
+        if len(name) > max_len:
+            self.stats['truncations'] += 1
+            logger.debug(f"Truncated name from {len(name)} to {max_len} chars")
+        return name[:max_len]
     
     def format_date(self, date_value: Any) -> Optional[str]:
         """
@@ -1114,6 +1132,7 @@ class QBDataTransformer:
 
         if qbo_id is None:
             # CRITICAL: Required reference is missing - add to manual review
+            self.stats['missing_refs'] += 1
             logger.warning(
                 f"Missing required {entity_type} reference '{qbd_id}' "
                 f"for {parent_entity_type} '{parent_entity_name}'"

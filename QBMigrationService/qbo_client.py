@@ -313,31 +313,46 @@ class PremiumQBOClient:
         sync_token: str = "0"
     ):
         """
-        FIX #130: Explicit transaction with context manager
-        FIX #33: Store SyncToken for future updates
+        Record a successfully created entity in SQLite for crash recovery.
+
+        Retries up to 3 times on transient SQLite errors (e.g., locked DB)
+        to prevent duplicates on restart when QBO creation succeeded but
+        the dedup record was lost.
         """
-        with self.db_lock:
-            # FIX #81: check_same_thread=False allows this
-            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-            
+        max_retries = 3
+        last_err = None
+        for attempt in range(max_retries):
             try:
-                with conn:  # FIX #130: Automatic transaction
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO migrated_entities 
-                        (entity_type, qbd_id, qbo_id, migration_id, status, sync_token)
-                        VALUES (?, ?, ?, ?, 'created', ?)
-                    ''', (entity_type, qbd_id, qbo_id, migration_id, sync_token))
-                    
-                # Update SyncToken cache
-                with self.synctoken_lock:
-                    self.synctoken_cache[(entity_type, qbo_id)] = sync_token
-                    
+                with self.db_lock:
+                    conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+                    try:
+                        with conn:
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                INSERT OR REPLACE INTO migrated_entities
+                                (entity_type, qbd_id, qbo_id, migration_id, status, sync_token)
+                                VALUES (?, ?, ?, ?, 'created', ?)
+                            ''', (entity_type, qbd_id, qbo_id, migration_id, sync_token))
+
+                        # Update SyncToken cache
+                        with self.synctoken_lock:
+                            self.synctoken_cache[(entity_type, qbo_id)] = sync_token
+                        return  # Success
+                    finally:
+                        conn.close()
             except Exception as e:
-                logger.error(f"Failed to record entity: {e}")
-                raise
-            finally:
-                conn.close()
+                last_err = e
+                if attempt < max_retries - 1:
+                    wait = 0.1 * (2 ** attempt)
+                    logger.warning(
+                        f"record_created retry {attempt + 1}/{max_retries} "
+                        f"for {entity_type}/{qbd_id}: {e}")
+                    time.sleep(wait)
+
+        logger.error(
+            f"record_created FAILED after {max_retries} attempts for "
+            f"{entity_type}/{qbd_id} (QBO ID {qbo_id}): {last_err}")
+        raise last_err
     
     def _record_migration(self, entity_type: str, qbd_id: str, qbo_id: str, migration_id: str = None, sync_token: str = "0"):
         """Alias for record_created for backward compatibility"""
@@ -912,20 +927,28 @@ class PremiumQBOClient:
             return f"batch_{int(time.time())}_{self.batch_counter}"
     
     def _enforce_batch_rate_limit(self):
-        """Enforce 40 batch requests per minute per realm"""
-        sleep_time = 0
-        with self._batch_timestamps_lock:
-            now = time.time()
-            # Remove timestamps older than 60 seconds
-            self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
-            if len(self._batch_timestamps) >= 40:
-                sleep_time = 60 - (now - self._batch_timestamps[0])
-        # Sleep OUTSIDE lock so other threads aren't blocked during the wait
-        if sleep_time > 0:
-            logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
-            time.sleep(sleep_time)
-        with self._batch_timestamps_lock:
-            self._batch_timestamps.append(time.time())
+        """Enforce 40 batch requests per minute per realm.
+
+        Uses a loop to handle the race where multiple threads may wake
+        from sleep simultaneously and all try to append at once.
+        """
+        while True:
+            sleep_time = 0
+            with self._batch_timestamps_lock:
+                now = time.time()
+                # Remove timestamps older than 60 seconds
+                self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
+                if len(self._batch_timestamps) >= 40:
+                    sleep_time = 60 - (now - self._batch_timestamps[0])
+                else:
+                    # Under limit — atomically record this batch's timestamp
+                    self._batch_timestamps.append(time.time())
+                    return  # Safe to proceed
+            # Sleep OUTSIDE lock so other threads aren't blocked
+            if sleep_time > 0:
+                logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
+                time.sleep(sleep_time)
+            # Re-check after sleeping (another thread may have consumed the slot)
 
     def _process_single_batch(
         self,
