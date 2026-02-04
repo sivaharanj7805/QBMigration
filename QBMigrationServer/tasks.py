@@ -249,13 +249,122 @@ def cleanup_expired_files_task():
         return {'error': str(e)}
 
 
+@celery.task(bind=True, name='tasks.cleanup_migration_async', max_retries=3, default_retry_delay=60)
+def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
+    """
+    Async cleanup of AWS resources after migration completion.
+
+    PRODUCTION FIX: Moved from synchronous webhook handler to async task.
+    This prevents webhook response delays and timeouts.
+
+    Args:
+        migration_id: Migration UUID
+        instance_id: Optional EC2 instance ID to terminate
+    """
+    from app import create_app
+    from models.database import db
+    from models.migration import Migration
+    from datetime import datetime, timezone
+
+    logger.info(f"Starting async cleanup for migration {migration_id}")
+
+    app = create_app()
+    with app.app_context():
+        try:
+            from utils.aws_manager import AWSMigrationManager
+            aws_manager = AWSMigrationManager()
+
+            # Terminate EC2 instance if provided
+            if instance_id:
+                try:
+                    aws_manager.terminate_instance(instance_id)
+                    logger.info(f"Terminated EC2 instance {instance_id} for migration {migration_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to terminate instance {instance_id}: {e}")
+
+            # Update migration cleanup status
+            migration = Migration.query.filter_by(migration_id=migration_id).first()
+            if migration:
+                migration.cleanup_completed = True
+                migration.cleanup_completed_at = datetime.now(timezone.utc)
+                if instance_id:
+                    migration.ec2_terminated = True
+                    migration.ec2_terminated_at = datetime.now(timezone.utc)
+                db.session.commit()
+
+            logger.info(f"Cleanup completed for migration {migration_id}")
+            return {'status': 'success', 'migration_id': migration_id}
+
+        except Exception as e:
+            logger.error(f"Cleanup failed for migration {migration_id}: {e}")
+            # Retry with exponential backoff
+            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+
 # Celery Beat schedule (for periodic tasks)
 celery.conf.beat_schedule = {
     'cleanup-expired-files': {
         'task': 'tasks.cleanup_expired_files',
         'schedule': 3600.0,  # Every hour
     },
+    'cleanup-orphaned-resources': {
+        'task': 'tasks.cleanup_orphaned_resources',
+        'schedule': 900.0,  # Every 15 minutes
+    },
 }
+
+
+@celery.task(name='tasks.cleanup_orphaned_resources')
+def cleanup_orphaned_resources():
+    """
+    Periodic task to clean up orphaned AWS resources.
+    Finds completed/failed migrations that weren't properly cleaned up.
+    """
+    from app import create_app
+    from models.database import db
+    from models.migration import Migration
+    from datetime import datetime, timezone, timedelta
+
+    logger.info("Starting orphaned resource cleanup")
+
+    app = create_app()
+    with app.app_context():
+        try:
+            from utils.aws_manager import AWSMigrationManager
+            aws_manager = AWSMigrationManager()
+
+            # Find stale migrations needing cleanup
+            stale_threshold = datetime.now(timezone.utc) - timedelta(hours=6)
+            stale_migrations = Migration.query.filter(
+                Migration.status.in_(['completed', 'failed']),
+                Migration.cleanup_completed == False,
+                Migration.created_at < stale_threshold,
+                Migration.aws_instance_id.isnot(None)
+            ).limit(10).all()
+
+            cleaned_count = 0
+            for migration in stale_migrations:
+                try:
+                    if migration.aws_instance_id:
+                        aws_manager.terminate_instance(migration.aws_instance_id)
+                        migration.ec2_terminated = True
+                        migration.ec2_terminated_at = datetime.now(timezone.utc)
+
+                    migration.cleanup_completed = True
+                    migration.cleanup_completed_at = datetime.now(timezone.utc)
+                    db.session.commit()
+                    cleaned_count += 1
+                    logger.info(f"Cleaned orphaned resources for migration {migration.migration_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean migration {migration.migration_id}: {e}")
+                    db.session.rollback()
+
+            logger.info(f"Orphaned resource cleanup complete: {cleaned_count} migrations cleaned")
+            return {'cleaned': cleaned_count}
+
+        except Exception as e:
+            logger.error(f"Orphaned resource cleanup failed: {e}")
+            return {'error': str(e)}
 
 
 # Signal handlers for logging

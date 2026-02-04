@@ -170,41 +170,73 @@ def _get_env_secrets() -> Dict[str, Any]:
     """
     Get secrets from environment variables as fallback.
     Maps common secret names to their env var equivalents.
+
+    PRODUCTION FIX: Validates required secrets and warns/fails on missing values.
     """
-    return {
+    # Required secrets in all environments
+    REQUIRED_SECRETS = ['flask_secret_key', 'database_url']
+
+    # Additional secrets required in production
+    PRODUCTION_REQUIRED_SECRETS = [
+        'flask_secret_key', 'database_url', 'backup_encryption_key', 'webhook_secret'
+    ]
+
+    secrets = {
         # Flask
         'flask_secret_key': os.getenv('SECRET_KEY', ''),
         'flask_env': os.getenv('FLASK_ENV', 'development'),
-        
+
         # Database
         'database_url': os.getenv('DATABASE_URL', ''),
-        
+
         # AWS
         'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID', ''),
         'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY', ''),
         'aws_region': os.getenv('AWS_REGION', 'ca-central-1'),
         'aws_s3_bucket': os.getenv('AWS_S3_BUCKET', ''),
-        
+
         # QuickBooks Online
         'qbo_client_id': os.getenv('QBO_CLIENT_ID', ''),
         'qbo_client_secret': os.getenv('QBO_CLIENT_SECRET', ''),
         'qbo_refresh_token': os.getenv('QBO_REFRESH_TOKEN', ''),
         'qbo_realm_id': os.getenv('QBO_REALM_ID', ''),
-        
+
         # Webhooks
         'webhook_secret': os.getenv('WEBHOOK_SECRET', ''),
-        
+
         # Encryption
         'backup_encryption_key': os.getenv('BACKUP_ENCRYPTION_KEY', ''),
         'encryption_password': os.getenv('ENCRYPTION_PASSWORD', ''),
     }
 
+    # Validate required secrets
+    is_production = os.getenv('FLASK_ENV') == 'production'
+    required = PRODUCTION_REQUIRED_SECRETS if is_production else REQUIRED_SECRETS
+
+    missing = [k for k in required if not secrets.get(k)]
+    if missing:
+        error_msg = f"Missing required secrets: {', '.join(missing)}"
+        if is_production:
+            logger.critical(error_msg)
+            raise SecretsManagerError(error_msg)
+        else:
+            logger.warning(f"DEV MODE: {error_msg}")
+
+    # Warn about empty non-critical secrets
+    empty = [k for k, v in secrets.items() if not v and k not in missing and k not in REQUIRED_SECRETS]
+    if empty:
+        logger.debug(f"Empty secrets (may cause issues): {', '.join(empty)}")
+
+    return secrets
+
 
 def clear_cache():
     """Clear the secrets cache. Useful for testing or when secrets are rotated."""
     global _secrets_cache, _secrets_cache_timestamp
-    _secrets_cache = {}
-    _secrets_cache_timestamp = 0
+    # THREAD SAFETY FIX: Use lock when clearing cache
+    with _secrets_cache_lock:
+        _secrets_cache = {}
+        _secrets_cache_timestamp = 0
     logger.info("Secrets cache cleared")
 
 

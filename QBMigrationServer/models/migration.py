@@ -58,7 +58,7 @@ class Migration(db.Model):
     s3_bucket = db.Column(db.String(255))
     s3_key = db.Column(db.String(500))
     aws_instance_id = db.Column(db.String(50))
-    aws_region = db.Column(db.String(50), default='us-east-1')
+    aws_region = db.Column(db.String(50), default='ca-central-1')  # PIPEDA compliance: Canadian data residency
     
     # Migration status
     status = db.Column(db.String(50), default='pending', nullable=False, index=True)

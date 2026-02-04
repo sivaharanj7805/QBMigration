@@ -29,18 +29,18 @@ jobs:
 
     - name: Check formatting with Black
       run: |
-        black --check --diff QBMigrationServer/ QBMigrationService/ || echo "::warning::Code formatting issues found. Run 'black .' to fix."
+        black --check --diff QBMigrationServer/ QBMigrationService/
 
     - name: Check import sorting with isort
       run: |
-        isort --check-only --diff QBMigrationServer/ QBMigrationService/ || echo "::warning::Import sorting issues found. Run 'isort .' to fix."
+        isort --check-only --diff QBMigrationServer/ QBMigrationService/
 
     - name: Lint with flake8
       run: |
         # Stop the build if there are Python syntax errors or undefined names
         flake8 QBMigrationServer/ QBMigrationService/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings
-        flake8 QBMigrationServer/ QBMigrationService/ --count --exit-zero --max-complexity=15 --max-line-length=120 --statistics
+        # Enforce complexity and line length limits
+        flake8 QBMigrationServer/ QBMigrationService/ --count --max-complexity=15 --max-line-length=120 --statistics
 
   security:
     name: Security Scan
@@ -63,7 +63,9 @@ jobs:
 
     - name: Run Bandit security scan
       run: |
-        bandit -r QBMigrationServer/ QBMigrationService/ -f json -o bandit-report.json --exit-zero
+        # Generate JSON report for artifact upload
+        bandit -r QBMigrationServer/ QBMigrationService/ -f json -o bandit-report.json || true
+        # Fail on medium+ severity issues (blocks CI on security vulnerabilities)
         bandit -r QBMigrationServer/ QBMigrationService/ -ll -ii
 
     - name: Upload Bandit Report
@@ -118,7 +120,7 @@ jobs:
         BACKUP_ENCRYPTION_KEY: ${{ secrets.TEST_BACKUP_ENCRYPTION_KEY }}
       run: |
         cd QBMigrationServer
-        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing || true
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4
@@ -151,7 +153,7 @@ jobs:
     - name: Run Service Tests
       run: |
         cd QBMigrationService
-        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing || true
+        pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4
@@ -161,9 +163,8 @@ jobs:
         path: QBMigrationService/coverage.xml
 
   type-check:
-    name: Type Check (Optional)
+    name: Type Check
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
     - name: Checkout Repository
@@ -182,4 +183,4 @@ jobs:
 
     - name: Run mypy
       run: |
-        mypy QBMigrationServer/ QBMigrationService/ --ignore-missing-imports --no-error-summary || echo "::warning::Type checking found issues"
+        mypy QBMigrationServer/ QBMigrationService/ --ignore-missing-imports

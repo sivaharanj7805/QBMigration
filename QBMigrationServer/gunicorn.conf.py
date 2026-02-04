@@ -50,8 +50,10 @@ backlog = 2048
 # For t3.medium (2 vCPU): 4-6 workers
 workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
 
-# Worker class - use gevent for async I/O (better for I/O bound tasks like S3 uploads)
-worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gevent')
+# Worker class - use gthread for thread-based concurrency
+# PRODUCTION FIX: Standardized on gthread to avoid gevent monkey-patching issues
+# with threading.Lock used in chunked uploads and other modules
+worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gthread')
 
 # Threads per worker (only used with sync/gthread workers)
 threads = int(os.getenv('GUNICORN_THREADS', 4))
