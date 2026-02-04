@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from threading import Lock
 from decimal import Decimal
 from pathlib import Path
@@ -118,8 +119,8 @@ class PremiumQBOClient:
         self.failed_items: List[Dict] = []
         self.failed_items_lock = Lock()
         
-        # Graceful shutdown flag (FIX #251, #386)
-        self.shutdown_requested = False
+        # Graceful shutdown flag — threading.Event is inherently thread-safe
+        self._shutdown_event = threading.Event()
         self._register_signal_handlers()
     
     @staticmethod
@@ -160,8 +161,6 @@ class PremiumQBOClient:
         FIX #251, #386: Graceful shutdown on SIGTERM/SIGINT
         AUDIT FIX: Only register from main thread to avoid ValueError
         """
-        import threading
-
         # Signal handlers can only be registered from the main thread
         if threading.current_thread() is not threading.main_thread():
             logger.debug("Skipping signal handler registration (not main thread)")
@@ -169,7 +168,7 @@ class PremiumQBOClient:
 
         def shutdown_handler(signum, frame):
             logger.warning("Shutdown signal received. Completing current requests...")
-            self.shutdown_requested = True
+            self._shutdown_event.set()
 
         try:
             signal.signal(signal.SIGTERM, shutdown_handler)
@@ -179,8 +178,8 @@ class PremiumQBOClient:
             logger.debug(f"Could not register signal handlers: {e}")
     
     def _check_shutdown(self):
-        """Check if shutdown was requested"""
-        if self.shutdown_requested:
+        """Check if shutdown was requested (thread-safe via Event)"""
+        if self._shutdown_event.is_set():
             logger.warning("Shutdown requested, stopping operations")
             raise KeyboardInterrupt("Graceful shutdown")
     
@@ -314,31 +313,46 @@ class PremiumQBOClient:
         sync_token: str = "0"
     ):
         """
-        FIX #130: Explicit transaction with context manager
-        FIX #33: Store SyncToken for future updates
+        Record a successfully created entity in SQLite for crash recovery.
+
+        Retries up to 3 times on transient SQLite errors (e.g., locked DB)
+        to prevent duplicates on restart when QBO creation succeeded but
+        the dedup record was lost.
         """
-        with self.db_lock:
-            # FIX #81: check_same_thread=False allows this
-            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-            
+        max_retries = 3
+        last_err = None
+        for attempt in range(max_retries):
             try:
-                with conn:  # FIX #130: Automatic transaction
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO migrated_entities 
-                        (entity_type, qbd_id, qbo_id, migration_id, status, sync_token)
-                        VALUES (?, ?, ?, ?, 'created', ?)
-                    ''', (entity_type, qbd_id, qbo_id, migration_id, sync_token))
-                    
-                # Update SyncToken cache
-                with self.synctoken_lock:
-                    self.synctoken_cache[(entity_type, qbo_id)] = sync_token
-                    
+                with self.db_lock:
+                    conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+                    try:
+                        with conn:
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                INSERT OR REPLACE INTO migrated_entities
+                                (entity_type, qbd_id, qbo_id, migration_id, status, sync_token)
+                                VALUES (?, ?, ?, ?, 'created', ?)
+                            ''', (entity_type, qbd_id, qbo_id, migration_id, sync_token))
+
+                        # Update SyncToken cache
+                        with self.synctoken_lock:
+                            self.synctoken_cache[(entity_type, qbo_id)] = sync_token
+                        return  # Success
+                    finally:
+                        conn.close()
             except Exception as e:
-                logger.error(f"Failed to record entity: {e}")
-                raise
-            finally:
-                conn.close()
+                last_err = e
+                if attempt < max_retries - 1:
+                    wait = 0.1 * (2 ** attempt)
+                    logger.warning(
+                        f"record_created retry {attempt + 1}/{max_retries} "
+                        f"for {entity_type}/{qbd_id}: {e}")
+                    time.sleep(wait)
+
+        logger.error(
+            f"record_created FAILED after {max_retries} attempts for "
+            f"{entity_type}/{qbd_id} (QBO ID {qbo_id}): {last_err}")
+        raise last_err
     
     def _record_migration(self, entity_type: str, qbd_id: str, qbo_id: str, migration_id: str = None, sync_token: str = "0"):
         """Alias for record_created for backward compatibility"""
@@ -584,7 +598,7 @@ class PremiumQBOClient:
         
         # TESTING REPORT: Add correlation ID header
         if correlation_id:
-            headers[config.CORRELATION_ID_HEADER] = correlation_id
+            headers[getattr(config, 'CORRELATION_ID_HEADER', 'X-Correlation-ID')] = correlation_id
         
         # FIX #312: Add idempotency key if provided
         if idempotency_key:
@@ -913,17 +927,28 @@ class PremiumQBOClient:
             return f"batch_{int(time.time())}_{self.batch_counter}"
     
     def _enforce_batch_rate_limit(self):
-        """Enforce 40 batch requests per minute per realm"""
-        with self._batch_timestamps_lock:
-            now = time.time()
-            # Remove timestamps older than 60 seconds
-            self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
-            if len(self._batch_timestamps) >= 40:
-                sleep_time = 60 - (now - self._batch_timestamps[0])
-                if sleep_time > 0:
-                    logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
-                    time.sleep(sleep_time)
-            self._batch_timestamps.append(time.time())
+        """Enforce 40 batch requests per minute per realm.
+
+        Uses a loop to handle the race where multiple threads may wake
+        from sleep simultaneously and all try to append at once.
+        """
+        while True:
+            sleep_time = 0
+            with self._batch_timestamps_lock:
+                now = time.time()
+                # Remove timestamps older than 60 seconds
+                self._batch_timestamps = [t for t in self._batch_timestamps if now - t < 60]
+                if len(self._batch_timestamps) >= 40:
+                    sleep_time = 60 - (now - self._batch_timestamps[0])
+                else:
+                    # Under limit — atomically record this batch's timestamp
+                    self._batch_timestamps.append(time.time())
+                    return  # Safe to proceed
+            # Sleep OUTSIDE lock so other threads aren't blocked
+            if sleep_time > 0:
+                logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
+                time.sleep(sleep_time)
+            # Re-check after sleeping (another thread may have consumed the slot)
 
     def _process_single_batch(
         self,
@@ -1305,13 +1330,13 @@ class PremiumQBOClient:
             if not self.failed_items:
                 logger.info("No failed items to export")
                 return
-            
+
             with open(filepath, 'w') as f:
                 json.dump({
                     "failed_count": len(self.failed_items),
                     "timestamp": datetime.now().isoformat(),
                     "items": self.failed_items
-                }, f, indent=2)
+                }, f, indent=2, default=str)  # default=str handles Decimal, datetime, etc.
             
             # HIGH FIX: Use logger instead of print
             logger.info(f"Exported {len(self.failed_items)} failed items to {filepath}")
@@ -1360,8 +1385,8 @@ class PremiumQBOClient:
                 if results:
                     all_results = self.query(entity_type, oauth_manager=oauth_manager)
                     return len(all_results)
-            except Exception:
-                pass
+            except Exception as fallback_err:
+                logger.warning(f"Query count fallback also failed for {entity_type}: {fallback_err}")
             return 0
 
     def query(

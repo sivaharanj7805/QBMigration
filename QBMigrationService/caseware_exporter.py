@@ -60,12 +60,20 @@ class CasewareExporter:
 
     VERSION = "1.0.0"
 
-    # Account type classification for debit/credit determination
+    # Account type classification for debit/credit determination.
+    # Includes both QBD names (spaced, plural: 'Other Current Assets')
+    # and QBO names (camelCase, singular: 'OtherCurrentAsset') since
+    # input data may arrive in either format.
     DEBIT_TYPES = {
+        # QBD format
         'Bank', 'Accounts Receivable', 'Other Current Assets',
         'Fixed Assets', 'Other Assets', 'Cost of Goods Sold',
         'Expense', 'Other Expense', 'Inventory',
         'Undeposited Funds', 'Prepaid Expenses',
+        # QBO format
+        'AccountsReceivable', 'OtherCurrentAsset', 'FixedAsset',
+        'OtherAsset', 'CostOfGoodsSold', 'OtherExpense',
+        # Overlap (same in both formats)
         'Other Current Asset', 'Fixed Asset', 'Other Asset',
     }
 
@@ -1098,6 +1106,8 @@ For technical support: support@forensicbridge.com
                 'credit': str(contra_credit)
             })
 
+            # Contra amount is opposite sign; use abs to avoid -0.00
+            contra_amount = -amount if amount != 0 else Decimal('0')
             contra_row = [
                 contra_acct_num,
                 contra_acct_name,
@@ -1105,7 +1115,7 @@ For technical support: support@forensicbridge.com
                 formatted_date,
                 ref_number,
                 memo[:255] if memo else '',
-                f"{-amount:.2f}",
+                f"{contra_amount:.2f}",
                 f"{contra_debit:.2f}",
                 f"{contra_credit:.2f}",
                 contra_hash

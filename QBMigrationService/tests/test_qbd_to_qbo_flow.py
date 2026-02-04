@@ -479,6 +479,7 @@ class TestIdMappingPropagation:
         )
         mock_client = MagicMock()
         mock_client.create_entity.return_value = {'Id': 'QBO-CUST-99', 'SyncToken': '0'}
+        mock_client.was_entity_created.return_value = None  # No prior creation
 
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = {'DisplayName': 'Acme'}
@@ -512,6 +513,7 @@ class TestPluralToSingularMapping:
         )
         mock_client = MagicMock()
         mock_client.create_entity.return_value = {'Id': '1', 'SyncToken': '0'}
+        mock_client.was_entity_created.return_value = None  # No prior creation
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = {'Name': 'Checking'}
 
@@ -551,6 +553,7 @@ class TestPluralToSingularMapping:
         for plural, expected_singular in expected_mappings.items():
             mock_client = MagicMock()
             mock_client.create_entity.return_value = {'Id': '1', 'SyncToken': '0'}
+            mock_client.was_entity_created.return_value = None  # No prior creation
             mock_transformer = MagicMock()
             mock_transformer.transform_entity.return_value = {'Name': 'Test'}
 
@@ -869,7 +872,7 @@ class TestErrorHandling:
         """Payment with missing customer reference produces null CustomerRef.
 
         When CustomerRef is None, map_id_required treats it as optional
-        and returns (None, True). The payment is still created.
+        and returns (None, True). The payment is still created (unapplied).
         """
         payment = {
             'RefNumber': 'PAY-BAD',
@@ -1069,6 +1072,7 @@ class TestOrchestratorMigrateEntity:
         orch = self._make_orchestrator()
         mock_client = MagicMock()
         mock_client.create_entity.return_value = {'Id': '100', 'SyncToken': '0'}
+        mock_client.was_entity_created.return_value = None  # No prior creation
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = {'DisplayName': 'Test'}
 
@@ -1084,6 +1088,7 @@ class TestOrchestratorMigrateEntity:
         orch = self._make_orchestrator()
         mock_client = MagicMock()
         mock_client.create_entity.side_effect = Exception("API Error")
+        mock_client.was_entity_created.return_value = None  # No prior creation
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = {'DisplayName': 'Fail'}
 
@@ -1098,6 +1103,7 @@ class TestOrchestratorMigrateEntity:
         """Transform returning None should increment skipped count."""
         orch = self._make_orchestrator()
         mock_client = MagicMock()
+        mock_client.was_entity_created.return_value = None  # No prior creation
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = None
 
@@ -1113,6 +1119,7 @@ class TestOrchestratorMigrateEntity:
         orch = self._make_orchestrator()
         mock_client = MagicMock()
         mock_client.create_entity.return_value = {'Id': '1', 'SyncToken': '0'}
+        mock_client.was_entity_created.return_value = None  # No prior creation
         mock_transformer = MagicMock()
         mock_transformer.transform_entity.return_value = {'DisplayName': 'X'}
         mock_oauth = MagicMock()
@@ -1781,8 +1788,8 @@ class TestGracefulShutdown:
     """Test graceful shutdown handling."""
 
     def test_shutdown_flag(self, mock_qbo_client):
-        """Setting shutdown_requested should cause _check_shutdown to raise."""
-        mock_qbo_client.shutdown_requested = True
+        """Setting _shutdown_event should cause _check_shutdown to raise."""
+        mock_qbo_client._shutdown_event.set()
         with pytest.raises(KeyboardInterrupt):
             mock_qbo_client._check_shutdown()
 

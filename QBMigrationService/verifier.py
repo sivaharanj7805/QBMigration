@@ -588,6 +588,11 @@ class PremiumMigrationVerifier:
         self.report["critical_metrics"]["reconciliation"] = reconciliation_results
         return reconciliation_results
     
+    @staticmethod
+    def _sanitize_query_value(value: str) -> str:
+        """Strip characters that could break QBO query syntax (defense-in-depth)."""
+        return str(value).replace("'", "").replace('"', '').replace(';', '').replace('\\', '')
+
     def _get_account_transactions(self, account_id: str, oauth_manager: Optional[Any] = None) -> List[Dict]:
         """
         $25M FIX: Get ALL transactions for an account (95-98% coverage).
@@ -601,7 +606,8 @@ class PremiumMigrationVerifier:
         Coverage improvement: 60% → 95-98%
         """
         transactions = []
-        
+        account_id = self._sanitize_query_value(account_id)
+
         # Pattern 1: Direct account reference in line details
         direct_ref_queries = {
             'Deposit': "SELECT * FROM Deposit WHERE Line.DepositLineDetail.AccountRef = '{account_id}'",
@@ -695,8 +701,8 @@ class PremiumMigrationVerifier:
             if not items:
                 return []
             
-            item_ids = [item['Id'] for item in items]
-            
+            item_ids = [self._sanitize_query_value(item['Id']) for item in items]
+
             # Step 2: Query transactions using these items
             # QBO allows IN clause with up to 30 items at a time
             for i in range(0, len(item_ids), 30):

@@ -1035,13 +1035,13 @@ class TestShutdownFlag:
 
     def test_check_shutdown_raises_keyboard_interrupt(self, tmp_path):
         client = _make_client(tmp_path)
-        client.shutdown_requested = True
+        client._shutdown_event.set()
         with pytest.raises(KeyboardInterrupt):
             client._check_shutdown()
 
     def test_check_shutdown_does_nothing_normally(self, tmp_path):
         client = _make_client(tmp_path)
-        client.shutdown_requested = False
+        client._shutdown_event.clear()
         client._check_shutdown()  # Should not raise
 
 
