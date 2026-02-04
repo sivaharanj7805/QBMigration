@@ -1307,13 +1307,13 @@ class PremiumQBOClient:
             if not self.failed_items:
                 logger.info("No failed items to export")
                 return
-            
+
             with open(filepath, 'w') as f:
                 json.dump({
                     "failed_count": len(self.failed_items),
                     "timestamp": datetime.now().isoformat(),
                     "items": self.failed_items
-                }, f, indent=2)
+                }, f, indent=2, default=str)  # default=str handles Decimal, datetime, etc.
             
             # HIGH FIX: Use logger instead of print
             logger.info(f"Exported {len(self.failed_items)} failed items to {filepath}")

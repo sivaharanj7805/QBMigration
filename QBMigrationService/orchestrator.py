@@ -695,6 +695,14 @@ class MigrationOrchestrator:
             layers.append(current_layer)
             remaining = still_remaining
 
+        # Safety: if max_depth exhausted but records remain, add them as a
+        # final layer rather than silently discarding them
+        if remaining:
+            logger.warning(
+                f"Parent-child layering: max depth ({max_depth}) reached with "
+                f"{len(remaining)} records remaining. Adding as final layer.")
+            layers.append(remaining)
+
         return layers
 
     @staticmethod

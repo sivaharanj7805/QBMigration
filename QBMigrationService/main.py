@@ -289,8 +289,8 @@ class MigrationOrchestrator:
 
             # CRITICAL FIX: Fail migration if failure rate exceeds threshold
             total_entities = upload_result['successful'] + upload_result['failed']
+            failure_rate = (upload_result['failed'] / total_entities) if total_entities > 0 else 0.0
             if total_entities > 0:
-                failure_rate = upload_result['failed'] / total_entities
                 if failure_rate > 0.10:  # More than 10% failure = migration failed
                     logger.info(f"\n❌ MIGRATION FAILED: {failure_rate*100:.1f}% of entities failed to upload")
                     logger.info(f"   This exceeds the 10% failure threshold.")

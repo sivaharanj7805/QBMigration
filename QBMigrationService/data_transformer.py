@@ -2351,6 +2351,15 @@ class QBDataTransformer:
 
         for line in qbd.get('DepositLines', []):
             acct_id = self.map_id('accounts', line.get('AccountRef'))
+            linked_txn_id = None
+            if line.get('LinkedTxn'):
+                linked_txn_id = self.map_id('payments', line['LinkedTxn'].get('TxnId'))
+
+            # A deposit line needs at least an AccountRef or LinkedTxn
+            if not acct_id and not linked_txn_id:
+                logger.debug(f"Deposit: dropping line — no AccountRef or LinkedTxn mapped")
+                continue
+
             qbo_line = {
                 'Amount': self.to_decimal(line.get('Amount', 0)),
                 'DetailType': 'DepositLineDetail',
@@ -2358,14 +2367,11 @@ class QBDataTransformer:
             }
             if acct_id:
                 qbo_line['DepositLineDetail']['AccountRef'] = {'value': acct_id}
-
-            if line.get('LinkedTxn'):
-                txn_id = self.map_id('payments', line['LinkedTxn'].get('TxnId'))
-                if txn_id:
-                    qbo_line['LinkedTxn'] = [{
-                        'TxnId': txn_id,
-                        'TxnType': 'Payment'
-                    }]
+            if linked_txn_id:
+                qbo_line['LinkedTxn'] = [{
+                    'TxnId': linked_txn_id,
+                    'TxnType': 'Payment'
+                }]
 
             qbo['Line'].append(qbo_line)
 
@@ -2425,14 +2431,16 @@ class QBDataTransformer:
 
         for line in qbd.get('AdjustmentLines', []):
             item_id = self.map_id('items', line.get('ItemRef'))
+            if not item_id:
+                logger.debug(f"InventoryAdjustment: dropping line — unmapped ItemRef: {line.get('ItemRef')}")
+                continue
             qbo_line = {
                 'DetailType': 'ItemAdjustmentLineDetail',
                 'ItemAdjustmentLineDetail': {
-                    'QtyDiff': self.to_decimal(line.get('QuantityDifference', 0))
+                    'QtyDiff': self.to_decimal(line.get('QuantityDifference', 0)),
+                    'ItemRef': {'value': item_id}
                 }
             }
-            if item_id:
-                qbo_line['ItemAdjustmentLineDetail']['ItemRef'] = {'value': item_id}
             qbo['Line'].append(qbo_line)
 
         if not self._require_lines(qbo, 'InventoryAdjustment', qbd):
@@ -2471,23 +2479,25 @@ class QBDataTransformer:
         for line in qbd.get('JournalEntryLines', []):
             amount = self.to_decimal(line.get('Amount', 0))
             posting_type = line.get('PostingType', 'Debit')
-        
+
             acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if not acct_id:
+                logger.debug(f"JournalEntry: dropping line — unmapped AccountRef: {line.get('AccountRef')}")
+                continue
             qbo_line = {
                 'Amount': amount,
                 'DetailType': 'JournalEntryLineDetail',
                 'JournalEntryLineDetail': {
-                    'PostingType': posting_type
+                    'PostingType': posting_type,
+                    'AccountRef': {'value': acct_id}
                 }
             }
-            if acct_id:
-                qbo_line['JournalEntryLineDetail']['AccountRef'] = {'value': acct_id}
-        
+
             if line.get('Description'):
                 qbo_line['Description'] = line['Description'][:4000]
-        
+
             qbo['Line'].append(qbo_line)
-        
+
             if posting_type == 'Debit':
                 debit_total += amount
             else:
@@ -2558,6 +2568,8 @@ class QBDataTransformer:
                     }]
                 })
 
+        if not self._require_lines(qbo, 'Payment', qbd):
+            return None
         self._store_entity_mapping('payments', qbd)
         return qbo
 
@@ -2589,13 +2601,16 @@ class QBDataTransformer:
 
         for line in qbd.get('ExpenseLines', []):
             acct_id = self.map_id('accounts', line.get('AccountRef'))
+            if not acct_id:
+                logger.debug(f"Purchase: dropping expense line — unmapped AccountRef: {line.get('AccountRef')}")
+                continue
             qbo_line = {
                 'DetailType': 'AccountBasedExpenseLineDetail',
                 'Amount': self.to_decimal(line.get('Amount', 0)),
-                'AccountBasedExpenseLineDetail': {}
+                'AccountBasedExpenseLineDetail': {
+                    'AccountRef': {'value': acct_id}
+                }
             }
-            if acct_id:
-                qbo_line['AccountBasedExpenseLineDetail']['AccountRef'] = {'value': acct_id}
             qbo['Line'].append(qbo_line)
 
         if not self._require_lines(qbo, 'Purchase', qbd):
