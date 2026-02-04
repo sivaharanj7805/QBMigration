@@ -597,7 +597,8 @@ class TestLineSkippingValidation:
         assert len(result['Line']) == 1
         assert 'LinkedTxn' in result['Line'][0]
 
-    def test_payment_returns_none_when_no_invoice_mapped(self, transformer):
+    def test_payment_with_no_mapped_invoices_returns_unapplied(self, transformer):
+        """QBO allows unapplied payments — empty Line array is valid."""
         qbd = {
             'RefNumber': 'PAY-100',
             'TxnDate': '2024-01-15',
@@ -607,7 +608,8 @@ class TestLineSkippingValidation:
             ]
         }
         result = transformer.transform_payment(qbd)
-        assert result is None
+        assert result is not None
+        assert result['Line'] == []
 
     def test_payment_keeps_lines_with_mapped_invoices(self, transformer):
         qbd = {

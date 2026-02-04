@@ -1396,6 +1396,62 @@ class QBDataTransformer:
         'schemaVersion': 'SchemaVersion',
         'extractionVersion': 'ExtractionVersion',
         'extractedAt': 'ExtractedAt', 'sessionId': 'SessionID',
+
+        # Invoice line – job costing / progress invoicing / retainage
+        'other1': 'Other1', 'other2': 'Other2',
+        'jobRefListId': 'JobRef', 'jobRefFullName': 'JobRefFullName',
+        'costType': 'CostType', 'costCode': 'CostCode',
+        'jobPhase': 'JobPhase',
+        'estimatedAmount': 'EstimatedAmount',
+        'percentComplete': 'PercentComplete',
+        'retainageAmount': 'RetainageAmount',
+        'retainagePercent': 'RetainagePercent',
+        'changeOrderRef': 'ChangeOrderRef',
+
+        # Transfer reference fields
+        'transferFromAccountRefListId': 'TransferFromAccountRef',
+        'transferToAccountRefListId': 'TransferToAccountRef',
+
+        # BillPaymentCreditCard / ARRefundCreditCard reference fields
+        'creditCardAccountRefListId': 'CreditCardAccountRef',
+        'refundFromAccountRefListId': 'RefundFromAccountRef',
+
+        # BuildAssembly fields
+        'itemInventoryAssemblyRefListId': 'ItemInventoryAssemblyRef',
+        'quantityToBuild': 'QuantityToBuild',
+
+        # InventoryTransfer site references
+        'fromInventorySiteRefListId': 'FromInventorySiteRef',
+        'toInventorySiteRefListId': 'ToInventorySiteRef',
+
+        # SalesRep fields
+        'initial': 'Initial',
+        'salesRepEntityRefListId': 'SalesRepEntityRef',
+        'salesRepEntityRefFullName': 'SalesRepEntityRefFullName',
+
+        # DataExtension fields
+        'entityType': 'EntityType', 'entityId': 'EntityID',
+        'ownerId': 'OwnerID',
+        'fieldName': 'FieldName', 'fieldValue': 'FieldValue',
+        'dataType': 'DataType',
+
+        # LinkedTxn fields
+        'txnType': 'TxnType', 'linkType': 'LinkType',
+        'linkAmount': 'LinkAmount', 'linkSequence': 'LinkSequence',
+        'balanceAfterLink': 'BalanceAfterLink',
+        'isFullyApplied': 'IsFullyApplied',
+        'discountAmount': 'DiscountAmount', 'originalAmount': 'OriginalAmount',
+
+        # Customer extra fields
+        'emailInvalidReason': 'EmailInvalidReason',
+        'creditCard': 'CreditCard',
+        'jobTypeRefFullName': 'JobTypeRefFullName',
+
+        # Preferences fields
+        'multiCurrencyEnabled': 'MultiCurrencyEnabled',
+        'homeCurrency': 'HomeCurrency',
+        'fiscalYearStartMonth': 'FiscalYearStartMonth',
+        'inventoryEnabled': 'InventoryEnabled',
     }
 
     # Address prefixes used by C# flat field naming
@@ -1435,6 +1491,18 @@ class QBDataTransformer:
         'salesTaxGroups': 'SalesTaxGroup',
         'priceLevels': 'PriceLevel', 'salesReps': 'SalesRep',
         'shipMethods': 'ShipMethod',
+        # Additional C# extractor entity types
+        'creditCardCredits': 'Purchase',
+        'arRefundCreditCards': 'RefundReceipt',
+        'billPaymentCreditCards': 'BillPayment',
+        'buildAssemblies': 'BuildAssembly',
+        'inventoryTransfers': 'InventoryTransfer',
+        'itemReceipts': 'ItemReceipt',
+        'charges': 'Charge',
+        'dataExtensions': 'DataExtension',
+        'otherNames': 'OtherName',
+        'leads': 'Lead',
+        'inventorySites': 'InventorySite',
     }
 
     # Line item key mapping per entity type
@@ -2582,8 +2650,8 @@ class QBDataTransformer:
                     }]
                 })
 
-        if not self._require_lines(qbo, 'Payment', qbd):
-            return None
+        # Note: QBO allows unapplied payments (empty Line array),
+        # so we do NOT call _require_lines here.
         self._store_entity_mapping('payments', qbd)
         return qbo
 
