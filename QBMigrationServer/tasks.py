@@ -20,7 +20,6 @@ import sys
 import json
 import logging
 from datetime import datetime
-from celery import Celery
 from celery.signals import task_prerun, task_postrun, task_failure
 
 # Add QBMigrationService to path
@@ -30,28 +29,12 @@ if SERVICE_PATH not in sys.path:
 
 logger = logging.getLogger(__name__)
 
-# Celery configuration
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
-
-celery = Celery(
-    'forensicbridge_tasks',
-    broker=CELERY_BROKER_URL,
-    backend=CELERY_RESULT_BACKEND
-)
-
-celery.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=3600,  # 1 hour max per migration
-    task_soft_time_limit=3300,  # Warn at 55 minutes
-    worker_prefetch_multiplier=1,  # One task at a time (migrations are heavy)
-    task_acks_late=True,  # Acknowledge after completion
-)
+# PRODUCTION FIX: Import shared Celery instance from celery_worker.py
+# This ensures all tasks use the same, correctly configured Celery application
+# with consistent settings for serialization, timeouts, retry behavior, etc.
+# Previously, this file created a duplicate Celery instance with different
+# name ('forensicbridge_tasks' vs 'qbmigration') and minimal configuration.
+from QBMigrationServer.celery_worker import celery
 
 
 def update_migration_status(migration_id: str, status: str, progress: int = None,
@@ -301,29 +284,25 @@ def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
 
 
-# Celery Beat schedule (for periodic tasks)
-celery.conf.beat_schedule = {
-    'cleanup-expired-files': {
-        'task': 'tasks.cleanup_expired_files',
-        'schedule': 3600.0,  # Every hour
-    },
-    'cleanup-orphaned-resources': {
-        'task': 'tasks.cleanup_orphaned_resources',
-        'schedule': 900.0,  # Every 15 minutes
-    },
-}
+# NOTE: Celery Beat schedule is defined in celery_worker.py
+# Task names registered there use full module path: 'QBMigrationServer.tasks.<task_name>'
 
 
 @celery.task(name='tasks.cleanup_orphaned_resources')
 def cleanup_orphaned_resources():
     """
     Periodic task to clean up orphaned AWS resources.
-    Finds completed/failed migrations that weren't properly cleaned up.
+    Finds completed/failed migrations AND stuck processing migrations
+    that weren't properly cleaned up.
+
+    PRODUCTION FIX: Also cleans up migrations stuck in intermediate states
+    (e.g., 'processing') for too long, which would otherwise leak EC2 instances.
     """
     from app import create_app
     from models.database import db
     from models.migration import Migration
     from datetime import datetime, timezone, timedelta
+    from sqlalchemy import or_
 
     logger.info("Starting orphaned resource cleanup")
 
@@ -333,18 +312,43 @@ def cleanup_orphaned_resources():
             from utils.aws_manager import AWSMigrationManager
             aws_manager = AWSMigrationManager()
 
-            # Find stale migrations needing cleanup
-            stale_threshold = datetime.now(timezone.utc) - timedelta(hours=6)
+            # Thresholds for different scenarios
+            completed_threshold = datetime.now(timezone.utc) - timedelta(hours=6)  # Completed but not cleaned up
+            stuck_threshold = datetime.now(timezone.utc) - timedelta(hours=2)  # Processing for too long
+
+            # PRODUCTION FIX: Find migrations needing cleanup including stuck ones
+            # 1. Completed/failed migrations older than 6 hours that weren't cleaned
+            # 2. Processing migrations older than 2 hours (likely stuck/orphaned)
             stale_migrations = Migration.query.filter(
-                Migration.status.in_(['completed', 'failed']),
                 Migration.cleanup_completed == False,
-                Migration.created_at < stale_threshold,
-                Migration.aws_instance_id.isnot(None)
+                Migration.aws_instance_id.isnot(None),
+                or_(
+                    # Case 1: Completed/failed but not cleaned up
+                    db.and_(
+                        Migration.status.in_(['completed', 'failed']),
+                        Migration.created_at < completed_threshold
+                    ),
+                    # Case 2: Stuck in processing state for too long
+                    db.and_(
+                        Migration.status == 'processing',
+                        Migration.started_at < stuck_threshold
+                    )
+                )
             ).limit(10).all()
 
             cleaned_count = 0
             for migration in stale_migrations:
                 try:
+                    # PRODUCTION FIX: Mark stuck processing migrations as failed
+                    if migration.status == 'processing':
+                        logger.warning(f"Migration {migration.migration_id} stuck in processing state, marking as failed")
+                        migration.status = 'failed'
+                        migration.error_code = 'STUCK_TIMEOUT'
+                        try:
+                            migration.set_error_message('Migration timed out after 2 hours in processing state')
+                        except Exception:
+                            pass  # Error message encryption might fail
+
                     if migration.aws_instance_id:
                         aws_manager.terminate_instance(migration.aws_instance_id)
                         migration.ec2_terminated = True
@@ -354,7 +358,7 @@ def cleanup_orphaned_resources():
                     migration.cleanup_completed_at = datetime.now(timezone.utc)
                     db.session.commit()
                     cleaned_count += 1
-                    logger.info(f"Cleaned orphaned resources for migration {migration.migration_id}")
+                    logger.info(f"Cleaned orphaned resources for migration {migration.migration_id} (status: {migration.status})")
                 except Exception as e:
                     logger.warning(f"Failed to clean migration {migration.migration_id}: {e}")
                     db.session.rollback()

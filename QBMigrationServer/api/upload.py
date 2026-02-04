@@ -847,29 +847,60 @@ def _get_upload_session(upload_id: str) -> dict:
 
 
 def _set_upload_session(upload_id: str, session_data: dict):
-    """Store upload session in Redis with expiry."""
+    """Store upload session in Redis with expiry.
+
+    PRODUCTION FIX: Uses atomic Lua script to prevent race condition in
+    concurrent upload limit check. Previously there was a TOCTOU vulnerability
+    where the count check and add operations were not atomic.
+    """
     r = _get_redis_client()
     if not r:
         raise RuntimeError("Redis not available for chunked uploads")
 
-    # Check concurrent upload limit
-    try:
-        current_count = r.scard(REDIS_UPLOAD_SET)
-        if current_count and current_count >= MAX_CONCURRENT_UPLOADS:
-            raise ValueError(f"Too many concurrent uploads ({current_count}). Please try again later.")
-    except ValueError:
-        raise
-    except Exception as e:
-        logger.warning(f"Failed to check upload count: {e}")
+    # PRODUCTION FIX: Use Lua script for atomic check-and-add operation
+    # This prevents race condition where multiple requests could exceed
+    # MAX_CONCURRENT_UPLOADS by checking the count separately from adding
+    lua_script = """
+    local set_key = KEYS[1]
+    local session_key = KEYS[2]
+    local upload_id = ARGV[1]
+    local session_data = ARGV[2]
+    local max_uploads = tonumber(ARGV[3])
+    local expiry = tonumber(ARGV[4])
+
+    -- Check current count atomically
+    local current_count = redis.call('SCARD', set_key)
+    if current_count >= max_uploads then
+        return {0, current_count}  -- Return failure with current count
+    end
+
+    -- Add to set and store session data atomically
+    redis.call('SADD', set_key, upload_id)
+    redis.call('EXPIRE', set_key, expiry)
+    redis.call('SETEX', session_key, expiry, session_data)
+
+    return {1, current_count}  -- Return success
+    """
 
     try:
-        r.setex(
-            f"{REDIS_UPLOAD_PREFIX}{upload_id}",
-            CHUNKED_UPLOAD_EXPIRY_SECONDS,
-            json.dumps(session_data)
+        # Execute atomic Lua script
+        result = r.eval(
+            lua_script,
+            2,  # Number of keys
+            REDIS_UPLOAD_SET,  # KEYS[1]
+            f"{REDIS_UPLOAD_PREFIX}{upload_id}",  # KEYS[2]
+            upload_id,  # ARGV[1]
+            json.dumps(session_data),  # ARGV[2]
+            MAX_CONCURRENT_UPLOADS,  # ARGV[3]
+            CHUNKED_UPLOAD_EXPIRY_SECONDS  # ARGV[4]
         )
-        r.sadd(REDIS_UPLOAD_SET, upload_id)
-        r.expire(REDIS_UPLOAD_SET, CHUNKED_UPLOAD_EXPIRY_SECONDS)
+
+        success, current_count = result
+        if not success:
+            raise ValueError(f"Too many concurrent uploads ({current_count}). Please try again later.")
+
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Failed to store upload session {upload_id}: {e}")
         raise
@@ -982,7 +1013,17 @@ def initiate_chunked_upload():
         }
 
         # Store in Redis (replaces in-memory storage)
-        _set_upload_session(upload_id, session_data)
+        # PRODUCTION FIX: Catch ValueError from concurrent upload limit and return 429
+        try:
+            _set_upload_session(upload_id, session_data)
+        except ValueError as e:
+            # Concurrent upload limit reached - return 429 Too Many Requests
+            logger.warning(f"Concurrent upload limit reached: {e}")
+            return jsonify({
+                'success': False,
+                'error': str(e),
+                'error_code': 'TOO_MANY_UPLOADS'
+            }), 429
 
         logger.info(f"Chunked upload initiated: {upload_id}, {total_chunks} chunks, session: {session_id}")
 
