@@ -29,21 +29,22 @@ class EncryptionManager:
 
     def _load_or_generate_keys(self):
         """Load existing RSA keys or generate new ones"""
-        key_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'keys')
+        key_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "keys")
         os.makedirs(key_dir, exist_ok=True)
 
-        private_key_path = os.path.join(key_dir, 'server_private.pem')
+        private_key_path = os.path.join(key_dir, "server_private.pem")
 
         if os.path.exists(private_key_path):
             try:
                 # FIX CRIT-04: Load private key password from secure sources only
-                key_password = os.environ.get('RSA_KEY_PASSWORD')
+                key_password = os.environ.get("RSA_KEY_PASSWORD")
 
                 if not key_password:
                     # Try AWS Secrets Manager
                     try:
                         from utils.secrets_manager import get_secret
-                        key_password = get_secret('rsa_key_password')
+
+                        key_password = get_secret("rsa_key_password")
                     except Exception:
                         pass
 
@@ -55,11 +56,11 @@ class EncryptionManager:
                         "Key may be unencrypted or use default password."
                     )
 
-                with open(private_key_path, 'rb') as f:
+                with open(private_key_path, "rb") as f:
                     self._private_key = serialization.load_pem_private_key(
                         f.read(),
                         password=key_password.encode() if key_password else None,
-                        backend=default_backend()
+                        backend=default_backend(),
                     )
                 self._public_key = self._private_key.public_key()
                 logger.info("Loaded existing RSA key pair")
@@ -70,36 +71,37 @@ class EncryptionManager:
         # Generate new key pair
         logger.info(f"Generating new RSA-{self.key_size} key pair...")
         self._private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=self.key_size,
-            backend=default_backend()
+            public_exponent=65537, key_size=self.key_size, backend=default_backend()
         )
         self._public_key = self._private_key.public_key()
 
         # FIX CRIT-04: Improved RSA key password handling
         # Priority: 1) Environment variable, 2) AWS Secrets Manager, 3) Generate and warn
-        key_password = os.environ.get('RSA_KEY_PASSWORD')
+        key_password = os.environ.get("RSA_KEY_PASSWORD")
 
         if not key_password:
             # Try AWS Secrets Manager
             try:
                 from utils.secrets_manager import get_secret
-                key_password = get_secret('rsa_key_password')
+
+                key_password = get_secret("rsa_key_password")
             except Exception:
                 pass
 
         if not key_password:
             # FIX 100/100: Require RSA_KEY_PASSWORD in ALL environments
             # This ensures consistent security posture and key recoverability
-            flask_env = os.environ.get('FLASK_ENV', 'development')
+            flask_env = os.environ.get("FLASK_ENV", "development")
 
             # Check if we're in testing mode (allow auto-generation for tests only)
-            is_testing = flask_env == 'testing' or os.environ.get('PYTEST_CURRENT_TEST')
+            is_testing = flask_env == "testing" or os.environ.get("PYTEST_CURRENT_TEST")
 
             if is_testing:
                 # Testing only: Generate a deterministic test password
-                key_password = 'test-rsa-key-password-for-ci-cd'
-                logger.info("Testing mode: Using deterministic RSA key password for CI/CD")
+                key_password = "test-rsa-key-password-for-ci-cd"
+                logger.info(
+                    "Testing mode: Using deterministic RSA key password for CI/CD"
+                )
             else:
                 # All other environments (production, development, staging): FAIL
                 # This forces proper secrets management everywhere
@@ -108,15 +110,19 @@ class EncryptionManager:
                     f"Environment: {flask_env}. "
                     "Cannot generate RSA keys without a configured password. "
                     "Please set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
-                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+                    'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
                 )
 
-        with open(private_key_path, 'wb') as f:
-            f.write(self._private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.BestAvailableEncryption(key_password.encode())
-            ))
+        with open(private_key_path, "wb") as f:
+            f.write(
+                self._private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.BestAvailableEncryption(
+                        key_password.encode()
+                    ),
+                )
+            )
         os.chmod(private_key_path, 0o600)
         logger.info("Generated and saved new RSA key pair")
 
@@ -125,10 +131,10 @@ class EncryptionManager:
         public_numbers = self._public_key.public_numbers()
 
         modulus = base64.b64encode(
-            public_numbers.n.to_bytes(self.key_size // 8, byteorder='big')
+            public_numbers.n.to_bytes(self.key_size // 8, byteorder="big")
         ).decode()
         exponent = base64.b64encode(
-            public_numbers.e.to_bytes(3, byteorder='big')
+            public_numbers.e.to_bytes(3, byteorder="big")
         ).decode()
 
         return f"<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>{exponent}</Exponent></RSAKeyValue>"
@@ -137,7 +143,7 @@ class EncryptionManager:
         """Get public key in PEM format"""
         return self._public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode()
 
     def decrypt_aes_key(self, encrypted_key):
@@ -150,8 +156,8 @@ class EncryptionManager:
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
                 algorithm=hashes.SHA256(),
-                label=None
-            )
+                label=None,
+            ),
         )
 
 

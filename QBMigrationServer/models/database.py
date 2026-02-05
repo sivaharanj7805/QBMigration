@@ -5,6 +5,7 @@ from datetime import datetime
 
 db = SQLAlchemy()
 
+
 def init_db(app):
     """Initialize database"""
     db.init_app(app)
@@ -13,7 +14,7 @@ def init_db(app):
         # Prevent DetachedInstanceError in testing by keeping instances usable after commits
         # This avoids Flask-Login's current_user becoming detached when endpoints
         # access user attributes after session operations
-        if app.config.get('TESTING') or os.getenv('FLASK_ENV') == 'testing':
+        if app.config.get("TESTING") or os.getenv("FLASK_ENV") == "testing":
             from sqlalchemy import event
 
             @event.listens_for(Session, "after_begin")
@@ -32,8 +33,8 @@ def is_postgresql():
     Used to conditionally apply PostgreSQL-specific features like FOR UPDATE.
     """
     try:
-        dialect = db.session.bind.dialect.name if db.session.bind else 'sqlite'
-        return dialect == 'postgresql'
+        dialect = db.session.bind.dialect.name if db.session.bind else "sqlite"
+        return dialect == "postgresql"
     except Exception:
         return False
 

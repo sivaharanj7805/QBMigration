@@ -31,6 +31,28 @@ const sentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
  * keeping the bundle size minimal. For full breadcrumb/replay support, install
  * @sentry/nextjs and replace this with Sentry.init().
  */
+/** Keys that must never be forwarded to Sentry (case-insensitive check). */
+const SENSITIVE_KEYS = new Set([
+  'token', 'secret', 'password', 'credential', 'authorization',
+  'api_key', 'apikey', 'access_token', 'refresh_token',
+  'ssn', 'credit_card', 'card_number', 'cvv',
+  'private_key', 'encryption_key',
+]);
+
+/** Strip sensitive fields from context before sending to Sentry. */
+function sanitizeContext(ctx?: LogContext): LogContext | undefined {
+  if (!ctx) return undefined;
+  const clean: LogContext = {};
+  for (const [key, value] of Object.entries(ctx)) {
+    if (SENSITIVE_KEYS.has(key.toLowerCase())) {
+      clean[key] = '[REDACTED]';
+    } else {
+      clean[key] = value;
+    }
+  }
+  return clean;
+}
+
 function reportToSentry(
   message: string,
   error?: Error | unknown,
@@ -77,7 +99,7 @@ function reportToSentry(
       exception: errorData
         ? { values: [errorData] }
         : undefined,
-      extra: context,
+      extra: sanitizeContext(context),
       environment: process.env.NODE_ENV,
       tags: { source: 'forensicbridge-dashboard' },
     };

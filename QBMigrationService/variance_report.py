@@ -15,7 +15,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 class VarianceReportGenerator:
     """
     Generates automated variance reports comparing:
@@ -23,25 +22,22 @@ class VarianceReportGenerator:
     - Balance Sheet comparison
     - Line-by-line variance highlighting
     """
-    
+
     def __init__(self, company_name: str = ""):
         self.company_name = company_name
         self.tolerance = Decimal("0.01")  # Penny-perfect tolerance
-    
+
     def generate_variance_report(
-        self,
-        source_data: Dict,
-        destination_data: Dict,
-        years: int = 3
+        self, source_data: Dict, destination_data: Dict, years: int = 3
     ) -> Dict:
         """
         Generate comprehensive variance report.
-        
+
         Args:
             source_data: QBD trial balance, P&L, balance sheet
             destination_data: QBO trial balance, P&L, balance sheet
             years: Number of years to compare (default 3)
-            
+
         Returns:
             Complete variance report dict
         """
@@ -53,51 +49,55 @@ class VarianceReportGenerator:
             "summary": {
                 "total_variances": 0,
                 "critical_variances": 0,
-                "total_amount": Decimal("0")
+                "total_amount": Decimal("0"),
             },
             "trial_balance": self._compare_trial_balance(
                 source_data.get("trial_balance", {}),
-                destination_data.get("trial_balance", {})
+                destination_data.get("trial_balance", {}),
             ),
             "profit_loss": [],
             "balance_sheet": [],
-            "account_details": []
+            "account_details": [],
         }
-        
+
         # Compare P&L by year
         for year in range(years):
             year_key = f"year_{year}"
             source_pl = source_data.get("profit_loss", {}).get(year_key, {})
             dest_pl = destination_data.get("profit_loss", {}).get(year_key, {})
-            
+
             pl_comparison = self._compare_pl(source_pl, dest_pl, year)
             report["profit_loss"].append(pl_comparison)
-            
+
             if pl_comparison["has_variance"]:
                 report["summary"]["total_variances"] += len(pl_comparison["variances"])
-        
+
         # Compare Balance Sheet
         source_bs = source_data.get("balance_sheet", {})
         dest_bs = destination_data.get("balance_sheet", {})
         report["balance_sheet"] = self._compare_balance_sheet(source_bs, dest_bs)
-        
+
         # Compare individual accounts
         source_accounts = source_data.get("accounts", [])
         dest_accounts = destination_data.get("accounts", [])
-        report["account_details"] = self._compare_accounts(source_accounts, dest_accounts)
-        
+        report["account_details"] = self._compare_accounts(
+            source_accounts, dest_accounts
+        )
+
         # Calculate totals
         for account in report["account_details"]:
             if account["has_variance"]:
                 report["summary"]["total_variances"] += 1
-                report["summary"]["total_amount"] += abs(Decimal(str(account["variance"])))
-                
+                report["summary"]["total_amount"] += abs(
+                    Decimal(str(account["variance"]))
+                )
+
                 if abs(Decimal(str(account["variance"]))) > 100:
                     report["summary"]["critical_variances"] += 1
                     report["overall_status"] = "FAIL"
-        
+
         return report
-    
+
     def _safe_decimal(self, value, default: str = "0") -> Decimal:
         """
         CRITICAL FIX: Safely convert value to Decimal, handling None and invalid inputs.
@@ -117,7 +117,9 @@ class VarianceReportGenerator:
             # Convert to string first to preserve precision (avoid float intermediary)
             return Decimal(str(value))
         except Exception:
-            logger.warning(f"Failed to convert '{value}' to Decimal, using default '{default}'")
+            logger.warning(
+                f"Failed to convert '{value}' to Decimal, using default '{default}'"
+            )
             return Decimal(default)
 
     def _decimal_to_str(self, value: Decimal) -> str:
@@ -141,8 +143,8 @@ class VarianceReportGenerator:
         credit_variance = dest_credits - source_credits
 
         is_balanced = (
-            abs(debit_variance) <= self.tolerance and
-            abs(credit_variance) <= self.tolerance
+            abs(debit_variance) <= self.tolerance
+            and abs(credit_variance) <= self.tolerance
         )
 
         # CRITICAL FIX: Use string representation to preserve Decimal precision
@@ -155,9 +157,9 @@ class VarianceReportGenerator:
             "debit_variance": self._decimal_to_str(debit_variance),
             "credit_variance": self._decimal_to_str(credit_variance),
             "is_balanced": is_balanced,
-            "status": "VERIFIED" if is_balanced else "VARIANCE DETECTED"
+            "status": "VERIFIED" if is_balanced else "VARIANCE DETECTED",
         }
-    
+
     def _compare_pl(self, source: Dict, dest: Dict, year: int) -> Dict:
         """Compare P&L for a specific year."""
         variances = []
@@ -168,13 +170,15 @@ class VarianceReportGenerator:
         revenue_var = dest_revenue - source_revenue
 
         if abs(revenue_var) > self.tolerance:
-            variances.append({
-                "category": "Total Revenue",
-                "source": self._decimal_to_str(source_revenue),
-                "destination": self._decimal_to_str(dest_revenue),
-                "variance": self._decimal_to_str(revenue_var),
-                "severity": "CRITICAL" if abs(revenue_var) > 1000 else "WARNING"
-            })
+            variances.append(
+                {
+                    "category": "Total Revenue",
+                    "source": self._decimal_to_str(source_revenue),
+                    "destination": self._decimal_to_str(dest_revenue),
+                    "variance": self._decimal_to_str(revenue_var),
+                    "severity": "CRITICAL" if abs(revenue_var) > 1000 else "WARNING",
+                }
+            )
 
         # Compare expenses
         source_expenses = self._safe_decimal(source.get("total_expenses"))
@@ -182,13 +186,15 @@ class VarianceReportGenerator:
         expense_var = dest_expenses - source_expenses
 
         if abs(expense_var) > self.tolerance:
-            variances.append({
-                "category": "Total Expenses",
-                "source": self._decimal_to_str(source_expenses),
-                "destination": self._decimal_to_str(dest_expenses),
-                "variance": self._decimal_to_str(expense_var),
-                "severity": "CRITICAL" if abs(expense_var) > 1000 else "WARNING"
-            })
+            variances.append(
+                {
+                    "category": "Total Expenses",
+                    "source": self._decimal_to_str(source_expenses),
+                    "destination": self._decimal_to_str(dest_expenses),
+                    "variance": self._decimal_to_str(expense_var),
+                    "severity": "CRITICAL" if abs(expense_var) > 1000 else "WARNING",
+                }
+            )
 
         # Compare net income
         source_net = source_revenue - source_expenses
@@ -196,13 +202,15 @@ class VarianceReportGenerator:
         net_var = dest_net - source_net
 
         if abs(net_var) > self.tolerance:
-            variances.append({
-                "category": "Net Income",
-                "source": self._decimal_to_str(source_net),
-                "destination": self._decimal_to_str(dest_net),
-                "variance": self._decimal_to_str(net_var),
-                "severity": "CRITICAL" if abs(net_var) > 1000 else "WARNING"
-            })
+            variances.append(
+                {
+                    "category": "Net Income",
+                    "source": self._decimal_to_str(source_net),
+                    "destination": self._decimal_to_str(dest_net),
+                    "variance": self._decimal_to_str(net_var),
+                    "severity": "CRITICAL" if abs(net_var) > 1000 else "WARNING",
+                }
+            )
 
         # CRITICAL FIX: Use string representation for all financial values
         return {
@@ -212,9 +220,9 @@ class VarianceReportGenerator:
             "destination_net_income": self._decimal_to_str(dest_net),
             "variance": self._decimal_to_str(net_var),
             "has_variance": len(variances) > 0,
-            "variances": variances
+            "variances": variances,
         }
-    
+
     def _compare_balance_sheet(self, source: Dict, dest: Dict) -> Dict:
         """Compare balance sheet."""
         variances = []
@@ -222,7 +230,7 @@ class VarianceReportGenerator:
         categories = [
             ("total_assets", "Total Assets"),
             ("total_liabilities", "Total Liabilities"),
-            ("total_equity", "Total Equity")
+            ("total_equity", "Total Equity"),
         ]
 
         # CRITICAL FIX: Use safe Decimal conversion
@@ -232,24 +240,30 @@ class VarianceReportGenerator:
             variance = dest_val - source_val
 
             if abs(variance) > self.tolerance:
-                variances.append({
-                    "category": label,
-                    "source": self._decimal_to_str(source_val),
-                    "destination": self._decimal_to_str(dest_val),
-                    "variance": self._decimal_to_str(variance),
-                    "severity": "CRITICAL" if abs(variance) > 1000 else "WARNING"
-                })
+                variances.append(
+                    {
+                        "category": label,
+                        "source": self._decimal_to_str(source_val),
+                        "destination": self._decimal_to_str(dest_val),
+                        "variance": self._decimal_to_str(variance),
+                        "severity": "CRITICAL" if abs(variance) > 1000 else "WARNING",
+                    }
+                )
 
         # Check accounting equation: Assets = Liabilities + Equity
         source_assets = self._safe_decimal(source.get("total_assets"))
         source_liabilities = self._safe_decimal(source.get("total_liabilities"))
         source_equity = self._safe_decimal(source.get("total_equity"))
-        source_balanced = abs(source_assets - source_liabilities - source_equity) <= self.tolerance
+        source_balanced = (
+            abs(source_assets - source_liabilities - source_equity) <= self.tolerance
+        )
 
         dest_assets = self._safe_decimal(dest.get("total_assets"))
         dest_liabilities = self._safe_decimal(dest.get("total_liabilities"))
         dest_equity = self._safe_decimal(dest.get("total_equity"))
-        dest_balanced = abs(dest_assets - dest_liabilities - dest_equity) <= self.tolerance
+        dest_balanced = (
+            abs(dest_assets - dest_liabilities - dest_equity) <= self.tolerance
+        )
 
         # CRITICAL FIX: Use string representation for all financial values
         return {
@@ -262,7 +276,7 @@ class VarianceReportGenerator:
             "source_balanced": source_balanced,
             "destination_balanced": dest_balanced,
             "has_variance": len(variances) > 0,
-            "variances": variances
+            "variances": variances,
         }
 
     def _compare_accounts(self, source: List, dest: List) -> List:
@@ -283,19 +297,21 @@ class VarianceReportGenerator:
             variance = dest_balance - source_balance
 
             # CRITICAL FIX: Use string representation for financial values
-            results.append({
-                "account_name": name,
-                "account_type": source_acct.get("type", ""),
-                "source_balance": self._decimal_to_str(source_balance),
-                "destination_balance": self._decimal_to_str(dest_balance),
-                "variance": self._decimal_to_str(variance),
-                "has_variance": abs(variance) > self.tolerance,
-                "severity": self._get_severity(variance),
-                "matched_in_destination": name.lower() in dest_lookup
-            })
+            results.append(
+                {
+                    "account_name": name,
+                    "account_type": source_acct.get("type", ""),
+                    "source_balance": self._decimal_to_str(source_balance),
+                    "destination_balance": self._decimal_to_str(dest_balance),
+                    "variance": self._decimal_to_str(variance),
+                    "has_variance": abs(variance) > self.tolerance,
+                    "severity": self._get_severity(variance),
+                    "matched_in_destination": name.lower() in dest_lookup,
+                }
+            )
 
         return results
-    
+
     def _get_severity(self, variance: Decimal) -> str:
         """Determine severity level based on variance amount."""
         abs_var = abs(variance)
@@ -307,18 +323,20 @@ class VarianceReportGenerator:
             return "WARNING"
         else:
             return "CRITICAL"
-    
+
     def generate_html_report(self, report: Dict, output_path: str) -> str:
         """Generate HTML variance report suitable for PDF conversion."""
-        
+
         # Status colors
         status_color = "#10B981" if report["overall_status"] == "PASS" else "#DC2626"
-        
+
         # Build account rows
         account_rows = ""
         for acct in report.get("account_details", []):
             severity_class = acct["severity"].lower()
-            variance_display = f"${acct['variance']:,.2f}" if acct["has_variance"] else "-"
+            variance_display = (
+                f"${acct['variance']:,.2f}" if acct["has_variance"] else "-"
+            )
             account_rows += f"""
             <tr class="severity-{severity_class}">
                 <td>{acct['account_name']}</td>
@@ -328,7 +346,7 @@ class VarianceReportGenerator:
                 <td class="amount variance">{variance_display}</td>
             </tr>
             """
-        
+
         # Build P&L comparison rows
         pl_rows = ""
         for pl in report.get("profit_loss", []):
@@ -342,7 +360,7 @@ class VarianceReportGenerator:
                 <td>{status}</td>
             </tr>
             """
-        
+
         html = f"""
 <!DOCTYPE html>
 <html>
@@ -465,10 +483,10 @@ class VarianceReportGenerator:
 </body>
 </html>
 """
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
+
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        
+
         return output_path
 
 
@@ -483,45 +501,45 @@ if __name__ == "__main__":
         "profit_loss": {
             "year_0": {"total_revenue": 800000, "total_expenses": 600000},
             "year_1": {"total_revenue": 750000, "total_expenses": 550000},
-            "year_2": {"total_revenue": 700000, "total_expenses": 500000}
+            "year_2": {"total_revenue": 700000, "total_expenses": 500000},
         },
         "balance_sheet": {
             "total_assets": 1500000,
             "total_liabilities": 700000,
-            "total_equity": 800000
+            "total_equity": 800000,
         },
         "accounts": [
             {"name": "Cash", "type": "Bank", "balance": 250000},
             {"name": "Accounts Receivable", "type": "AR", "balance": 125000},
-            {"name": "Revenue", "type": "Income", "balance": 800000}
-        ]
+            {"name": "Revenue", "type": "Income", "balance": 800000},
+        ],
     }
-    
+
     dest_data = {
         "trial_balance": {"debits": 1500000, "credits": 1500000},
         "profit_loss": {
             "year_0": {"total_revenue": 800000, "total_expenses": 600000},
             "year_1": {"total_revenue": 750000, "total_expenses": 550000},
-            "year_2": {"total_revenue": 700000, "total_expenses": 500000}
+            "year_2": {"total_revenue": 700000, "total_expenses": 500000},
         },
         "balance_sheet": {
             "total_assets": 1500000,
             "total_liabilities": 700000,
-            "total_equity": 800000
+            "total_equity": 800000,
         },
         "accounts": [
             {"name": "Cash", "type": "Bank", "balance": 250000},
             {"name": "Accounts Receivable", "type": "AR", "balance": 125000},
-            {"name": "Revenue", "type": "Income", "balance": 800000}
-        ]
+            {"name": "Revenue", "type": "Income", "balance": 800000},
+        ],
     }
-    
+
     generator = VarianceReportGenerator("Test Company Inc.")
     report = generator.generate_variance_report(source_data, dest_data)
-    
+
     logger.info(f"Overall Status: {report['overall_status']}")
     logger.info(f"Total Variances: {report['summary']['total_variances']}")
-    
+
     # Generate HTML
     generator.generate_html_report(report, "variance_report.html")
     logger.info("HTML report generated: variance_report.html")

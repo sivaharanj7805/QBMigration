@@ -12,8 +12,10 @@ from typing import Dict, Set, FrozenSet
 # QBO API CONSTANTS
 # =============================================================================
 
+
 class QBOLimits:
     """QuickBooks Online API limits and thresholds"""
+
     # Batch limits
     MAX_BATCH_SIZE = 30
     MAX_QUERY_RESULTS = 1000
@@ -33,6 +35,7 @@ class QBOLimits:
 
 class EntityTypes:
     """QBO entity type constants"""
+
     ACCOUNT = "Account"
     CUSTOMER = "Customer"
     VENDOR = "Vendor"
@@ -89,8 +92,10 @@ class EntityTypes:
 # ACCOUNT TYPE MAPPINGS
 # =============================================================================
 
+
 class AccountTypes:
     """QBO account type constants and mappings"""
+
     # Asset accounts
     BANK = "Bank"
     ACCOUNTS_RECEIVABLE = "Accounts Receivable"
@@ -140,8 +145,10 @@ class AccountTypes:
 # DATE FORMATS
 # =============================================================================
 
+
 class DateFormats:
     """Date format constants for parsing and formatting"""
+
     # ISO format (preferred)
     ISO_8601 = "%Y-%m-%d"
 
@@ -154,14 +161,14 @@ class DateFormats:
 
     # All supported formats for auto-detection
     ALL_FORMATS = [
-        "%Y-%m-%d",      # ISO 8601
-        "%m/%d/%Y",      # US slash
-        "%d/%m/%Y",      # EU slash
-        "%Y/%m/%d",      # Alt ISO
-        "%m-%d-%Y",      # US dash
-        "%d-%m-%Y",      # EU dash
-        "%d.%m.%Y",      # EU dot
-        "%Y.%m.%d",      # Alt dot
+        "%Y-%m-%d",  # ISO 8601
+        "%m/%d/%Y",  # US slash
+        "%d/%m/%Y",  # EU slash
+        "%Y/%m/%d",  # Alt ISO
+        "%m-%d-%Y",  # US dash
+        "%d-%m-%Y",  # EU dash
+        "%d.%m.%Y",  # EU dot
+        "%Y.%m.%d",  # Alt dot
     ]
 
     # Region defaults
@@ -178,8 +185,10 @@ class DateFormats:
 # CURRENCY CODES
 # =============================================================================
 
+
 class Currencies:
     """Currency code constants"""
+
     USD = "USD"
     CAD = "CAD"
     GBP = "GBP"
@@ -200,8 +209,10 @@ class Currencies:
 # PROCESSING LIMITS
 # =============================================================================
 
+
 class ProcessingLimits:
     """Processing and performance limits"""
+
     # Worker limits by plan
     WORKER_LIMITS: Dict[str, int] = {
         "Simple Start": 2,
@@ -227,8 +238,10 @@ class ProcessingLimits:
 # ERROR MESSAGES
 # =============================================================================
 
+
 class ErrorMessages:
     """Standardized error messages"""
+
     # Validation errors
     INVALID_EMAIL = "Invalid email format"
     INVALID_DATE = "Invalid date format"
@@ -256,8 +269,10 @@ class ErrorMessages:
 # STATUS CONSTANTS
 # =============================================================================
 
+
 class MigrationStatus:
     """Migration status constants"""
+
     PENDING = "pending"
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"
@@ -268,24 +283,26 @@ class MigrationStatus:
     CANCELLED = "cancelled"
     PARTIAL = "partial"
 
-    TERMINAL_STATES: FrozenSet[str] = frozenset({
-        "completed", "failed", "cancelled", "partial"
-    })
+    TERMINAL_STATES: FrozenSet[str] = frozenset(
+        {"completed", "failed", "cancelled", "partial"}
+    )
 
-    ACTIVE_STATES: FrozenSet[str] = frozenset({
-        "pending", "queued", "in_progress", "validating", "uploading"
-    })
+    ACTIVE_STATES: FrozenSet[str] = frozenset(
+        {"pending", "queued", "in_progress", "validating", "uploading"}
+    )
 
 
 # =============================================================================
 # ENCRYPTION CONSTANTS
 # =============================================================================
 
+
 class Encryption:
     """Encryption-related constants"""
+
     # AES-256-GCM
     AES_KEY_SIZE = 32  # 256 bits
-    AES_IV_SIZE = 12   # 96 bits for GCM
+    AES_IV_SIZE = 12  # 96 bits for GCM
     AES_TAG_SIZE = 16  # 128 bits
 
     # Key derivation

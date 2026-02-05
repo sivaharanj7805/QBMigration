@@ -32,10 +32,10 @@ from typing import Dict, List, Any
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
-
 # ==============================================================================
 # BENCHMARK CONFIGURATION
 # ==============================================================================
+
 
 class BenchmarkConfig:
     """Configuration for performance benchmarks."""
@@ -70,6 +70,7 @@ class BenchmarkConfig:
 # TEST FIXTURES
 # ==============================================================================
 
+
 @pytest.fixture
 def mock_small_extraction():
     """Generate mock data for small file extraction test."""
@@ -78,7 +79,7 @@ def mock_small_extraction():
         num_bills=300,
         num_payments=200,
         num_customers=100,
-        num_vendors=50
+        num_vendors=50,
     )
 
 
@@ -91,7 +92,7 @@ def mock_midmarket_extraction():
         num_payments=15000,
         num_customers=5000,
         num_vendors=2000,
-        num_journal_entries=10000
+        num_journal_entries=10000,
     )
 
 
@@ -105,7 +106,7 @@ def mock_enterprise_extraction():
         num_customers=25000,
         num_vendors=10000,
         num_journal_entries=50000,
-        num_items=15000
+        num_items=15000,
     )
 
 
@@ -116,12 +117,12 @@ def generate_mock_extraction_data(
     num_customers: int = 20,
     num_vendors: int = 10,
     num_journal_entries: int = 0,
-    num_items: int = 100
+    num_items: int = 100,
 ) -> Dict[str, Any]:
     """Generate realistic mock extraction data for benchmarking."""
 
     def random_string(length: int = 10) -> str:
-        return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+        return "".join(random.choices(string.ascii_letters + string.digits, k=length))
 
     def random_decimal(min_val: float = 10.0, max_val: float = 10000.0) -> float:
         return round(random.uniform(min_val, max_val), 2)
@@ -137,7 +138,7 @@ def generate_mock_extraction_data(
             "CompanyName": f"Company {random_string(8)}",
             "Email": f"customer{i}@example.com",
             "Phone": f"555-{random.randint(100,999)}-{random.randint(1000,9999)}",
-            "Balance": random_decimal(0, 50000)
+            "Balance": random_decimal(0, 50000),
         }
         for i in range(num_customers)
     ]
@@ -150,7 +151,7 @@ def generate_mock_extraction_data(
             "CompanyName": f"Supplier {random_string(8)}",
             "Email": f"vendor{i}@example.com",
             "Phone": f"555-{random.randint(100,999)}-{random.randint(1000,9999)}",
-            "Balance": random_decimal(0, 30000)
+            "Balance": random_decimal(0, 30000),
         }
         for i in range(num_vendors)
     ]
@@ -164,7 +165,7 @@ def generate_mock_extraction_data(
             "Type": random.choice(["Service", "Inventory", "NonInventory"]),
             "SalesPrice": random_decimal(10, 500),
             "PurchaseCost": random_decimal(5, 300),
-            "IsActive": True
+            "IsActive": True,
         }
         for i in range(num_items)
     ]
@@ -186,10 +187,10 @@ def generate_mock_extraction_data(
                 {
                     "TxnLineID": f"INV-{i:06d}-L{j}",
                     "ItemRefListID": f"ITEM-{random.randint(0, num_items-1):06d}",
-                    "Amount": random_decimal(50, 1000)
+                    "Amount": random_decimal(50, 1000),
                 }
                 for j in range(random.randint(1, 5))
-            ]
+            ],
         }
         for i in range(num_invoices)
     ]
@@ -205,12 +206,9 @@ def generate_mock_extraction_data(
             "IsPaid": random.choice([True, False]),
             "EditSequence": random_string(16),
             "Lines": [
-                {
-                    "TxnLineID": f"BILL-{i:06d}-L{j}",
-                    "Amount": random_decimal(50, 1000)
-                }
+                {"TxnLineID": f"BILL-{i:06d}-L{j}", "Amount": random_decimal(50, 1000)}
                 for j in range(random.randint(1, 3))
-            ]
+            ],
         }
         for i in range(num_bills)
     ]
@@ -224,7 +222,7 @@ def generate_mock_extraction_data(
             "CustomerRefListID": f"CUST-{random.randint(0, num_customers-1):06d}",
             "TotalAmount": random_decimal(100, 5000),
             "PaymentMethodRefListID": random.choice(["CHECK", "CREDIT", "CASH"]),
-            "EditSequence": random_string(16)
+            "EditSequence": random_string(16),
         }
         for i in range(num_payments)
     ]
@@ -240,10 +238,10 @@ def generate_mock_extraction_data(
                 {
                     "TxnLineID": f"JE-{i:06d}-L{j}",
                     "JournalLineType": "Debit" if j % 2 == 0 else "Credit",
-                    "Amount": random_decimal(100, 5000)
+                    "Amount": random_decimal(100, 5000),
                 }
                 for j in range(random.randint(2, 6))
-            ]
+            ],
         }
         for i in range(num_journal_entries)
     ]
@@ -258,15 +256,21 @@ def generate_mock_extraction_data(
         "journal_entries": journal_entries,
         "extraction_timestamp": datetime.utcnow().isoformat(),
         "total_records": (
-            len(customers) + len(vendors) + len(items) +
-            len(invoices) + len(bills) + len(payments) + len(journal_entries)
-        )
+            len(customers)
+            + len(vendors)
+            + len(items)
+            + len(invoices)
+            + len(bills)
+            + len(payments)
+            + len(journal_entries)
+        ),
     }
 
 
 # ==============================================================================
 # BENCHMARK UTILITY FUNCTIONS
 # ==============================================================================
+
 
 def compute_sha256_hash(data: Dict) -> str:
     """Compute SHA-256 hash of data for verification."""
@@ -277,7 +281,7 @@ def compute_sha256_hash(data: Dict) -> str:
 def measure_throughput(num_records: int, elapsed_seconds: float) -> float:
     """Calculate records per hour throughput."""
     if elapsed_seconds == 0:
-        return float('inf')
+        return float("inf")
     return (num_records / elapsed_seconds) * 3600
 
 
@@ -311,6 +315,7 @@ class BenchmarkTimer:
 # PERFORMANCE BENCHMARK TESTS
 # ==============================================================================
 
+
 class TestSmallFilePerformance:
     """
     Tests for small file processing (<50 MB in <5 minutes).
@@ -334,12 +339,14 @@ class TestSmallFilePerformance:
             f"exceeds threshold of {BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS}s"
         )
 
-        print(f"\n✓ Small file extraction: {timer.elapsed_seconds:.2f}s "
-              f"(threshold: {BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS}s)")
+        print(
+            f"\n✓ Small file extraction: {timer.elapsed_seconds:.2f}s "
+            f"(threshold: {BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS}s)"
+        )
 
     def test_small_file_throughput(self, mock_small_extraction):
         """Verify small file meets minimum throughput requirements."""
-        total_records = mock_small_extraction.get('total_records', 0)
+        total_records = mock_small_extraction.get("total_records", 0)
 
         with BenchmarkTimer("small_file_throughput") as timer:
             for entity_type, records in mock_small_extraction.items():
@@ -354,8 +361,10 @@ class TestSmallFilePerformance:
             f"{BenchmarkConfig.MIN_THROUGHPUT_RECORDS_PER_HOUR}"
         )
 
-        print(f"\n✓ Small file throughput: {throughput:,.0f} records/hour "
-              f"(minimum: {BenchmarkConfig.MIN_THROUGHPUT_RECORDS_PER_HOUR:,})")
+        print(
+            f"\n✓ Small file throughput: {throughput:,.0f} records/hour "
+            f"(minimum: {BenchmarkConfig.MIN_THROUGHPUT_RECORDS_PER_HOUR:,})"
+        )
 
 
 class TestMidMarketPerformance:
@@ -378,12 +387,14 @@ class TestMidMarketPerformance:
             f"exceeds threshold of {BenchmarkConfig.MIDMARKET_MAX_TIME_SECONDS/60:.0f} minutes"
         )
 
-        print(f"\n✓ Mid-market extraction: {timer.elapsed_minutes:.2f} min "
-              f"(threshold: {BenchmarkConfig.MIDMARKET_MAX_TIME_SECONDS/60:.0f} min)")
+        print(
+            f"\n✓ Mid-market extraction: {timer.elapsed_minutes:.2f} min "
+            f"(threshold: {BenchmarkConfig.MIDMARKET_MAX_TIME_SECONDS/60:.0f} min)"
+        )
 
     def test_midmarket_throughput(self, mock_midmarket_extraction):
         """Verify mid-market file meets target throughput."""
-        total_records = mock_midmarket_extraction.get('total_records', 0)
+        total_records = mock_midmarket_extraction.get("total_records", 0)
 
         with BenchmarkTimer("midmarket_throughput") as timer:
             for entity_type, records in mock_midmarket_extraction.items():
@@ -422,13 +433,15 @@ class TestEnterprisePerformance:
             f"exceeds threshold of {BenchmarkConfig.ENTERPRISE_MAX_TIME_SECONDS/60:.0f} minutes"
         )
 
-        print(f"\n✓ Enterprise extraction: {timer.elapsed_minutes:.2f} min "
-              f"(threshold: {BenchmarkConfig.ENTERPRISE_MAX_TIME_SECONDS/60:.0f} min)")
+        print(
+            f"\n✓ Enterprise extraction: {timer.elapsed_minutes:.2f} min "
+            f"(threshold: {BenchmarkConfig.ENTERPRISE_MAX_TIME_SECONDS/60:.0f} min)"
+        )
 
     @pytest.mark.slow
     def test_enterprise_throughput(self, mock_enterprise_extraction):
         """Verify enterprise processing achieves 500K+ records/hour."""
-        total_records = mock_enterprise_extraction.get('total_records', 0)
+        total_records = mock_enterprise_extraction.get("total_records", 0)
 
         with BenchmarkTimer("enterprise_throughput") as timer:
             for entity_type, records in mock_enterprise_extraction.items():
@@ -443,8 +456,10 @@ class TestEnterprisePerformance:
             f"{BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR}"
         )
 
-        print(f"\n✓ Enterprise throughput: {throughput:,.0f} records/hour "
-              f"(target: {BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR:,})")
+        print(
+            f"\n✓ Enterprise throughput: {throughput:,.0f} records/hour "
+            f"(target: {BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR:,})"
+        )
 
 
 class TestTrialBalancePerformance:
@@ -461,19 +476,25 @@ class TestTrialBalancePerformance:
             {
                 "ListID": f"ACCT-{i:04d}",
                 "Name": f"Account {i}",
-                "AccountType": random.choice([
-                    "Bank", "AccountsReceivable", "Expense",
-                    "Income", "CostOfGoodsSold", "Equity"
-                ]),
-                "Balance": round(random.uniform(-100000, 100000), 2)
+                "AccountType": random.choice(
+                    [
+                        "Bank",
+                        "AccountsReceivable",
+                        "Expense",
+                        "Income",
+                        "CostOfGoodsSold",
+                        "Equity",
+                    ]
+                ),
+                "Balance": round(random.uniform(-100000, 100000), 2),
             }
             for i in range(1000)
         ]
 
         with BenchmarkTimer("trial_balance") as timer:
             # Simulate trial balance calculation
-            total_debits = Decimal('0')
-            total_credits = Decimal('0')
+            total_debits = Decimal("0")
+            total_credits = Decimal("0")
 
             debit_types = {"Bank", "AccountsReceivable", "Expense", "CostOfGoodsSold"}
 
@@ -498,8 +519,10 @@ class TestTrialBalancePerformance:
             f"exceeds threshold of {BenchmarkConfig.TRIAL_BALANCE_MAX_SECONDS}s"
         )
 
-        print(f"\n✓ Trial balance calculation: {timer.elapsed_seconds:.2f}s "
-              f"(threshold: {BenchmarkConfig.TRIAL_BALANCE_MAX_SECONDS}s)")
+        print(
+            f"\n✓ Trial balance calculation: {timer.elapsed_seconds:.2f}s "
+            f"(threshold: {BenchmarkConfig.TRIAL_BALANCE_MAX_SECONDS}s)"
+        )
 
 
 class TestCasewareExportPerformance:
@@ -517,27 +540,33 @@ class TestCasewareExportPerformance:
 
             with BenchmarkTimer("caseware_export") as timer:
                 # Simulate Trial Balance export
-                with open(tb_path, 'w') as f:
+                with open(tb_path, "w") as f:
                     f.write("Account,LeadSheet,Debit,Credit\n")
                     for i in range(1000):
-                        f.write(f"Account {i},A{i % 10},{random.uniform(0, 10000):.2f},0\n")
+                        f.write(
+                            f"Account {i},A{i % 10},{random.uniform(0, 10000):.2f},0\n"
+                        )
 
                 # Simulate General Ledger export
-                with open(gl_path, 'w') as f:
+                with open(gl_path, "w") as f:
                     f.write("Date,Account,Ref,Debit,Credit,Description\n")
-                    for inv in mock_midmarket_extraction.get('invoices', []):
+                    for inv in mock_midmarket_extraction.get("invoices", []):
                         f.write(
                             f"{inv['TxnDate']},1200,{inv['RefNumber']},"
                             f"{inv['Subtotal']:.2f},0,Invoice\n"
                         )
 
-            assert timer.elapsed_seconds < BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS, (
+            assert (
+                timer.elapsed_seconds < BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS
+            ), (
                 f"Caseware export took {timer.elapsed_seconds:.2f}s, "
                 f"exceeds threshold of {BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS}s"
             )
 
-            print(f"\n✓ Caseware export: {timer.elapsed_seconds:.2f}s "
-                  f"(threshold: {BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS}s)")
+            print(
+                f"\n✓ Caseware export: {timer.elapsed_seconds:.2f}s "
+                f"(threshold: {BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS}s)"
+            )
 
 
 class TestSHA256VerificationOverhead:
@@ -576,8 +605,10 @@ class TestSHA256VerificationOverhead:
             f"{BenchmarkConfig.SHA256_OVERHEAD_MAX_PERCENT}%"
         )
 
-        print(f"\n✓ SHA-256 overhead: {overhead_percent:.4f}% "
-              f"(max: {BenchmarkConfig.SHA256_OVERHEAD_MAX_PERCENT}%)")
+        print(
+            f"\n✓ SHA-256 overhead: {overhead_percent:.4f}% "
+            f"(max: {BenchmarkConfig.SHA256_OVERHEAD_MAX_PERCENT}%)"
+        )
 
 
 class TestMerkleTreePerformance:
@@ -608,7 +639,9 @@ class TestMerkleTreePerformance:
                     next_level = []
                     for i in range(0, len(current_level), 2):
                         left = current_level[i]
-                        right = current_level[i + 1] if i + 1 < len(current_level) else left
+                        right = (
+                            current_level[i + 1] if i + 1 < len(current_level) else left
+                        )
                         combined = left + right
                         parent = hashlib.sha256(combined.encode()).hexdigest()
                         next_level.append(parent)
@@ -622,8 +655,10 @@ class TestMerkleTreePerformance:
             f"exceeds threshold of 30s"
         )
 
-        print(f"\n✓ Merkle tree construction: {timer.elapsed_seconds:.2f}s "
-              f"for {len(hashes):,} leaves")
+        print(
+            f"\n✓ Merkle tree construction: {timer.elapsed_seconds:.2f}s "
+            f"for {len(hashes):,} leaves"
+        )
         print(f"  Merkle root: {merkle_root[:32]}...")
 
 
@@ -639,7 +674,7 @@ class TestMemoryEfficiency:
         # Track peak memory usage (simplified)
         initial_size = sys.getsizeof(mock_midmarket_extraction)
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.ndjson', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".ndjson", delete=False) as f:
             ndjson_path = f.name
 
             # Simulate NDJSON streaming write
@@ -648,7 +683,7 @@ class TestMemoryEfficiency:
                     for record in records:
                         # Stream each record individually
                         line = json.dumps({entity_type: record}, default=str)
-                        f.write(line + '\n')
+                        f.write(line + "\n")
 
         # Verify file was created
         file_size = os.path.getsize(ndjson_path)
@@ -665,13 +700,12 @@ class TestMemoryEfficiency:
 # BENCHMARK SUMMARY
 # ==============================================================================
 
+
 class TestBenchmarkSummary:
     """Generate a summary report of all benchmark results."""
 
     def test_generate_benchmark_report(
-        self,
-        mock_small_extraction,
-        mock_midmarket_extraction
+        self, mock_small_extraction, mock_midmarket_extraction
     ):
         """Generate comprehensive benchmark report."""
         results = {
@@ -684,12 +718,12 @@ class TestBenchmarkSummary:
                 "target_throughput_per_hour": BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR,
                 "trial_balance_max_seconds": BenchmarkConfig.TRIAL_BALANCE_MAX_SECONDS,
                 "caseware_export_max_seconds": BenchmarkConfig.CASEWARE_EXPORT_MAX_SECONDS,
-                "sha256_overhead_max_percent": BenchmarkConfig.SHA256_OVERHEAD_MAX_PERCENT
+                "sha256_overhead_max_percent": BenchmarkConfig.SHA256_OVERHEAD_MAX_PERCENT,
             },
             "test_data_sizes": {
-                "small": mock_small_extraction.get('total_records', 0),
-                "midmarket": mock_midmarket_extraction.get('total_records', 0)
-            }
+                "small": mock_small_extraction.get("total_records", 0),
+                "midmarket": mock_midmarket_extraction.get("total_records", 0),
+            },
         }
 
         print("\n" + "=" * 80)
@@ -700,10 +734,18 @@ class TestBenchmarkSummary:
         print(f"  Small file: {results['test_data_sizes']['small']:,} records")
         print(f"  Mid-market: {results['test_data_sizes']['midmarket']:,} records")
         print(f"\nPerformance Thresholds:")
-        print(f"  Small file: <{BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS/60:.0f} minutes")
-        print(f"  Mid-market: <{BenchmarkConfig.MIDMARKET_MAX_TIME_SECONDS/60:.0f} minutes")
-        print(f"  Enterprise: <{BenchmarkConfig.ENTERPRISE_MAX_TIME_SECONDS/60:.0f} minutes")
-        print(f"  Throughput: >{BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR:,} records/hour")
+        print(
+            f"  Small file: <{BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS/60:.0f} minutes"
+        )
+        print(
+            f"  Mid-market: <{BenchmarkConfig.MIDMARKET_MAX_TIME_SECONDS/60:.0f} minutes"
+        )
+        print(
+            f"  Enterprise: <{BenchmarkConfig.ENTERPRISE_MAX_TIME_SECONDS/60:.0f} minutes"
+        )
+        print(
+            f"  Throughput: >{BenchmarkConfig.TARGET_THROUGHPUT_RECORDS_PER_HOUR:,} records/hour"
+        )
         print("=" * 80)
 
         assert True  # Report generation successful

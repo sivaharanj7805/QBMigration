@@ -44,9 +44,14 @@ def init_observability(app) -> bool:
     global _tracer_provider, _meter_provider
 
     # Check if observability is enabled
-    flask_env = os.getenv('FLASK_ENV', 'development')
-    traces_enabled = os.getenv('OTEL_TRACES_ENABLED', 'true' if flask_env == 'production' else 'false').lower() == 'true'
-    metrics_enabled = os.getenv('OTEL_METRICS_ENABLED', 'true').lower() == 'true'
+    flask_env = os.getenv("FLASK_ENV", "development")
+    traces_enabled = (
+        os.getenv(
+            "OTEL_TRACES_ENABLED", "true" if flask_env == "production" else "false"
+        ).lower()
+        == "true"
+    )
+    metrics_enabled = os.getenv("OTEL_METRICS_ENABLED", "true").lower() == "true"
 
     if not traces_enabled and not metrics_enabled:
         logger.info("Observability disabled via environment configuration")
@@ -58,7 +63,9 @@ def init_observability(app) -> bool:
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
 
         # Import auto-instrumentation
         from opentelemetry.instrumentation.flask import FlaskInstrumentor
@@ -66,23 +73,27 @@ def init_observability(app) -> bool:
         from opentelemetry.instrumentation.requests import RequestsInstrumentor
 
         # Service resource
-        service_name = os.getenv('OTEL_SERVICE_NAME', 'forensicbridge-server')
-        resource = Resource.create({
-            SERVICE_NAME: service_name,
-            "deployment.environment": flask_env,
-            "service.version": app.config.get('VERSION', '1.0.0'),
-        })
+        service_name = os.getenv("OTEL_SERVICE_NAME", "forensicbridge-server")
+        resource = Resource.create(
+            {
+                SERVICE_NAME: service_name,
+                "deployment.environment": flask_env,
+                "service.version": app.config.get("VERSION", "1.0.0"),
+            }
+        )
 
         if traces_enabled:
             # Initialize tracer provider
             _tracer_provider = TracerProvider(resource=resource)
 
             # Configure exporter
-            otlp_endpoint = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT')
+            otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
             if otlp_endpoint:
                 exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
                 _tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
-                logger.info(f"OpenTelemetry tracing enabled, exporting to {otlp_endpoint}")
+                logger.info(
+                    f"OpenTelemetry tracing enabled, exporting to {otlp_endpoint}"
+                )
             else:
                 logger.info("OpenTelemetry tracing enabled (no exporter configured)")
 
@@ -92,9 +103,9 @@ def init_observability(app) -> bool:
             FlaskInstrumentor().instrument_app(app)
 
             # Auto-instrument SQLAlchemy (if db is configured)
-            if hasattr(app, 'extensions') and 'sqlalchemy' in app.extensions:
+            if hasattr(app, "extensions") and "sqlalchemy" in app.extensions:
                 SQLAlchemyInstrumentor().instrument(
-                    engine=app.extensions['sqlalchemy'].engine
+                    engine=app.extensions["sqlalchemy"].engine
                 )
                 logger.info("SQLAlchemy instrumentation enabled")
 
@@ -128,13 +139,17 @@ def _init_metrics(app, resource) -> None:
         from opentelemetry import metrics
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+            OTLPMetricExporter,
+        )
 
         # Check for OTLP metrics endpoint
-        otlp_endpoint = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT')
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
         if otlp_endpoint:
             exporter = OTLPMetricExporter(endpoint=otlp_endpoint)
-            reader = PeriodicExportingMetricReader(exporter, export_interval_millis=60000)
+            reader = PeriodicExportingMetricReader(
+                exporter, export_interval_millis=60000
+            )
             _meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
             metrics.set_meter_provider(_meter_provider)
             logger.info("OpenTelemetry metrics enabled")
@@ -151,13 +166,15 @@ def _init_metrics(app, resource) -> None:
         # Initialize with custom settings
         metrics_instance = PrometheusMetrics(
             app,
-            path='/metrics',
-            group_by='endpoint',
-            default_labels={'service': 'forensicbridge-server'}
+            path="/metrics",
+            group_by="endpoint",
+            default_labels={"service": "forensicbridge-server"},
         )
 
         # Add custom metrics
-        metrics_instance.info('app_info', 'Application info', version=app.config.get('VERSION', '1.0.0'))
+        metrics_instance.info(
+            "app_info", "Application info", version=app.config.get("VERSION", "1.0.0")
+        )
 
         logger.info("Prometheus Flask metrics enabled at /metrics")
 
@@ -179,16 +196,20 @@ def get_tracer(name: str = __name__):
     """
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(name)
     except ImportError:
         # Return a no-op tracer
         class NoOpTracer:
             def start_as_current_span(self, name, **kwargs):
                 from contextlib import contextmanager
+
                 @contextmanager
                 def no_op_context():
                     yield None
+
                 return no_op_context()
+
         return NoOpTracer()
 
 
@@ -201,6 +222,7 @@ def add_span_attributes(attributes: dict) -> None:
     """
     try:
         from opentelemetry import trace
+
         span = trace.get_current_span()
         if span:
             for key, value in attributes.items():
@@ -219,6 +241,7 @@ def record_exception(exception: Exception, attributes: Optional[dict] = None) ->
     """
     try:
         from opentelemetry import trace
+
         span = trace.get_current_span()
         if span:
             span.record_exception(exception)

@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from qbo_client import PremiumQBOClient
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -70,6 +69,7 @@ def _mock_oauth_manager(new_token="refreshed_token_xyz"):
 # 1. Constructor / Initialization
 # ===================================================================
 
+
 class TestConstructor:
     """Verify constructor stores state correctly."""
 
@@ -77,7 +77,10 @@ class TestConstructor:
         """CRITICAL BUG FIX: token must be stored in _base_access_token."""
         client = _make_client(tmp_path)
         assert client._base_access_token == ACCESS_TOKEN
-        assert not hasattr(client, "access_token") or client._base_access_token == ACCESS_TOKEN
+        assert (
+            not hasattr(client, "access_token")
+            or client._base_access_token == ACCESS_TOKEN
+        )
 
     def test_base_url_stored(self, tmp_path):
         client = _make_client(tmp_path)
@@ -114,6 +117,7 @@ class TestConstructor:
 # 2. _get_request_headers
 # ===================================================================
 
+
 class TestGetRequestHeaders:
     """Verify per-request headers are built correctly."""
 
@@ -149,6 +153,7 @@ class TestGetRequestHeaders:
 # 3. _make_request -- happy path
 # ===================================================================
 
+
 class TestMakeRequestHappyPath:
     """Verify normal request flow."""
 
@@ -168,7 +173,9 @@ class TestMakeRequestHappyPath:
         ok_resp = _mock_response(200, {"QueryResponse": {"totalCount": 5}})
         client.session.get = MagicMock(return_value=ok_resp)
 
-        result = client._make_request("GET", "query?query=SELECT+COUNT(*)+FROM+Customer")
+        result = client._make_request(
+            "GET", "query?query=SELECT+COUNT(*)+FROM+Customer"
+        )
         assert result["QueryResponse"]["totalCount"] == 5
 
     @patch("qbo_client.time.sleep", return_value=None)
@@ -189,7 +196,9 @@ class TestMakeRequestHappyPath:
         ok_resp = _mock_response(200, {"Customer": {"Id": "1", "SyncToken": "0"}})
         client.session.post = MagicMock(return_value=ok_resp)
 
-        client._make_request("POST", "customer", {"Name": "X"}, idempotency_key="idem-123")
+        client._make_request(
+            "POST", "customer", {"Name": "X"}, idempotency_key="idem-123"
+        )
 
         posted_headers = client.session.post.call_args[1]["headers"]
         assert posted_headers.get("X-Idempotency-Key") == "idem-123"
@@ -221,6 +230,7 @@ class TestMakeRequestHappyPath:
 # 4. _make_request -- 401 token refresh
 # ===================================================================
 
+
 class TestMakeRequest401:
     """Verify token refresh logic on 401 responses."""
 
@@ -235,7 +245,9 @@ class TestMakeRequest401:
         resp_200 = _mock_response(200, {"Customer": {"Id": "7", "SyncToken": "0"}})
         client.session.post = MagicMock(side_effect=[resp_401, resp_200])
 
-        result = client._make_request("POST", "customer", {"Name": "Test"}, oauth_manager=mgr)
+        result = client._make_request(
+            "POST", "customer", {"Name": "Test"}, oauth_manager=mgr
+        )
 
         # Token was refreshed
         mgr.refresh_access_token.assert_called_once()
@@ -274,6 +286,7 @@ class TestMakeRequest401:
 # 5. _make_request -- 429 rate limiting
 # ===================================================================
 
+
 class TestMakeRequest429:
     """Verify Retry-After handling on 429 responses."""
 
@@ -281,7 +294,9 @@ class TestMakeRequest429:
     def test_429_retries_with_retry_after_header(self, mock_sleep, tmp_path):
         client = _make_client(tmp_path)
 
-        resp_429 = _mock_response(429, headers={"Retry-After": "5", "intuit_tid": "tid4"})
+        resp_429 = _mock_response(
+            429, headers={"Retry-After": "5", "intuit_tid": "tid4"}
+        )
         resp_200 = _mock_response(200, {"ok": True})
         client.session.get = MagicMock(side_effect=[resp_429, resp_200])
 
@@ -295,7 +310,9 @@ class TestMakeRequest429:
     @patch("qbo_client.time.sleep", return_value=None)
     def test_429_max_retries_exceeded_raises(self, _sleep, tmp_path):
         client = _make_client(tmp_path)
-        resp_429 = _mock_response(429, headers={"Retry-After": "1", "intuit_tid": "tid5"})
+        resp_429 = _mock_response(
+            429, headers={"Retry-After": "1", "intuit_tid": "tid5"}
+        )
         client.session.get = MagicMock(return_value=resp_429)
 
         with pytest.raises(Exception, match="Max retries exceeded"):
@@ -308,6 +325,7 @@ class TestMakeRequest429:
 # ===================================================================
 # 6. _make_request -- 500/503 server errors
 # ===================================================================
+
 
 class TestMakeRequest5xx:
     """Verify exponential backoff on server errors."""
@@ -349,6 +367,7 @@ class TestMakeRequest5xx:
 # 7. _make_request -- 400 validation error
 # ===================================================================
 
+
 class TestMakeRequest400:
     """Verify 400 validation errors are NOT retried."""
 
@@ -358,13 +377,21 @@ class TestMakeRequest400:
         fault_body = {
             "Fault": {
                 "Error": [
-                    {"code": "6000", "Message": "Duplicate Name", "Detail": "Name already exists"}
+                    {
+                        "code": "6000",
+                        "Message": "Duplicate Name",
+                        "Detail": "Name already exists",
+                    }
                 ],
-                "type": "ValidationFault"
+                "type": "ValidationFault",
             }
         }
-        resp_400 = _mock_response(400, json_data=fault_body, headers={"intuit_tid": "tid9"})
-        resp_400.raise_for_status.side_effect = None  # 400 path doesn't reach raise_for_status
+        resp_400 = _mock_response(
+            400, json_data=fault_body, headers={"intuit_tid": "tid9"}
+        )
+        resp_400.raise_for_status.side_effect = (
+            None  # 400 path doesn't reach raise_for_status
+        )
         client.session.post = MagicMock(return_value=resp_400)
 
         with pytest.raises(ValueError, match="Name already exists"):
@@ -377,6 +404,7 @@ class TestMakeRequest400:
 # ===================================================================
 # 8. create_entity
 # ===================================================================
+
 
 class TestCreateEntity:
     """Verify create_entity parses responses and faults."""
@@ -412,9 +440,18 @@ class TestCreateEntity:
             "Fault": {
                 "type": "ValidationFault",
                 "Error": [
-                    {"code": "500", "Message": "Invalid Reference", "Detail": "AccountRef is invalid"},
-                    {"code": "501", "Message": "Missing field", "Detail": "DocNumber required", "element": "DocNumber"},
-                ]
+                    {
+                        "code": "500",
+                        "Message": "Invalid Reference",
+                        "Detail": "AccountRef is invalid",
+                    },
+                    {
+                        "code": "501",
+                        "Message": "Missing field",
+                        "Detail": "DocNumber required",
+                        "element": "DocNumber",
+                    },
+                ],
             }
         }
         ok_resp = _mock_response(200, fault_resp)
@@ -444,6 +481,7 @@ class TestCreateEntity:
 # 9. record_created -- thread-safe SQLite
 # ===================================================================
 
+
 class TestRecordCreated:
     """Verify record_created uses db_lock and writes to SQLite."""
 
@@ -454,7 +492,10 @@ class TestRecordCreated:
         # Verify SQLite row
         conn = sqlite3.connect(str(client.db_path))
         cur = conn.cursor()
-        cur.execute("SELECT qbo_id, sync_token FROM migrated_entities WHERE qbd_id = ?", ("QBD-1",))
+        cur.execute(
+            "SELECT qbo_id, sync_token FROM migrated_entities WHERE qbd_id = ?",
+            ("QBD-1",),
+        )
         row = cur.fetchone()
         conn.close()
         assert row is not None
@@ -504,6 +545,7 @@ class TestRecordCreated:
 # 10. get_synctoken
 # ===================================================================
 
+
 class TestGetSynctoken:
     """Verify cache-first lookup with DB fallback."""
 
@@ -539,6 +581,7 @@ class TestGetSynctoken:
 # ===================================================================
 # 11. update_synctoken -- LOCK ORDERING BUG FIX
 # ===================================================================
+
 
 class TestUpdateSynctoken:
     """CRITICAL: Verify db_lock is acquired BEFORE synctoken_lock."""
@@ -617,6 +660,7 @@ class TestUpdateSynctoken:
 # 12. was_entity_created
 # ===================================================================
 
+
 class TestWasEntityCreated:
     """Verify O(1) lookup returns qbo_id or None."""
 
@@ -646,6 +690,7 @@ class TestWasEntityCreated:
 # 13. query_count -- whitelist validation
 # ===================================================================
 
+
 class TestQueryCount:
     """Verify entity_type whitelist enforcement."""
 
@@ -668,12 +713,33 @@ class TestQueryCount:
     def test_all_valid_types_accepted(self, tmp_path):
         """Ensure every type in the whitelist is accepted without error."""
         valid_types = {
-            'Account', 'Customer', 'Vendor', 'Item', 'Employee', 'Invoice',
-            'Bill', 'Payment', 'Estimate', 'SalesReceipt', 'PurchaseOrder',
-            'Deposit', 'Transfer', 'JournalEntry', 'CreditMemo', 'VendorCredit',
-            'BillPayment', 'TimeActivity', 'TaxCode', 'TaxRate', 'Term',
-            'PaymentMethod', 'Class', 'Department', 'Attachable',
-            'CompanyCurrency', 'Budget',
+            "Account",
+            "Customer",
+            "Vendor",
+            "Item",
+            "Employee",
+            "Invoice",
+            "Bill",
+            "Payment",
+            "Estimate",
+            "SalesReceipt",
+            "PurchaseOrder",
+            "Deposit",
+            "Transfer",
+            "JournalEntry",
+            "CreditMemo",
+            "VendorCredit",
+            "BillPayment",
+            "TimeActivity",
+            "TaxCode",
+            "TaxRate",
+            "Term",
+            "PaymentMethod",
+            "Class",
+            "Department",
+            "Attachable",
+            "CompanyCurrency",
+            "Budget",
         }
         client = _make_client(tmp_path)
         ok_resp = _mock_response(200, {"QueryResponse": {"totalCount": 0}})
@@ -694,6 +760,7 @@ class TestQueryCount:
 # ===================================================================
 # 14. query_raw
 # ===================================================================
+
 
 class TestQueryRaw:
     """Verify raw query execution against QBO API."""
@@ -738,6 +805,7 @@ class TestQueryRaw:
 # 15. batch_upload -- entity ordering and empty handling
 # ===================================================================
 
+
 class TestBatchUpload:
     """Verify batch_upload processes entities in dependency order."""
 
@@ -758,7 +826,12 @@ class TestBatchUpload:
 
         def mock_batch_create(entities, entity_type, **kwargs):
             processing_order.append(entity_type)
-            return {"succeeded": [], "succeeded_count": 0, "succeeded_ids": [], "failed": []}
+            return {
+                "succeeded": [],
+                "succeeded_count": 0,
+                "succeeded_ids": [],
+                "failed": [],
+            }
 
         client.batch_create_parallel = mock_batch_create
 
@@ -784,7 +857,12 @@ class TestBatchUpload:
 
         def mock_batch_create(entities, entity_type, **kwargs):
             processing_order.append(entity_type)
-            return {"succeeded": [], "succeeded_count": 0, "succeeded_ids": [], "failed": []}
+            return {
+                "succeeded": [],
+                "succeeded_count": 0,
+                "succeeded_ids": [],
+                "failed": [],
+            }
 
         client.batch_create_parallel = mock_batch_create
 
@@ -801,6 +879,7 @@ class TestBatchUpload:
 # ===================================================================
 # 16. _build_url
 # ===================================================================
+
 
 class TestBuildUrl:
     """Verify URL construction with minorversion."""
@@ -825,6 +904,7 @@ class TestBuildUrl:
 # 17. _calculate_backoff
 # ===================================================================
 
+
 class TestCalculateBackoff:
     """Verify exponential backoff calculation."""
 
@@ -846,12 +926,14 @@ class TestCalculateBackoff:
 # 18. Timeout handling
 # ===================================================================
 
+
 class TestTimeoutHandling:
     """Verify request timeout retries."""
 
     @patch("qbo_client.time.sleep", return_value=None)
     def test_timeout_retries(self, _sleep, tmp_path):
         import requests as real_requests
+
         client = _make_client(tmp_path)
 
         ok_resp = _mock_response(200, {"ok": True})
@@ -867,6 +949,7 @@ class TestTimeoutHandling:
 # ===================================================================
 # 19. Context manager
 # ===================================================================
+
 
 class TestContextManager:
     """Verify __enter__ / __exit__ close session."""
@@ -887,6 +970,7 @@ class TestContextManager:
 # ===================================================================
 # 20. get_migration_summary
 # ===================================================================
+
 
 class TestGetMigrationSummary:
     """Verify migration summary reporting."""
@@ -913,6 +997,7 @@ class TestGetMigrationSummary:
 # 21. Rate limit tracking
 # ===================================================================
 
+
 class TestRateLimitTracking:
     """Verify _update_rate_limits reads headers."""
 
@@ -934,6 +1019,7 @@ class TestRateLimitTracking:
 # 22. delete_entity
 # ===================================================================
 
+
 class TestDeleteEntity:
     """Verify delete uses POST with ?operation=delete."""
 
@@ -954,9 +1040,7 @@ class TestDeleteEntity:
     @patch("qbo_client.time.sleep", return_value=None)
     def test_delete_entity_returns_false_on_failure(self, _sleep, tmp_path):
         client = _make_client(tmp_path)
-        client.session.post = MagicMock(
-            side_effect=Exception("Boom")
-        )
+        client.session.post = MagicMock(side_effect=Exception("Boom"))
 
         result = client.delete_entity("Customer", "QBO-X1")
         assert result is False
@@ -965,6 +1049,7 @@ class TestDeleteEntity:
 # ===================================================================
 # 23. _get_next_batch_id thread safety
 # ===================================================================
+
 
 class TestBatchIdGeneration:
     """Verify thread-safe batch ID generation."""
@@ -987,6 +1072,7 @@ class TestBatchIdGeneration:
 # 24. SyncToken auto-caching from response
 # ===================================================================
 
+
 class TestSyncTokenAutoCaching:
     """Verify _make_request auto-caches SyncToken from responses."""
 
@@ -994,11 +1080,7 @@ class TestSyncTokenAutoCaching:
     def test_synctoken_cached_from_response(self, _sleep, tmp_path):
         client = _make_client(tmp_path)
         resp_data = {
-            "Customer": {
-                "Id": "55",
-                "SyncToken": "3",
-                "DisplayName": "Auto Cached"
-            }
+            "Customer": {"Id": "55", "SyncToken": "3", "DisplayName": "Auto Cached"}
         }
         ok_resp = _mock_response(200, resp_data)
         client.session.post = MagicMock(return_value=ok_resp)
@@ -1012,6 +1094,7 @@ class TestSyncTokenAutoCaching:
 # ===================================================================
 # 25. 403 permission denied
 # ===================================================================
+
 
 class TestMakeRequest403:
     """Verify 403 raises PermissionError."""
@@ -1029,6 +1112,7 @@ class TestMakeRequest403:
 # ===================================================================
 # 26. shutdown flag
 # ===================================================================
+
 
 class TestShutdownFlag:
     """Verify graceful shutdown."""
@@ -1049,6 +1133,7 @@ class TestShutdownFlag:
 # 27. record_created with duplicate qbd_id (INSERT OR REPLACE)
 # ===================================================================
 
+
 class TestRecordCreatedDuplicate:
     """Verify INSERT OR REPLACE upsert behaviour."""
 
@@ -1062,7 +1147,9 @@ class TestRecordCreatedDuplicate:
 
         conn = sqlite3.connect(str(client.db_path))
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM migrated_entities WHERE qbd_id = ?", ("QBD-DUP",))
+        cur.execute(
+            "SELECT COUNT(*) FROM migrated_entities WHERE qbd_id = ?", ("QBD-DUP",)
+        )
         count = cur.fetchone()[0]
         conn.close()
         assert count == 1  # Replaced, not duplicated
@@ -1071,6 +1158,7 @@ class TestRecordCreatedDuplicate:
 # ===================================================================
 # 28. Plan worker limits
 # ===================================================================
+
 
 class TestPlanWorkerLimits:
     """Verify _get_plan_worker_limit returns correct values."""

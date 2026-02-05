@@ -46,7 +46,7 @@ def redact_email(text: str) -> str:
         "Error for use***@example.com"
     """
     # Email regex pattern
-    email_pattern = r'\b([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b'
+    email_pattern = r"\b([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b"
 
     def redact_match(match):
         username = match.group(1)
@@ -103,20 +103,20 @@ def redact_phone(text: str) -> str:
     # Pre-process to mark these as "safe" before phone redaction
     safe_patterns = {
         # Date patterns (YYYY-MM-DD, MM-DD-YYYY, DD-MM-YYYY)
-        r'\b\d{4}[-/]\d{2}[-/]\d{2}\b': lambda m: f"__DATE_{m.start()}__",
-        r'\b\d{2}[-/]\d{2}[-/]\d{4}\b': lambda m: f"__DATE_{m.start()}__",
+        r"\b\d{4}[-/]\d{2}[-/]\d{2}\b": lambda m: f"__DATE_{m.start()}__",
+        r"\b\d{2}[-/]\d{2}[-/]\d{4}\b": lambda m: f"__DATE_{m.start()}__",
         # Time patterns (HH:MM:SS, including milliseconds)
-        r'\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b': lambda m: f"__TIME_{m.start()}__",
+        r"\b\d{2}:\d{2}:\d{2}(?:\.\d+)?\b": lambda m: f"__TIME_{m.start()}__",
         # Version numbers (1.2.3, 10.0.0.1)
-        r'\b\d+\.\d+\.\d+(?:\.\d+)?\b': lambda m: f"__VERSION_{m.start()}__",
+        r"\b\d+\.\d+\.\d+(?:\.\d+)?\b": lambda m: f"__VERSION_{m.start()}__",
         # IP addresses
-        r'\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b': lambda m: f"__IP_{m.start()}__",
+        r"\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b": lambda m: f"__IP_{m.start()}__",
         # Invoice/reference numbers with letters (INV-12345678, REF123456789)
-        r'\b[A-Z]{2,4}[-]?\d{6,12}\b': lambda m: f"__REF_{m.start()}__",
+        r"\b[A-Z]{2,4}[-]?\d{6,12}\b": lambda m: f"__REF_{m.start()}__",
         # Zip codes (should not be redacted)
-        r'\b\d{5}(?:-\d{4})?\b': lambda m: f"__ZIP_{m.start()}__",
+        r"\b\d{5}(?:-\d{4})?\b": lambda m: f"__ZIP_{m.start()}__",
         # Account numbers (often just digits but context matters)
-        r'(?:account|acct|acc)[:\s#]*\d{4,10}\b': lambda m: f"__ACCT_{m.start()}__",
+        r"(?:account|acct|acc)[:\s#]*\d{4,10}\b": lambda m: f"__ACCT_{m.start()}__",
     }
 
     result = text
@@ -135,15 +135,15 @@ def redact_phone(text: str) -> str:
     # Match phone number formats (more specific patterns)
     phone_patterns = [
         # US format with area code: (555) 123-4567 or 555-123-4567
-        r'(?<![.\d])(?:\(\d{3}\)\s*|\b\d{3}[-.])\d{3}[-.]?\d{4}\b(?![.\d])',
+        r"(?<![.\d])(?:\(\d{3}\)\s*|\b\d{3}[-.])\d{3}[-.]?\d{4}\b(?![.\d])",
         # International with + prefix: +1-555-123-4567
-        r'\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b',
+        r"\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b",
         # Compact international: +12125551234 (10+ digits after +)
-        r'\+\d{10,15}\b',
+        r"\+\d{10,15}\b",
     ]
 
     for pattern in phone_patterns:
-        result = re.sub(pattern, 'XXX-XXX-XXXX', result)
+        result = re.sub(pattern, "XXX-XXX-XXXX", result)
 
     # Restore safe patterns
     for placeholder, original in replacements.items():
@@ -167,7 +167,7 @@ def redact_ssn(text: str) -> str:
         "SSN: XXX-XX-6789"
     """
     # Match SSN patterns
-    ssn_pattern = r'\b\d{3}[-]?\d{2}[-]?\d{4}\b'
+    ssn_pattern = r"\b\d{3}[-]?\d{2}[-]?\d{4}\b"
 
     def redact_match(match):
         ssn = match.group(0)
@@ -192,12 +192,12 @@ def redact_credit_card(text: str) -> str:
         "Card: XXXX-XXXX-XXXX-9010"
     """
     # Match credit card patterns (13-16 digits, with optional separators)
-    cc_pattern = r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{3,4}\b'
+    cc_pattern = r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{3,4}\b"
 
     def redact_match(match):
         card = match.group(0)
         # Keep last 4 digits only
-        last_four = card.replace('-', '').replace(' ', '')[-4:]
+        last_four = card.replace("-", "").replace(" ", "")[-4:]
         return f"XXXX-XXXX-XXXX-{last_four}"
 
     return re.sub(cc_pattern, redact_match, text)
@@ -230,7 +230,7 @@ def redact_all_pii(text: str, preserve_email_hash: bool = False) -> str:
 
     if preserve_email_hash:
         # Extract emails and replace with hashes
-        email_pattern = r'\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b'
+        email_pattern = r"\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b"
         emails = re.findall(email_pattern, result)
         for email in emails:
             result = result.replace(email, hash_email(email))

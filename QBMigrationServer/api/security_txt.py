@@ -13,7 +13,7 @@ from flask import Blueprint, Response
 from datetime import datetime, timezone
 import os
 
-security_txt_bp = Blueprint('security_txt', __name__)
+security_txt_bp = Blueprint("security_txt", __name__)
 
 
 def _get_security_txt_content() -> str:
@@ -25,13 +25,16 @@ def _get_security_txt_content() -> str:
         SECURITY_POLICY_URL: URL to security policy page
         SECURITY_ACKNOWLEDGMENTS_URL: URL to acknowledgments page
     """
-    contact_email = os.getenv('SECURITY_CONTACT_EMAIL', 'security@forensicbridge.io')
-    policy_url = os.getenv('SECURITY_POLICY_URL', 'https://forensicbridge.io/security')
-    acknowledgments_url = os.getenv('SECURITY_ACKNOWLEDGMENTS_URL', 'https://forensicbridge.io/security/acknowledgments')
+    contact_email = os.getenv("SECURITY_CONTACT_EMAIL", "security@forensicbridge.io")
+    policy_url = os.getenv("SECURITY_POLICY_URL", "https://forensicbridge.io/security")
+    acknowledgments_url = os.getenv(
+        "SECURITY_ACKNOWLEDGMENTS_URL",
+        "https://forensicbridge.io/security/acknowledgments",
+    )
 
     # Calculate expiration date (1 year from now)
     expires = datetime.now(timezone.utc).replace(year=datetime.now().year + 1)
-    expires_str = expires.strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    expires_str = expires.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     content = f"""# ForensicBridge Security Contact Information
 # This file follows RFC 9116 (security.txt standard)
@@ -62,7 +65,7 @@ Acknowledgments: {acknowledgments_url}
     return content
 
 
-@security_txt_bp.route('/.well-known/security.txt', methods=['GET'])
+@security_txt_bp.route("/.well-known/security.txt", methods=["GET"])
 def security_txt():
     """
     Serve security.txt file per RFC 9116.
@@ -73,15 +76,15 @@ def security_txt():
     content = _get_security_txt_content()
     return Response(
         content,
-        mimetype='text/plain',
+        mimetype="text/plain",
         headers={
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'public, max-age=86400',  # Cache for 1 day
-        }
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "public, max-age=86400",  # Cache for 1 day
+        },
     )
 
 
-@security_txt_bp.route('/security.txt', methods=['GET'])
+@security_txt_bp.route("/security.txt", methods=["GET"])
 def security_txt_root():
     """
     Alternative location for security.txt (root path).
@@ -91,9 +94,9 @@ def security_txt_root():
     content = _get_security_txt_content()
     return Response(
         content,
-        mimetype='text/plain',
+        mimetype="text/plain",
         headers={
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'public, max-age=86400',
-        }
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "public, max-age=86400",
+        },
     )

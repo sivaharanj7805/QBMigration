@@ -31,12 +31,12 @@ from .freshbooks_connector import FreshBooksConnector, FreshBooksExtractionConfi
 from .base_connector import BaseAccountingConnector, ExtractionResult
 
 __all__ = [
-    'BaseAccountingConnector',
-    'ExtractionResult',
-    'SageConnector',
-    'SageExtractionConfig',
-    'XeroConnector',
-    'XeroExtractionConfig',
-    'FreshBooksConnector',
-    'FreshBooksExtractionConfig',
+    "BaseAccountingConnector",
+    "ExtractionResult",
+    "SageConnector",
+    "SageExtractionConfig",
+    "XeroConnector",
+    "XeroExtractionConfig",
+    "FreshBooksConnector",
+    "FreshBooksExtractionConfig",
 ]

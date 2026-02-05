@@ -312,6 +312,15 @@ namespace QBDesktopExtractor
                 string kmsEndpoint = Environment.GetEnvironmentVariable("KMS_ENCRYPTION_ENDPOINT");
                 if (!string.IsNullOrEmpty(kmsEndpoint))
                 {
+                    // Enforce HTTPS to prevent exfiltrating key material over plaintext
+                    if (!kmsEndpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new CryptographicException(
+                            "KMS_ENCRYPTION_ENDPOINT must use HTTPS. " +
+                            $"Received scheme: {new Uri(kmsEndpoint).Scheme}. " +
+                            "Sending key material over non-HTTPS connections is not permitted.");
+                    }
+
                     // LOW-03 FIX: KMS key wrapping via HTTPS endpoint.
                     // Sends the raw key to a KMS envelope encryption endpoint that
                     // wraps it with a master key (e.g. AWS KMS, Azure Key Vault).
@@ -412,6 +421,15 @@ namespace QBDesktopExtractor
                 string kmsEndpoint = Environment.GetEnvironmentVariable("KMS_ENCRYPTION_ENDPOINT");
                 if (!string.IsNullOrEmpty(kmsEndpoint))
                 {
+                    // Enforce HTTPS to prevent exfiltrating key material over plaintext
+                    if (!kmsEndpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new CryptographicException(
+                            "KMS_ENCRYPTION_ENDPOINT must use HTTPS. " +
+                            $"Received scheme: {new Uri(kmsEndpoint).Scheme}. " +
+                            "Sending key material over non-HTTPS connections is not permitted.");
+                    }
+
                     try
                     {
                         using (var client = new System.Net.Http.HttpClient())

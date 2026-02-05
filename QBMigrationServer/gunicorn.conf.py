@@ -34,7 +34,7 @@ import multiprocessing
 
 # Bind to all interfaces for EC2 (load balancer will connect)
 # In production, this should be behind an ALB/NLB or nginx
-bind = os.getenv('GUNICORN_BIND', '0.0.0.0:5000')
+bind = os.getenv("GUNICORN_BIND", "0.0.0.0:5000")
 
 # Backlog - number of pending connections
 backlog = 2048
@@ -48,19 +48,19 @@ backlog = 2048
 # For t3.micro (2 vCPU): 4 workers
 # For t3.small (2 vCPU): 4 workers
 # For t3.medium (2 vCPU): 4-6 workers
-workers = int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1))
+workers = int(os.getenv("GUNICORN_WORKERS", multiprocessing.cpu_count() * 2 + 1))
 
 # Worker class - use gthread for thread-based concurrency
 # PRODUCTION FIX: Standardized on gthread to avoid gevent monkey-patching issues
 # with threading.Lock used in chunked uploads and other modules
-worker_class = os.getenv('GUNICORN_WORKER_CLASS', 'gthread')
+worker_class = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
 
 # Threads per worker (only used with sync/gthread workers)
-threads = int(os.getenv('GUNICORN_THREADS', 4))
+threads = int(os.getenv("GUNICORN_THREADS", 4))
 
 # Max requests before worker restart (prevents memory leaks)
-max_requests = int(os.getenv('GUNICORN_MAX_REQUESTS', 1000))
-max_requests_jitter = int(os.getenv('GUNICORN_MAX_REQUESTS_JITTER', 100))
+max_requests = int(os.getenv("GUNICORN_MAX_REQUESTS", 1000))
+max_requests_jitter = int(os.getenv("GUNICORN_MAX_REQUESTS_JITTER", 100))
 
 # =============================================================================
 # TIMEOUTS
@@ -68,13 +68,13 @@ max_requests_jitter = int(os.getenv('GUNICORN_MAX_REQUESTS_JITTER', 100))
 
 # Worker timeout (seconds) - important for long-running migrations
 # Set high enough for file uploads but not infinite
-timeout = int(os.getenv('GUNICORN_TIMEOUT', 120))
+timeout = int(os.getenv("GUNICORN_TIMEOUT", 120))
 
 # Graceful timeout for worker shutdown
-graceful_timeout = int(os.getenv('GUNICORN_GRACEFUL_TIMEOUT', 30))
+graceful_timeout = int(os.getenv("GUNICORN_GRACEFUL_TIMEOUT", 30))
 
 # Keep-alive timeout
-keepalive = int(os.getenv('GUNICORN_KEEPALIVE', 5))
+keepalive = int(os.getenv("GUNICORN_KEEPALIVE", 5))
 
 # =============================================================================
 # SECURITY
@@ -94,13 +94,13 @@ limit_request_field_size = 8190
 # =============================================================================
 
 # Access log - set to '-' for stdout (captured by CloudWatch/journald)
-accesslog = os.getenv('GUNICORN_ACCESS_LOG', '-')
+accesslog = os.getenv("GUNICORN_ACCESS_LOG", "-")
 
 # Error log - set to '-' for stderr
-errorlog = os.getenv('GUNICORN_ERROR_LOG', '-')
+errorlog = os.getenv("GUNICORN_ERROR_LOG", "-")
 
 # Log level
-loglevel = os.getenv('GUNICORN_LOG_LEVEL', 'info')
+loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")
 
 # Access log format (combined format for ALB parsing)
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
@@ -110,7 +110,7 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"
 # =============================================================================
 
 # Process name
-proc_name = 'qbmigration-server'
+proc_name = "qbmigration-server"
 
 # =============================================================================
 # SERVER MECHANICS
@@ -120,7 +120,7 @@ proc_name = 'qbmigration-server'
 daemon = False
 
 # AUDIT FIX HIGH-12: PID file in /run instead of /tmp for security
-pidfile = os.getenv('GUNICORN_PID_FILE', '/run/gunicorn/qbmigration.pid')
+pidfile = os.getenv("GUNICORN_PID_FILE", "/run/gunicorn/qbmigration.pid")
 
 # User/Group (uncomment for production with dedicated user)
 # user = 'ubuntu'
@@ -130,11 +130,12 @@ pidfile = os.getenv('GUNICORN_PID_FILE', '/run/gunicorn/qbmigration.pid')
 chdir = os.path.dirname(os.path.abspath(__file__))
 
 # Temp directory for worker heartbeat
-worker_tmp_dir = '/dev/shm'
+worker_tmp_dir = "/dev/shm"
 
 # =============================================================================
 # HOOKS
 # =============================================================================
+
 
 def on_starting(server):
     """Called just before the master process is initialized."""
@@ -149,18 +150,21 @@ def on_reload(server):
 def when_ready(server):
     """Called just after the server is started."""
     import logging
+
     logging.info("QB Migration Server is ready. Listening on %s", bind)
 
 
 def worker_int(worker):
     """Called when a worker receives SIGINT or SIGQUIT."""
     import logging
+
     logging.info("Worker %s received INT/QUIT signal", worker.pid)
 
 
 def worker_abort(worker):
     """Called when a worker receives SIGABRT."""
     import logging
+
     logging.warning("Worker %s aborted!", worker.pid)
 
 
@@ -172,6 +176,7 @@ def pre_fork(server, worker):
 def post_fork(server, worker):
     """Called just after a worker has been forked."""
     import logging
+
     logging.info("Worker %s spawned (pid: %s)", worker.age, worker.pid)
 
 
@@ -183,16 +188,19 @@ def post_worker_init(worker):
 def worker_exit(server, worker):
     """Called just after a worker has been exited."""
     import logging
+
     logging.info("Worker %s exited (pid: %s)", worker.age, worker.pid)
 
 
 def nworkers_changed(server, new_value, old_value):
     """Called when number of workers changes."""
     import logging
+
     logging.info("Number of workers changed from %d to %d", old_value, new_value)
 
 
 def on_exit(server):
     """Called just before exiting gunicorn."""
     import logging
+
     logging.info("QB Migration Server shutting down")

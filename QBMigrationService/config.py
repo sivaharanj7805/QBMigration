@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION VALIDATION & SANITIZATION
 # ============================================================================
 
+
 def get_env_int(key: str, default: int) -> int:
     """Safely get integer from environment with validation"""
     try:
@@ -17,6 +18,7 @@ def get_env_int(key: str, default: int) -> int:
     except ValueError:
         logger.info(f"Warning: Invalid integer for {key}, using default: {default}")
         return default
+
 
 def get_env_float(key: str, default: float) -> float:
     """Safely get float from environment with validation"""
@@ -26,26 +28,29 @@ def get_env_float(key: str, default: float) -> float:
         logger.info(f"Warning: Invalid float for {key}, using default: {default}")
         return default
 
+
 def get_env_bool(key: str, default: str = "true") -> bool:
     """Safely get boolean from environment"""
     return os.getenv(key, default).lower() in ("true", "1", "yes")
 
+
 def sanitize_migration_id(migration_id: str) -> str:
     """
     Sanitize migration_id to prevent path traversal attacks
-    
+
     SECURITY: Prevents directory traversal with IDs like "../../etc/passwd"
     """
     # Remove path separators and dangerous characters
     safe_id = "".join(c for c in migration_id if c.isalnum() or c in "_-")
-    
+
     if not safe_id or safe_id != migration_id:
         raise ValueError(
             f"Invalid migration_id: '{migration_id}'. "
             "Only alphanumeric, underscore, and hyphen allowed."
         )
-    
+
     return safe_id
+
 
 # ============================================================================
 # QUICKBOOKS ONLINE API CREDENTIALS
@@ -68,7 +73,9 @@ if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
 # Environment (sandbox or production)
 ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
 if ENVIRONMENT not in ("sandbox", "production"):
-    logger.info(f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'")
+    logger.info(
+        f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
+    )
     ENVIRONMENT = "sandbox"
 
 # Region support (US, CA, UK, AU, IN)
@@ -89,24 +96,24 @@ PRODUCTION_CONFIRMATION_FLAG = get_env_bool("QBO_CONFIRM_PRODUCTION", "false")
 REGION_URLS = {
     "US": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
-        "production": "https://quickbooks.api.intuit.com/v3/company"
+        "production": "https://quickbooks.api.intuit.com/v3/company",
     },
     "CA": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
-        "production": "https://quickbooks.api.intuit.com/v3/company"
+        "production": "https://quickbooks.api.intuit.com/v3/company",
     },
     "UK": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
-        "production": "https://quickbooks.api.intuit.com/v3/company"
+        "production": "https://quickbooks.api.intuit.com/v3/company",
     },
     "AU": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
-        "production": "https://quickbooks.api.intuit.com/v3/company"
+        "production": "https://quickbooks.api.intuit.com/v3/company",
     },
     "IN": {
         "sandbox": "https://sandbox-quickbooks.api.intuit.com/v3/company",
-        "production": "https://quickbooks.api.intuit.com/v3/company"
-    }
+        "production": "https://quickbooks.api.intuit.com/v3/company",
+    },
 }
 
 # Build BASE_URL based on region and environment
@@ -149,7 +156,9 @@ if BCRYPT_ROUNDS < 10:
     BCRYPT_ROUNDS = 10
 
 # Token refresh buffer (in seconds) - configurable for different batch sizes
-TOKEN_REFRESH_BUFFER_SECONDS = get_env_int("TOKEN_REFRESH_BUFFER_SECONDS", 300)  # 5 minutes
+TOKEN_REFRESH_BUFFER_SECONDS = get_env_int(
+    "TOKEN_REFRESH_BUFFER_SECONDS", 300
+)  # 5 minutes
 
 # ============================================================================
 # NETWORK TIMEOUT & RETRY CONFIGURATION (HIGH PRIORITY FROM TESTING REPORT)
@@ -157,7 +166,9 @@ TOKEN_REFRESH_BUFFER_SECONDS = get_env_int("TOKEN_REFRESH_BUFFER_SECONDS", 300) 
 
 # Network timeout settings (in seconds)
 # RECOMMENDATION: Make these configurable for different network conditions
-QBO_CONNECT_TIMEOUT = get_env_int("QBO_CONNECT_TIMEOUT", 10)  # Connection establishment timeout
+QBO_CONNECT_TIMEOUT = get_env_int(
+    "QBO_CONNECT_TIMEOUT", 10
+)  # Connection establishment timeout
 QBO_READ_TIMEOUT = get_env_int("QBO_READ_TIMEOUT", 30)  # Response read timeout
 QBO_TOTAL_TIMEOUT = get_env_int("QBO_TOTAL_TIMEOUT", 60)  # Total request timeout
 
@@ -165,10 +176,18 @@ QBO_TOTAL_TIMEOUT = get_env_int("QBO_TOTAL_TIMEOUT", 60)  # Total request timeou
 QBO_REQUEST_TIMEOUT = (QBO_CONNECT_TIMEOUT, QBO_READ_TIMEOUT)
 
 # Retry configuration
-RETRY_MAX_ATTEMPTS = get_env_int("RETRY_MAX_ATTEMPTS", 7)  # QBO rate limit window is 60s; 7 retries with base-2 backoff covers ~127s
-RETRY_BACKOFF_BASE = get_env_float("RETRY_BACKOFF_BASE", 2.0)  # Exponential backoff base
-RETRY_BACKOFF_MAX = get_env_int("RETRY_BACKOFF_MAX", 60)  # Maximum retry delay in seconds
-RETRY_JITTER = get_env_bool("RETRY_JITTER", "true")  # Add random jitter to prevent thundering herd
+RETRY_MAX_ATTEMPTS = get_env_int(
+    "RETRY_MAX_ATTEMPTS", 7
+)  # QBO rate limit window is 60s; 7 retries with base-2 backoff covers ~127s
+RETRY_BACKOFF_BASE = get_env_float(
+    "RETRY_BACKOFF_BASE", 2.0
+)  # Exponential backoff base
+RETRY_BACKOFF_MAX = get_env_int(
+    "RETRY_BACKOFF_MAX", 60
+)  # Maximum retry delay in seconds
+RETRY_JITTER = get_env_bool(
+    "RETRY_JITTER", "true"
+)  # Add random jitter to prevent thundering herd
 
 # Retryable status codes
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -183,7 +202,9 @@ ENABLE_CORRELATION_IDS = get_env_bool("ENABLE_CORRELATION_IDS", "true")
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 
 # Enhanced logging settings
-LOG_REQUEST_HEADERS = get_env_bool("LOG_REQUEST_HEADERS", "false")  # Security: False by default
+LOG_REQUEST_HEADERS = get_env_bool(
+    "LOG_REQUEST_HEADERS", "false"
+)  # Security: False by default
 LOG_REQUEST_BODY_SIZE = get_env_int("LOG_REQUEST_BODY_SIZE", 1000)  # Max chars to log
 LOG_RESPONSE_BODY_SIZE = get_env_int("LOG_RESPONSE_BODY_SIZE", 1000)  # Max chars to log
 LOG_INTUIT_TID = get_env_bool("LOG_INTUIT_TID", "true")  # Log Intuit Transaction ID
@@ -200,14 +221,14 @@ DATE_FORMAT_AUTO_DETECT = get_env_bool("DATE_FORMAT_AUTO_DETECT", "true")
 
 # Supported date formats by priority (first match wins)
 DATE_FORMATS = [
-    "%Y-%m-%d",       # ISO 8601 (preferred)
-    "%m/%d/%Y",       # US format (MM/DD/YYYY)
-    "%d/%m/%Y",       # UK/EU format (DD/MM/YYYY)
-    "%Y/%m/%d",       # Alternative ISO
-    "%m-%d-%Y",       # US with dashes
-    "%d-%m-%Y",       # UK/EU with dashes
-    "%d.%m.%Y",       # EU with dots
-    "%Y.%m.%d",       # Alternative with dots
+    "%Y-%m-%d",  # ISO 8601 (preferred)
+    "%m/%d/%Y",  # US format (MM/DD/YYYY)
+    "%d/%m/%Y",  # UK/EU format (DD/MM/YYYY)
+    "%Y/%m/%d",  # Alternative ISO
+    "%m-%d-%Y",  # US with dashes
+    "%d-%m-%Y",  # UK/EU with dashes
+    "%d.%m.%Y",  # EU with dots
+    "%Y.%m.%d",  # Alternative with dots
 ]
 
 # Region-specific default date formats
@@ -224,8 +245,12 @@ DEFAULT_DATE_FORMAT = REGION_DATE_FORMATS.get(REGION, "%m/%d/%Y")
 
 # Date validation settings
 DATE_VALIDATION_STRICT = get_env_bool("DATE_VALIDATION_STRICT", "false")
-DATE_FUTURE_MAX_YEARS = get_env_int("DATE_FUTURE_MAX_YEARS", 5)  # Max years in future allowed
-DATE_PAST_MAX_YEARS = get_env_int("DATE_PAST_MAX_YEARS", 50)  # Max years in past allowed
+DATE_FUTURE_MAX_YEARS = get_env_int(
+    "DATE_FUTURE_MAX_YEARS", 5
+)  # Max years in future allowed
+DATE_PAST_MAX_YEARS = get_env_int(
+    "DATE_PAST_MAX_YEARS", 50
+)  # Max years in past allowed
 
 # ============================================================================
 # MIGRATION SETTINGS
@@ -242,7 +267,9 @@ MAX_RETRIES = get_env_int("MAX_RETRIES", 3)
 # Parallel processing settings
 MAX_PARALLEL_WORKERS = get_env_int("MAX_PARALLEL_WORKERS", 5)
 if MAX_PARALLEL_WORKERS > 10:
-    logger.info(f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting")
+    logger.info(
+        f"Warning: MAX_PARALLEL_WORKERS {MAX_PARALLEL_WORKERS} may cause rate limiting"
+    )
 
 # Redis configuration (for rate limiting and job queue)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -255,23 +282,20 @@ SQLITE_BUSY_TIMEOUT_MS = get_env_int("SQLITE_BUSY_TIMEOUT_MS", 30000)
 
 # QBO Plan-specific worker limits
 # These are conservative limits to avoid rate limiting
-QBO_PLAN_WORKER_LIMITS = {
-    "Simple Start": 2,
-    "Essentials": 3,
-    "Plus": 5,
-    "Advanced": 8
-}
+QBO_PLAN_WORKER_LIMITS = {"Simple Start": 2, "Essentials": 3, "Plus": 5, "Advanced": 8}
+
 
 def get_qbo_plan_worker_limit(plan_name: str = None) -> int:
     """
     $25M FIX: Get worker limit based on QBO plan tier.
-    
+
     Prevents rate limiting by adjusting concurrency to plan capabilities.
     """
     if plan_name is None:
         plan_name = os.getenv("QBO_PLAN", "Plus")  # Default to Plus
-    
+
     return QBO_PLAN_WORKER_LIMITS.get(plan_name, 5)
+
 
 # ============================================================================
 # QBO API LIMITS
@@ -294,21 +318,13 @@ APP_NAME = os.getenv("APP_NAME", "QB Migration Tool")
 # REQUIRED OAUTH SCOPES
 # ============================================================================
 
-REQUIRED_SCOPES = [
-    "com.intuit.quickbooks.accounting"
-]
+REQUIRED_SCOPES = ["com.intuit.quickbooks.accounting"]
 
 # ============================================================================
 # CURRENCY CODES BY REGION
 # ============================================================================
 
-REGION_CURRENCIES = {
-    "US": "USD",
-    "CA": "CAD",
-    "UK": "GBP",
-    "AU": "AUD",
-    "IN": "INR"
-}
+REGION_CURRENCIES = {"US": "USD", "CA": "CAD", "UK": "GBP", "AU": "AUD", "IN": "INR"}
 
 DEFAULT_CURRENCY = REGION_CURRENCIES.get(REGION, "USD")
 
@@ -316,10 +332,11 @@ DEFAULT_CURRENCY = REGION_CURRENCIES.get(REGION, "USD")
 # DIRECTORY CREATION (Only if not in read-only mode)
 # ============================================================================
 
+
 def initialize_directories():
     """
     Initialize required directories
-    
+
     SECURITY FIX: Only create directories when needed, not on import
     """
     try:
@@ -327,22 +344,24 @@ def initialize_directories():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         ENCRYPTED_DIR.mkdir(parents=True, exist_ok=True)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         # Set restrictive permissions on data directory
         os.chmod(DATA_DIR, 0o700)  # Owner read/write/execute only
-        
+
     except PermissionError as e:
         logger.info(f"Warning: Cannot create directories: {e}")
         logger.info(f"   Ensure write permissions for: {DATA_DIR}")
+
 
 # ============================================================================
 # PRODUCTION GUARD
 # ============================================================================
 
+
 def validate_production_access():
     """
     Production guard: Ensure user explicitly confirms production access
-    
+
     Prevents accidental production migrations
     """
     if ENVIRONMENT == "production":
@@ -352,7 +371,7 @@ def validate_production_access():
                 "Set environment variable: QBO_CONFIRM_PRODUCTION=true\n"
                 "Or disable guard with: QBO_PRODUCTION_GUARD=false"
             )
-        
+
         logger.info("WARNING: Running against PRODUCTION environment")
         logger.info(f"   Region: {REGION}")
         logger.info(f"   Realm ID: {REALM_ID}")
@@ -360,14 +379,18 @@ def validate_production_access():
     else:
         logger.info(f"✓ Running in {ENVIRONMENT.upper()} mode (Region: {REGION})")
 
+
 # ============================================================================
 # QBO PLAN RECOMMENDATION
 # ============================================================================
 
-def get_qbo_plan_recommendation(class_count: int, item_count: int, user_count: int) -> str:
+
+def get_qbo_plan_recommendation(
+    class_count: int, item_count: int, user_count: int
+) -> str:
     """
     Recommend QBO plan based on data volume
-    
+
     Plans:
     - Simple Start: 1 user, no classes
     - Essentials: 3 users, no classes
@@ -387,9 +410,11 @@ def get_qbo_plan_recommendation(class_count: int, item_count: int, user_count: i
         else:
             return "Plus"
 
+
 # ============================================================================
 # REALM_ID VALIDATION
 # ============================================================================
+
 
 def validate_realm_id(token_realm_id: Optional[str] = None) -> bool:
     """

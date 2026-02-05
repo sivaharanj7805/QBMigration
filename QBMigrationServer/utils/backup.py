@@ -12,109 +12,109 @@ logger = logging.getLogger(__name__)
 
 class BackupManager:
     """Manage encrypted database backups with S3 storage"""
-    
+
     def __init__(self, app):
         self.app = app
-        self.backup_dir = app.config.get('BACKUP_DIR', 'backups')
-        self.retention_days = app.config.get('BACKUP_RETENTION_DAYS', 7)
-        self.enabled = app.config.get('BACKUP_ENABLED', True)
-        self.backup_to_s3 = app.config.get('BACKUP_TO_S3', True)
-        self.encryption_key = app.config.get('BACKUP_ENCRYPTION_KEY')
-        
+        self.backup_dir = app.config.get("BACKUP_DIR", "backups")
+        self.retention_days = app.config.get("BACKUP_RETENTION_DAYS", 7)
+        self.enabled = app.config.get("BACKUP_ENABLED", True)
+        self.backup_to_s3 = app.config.get("BACKUP_TO_S3", True)
+        self.encryption_key = app.config.get("BACKUP_ENCRYPTION_KEY")
+
         # Initialize S3 if enabled
         if self.backup_to_s3:
             try:
-                self.s3 = boto3.client('s3', region_name=app.config.get('AWS_REGION'))
-                self.s3_bucket = app.config.get('AWS_S3_BUCKET')
+                self.s3 = boto3.client("s3", region_name=app.config.get("AWS_REGION"))
+                self.s3_bucket = app.config.get("AWS_S3_BUCKET")
             except Exception as e:
                 logger.error(f"Failed to initialize S3 for backups: {str(e)}")
                 self.backup_to_s3 = False
-        
+
         # Create backup directory
         if self.enabled:
             os.makedirs(self.backup_dir, exist_ok=True)
             logger.info(f"Backup manager initialized. Directory: {self.backup_dir}")
-    
+
     def create_backup(self):
         """
         Create encrypted database backup
-        
+
         Returns:
             str: Path to backup file or None if failed
         """
         if not self.enabled:
             logger.info("Backups disabled, skipping")
             return None
-        
+
         try:
             # Get database path
-            db_uri = self.app.config.get('SQLALCHEMY_DATABASE_URI', '')
-            
+            db_uri = self.app.config.get("SQLALCHEMY_DATABASE_URI", "")
+
             # Support both SQLite and PostgreSQL
-            if db_uri.startswith('sqlite:///'):
+            if db_uri.startswith("sqlite:///"):
                 return self._backup_sqlite(db_uri)
-            elif db_uri.startswith('postgresql://'):
+            elif db_uri.startswith("postgresql://"):
                 return self._backup_postgresql(db_uri)
             else:
                 logger.warning(f"Unsupported database type: {db_uri}")
                 return None
-                
+
         except Exception as e:
             logger.exception(f"Backup failed: {str(e)}")
             return None
-    
+
     def _backup_sqlite(self, db_uri):
         """Backup SQLite database"""
         try:
-            db_path = db_uri.replace('sqlite:///', '')
-            
+            db_path = db_uri.replace("sqlite:///", "")
+
             if not os.path.exists(db_path):
                 logger.error(f"Database file not found: {db_path}")
                 return None
-            
+
             # Create backup filename
-            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_filename = f"qb_migrations_backup_{timestamp}.db"
             backup_path = os.path.join(self.backup_dir, backup_filename)
-            
+
             # Copy database file
             shutil.copy2(db_path, backup_path)
-            
+
             # Verify backup
             if not os.path.exists(backup_path):
                 logger.error(f"Backup verification failed: {backup_path}")
                 return None
-            
+
             backup_size = os.path.getsize(backup_path)
             logger.info(f"SQLite backup created: {backup_path} ({backup_size} bytes)")
-            
+
             # Encrypt backup
             encrypted_path = self._encrypt_backup(backup_path)
             if encrypted_path:
                 # Delete unencrypted backup
                 os.remove(backup_path)
                 backup_path = encrypted_path
-            
+
             # Upload to S3
             if self.backup_to_s3:
                 self._upload_to_s3(backup_path, backup_filename)
-            
+
             # Verify backup integrity
             if self._verify_backup(backup_path):
                 logger.info(f"Backup verified successfully: {backup_path}")
             else:
                 logger.error(f"Backup verification failed: {backup_path}")
                 return None
-            
+
             # Clean up old backups
             self.cleanup_old_backups()
-            
+
             return backup_path
-            
+
         except Exception as e:
             logger.exception(f"SQLite backup failed: {str(e)}")
             return None
-    
+
     def _backup_postgresql(self, db_uri):
         """Backup PostgreSQL database using pg_dump with secure .pgpass authentication"""
         try:
@@ -126,7 +126,7 @@ class BackupManager:
             parsed = urlparse(db_uri)
 
             # Create backup filename
-            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_filename = f"qb_migrations_backup_{timestamp}.sql"
             backup_path = os.path.join(self.backup_dir, backup_filename)
 
@@ -137,7 +137,9 @@ class BackupManager:
 
             if parsed.password:
                 # Create temporary .pgpass file with proper permissions
-                pgpass_fd, pgpass_path = tempfile.mkstemp(prefix='pgpass_', suffix='.conf')
+                pgpass_fd, pgpass_path = tempfile.mkstemp(
+                    prefix="pgpass_", suffix=".conf"
+                )
                 pgpass_file = pgpass_path
                 try:
                     # .pgpass format: hostname:port:database:username:password
@@ -149,25 +151,33 @@ class BackupManager:
                     os.chmod(pgpass_path, 0o600)
 
                     # Point pg_dump to use this .pgpass file
-                    env['PGPASSFILE'] = pgpass_path
+                    env["PGPASSFILE"] = pgpass_path
                 except Exception as e:
                     os.close(pgpass_fd)
                     if pgpass_file and os.path.exists(pgpass_file):
                         os.remove(pgpass_file)
-                    logger.warning(f"Failed to create .pgpass file, falling back to env var: {e}")
+                    logger.warning(
+                        f"Failed to create .pgpass file, falling back to env var: {e}"
+                    )
                     # Fallback to env var (less secure but functional)
-                    env['PGPASSWORD'] = parsed.password
+                    env["PGPASSWORD"] = parsed.password
                     pgpass_file = None
 
             # Run pg_dump
             cmd = [
-                'pg_dump',
-                '-h', parsed.hostname or 'localhost',
-                '-p', str(parsed.port or 5432),
-                '-U', parsed.username or 'postgres',
-                '-d', parsed.path.lstrip('/'),
-                '-F', 'c',  # Custom format (compressed)
-                '-f', backup_path
+                "pg_dump",
+                "-h",
+                parsed.hostname or "localhost",
+                "-p",
+                str(parsed.port or 5432),
+                "-U",
+                parsed.username or "postgres",
+                "-d",
+                parsed.path.lstrip("/"),
+                "-F",
+                "c",  # Custom format (compressed)
+                "-f",
+                backup_path,
             ]
 
             try:
@@ -176,131 +186,141 @@ class BackupManager:
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5 minute timeout
+                    timeout=300,  # 5 minute timeout
                 )
             finally:
                 # SECURITY: Always clean up the .pgpass file
                 if pgpass_file and os.path.exists(pgpass_file):
                     try:
                         # Overwrite with zeros before deletion
-                        with open(pgpass_file, 'wb') as f:
-                            f.write(b'\x00' * 256)
+                        with open(pgpass_file, "wb") as f:
+                            f.write(b"\x00" * 256)
                         os.remove(pgpass_file)
                     except Exception as e:
                         logger.warning(f"Failed to clean up .pgpass file: {e}")
-            
+
             if result.returncode != 0:
                 logger.error(f"pg_dump failed: {result.stderr}")
                 return None
-            
+
             # Verify backup
             if not os.path.exists(backup_path):
                 logger.error(f"Backup file not created: {backup_path}")
                 return None
-            
+
             backup_size = os.path.getsize(backup_path)
-            logger.info(f"PostgreSQL backup created: {backup_path} ({backup_size} bytes)")
-            
+            logger.info(
+                f"PostgreSQL backup created: {backup_path} ({backup_size} bytes)"
+            )
+
             # Encrypt backup
             encrypted_path = self._encrypt_backup(backup_path)
             if encrypted_path:
                 os.remove(backup_path)
                 backup_path = encrypted_path
-            
+
             # Upload to S3
             if self.backup_to_s3:
                 self._upload_to_s3(backup_path, backup_filename)
-            
+
             # Clean up old backups
             self.cleanup_old_backups()
-            
+
             return backup_path
-            
+
         except subprocess.TimeoutExpired:
             logger.error("pg_dump timed out after 5 minutes")
             return None
         except Exception as e:
             logger.exception(f"PostgreSQL backup failed: {str(e)}")
             return None
-    
+
     def _encrypt_backup(self, backup_path):
         """
         Encrypt backup file
-        
+
         Args:
             backup_path: Path to unencrypted backup
-            
+
         Returns:
             str: Path to encrypted backup or None
         """
         if not self.encryption_key:
             logger.warning("Backup encryption key not configured, storing unencrypted")
             return None
-        
+
         try:
             # Initialize Fernet
-            key = self.encryption_key.encode() if isinstance(self.encryption_key, str) else self.encryption_key
+            key = (
+                self.encryption_key.encode()
+                if isinstance(self.encryption_key, str)
+                else self.encryption_key
+            )
             f = Fernet(key)
-            
+
             # Read backup file
-            with open(backup_path, 'rb') as file:
+            with open(backup_path, "rb") as file:
                 backup_data = file.read()
-            
+
             # Encrypt
             encrypted_data = f.encrypt(backup_data)
-            
+
             # Write encrypted file
             encrypted_path = f"{backup_path}.encrypted"
-            with open(encrypted_path, 'wb') as file:
+            with open(encrypted_path, "wb") as file:
                 file.write(encrypted_data)
-            
+
             logger.info(f"Backup encrypted: {encrypted_path}")
-            
+
             return encrypted_path
-            
+
         except Exception as e:
             logger.exception(f"Backup encryption failed: {str(e)}")
             return None
-    
+
     def _decrypt_backup(self, encrypted_path, output_path):
         """
         Decrypt backup file
-        
+
         Args:
             encrypted_path: Path to encrypted backup
             output_path: Path to write decrypted backup
-            
+
         Returns:
             bool: True if successful
         """
         if not self.encryption_key:
             logger.error("Encryption key not configured")
             return False
-        
+
         try:
             # Initialize Fernet
-            key = self.encryption_key.encode() if isinstance(self.encryption_key, str) else self.encryption_key
+            key = (
+                self.encryption_key.encode()
+                if isinstance(self.encryption_key, str)
+                else self.encryption_key
+            )
             f = Fernet(key)
-            
+
             # Read encrypted file
-            with open(encrypted_path, 'rb') as file:
+            with open(encrypted_path, "rb") as file:
                 encrypted_data = file.read()
-            
+
             # Decrypt
             decrypted_data = f.decrypt(encrypted_data)
-            
+
             # Write decrypted file
-            with open(output_path, 'wb') as file:
+            with open(output_path, "wb") as file:
                 file.write(decrypted_data)
-            
+
             logger.info(f"Backup decrypted: {output_path}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.exception(f"Backup decryption failed: {str(e)}")
             return False
-    
+
     def _verify_backup(self, backup_path):
         """
         Verify backup integrity with cryptographic hash verification
@@ -324,31 +344,35 @@ class BackupManager:
 
             # SECURITY FIX: Calculate and store cryptographic hash for verification
             sha256_hash = hashlib.sha256()
-            with open(backup_path, 'rb') as f:
+            with open(backup_path, "rb") as f:
                 # Read in 64KB chunks for memory efficiency
-                for chunk in iter(lambda: f.read(65536), b''):
+                for chunk in iter(lambda: f.read(65536), b""):
                     sha256_hash.update(chunk)
 
             file_hash = sha256_hash.hexdigest()
             hash_file_path = f"{backup_path}.sha256"
 
             # Store hash for future verification
-            with open(hash_file_path, 'w') as hf:
+            with open(hash_file_path, "w") as hf:
                 hf.write(f"{file_hash}  {Path(backup_path).name}\n")
 
             logger.info(f"Backup SHA-256: {file_hash[:16]}...")
 
             # If encrypted, try to decrypt a small portion
-            if backup_path.endswith('.encrypted'):
+            if backup_path.endswith(".encrypted"):
                 if not self.encryption_key:
                     logger.warning("Cannot verify encrypted backup without key")
                     return True  # Assume valid
 
                 try:
-                    key = self.encryption_key.encode() if isinstance(self.encryption_key, str) else self.encryption_key
+                    key = (
+                        self.encryption_key.encode()
+                        if isinstance(self.encryption_key, str)
+                        else self.encryption_key
+                    )
                     f = Fernet(key)
 
-                    with open(backup_path, 'rb') as file:
+                    with open(backup_path, "rb") as file:
                         encrypted_data = file.read()
 
                     # SECURITY FIX: Verify full decryption works (Fernet includes MAC)
@@ -360,15 +384,18 @@ class BackupManager:
                         logger.error("Decrypted backup is empty")
                         return False
 
-                    logger.info(f"Encrypted backup verified: {len(decrypted_data)} bytes decrypted successfully")
+                    logger.info(
+                        f"Encrypted backup verified: {len(decrypted_data)} bytes decrypted successfully"
+                    )
                     return True
                 except Exception as e:
                     logger.error(f"Backup verification failed: {str(e)}")
                     return False
 
             # For unencrypted SQLite, try to open
-            if backup_path.endswith('.db'):
+            if backup_path.endswith(".db"):
                 import sqlite3
+
                 try:
                     conn = sqlite3.connect(backup_path)
                     cursor = conn.cursor()
@@ -381,12 +408,12 @@ class BackupManager:
                     return False
 
             # For PostgreSQL custom format (.sql), verify header
-            if backup_path.endswith('.sql'):
+            if backup_path.endswith(".sql"):
                 try:
-                    with open(backup_path, 'rb') as f:
+                    with open(backup_path, "rb") as f:
                         header = f.read(5)
                     # pg_dump custom format starts with "PGDMP"
-                    if header == b'PGDMP':
+                    if header == b"PGDMP":
                         logger.info("PostgreSQL backup header verified")
                         return True
                     else:
@@ -422,13 +449,13 @@ class BackupManager:
 
         try:
             # Read stored hash
-            with open(hash_file_path, 'r') as hf:
+            with open(hash_file_path, "r") as hf:
                 stored_hash = hf.read().split()[0]
 
             # Calculate current hash
             sha256_hash = hashlib.sha256()
-            with open(backup_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(65536), b''):
+            with open(backup_path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
                     sha256_hash.update(chunk)
 
             current_hash = sha256_hash.hexdigest()
@@ -437,192 +464,201 @@ class BackupManager:
                 logger.info(f"Backup hash verification passed: {current_hash[:16]}...")
                 return True
             else:
-                logger.error(f"Backup hash mismatch! Stored: {stored_hash[:16]}..., Current: {current_hash[:16]}...")
+                logger.error(
+                    f"Backup hash mismatch! Stored: {stored_hash[:16]}..., Current: {current_hash[:16]}..."
+                )
                 return False
 
         except Exception as e:
             logger.error(f"Hash verification failed: {str(e)}")
             return False
-    
+
     def _upload_to_s3(self, backup_path, backup_filename):
         """Upload backup to S3"""
         try:
             if not self.s3_bucket:
                 logger.warning("S3 bucket not configured")
                 return False
-            
+
             s3_key = f"backups/{backup_filename}"
-            
+
             # Upload with encryption
             self.s3.upload_file(
                 backup_path,
                 self.s3_bucket,
                 s3_key,
                 ExtraArgs={
-                    'ServerSideEncryption': 'AES256',
-                    'StorageClass': 'STANDARD_IA',
-                    'Metadata': {
-                        'created-at': datetime.now(timezone.utc).isoformat(),
-                        'type': 'database-backup'
-                    }
-                }
+                    "ServerSideEncryption": "AES256",
+                    "StorageClass": "STANDARD_IA",
+                    "Metadata": {
+                        "created-at": datetime.now(timezone.utc).isoformat(),
+                        "type": "database-backup",
+                    },
+                },
             )
-            
+
             logger.info(f"Backup uploaded to S3: s3://{self.s3_bucket}/{s3_key}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.exception(f"S3 upload failed: {str(e)}")
             return False
-    
+
     def cleanup_old_backups(self):
         """Delete backups older than retention period"""
         try:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
-            
+            cutoff_date = datetime.now(timezone.utc) - timedelta(
+                days=self.retention_days
+            )
+
             # Clean up local backups
             for filename in os.listdir(self.backup_dir):
-                if not filename.startswith('qb_migrations_backup_'):
+                if not filename.startswith("qb_migrations_backup_"):
                     continue
-                
+
                 filepath = os.path.join(self.backup_dir, filename)
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc)
-                
+                file_time = datetime.fromtimestamp(
+                    os.path.getmtime(filepath), tz=timezone.utc
+                )
+
                 if file_time < cutoff_date:
                     os.remove(filepath)
                     logger.info(f"Deleted old backup: {filename}")
-            
+
             # Clean up S3 backups
             if self.backup_to_s3 and self.s3_bucket:
                 try:
                     response = self.s3.list_objects_v2(
-                        Bucket=self.s3_bucket,
-                        Prefix='backups/'
+                        Bucket=self.s3_bucket, Prefix="backups/"
                     )
-                    
-                    if 'Contents' in response:
-                        for obj in response['Contents']:
-                            last_modified = obj['LastModified'].replace(tzinfo=None)
-                            
+
+                    if "Contents" in response:
+                        for obj in response["Contents"]:
+                            last_modified = obj["LastModified"].replace(tzinfo=None)
+
                             if last_modified < cutoff_date:
                                 self.s3.delete_object(
-                                    Bucket=self.s3_bucket,
-                                    Key=obj['Key']
+                                    Bucket=self.s3_bucket, Key=obj["Key"]
                                 )
                                 logger.info(f"Deleted old S3 backup: {obj['Key']}")
                 except Exception as e:
                     logger.error(f"S3 cleanup failed: {str(e)}")
-                    
+
         except Exception as e:
             logger.exception(f"Backup cleanup failed: {str(e)}")
-    
+
     def list_backups(self):
         """List all available backups"""
         backups = []
-        
+
         try:
             # List local backups
             for filename in os.listdir(self.backup_dir):
-                if not filename.startswith('qb_migrations_backup_'):
+                if not filename.startswith("qb_migrations_backup_"):
                     continue
-                
+
                 filepath = os.path.join(self.backup_dir, filename)
-                
-                backups.append({
-                    'filename': filename,
-                    'path': filepath,
-                    'size': os.path.getsize(filepath),
-                    'created': datetime.fromtimestamp(os.path.getmtime(filepath), tz=timezone.utc),
-                    'location': 'local',
-                    'encrypted': filename.endswith('.encrypted')
-                })
-            
+
+                backups.append(
+                    {
+                        "filename": filename,
+                        "path": filepath,
+                        "size": os.path.getsize(filepath),
+                        "created": datetime.fromtimestamp(
+                            os.path.getmtime(filepath), tz=timezone.utc
+                        ),
+                        "location": "local",
+                        "encrypted": filename.endswith(".encrypted"),
+                    }
+                )
+
             # List S3 backups
             if self.backup_to_s3 and self.s3_bucket:
                 try:
                     response = self.s3.list_objects_v2(
-                        Bucket=self.s3_bucket,
-                        Prefix='backups/'
+                        Bucket=self.s3_bucket, Prefix="backups/"
                     )
-                    
-                    if 'Contents' in response:
-                        for obj in response['Contents']:
-                            backups.append({
-                                'filename': obj['Key'].split('/')[-1],
-                                'path': f"s3://{self.s3_bucket}/{obj['Key']}",
-                                'size': obj['Size'],
-                                'created': obj['LastModified'].replace(tzinfo=None),
-                                'location': 's3',
-                                'encrypted': True  # S3 server-side encryption
-                            })
+
+                    if "Contents" in response:
+                        for obj in response["Contents"]:
+                            backups.append(
+                                {
+                                    "filename": obj["Key"].split("/")[-1],
+                                    "path": f"s3://{self.s3_bucket}/{obj['Key']}",
+                                    "size": obj["Size"],
+                                    "created": obj["LastModified"].replace(tzinfo=None),
+                                    "location": "s3",
+                                    "encrypted": True,  # S3 server-side encryption
+                                }
+                            )
                 except Exception as e:
                     logger.error(f"Failed to list S3 backups: {str(e)}")
-            
+
             # Sort by creation time (newest first)
-            backups.sort(key=lambda x: x['created'], reverse=True)
-            
+            backups.sort(key=lambda x: x["created"], reverse=True)
+
         except Exception as e:
             logger.exception(f"Failed to list backups: {str(e)}")
-        
+
         return backups
-    
+
     def restore_backup(self, backup_path):
         """
         Restore database from backup
-        
+
         Args:
             backup_path: Path to backup file
-            
+
         Returns:
             bool: True if successful
         """
         try:
-            if not os.path.exists(backup_path) and not backup_path.startswith('s3://'):
+            if not os.path.exists(backup_path) and not backup_path.startswith("s3://"):
                 logger.error(f"Backup file not found: {backup_path}")
                 return False
-            
+
             # Download from S3 if needed
-            if backup_path.startswith('s3://'):
-                s3_path = backup_path.replace('s3://', '').split('/', 1)
+            if backup_path.startswith("s3://"):
+                s3_path = backup_path.replace("s3://", "").split("/", 1)
                 bucket = s3_path[0]
                 key = s3_path[1]
-                
-                local_path = os.path.join(self.backup_dir, 'restore_temp.db')
+
+                local_path = os.path.join(self.backup_dir, "restore_temp.db")
                 self.s3.download_file(bucket, key, local_path)
                 backup_path = local_path
-            
+
             # Decrypt if encrypted
-            if backup_path.endswith('.encrypted'):
-                decrypted_path = backup_path.replace('.encrypted', '')
+            if backup_path.endswith(".encrypted"):
+                decrypted_path = backup_path.replace(".encrypted", "")
                 if not self._decrypt_backup(backup_path, decrypted_path):
                     return False
                 backup_path = decrypted_path
-            
+
             # Get database path
-            db_uri = self.app.config.get('SQLALCHEMY_DATABASE_URI', '')
-            
-            if db_uri.startswith('sqlite:///'):
-                db_path = db_uri.replace('sqlite:///', '')
-                
+            db_uri = self.app.config.get("SQLALCHEMY_DATABASE_URI", "")
+
+            if db_uri.startswith("sqlite:///"):
+                db_path = db_uri.replace("sqlite:///", "")
+
                 # Create backup of current database
                 current_backup = f"{db_path}.before_restore_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
                 shutil.copy2(db_path, current_backup)
                 logger.info(f"Current database backed up to: {current_backup}")
-                
+
                 # Restore from backup
                 shutil.copy2(backup_path, db_path)
-                
+
                 logger.info(f"Database restored from: {backup_path}")
                 return True
-                
-            elif db_uri.startswith('postgresql://'):
+
+            elif db_uri.startswith("postgresql://"):
                 logger.error("PostgreSQL restore not yet implemented")
                 return False
             else:
                 logger.error(f"Unsupported database type: {db_uri}")
                 return False
-            
+
         except Exception as e:
             logger.exception(f"Restore failed: {str(e)}")
             return False
@@ -630,36 +666,36 @@ class BackupManager:
 
 def init_backup_scheduler(app):
     """Initialize backup scheduler"""
-    if not app.config.get('BACKUP_ENABLED', True):
+    if not app.config.get("BACKUP_ENABLED", True):
         logger.info("Backups disabled by configuration")
         return None
-    
+
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.interval import IntervalTrigger
-        
+
         backup_manager = BackupManager(app)
-        
+
         scheduler = BackgroundScheduler()
-        
-        interval_hours = app.config.get('BACKUP_INTERVAL_HOURS', 6)
+
+        interval_hours = app.config.get("BACKUP_INTERVAL_HOURS", 6)
         scheduler.add_job(
             func=backup_manager.create_backup,
             trigger=IntervalTrigger(hours=interval_hours),
-            id='database_backup',
-            name='Database backup job',
-            replace_existing=True
+            id="database_backup",
+            name="Database backup job",
+            replace_existing=True,
         )
-        
+
         scheduler.start()
-        
+
         logger.info(f"Backup scheduler started (interval: {interval_hours} hours)")
-        
+
         # Create initial backup
         backup_manager.create_backup()
-        
+
         return scheduler
-        
+
     except ImportError:
         logger.warning("APScheduler not installed, backups disabled")
         return None

@@ -23,7 +23,7 @@ from .base_connector import (
     BaseAccountingConnector,
     BaseExtractionConfig,
     ExtractionResult,
-    ExtractionStatus
+    ExtractionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class XeroExtractionConfig(BaseExtractionConfig):
     """Xero-specific extraction configuration."""
+
     tenant_id: Optional[str] = None  # Xero organization ID
     include_tracking_categories: bool = True
     include_budget: bool = False
@@ -122,7 +123,7 @@ class XeroConnector(BaseAccountingConnector):
         return ExtractionResult(
             status=ExtractionStatus.FAILED,
             started_at=datetime.now(timezone.utc),
-            errors=["Xero connector not yet implemented - roadmap Q2 2026"]
+            errors=["Xero connector not yet implemented - roadmap Q2 2026"],
         )
 
     def extract_accounts(self) -> List[Dict]:
@@ -192,7 +193,9 @@ class XeroConnector(BaseAccountingConnector):
         logger.info("Xero connector: extract_payments() called (ROADMAP)")
         return []
 
-    def extract_journal_entries(self, date_from: Optional[datetime] = None) -> List[Dict]:
+    def extract_journal_entries(
+        self, date_from: Optional[datetime] = None
+    ) -> List[Dict]:
         """Extract Xero manual journals."""
         logger.info("Xero connector: extract_journal_entries() called (ROADMAP)")
         return []
@@ -214,20 +217,20 @@ class XeroConnector(BaseAccountingConnector):
     def get_supported_entity_types(self) -> List[str]:
         """Get Xero-specific supported entity types."""
         return [
-            'accounts',
-            'contacts',  # Split to customers/vendors
-            'customers',
-            'vendors',
-            'invoices',
-            'credit_notes',
-            'bills',
-            'bank_transactions',
-            'manual_journals',
-            'tracking_categories',
-            'items',
-            'payments',
-            'prepayments',
-            'overpayments',
+            "accounts",
+            "contacts",  # Split to customers/vendors
+            "customers",
+            "vendors",
+            "invoices",
+            "credit_notes",
+            "bills",
+            "bank_transactions",
+            "manual_journals",
+            "tracking_categories",
+            "items",
+            "payments",
+            "prepayments",
+            "overpayments",
         ]
 
     def list_organizations(self) -> List[Dict]:

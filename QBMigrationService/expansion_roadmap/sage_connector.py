@@ -24,7 +24,7 @@ from .base_connector import (
     BaseAccountingConnector,
     BaseExtractionConfig,
     ExtractionResult,
-    ExtractionStatus
+    ExtractionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SageExtractionConfig(BaseExtractionConfig):
     """Sage-specific extraction configuration."""
+
     sage_version: str = "Sage50"  # Sage50, SageIntacct
     company_db_path: Optional[str] = None  # For Sage 50 on-premise
     api_endpoint: Optional[str] = None  # For Sage Intacct cloud
@@ -124,7 +125,7 @@ class SageConnector(BaseAccountingConnector):
         return ExtractionResult(
             status=ExtractionStatus.FAILED,
             started_at=datetime.now(timezone.utc),
-            errors=["Sage connector not yet implemented - roadmap Q3 2026"]
+            errors=["Sage connector not yet implemented - roadmap Q3 2026"],
         )
 
     def extract_accounts(self) -> List[Dict]:
@@ -157,7 +158,9 @@ class SageConnector(BaseAccountingConnector):
         logger.info("Sage connector: extract_payments() called (ROADMAP)")
         return []
 
-    def extract_journal_entries(self, date_from: Optional[datetime] = None) -> List[Dict]:
+    def extract_journal_entries(
+        self, date_from: Optional[datetime] = None
+    ) -> List[Dict]:
         """Extract Sage journal entries."""
         logger.info("Sage connector: extract_journal_entries() called (ROADMAP)")
         return []
@@ -181,17 +184,17 @@ class SageConnector(BaseAccountingConnector):
     def get_supported_entity_types(self) -> List[str]:
         """Get Sage-specific supported entity types."""
         return [
-            'accounts',
-            'customers',
-            'jobs',  # Sage has explicit job tracking
-            'vendors',
-            'employees',
-            'inventory_items',
-            'invoices',
-            'bills',
-            'payments_received',
-            'payments_made',
-            'journal_entries',
-            'job_costs',  # Sage job costing
-            'payroll_entries',  # If payroll enabled
+            "accounts",
+            "customers",
+            "jobs",  # Sage has explicit job tracking
+            "vendors",
+            "employees",
+            "inventory_items",
+            "invoices",
+            "bills",
+            "payments_received",
+            "payments_made",
+            "journal_entries",
+            "job_costs",  # Sage job costing
+            "payroll_entries",  # If payroll enabled
         ]

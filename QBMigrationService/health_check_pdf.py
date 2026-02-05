@@ -15,11 +15,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
 class HealthCheckPDFGenerator:
     """
     Generates PDF health check reports for QuickBooks files.
-    
+
     Report includes:
     - Executive Summary (Red/Yellow/Green)
     - Data Quality Issues
@@ -27,15 +26,15 @@ class HealthCheckPDFGenerator:
     - Estimated Migration Time
     - Required QBO Plan Tier
     """
-    
+
     def __init__(self, company_name: str = "ForensicBridge"):
         self.company_name = company_name
         self.report_data = {}
-    
+
     def analyze_health_check(self, scan_results: Dict) -> Dict:
         """
         Analyze scan results and categorize issues.
-        
+
         Returns:
             Dict with severity levels and recommendations
         """
@@ -47,31 +46,31 @@ class HealthCheckPDFGenerator:
             "stats": {
                 "total_records": 0,
                 "problematic_records": 0,
-                "estimated_migration_hours": 0
+                "estimated_migration_hours": 0,
             },
-            "recommended_qbo_plan": "Plus"
+            "recommended_qbo_plan": "Plus",
         }
-        
+
         # Count total records
         total = 0
         for entity_type in ["Customers", "Vendors", "Invoices", "Bills", "Accounts"]:
             count = len(scan_results.get(entity_type, []))
             total += count
         analysis["stats"]["total_records"] = total
-        
+
         # Check for critical issues (RED)
         errors = scan_results.get("errors", [])
         for error in errors:
             analysis["critical_issues"].append(error)
             analysis["overall_status"] = "RED"
-        
+
         # Check for warnings (YELLOW)
         warnings = scan_results.get("warnings", [])
         for warning in warnings:
             analysis["warnings"].append(warning)
             if analysis["overall_status"] == "GREEN":
                 analysis["overall_status"] = "YELLOW"
-        
+
         # Determine QBO plan based on record count
         if total > 500000:
             analysis["recommended_qbo_plan"] = "Advanced"
@@ -85,46 +84,38 @@ class HealthCheckPDFGenerator:
             )
         else:
             analysis["recommended_qbo_plan"] = "Essentials"
-        
+
         # Estimate migration time (500K records/hour)
         hours = max(1, total / 500000)
         analysis["stats"]["estimated_migration_hours"] = round(hours, 1)
-        
+
         # Add recommendations from scan
         recs = scan_results.get("recommendations", [])
         analysis["recommendations"].extend(recs)
-        
+
         return analysis
-    
+
     def generate_html_report(self, scan_results: Dict, output_path: str) -> str:
         """
         Generate an HTML report that can be converted to PDF.
-        
+
         Args:
             scan_results: Results from SecurityManager.pre_migration_scan()
             output_path: Path to save the HTML file
-            
+
         Returns:
             Path to the generated HTML file
         """
         analysis = self.analyze_health_check(scan_results)
-        
+
         # Status colors
-        status_colors = {
-            "GREEN": "#10B981",
-            "YELLOW": "#F59E0B", 
-            "RED": "#DC2626"
-        }
+        status_colors = {"GREEN": "#10B981", "YELLOW": "#F59E0B", "RED": "#DC2626"}
         status_color = status_colors[analysis["overall_status"]]
-        
+
         # Status icons
-        status_icons = {
-            "GREEN": "✓",
-            "YELLOW": "⚠",
-            "RED": "✗"
-        }
+        status_icons = {"GREEN": "✓", "YELLOW": "⚠", "RED": "✗"}
         status_icon = status_icons[analysis["overall_status"]]
-        
+
         # Build HTML
         html = f"""
 <!DOCTYPE html>
@@ -296,69 +287,77 @@ class HealthCheckPDFGenerator:
 </body>
 </html>
 """
-        
+
         # Write HTML file
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        
+
         return output_path
-    
+
     def _get_status_message(self, status: str) -> str:
         messages = {
             "GREEN": "Your QuickBooks file is ready for migration. No critical issues detected.",
             "YELLOW": "Your file can be migrated, but some issues should be reviewed first.",
-            "RED": "Critical issues detected. These must be resolved before migration."
+            "RED": "Critical issues detected. These must be resolved before migration.",
         }
         return messages.get(status, "")
-    
-    def _render_issues_section(self, title: str, issues: List[str], css_class: str) -> str:
+
+    def _render_issues_section(
+        self, title: str, issues: List[str], css_class: str
+    ) -> str:
         if not issues:
             return ""
-        
-        items = "\n".join([
-            f'<div class="issue {css_class}">{issue}</div>'
-            for issue in issues
-        ])
-        
+
+        items = "\n".join(
+            [f'<div class="issue {css_class}">{issue}</div>' for issue in issues]
+        )
+
         return f"""
             <div class="section">
                 <h3 class="section-title">{title}</h3>
                 {items}
             </div>
         """
-    
+
     def generate_pdf(self, scan_results: Dict, output_path: str) -> str:
         """
         Generate a PDF report.
-        
+
         Note: Requires wkhtmltopdf or weasyprint installed.
         Falls back to HTML if PDF generation not available.
         """
         # Generate HTML first
-        html_path = output_path.replace('.pdf', '.html')
+        html_path = output_path.replace(".pdf", ".html")
         self.generate_html_report(scan_results, html_path)
-        
+
         # Try to convert to PDF
         try:
             import subprocess
-            
+
             # Try wkhtmltopdf
-            result = subprocess.run([
-                'wkhtmltopdf',
-                '--enable-local-file-access',
-                '--page-size', 'Letter',
-                '--margin-top', '10mm',
-                '--margin-bottom', '10mm',
-                html_path,
-                output_path
-            ], capture_output=True, text=True)
-            
+            result = subprocess.run(
+                [
+                    "wkhtmltopdf",
+                    "--enable-local-file-access",
+                    "--page-size",
+                    "Letter",
+                    "--margin-top",
+                    "10mm",
+                    "--margin-bottom",
+                    "10mm",
+                    html_path,
+                    output_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+
             if result.returncode == 0:
                 return output_path
-                
+
         except FileNotFoundError:
             pass
-        
+
         # Fallback: return HTML path
         logger.info(f"PDF generation not available. HTML report saved to: {html_path}")
         return html_path
@@ -375,19 +374,19 @@ if __name__ == "__main__":
         "Invoices": [{"RefNumber": "1001"}] * 100000,
         "errors": [
             "12,340 corrupt transaction links detected",
-            "Multi-user mode is enabled - please switch to single-user"
+            "Multi-user mode is enabled - please switch to single-user",
         ],
         "warnings": [
             "Duplicate customer name: 'John Smith' appears 15 times",
-            "Invalid characters in 23 invoice descriptions"
+            "Invalid characters in 23 invoice descriptions",
         ],
         "recommendations": [
             "Clean up inactive customers before migration",
-            "Archive transactions older than 3 years"
+            "Archive transactions older than 3 years",
         ],
-        "should_proceed": False
+        "should_proceed": False,
     }
-    
+
     # Generate report
     generator = HealthCheckPDFGenerator("ForensicBridge")
     output = generator.generate_html_report(sample_results, "health_check_report.html")
