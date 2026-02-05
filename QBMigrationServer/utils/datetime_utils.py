@@ -20,7 +20,7 @@ Usage:
 """
 
 import warnings
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 # Try to import zoneinfo for timezone support (Python 3.9+)

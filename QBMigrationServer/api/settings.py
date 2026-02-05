@@ -3,12 +3,13 @@ ForensicBridge Settings API
 Whitelabel branding configuration endpoints.
 """
 
-from flask import Blueprint, request, jsonify
-from models.database import db
-from models.whitelabel_settings import WhitelabelSettings
+import logging
+
 from api.auth import require_auth
 from extensions import limiter
-import logging
+from flask import Blueprint, jsonify, request
+from models.database import db
+from models.whitelabel_settings import WhitelabelSettings
 
 settings_bp = Blueprint("settings", __name__, url_prefix="/api/settings")
 logger = logging.getLogger(__name__)

@@ -12,15 +12,16 @@ Features:
 FIX HIGH-01: Added authentication to all webhook log endpoints
 """
 
-from flask import Blueprint, request, jsonify
-from flask_login import login_required, current_user
-from models.database import db
+import hmac
+import logging
+import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-import logging
-import hmac
-import os
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
+
+from flask import Blueprint, jsonify, request
+from flask_login import current_user, login_required
+from models.database import db
 
 logger = logging.getLogger(__name__)
 

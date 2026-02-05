@@ -11,14 +11,15 @@ Tests all core methods with mocked HTTP calls. Validates critical bug fixes:
 - Exponential backoff on 500/503 server errors
 """
 
-import os
-import sys
 import json
-import time
+import os
 import sqlite3
+import sys
 import threading
+import time
+from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch, call, PropertyMock
 
 # Add parent directory to path so we can import qbo_client
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

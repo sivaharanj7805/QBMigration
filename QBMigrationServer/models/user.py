@@ -6,15 +6,16 @@ User Model with Enterprise Security
 - Account lockout protection
 """
 
-from models.database import db
-from flask_login import UserMixin
-from datetime import datetime, timedelta, timezone
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHash
-import pyotp
 import json
 import re
 import secrets
+from datetime import datetime, timedelta, timezone
+
+import pyotp
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
+from flask_login import UserMixin
+from models.database import db
 
 # Initialize Argon2 password hasher with secure parameters
 ph = PasswordHasher(
@@ -164,8 +165,9 @@ class User(UserMixin, db.Model):
         """Get decrypted QBO access token"""
         if not self.qbo_access_token:
             return None
-        from cryptography.fernet import Fernet
         import logging
+
+        from cryptography.fernet import Fernet
 
         try:
             f = Fernet(self._get_encryption_key())
@@ -180,8 +182,9 @@ class User(UserMixin, db.Model):
         """Get decrypted QBO refresh token"""
         if not self.qbo_refresh_token:
             return None
-        from cryptography.fernet import Fernet
         import logging
+
+        from cryptography.fernet import Fernet
 
         try:
             f = Fernet(self._get_encryption_key())
@@ -623,7 +626,7 @@ class User(UserMixin, db.Model):
         self._mfa_secret_encrypted = f.encrypt(value.encode()).decode()
         self.mfa_secret = None  # Clear legacy column
 
-    def _get_backup_codes(self) -> list:
+    def _get_backup_codes(self):
         """Get decrypted backup codes (prefers encrypted, falls back to legacy).
 
         MED-01 FIX: Logs deprecation warning when falling back to legacy column.

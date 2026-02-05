@@ -3,18 +3,18 @@ S3 Upload API with Pre-signed URLs
 Enables direct uploads from C# client to S3
 """
 
-from flask import Blueprint, request, jsonify
-import boto3
-from botocore.config import Config
-from datetime import datetime, timezone
 import hashlib
+import logging
 import os
+from datetime import datetime, timezone
 
+import boto3
 from api.auth import require_auth
-from models import db, Migration
+from botocore.config import Config
+from flask import Blueprint, jsonify, request
+from models import Migration, db
 from utils.anomaly_detector import check_upload_anomalies, log_anomaly
 from utils.pii_redaction import hash_ip
-import logging
 
 logger = logging.getLogger(__name__)
 

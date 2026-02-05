@@ -26,7 +26,7 @@ import os
 import sys
 from datetime import datetime
 from decimal import Decimal
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -34,7 +34,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from caseware_exporter import CasewareExporter
-from leadsheet_mapper import LeadSheetMapper, AccountingStandard
+from leadsheet_mapper import AccountingStandard, LeadSheetMapper
 
 # =============================================================================
 # FIXTURES

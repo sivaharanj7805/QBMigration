@@ -25,8 +25,8 @@ With systemd:
     WantedBy=multi-user.target
 """
 
-import os
 import multiprocessing
+import os
 
 # =============================================================================
 # SERVER SOCKET
@@ -130,7 +130,7 @@ pidfile = os.getenv("GUNICORN_PID_FILE", "/run/gunicorn/qbmigration.pid")
 chdir = os.path.dirname(os.path.abspath(__file__))
 
 # Temp directory for worker heartbeat
-worker_tmp_dir = "/dev/shm"
+worker_tmp_dir = "/dev/shm"  # nosec B108
 
 # =============================================================================
 # HOOKS

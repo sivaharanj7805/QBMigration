@@ -16,12 +16,13 @@ Webhook endpoints use HMAC-SHA256 signature auth (not Flask-Login),
 so we use the bare ``client`` fixture rather than ``authenticated_client``.
 """
 
-import pytest
-import hmac
 import hashlib
-from datetime import datetime, timezone, timedelta
-import uuid
+import hmac
 import json
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
 from models.database import db
 from models.migration import Migration
 from models.user import User

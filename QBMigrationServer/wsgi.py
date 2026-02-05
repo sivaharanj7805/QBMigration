@@ -11,7 +11,9 @@ For EC2 deployment:
     3. Run: gunicorn wsgi:application --config gunicorn.conf.py
 """
 
+import logging
 import os
+
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)

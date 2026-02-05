@@ -8,14 +8,15 @@ Handles OAuth2 flow for connecting to QuickBooks Online:
 - /api/qbo/status - Check connection status
 """
 
-from flask import Blueprint, request, redirect, jsonify, session, current_app, url_for
-from flask_login import login_required, current_user
-from models.database import db
-from datetime import datetime, timedelta, timezone
-import requests
 import logging
 import secrets
 import urllib.parse
+from datetime import datetime, timedelta, timezone
+
+import requests
+from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
+from flask_login import current_user, login_required
+from models.database import db
 
 qbo_bp = Blueprint("qbo", __name__, url_prefix="/api/qbo")
 logger = logging.getLogger(__name__)
@@ -101,8 +102,8 @@ def qbo_callback():
             )
             # CRITICAL FIX: Use whitelist-based sanitization to prevent XSS and information disclosure
             from utils.error_sanitizer import (
-                sanitize_qbo_error_for_url,
                 get_qbo_user_message,
+                sanitize_qbo_error_for_url,
             )
 
             safe_error = sanitize_qbo_error_for_url(error)

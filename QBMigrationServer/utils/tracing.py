@@ -36,10 +36,10 @@ Author: ForensicBridge Team
 Version: 1.0.0
 """
 
-import os
 import logging
+import os
 from contextlib import contextmanager
-from typing import Optional, Dict, Any, Generator
+from typing import Any, Dict, Generator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,9 @@ TRACING_ENABLED = os.getenv("ENABLE_TRACING", "true").lower() == "true"
 # Try to import OpenTelemetry, gracefully degrade if not available
 try:
     from opentelemetry import trace
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.trace import Status, StatusCode
     from opentelemetry.trace.propagation.tracecontext import (
         TraceContextTextMapPropagator,
@@ -68,7 +68,6 @@ _tracer: Optional[Any] = None
 
 def get_tracer():
     """Get the global tracer instance."""
-    global _tracer
     return _tracer
 
 
@@ -274,8 +273,8 @@ def init_tracing(app):
 
         # Instrument SQLAlchemy
         try:
-            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
             from models.database import db
+            from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
             SQLAlchemyInstrumentor().instrument(engine=db.engine)
             logger.info("SQLAlchemy instrumented with OpenTelemetry")
@@ -339,7 +338,7 @@ def get_trace_context() -> Dict[str, str]:
     if not OPENTELEMETRY_AVAILABLE or not TRACING_ENABLED:
         return {}
 
-    carrier = {}
+    carrier: dict[str, str] = {}
     TraceContextTextMapPropagator().inject(carrier)
     return carrier
 

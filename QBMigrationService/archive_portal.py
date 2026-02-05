@@ -5,12 +5,13 @@ This is the backend for the "Data Museum" feature.
 """
 
 import json
+import logging
 import os
 import re
-import logging
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
 from functools import wraps
+
+from flask import Flask, jsonify, render_template_string, request
 
 logger = logging.getLogger(__name__)
 

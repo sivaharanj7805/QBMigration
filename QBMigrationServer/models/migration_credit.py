@@ -4,6 +4,7 @@ Each purchase creates one credit that can be used for one migration.
 """
 
 from datetime import datetime, timezone
+
 from models.database import db, is_postgresql
 
 

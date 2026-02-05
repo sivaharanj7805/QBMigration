@@ -1,11 +1,12 @@
-import os
-import time
-import threading
 import json
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timedelta
-from encryption import EncryptionManager
+
 from audit_logger import AuditLogger
+from encryption import EncryptionManager
 
 # Initialize logger at module level
 logger = logging.getLogger(__name__)
@@ -44,8 +45,8 @@ if CELERY_AVAILABLE:
     @celery_app.task(name="qb_migration.execute_deletion")
     def celery_execute_deletion(job_data):
         """Celery task for scheduled deletion (survives server restarts)"""
-        from encryption import EncryptionManager
         from audit_logger import AuditLogger
+        from encryption import EncryptionManager
 
         logger = AuditLogger()
         deleted_count = 0

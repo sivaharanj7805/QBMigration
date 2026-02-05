@@ -4,30 +4,30 @@ JWT-based authentication for dashboard users with full security features
 Compatible with models/user.py User model
 """
 
-from flask import Blueprint, request, jsonify, current_app, session
-from functools import wraps
-import jwt
 import datetime
-from datetime import timezone
-import re
-import hmac
 import hashlib
-import os
-from typing import Optional, Tuple, Callable, Any
+import hmac
 import logging
+import os
+import re
+from datetime import timezone
+from functools import wraps
+from typing import Any, Callable, Optional, Tuple
 
+import jwt
+from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request, session
 from models.database import db
 from models.user import User
-from extensions import limiter
-from utils.pii_redaction import hash_email, redact_all_pii
-from utils.error_sanitizer import sanitize_error_message, create_error_response
-from utils.captcha_verifier import (
-    verify_captcha_token,
-    is_captcha_required,
-    get_client_ip,
-    get_captcha_config,
-)
 from utils.anomaly_detector import check_login_anomalies, log_anomaly
+from utils.captcha_verifier import (
+    get_captcha_config,
+    get_client_ip,
+    is_captcha_required,
+    verify_captcha_token,
+)
+from utils.error_sanitizer import create_error_response, sanitize_error_message
+from utils.pii_redaction import hash_email, redact_all_pii
 
 logger = logging.getLogger(__name__)
 
@@ -574,7 +574,8 @@ def validate_email(email: str) -> bool:
     email = email.strip().lower()
 
     try:
-        from email_validator import validate_email as ev_validate, EmailNotValidError
+        from email_validator import EmailNotValidError
+        from email_validator import validate_email as ev_validate
 
         try:
             # Validate email format
@@ -1770,6 +1771,7 @@ def forgot_password():
     else:
         # User doesn't exist - still perform timing-consistent operations
         import os
+
         from argon2 import PasswordHasher
 
         ph = PasswordHasher()

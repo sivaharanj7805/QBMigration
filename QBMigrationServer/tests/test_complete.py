@@ -4,14 +4,15 @@ Tests all critical functionality with 10/10 coverage
 Enterprise-grade test quality with comprehensive validation
 """
 
-from http import client
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
-from models.user import User
-from models.migration import Migration
-from flask import current_app
 import re
+from datetime import datetime, timedelta, timezone
+from http import client
+
+import pytest
+from flask import current_app
+from models.migration import Migration
+from models.user import User
 
 # ============================================================================
 # AUTHENTICATION TESTS - Security Critical

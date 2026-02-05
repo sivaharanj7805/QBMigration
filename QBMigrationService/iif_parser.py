@@ -6,14 +6,14 @@ IIF is a tab-delimited format used by QuickBooks for importing/exporting data.
 This parser converts IIF files to JSON format for migration to QuickBooks Online.
 """
 
-import os
-import json
 import csv
-from typing import Dict, List, Any, Optional
+import json
+import logging
+import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from io import StringIO
-import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

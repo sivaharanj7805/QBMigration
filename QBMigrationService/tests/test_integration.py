@@ -10,14 +10,15 @@ Tests cover:
 5. WebSocket/polling scenarios
 """
 
-import pytest
 import json
-import time
 import os
-import sys
 import subprocess
+import sys
+import time
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

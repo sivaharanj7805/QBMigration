@@ -11,13 +11,14 @@ These tests verify production readiness against LIVE systems:
 Run with: pytest tests/test_production_ready.py -v
 """
 
+import hashlib
+import json
+import os
+import time
+from datetime import datetime, timedelta
+
 import pytest
 import requests
-import time
-import hashlib
-import os
-import json
-from datetime import datetime, timedelta
 
 # Configuration
 API_BASE_URL = os.getenv("TEST_API_URL", "http://localhost:5000")
@@ -430,8 +431,8 @@ class TestProductionConfiguration:
 
     def test_pricing_tiers_configured(self):
         """Test that pricing tiers are properly configured"""
-        import sys
         import importlib
+        import sys
 
         # Force reimport
         if "config" in sys.modules:
@@ -486,8 +487,8 @@ class TestProductionConfiguration:
 
     def test_session_cookie_secure_in_production(self):
         """Test that session cookie is secure in production config"""
-        import sys
         import importlib
+        import sys
 
         # Force reimport
         if "config" in sys.modules:

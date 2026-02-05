@@ -11,14 +11,14 @@ Tests cover:
 8. Invalid migration_id format (SQL injection prevention)
 """
 
-import pytest
 import uuid
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
+import pytest
 from models.database import db
-from models.user import User
 from models.migration import Migration
+from models.user import User
 
 
 class TestListMigrations:

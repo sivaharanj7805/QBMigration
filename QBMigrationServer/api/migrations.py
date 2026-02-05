@@ -1,14 +1,15 @@
-from flask import Blueprint, request, jsonify, current_app
-from models.database import db
-from models.migration import Migration
-from models.user import User
-from models.migration_credit import MigrationCredit
-from utils.aws_manager import AWSMigrationManager
-from extensions import limiter
-from api.auth import require_auth
-from datetime import datetime
 import logging
 import re
+from datetime import datetime
+
+from api.auth import require_auth
+from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request
+from models.database import db
+from models.migration import Migration
+from models.migration_credit import MigrationCredit
+from models.user import User
+from utils.aws_manager import AWSMigrationManager
 
 migrations_bp = Blueprint("migrations", __name__)
 logger = logging.getLogger(__name__)
@@ -1093,8 +1094,9 @@ def get_migration_stats():
     Returns real data (not mock) for the current user.
     """
     try:
-        from sqlalchemy import func
         from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import func
 
         user_id = _get_current_user_id()
 

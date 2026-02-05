@@ -8,18 +8,18 @@ Endpoints:
 - POST /api/license/deactivate - Transfer license (admin only)
 """
 
-from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required, current_user
-from functools import wraps
-from datetime import datetime, timedelta, timezone
-import jwt
-import os
 import logging
+import os
+from datetime import datetime, timedelta, timezone
+from functools import wraps
 
-from models.database import db
-from models.license import License, LicenseActivation, LICENSE_TIERS
-from extensions import limiter
+import jwt
 from config import Config
+from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request
+from flask_login import current_user, login_required
+from models.database import db
+from models.license import LICENSE_TIERS, License, LicenseActivation
 
 # FIX #53: Import PII redaction for secure logging
 from utils.pii_redaction import hash_email

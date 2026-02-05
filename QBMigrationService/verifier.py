@@ -1,22 +1,23 @@
+import hashlib
 import json
 import logging
-import hashlib
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
 from decimal import Decimal, InvalidOperation
-from reportlab.lib.pagesizes import letter
+from typing import Any, Dict, List, Optional, Tuple
+
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Image as RLImage
 from reportlab.platypus import (
+    PageBreak,
+    Paragraph,
     SimpleDocTemplate,
+    Spacer,
     Table,
     TableStyle,
-    Paragraph,
-    Spacer,
-    PageBreak,
 )
-from reportlab.platypus import Image as RLImage
-from reportlab.lib.units import inch
 
 logger = logging.getLogger(__name__)
 

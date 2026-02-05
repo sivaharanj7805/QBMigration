@@ -6,9 +6,9 @@ Run with: flask db upgrade
 from flask import Flask
 from flask_migrate import Migrate
 from models.database import db
-from models.user import User
 from models.migration import Migration
 from models.project import Project
+from models.user import User
 
 # This file sets up Flask-Migrate
 # To initialize migrations:

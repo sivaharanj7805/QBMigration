@@ -7,10 +7,10 @@ Replaces local .pem files with AWS KMS envelope encryption.
 
 import base64
 import json
-import os
 import logging
-from typing import Dict, Optional, Tuple
+import os
 from datetime import datetime, timezone
+from typing import Dict, Optional, Tuple
 
 # AWS SDK
 try:
@@ -206,8 +206,9 @@ class AWSKMSManager:
         plaintext_key, encrypted_key = self.generate_data_key(context)
 
         # Encrypt tokens with data key using AES-256-GCM
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         import os as _os
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         aesgcm = AESGCM(plaintext_key)
         nonce = _os.urandom(12)
@@ -269,8 +270,9 @@ class AWSKMSManager:
 
         plaintext_key, encrypted_key = self.generate_data_key(context)
 
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         import os as _os
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         aesgcm = AESGCM(plaintext_key)
         nonce = _os.urandom(12)
@@ -346,6 +348,7 @@ class KMSFallbackManager:
     def generate_data_key(self, context: Dict = None) -> Tuple[bytes, bytes]:
         """Generate data key using local key."""
         import os as _os
+
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         # Generate random data key

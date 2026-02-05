@@ -19,9 +19,10 @@ Usage:
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+
 from flask import Flask
-from models.migration import Migration
 from models import db
+from models.migration import Migration
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +144,9 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
             'dry_run': bool
         }
     """
-    import boto3
     import os
+
+    import boto3
     from botocore.exceptions import ClientError
 
     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
@@ -268,9 +270,9 @@ if __name__ == "__main__":
         DATA_RETENTION_HOURS: Number of hours to retain full data (default: 24)
         DRY_RUN: Set to '1' or 'true' for dry run mode (default: false)
     """
-    import sys
-    import os
     import json
+    import os
+    import sys
 
     # Configure logging
     logging.basicConfig(

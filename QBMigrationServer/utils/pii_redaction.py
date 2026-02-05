@@ -4,8 +4,8 @@ Provides functions to redact Personally Identifiable Information (PII) from logs
 to comply with GDPR, PIPEDA, and other privacy regulations.
 """
 
-import re
 import hashlib
+import re
 from typing import Optional
 
 

@@ -12,12 +12,12 @@ Usage:
     secrets = get_all_secrets()
 """
 
-import os
 import json
 import logging
-import time
+import os
 import threading
-from typing import Dict, Any, Optional
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,6 @@ def _get_boto3_client():
 
 def _is_cache_valid() -> bool:
     """Check if the secrets cache is still valid based on TTL."""
-    global _secrets_cache_timestamp
     if not _secrets_cache:
         return False
     elapsed = time.time() - _secrets_cache_timestamp
@@ -88,7 +87,7 @@ def get_all_secrets(
     Raises:
         SecretsManagerError: If secrets cannot be retrieved.
     """
-    global _secrets_cache, _secrets_cache_timestamp
+    global _secrets_cache_timestamp  # noqa: F824
 
     # In development mode, fall back to environment variables
     if os.getenv("FLASK_ENV", "development") == "development":
@@ -258,7 +257,6 @@ def clear_cache():
 
 def get_cache_status() -> Dict[str, Any]:
     """Get current cache status for monitoring/debugging."""
-    global _secrets_cache, _secrets_cache_timestamp
     if not _secrets_cache:
         return {
             "cached": False,

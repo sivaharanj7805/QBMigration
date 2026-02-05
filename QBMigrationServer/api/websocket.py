@@ -7,15 +7,16 @@ FIX CRIT-03: Configured proper CORS origins instead of wildcard
 FIX LOW-04: Replaced print statements with logging
 """
 
-from flask import Blueprint, request, current_app
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from functools import wraps
-import jwt
-import hmac
 import hashlib
-import os
+import hmac
 import logging
+import os
 from datetime import datetime, timezone
+from functools import wraps
+
+import jwt
+from flask import Blueprint, current_app, request
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 logger = logging.getLogger(__name__)
 

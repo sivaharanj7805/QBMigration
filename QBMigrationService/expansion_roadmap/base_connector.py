@@ -9,8 +9,8 @@ Defines the common interface that Sage, Xero, FreshBooks, etc. must implement.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class ExtractionStatus(Enum):

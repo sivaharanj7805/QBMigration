@@ -12,12 +12,13 @@ this service preserves:
 This satisfies legal retention requirements without storing sensitive data.
 """
 
-import boto3
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional
+
+import boto3
 from botocore.exceptions import ClientError
-from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,7 @@ class ForensicArchivalService:
 
             total_objects = 0
             total_size = 0
-            by_type = {}
+            by_type: dict[str, int] = {}
 
             for page in paginator.paginate(
                 Bucket=self.bucket_name, Prefix=self.archive_prefix

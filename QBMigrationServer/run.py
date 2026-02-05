@@ -1,7 +1,8 @@
 # STEP 1: Import dotenv
-from dotenv import load_dotenv
-import os
 import logging
+import os
+
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ if __name__ == "__main__":
     # To expose to network, set DEV_HOST environment variable
     host = os.environ.get("DEV_HOST", "127.0.0.1")
 
-    if host == "0.0.0.0":
+    if host == "0.0.0.0":  # nosec B104
         logger.info("WARNING: Server is binding to all interfaces (0.0.0.0)")
         logger.info("This should ONLY be used in isolated development environments!")
         logger.info("=" * 80)

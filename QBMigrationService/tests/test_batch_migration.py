@@ -10,14 +10,15 @@ Tests the batch migration methods added to MigrationOrchestrator:
 6. Full integration: batch migration through the orchestrator flow
 """
 
-import pytest
-import sys
-import os
 import json
-import tempfile
+import os
 import sqlite3
-from unittest.mock import MagicMock, patch, call, PropertyMock
+import sys
+import tempfile
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, PropertyMock, call, patch
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

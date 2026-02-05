@@ -10,19 +10,19 @@ Endpoints tested:
 - DELETE /api/projects/<id>     - Delete project
 """
 
-import pytest
+import os
+import sys
 from datetime import datetime, timezone
 
-import sys
-import os
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.database import db
-from models.user import User
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
 from models.project import Project
+from models.user import User
 
 # ============================================================================
 # Fixtures

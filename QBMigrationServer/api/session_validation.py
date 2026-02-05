@@ -10,17 +10,17 @@ Security Features:
 - Audit logging
 """
 
-import os
-import logging
 import hashlib
+import logging
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from flask import Blueprint, request, jsonify, current_app
 
+from flask import Blueprint, current_app, jsonify, request
 from models.database import db
-from models.project import Project
 from models.migration_credit import MigrationCredit
+from models.project import Project
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,7 @@ def hash_fingerprint(fingerprint):
     if not fingerprint:
         return None
     import hmac
+
     from flask import current_app
 
     secret = current_app.config["SECRET_KEY"].encode()
@@ -371,9 +372,9 @@ def activate_session():
 
     # RACE CONDITION FIX: Use database-level locking to prevent duplicate activations
     # This ensures that concurrent requests don't both pass the device limit check
+    from models.database import is_postgresql
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
-    from models.database import is_postgresql
 
     try:
         # Lock existing activations for this session to prevent race conditions

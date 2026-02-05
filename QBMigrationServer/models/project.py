@@ -3,10 +3,11 @@ Project Model
 Manages migration projects for clients
 """
 
-from models.database import db
-from datetime import datetime, timezone
 import secrets
 import string
+from datetime import datetime, timezone
+
+from models.database import db
 
 
 def generate_session_id(max_retries: int = 10) -> str:

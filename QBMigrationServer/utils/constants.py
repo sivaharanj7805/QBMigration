@@ -15,7 +15,7 @@ Categories:
 - QBO API Limits
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 # =============================================================================
 # API RATE LIMITING

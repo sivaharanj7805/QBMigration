@@ -12,16 +12,17 @@ Author: QB Migration Suite
 Version: 1.0.0
 """
 
-import pytest
+import hashlib
+import json
+import os
+import sys
 import threading
 import time
-import json
-import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
-import sys
-import os
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

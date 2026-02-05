@@ -3,18 +3,18 @@ Payments API - Stripe integration for purchasing migration credits.
 Handles checkout session creation and webhook verification.
 """
 
-import os
-import stripe
 import logging
+import os
 from datetime import datetime, timezone
-from typing import Callable, Any, Tuple
-from flask import Blueprint, request, jsonify, current_app, Response
 from functools import wraps
-import jwt
+from typing import Any, Callable, Tuple
 
+import jwt
+import stripe
+from flask import Blueprint, Response, current_app, jsonify, request
 from models.database import db
-from models.user import User
 from models.migration_credit import MigrationCredit
+from models.user import User
 
 logger = logging.getLogger(__name__)
 

@@ -9,18 +9,19 @@ Provides API endpoints for:
 5. Audit certificate download
 """
 
-from flask import Blueprint, request, jsonify, current_app, send_file
-from api.auth import require_auth
-from models.database import db
-from models.migration import Migration
-from sqlalchemy import func, extract
-import logging
 import json
+import logging
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-import sys
+
+from api.auth import require_auth
+from flask import Blueprint, current_app, jsonify, request, send_file
+from models.database import db
+from models.migration import Migration
+from sqlalchemy import extract, func
 
 
 def is_valid_uuid(value):
@@ -742,8 +743,8 @@ def download_audit_certificate(migration_id):
                 )
                 # Generate a basic placeholder certificate
                 from reportlab.lib.pagesizes import letter
-                from reportlab.platypus import SimpleDocTemplate, Paragraph
                 from reportlab.lib.styles import getSampleStyleSheet
+                from reportlab.platypus import Paragraph, SimpleDocTemplate
 
                 doc = SimpleDocTemplate(cert_path, pagesize=letter)
                 styles = getSampleStyleSheet()
@@ -955,9 +956,10 @@ def export_caseware_bundle(migration_id):
             result = exporter.generate_audit_bundle(qb_data)
 
             # SECURITY FIX: Create encrypted zip file (AES-256)
-            import zipfile
-            from cryptography.fernet import Fernet
             import base64
+            import zipfile
+
+            from cryptography.fernet import Fernet
 
             # Generate encryption key from app secret (deterministic for same migration)
             # SECURITY FIX: Fail if no encryption key configured - never use default
@@ -976,9 +978,9 @@ def export_caseware_bundle(migration_id):
             # 3. We need to be able to decrypt for download
             migration_salt = migration_id.encode("utf-8")
 
-            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-            from cryptography.hazmat.primitives import hashes
             from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
@@ -1227,7 +1229,7 @@ def download_caseware_bundle(migration_id):
         bundle_path = os.path.realpath(migration.caseware_bundle_path)
         allowed_dirs = [
             os.path.realpath(current_app.root_path),
-            os.path.realpath("/tmp"),
+            os.path.realpath("/tmp"),  # nosec B108
         ]
         path_is_valid = False
         for allowed_dir in allowed_dirs:
@@ -1255,12 +1257,13 @@ def download_caseware_bundle(migration_id):
             and migration.caseware_encryption_method == "Fernet-AES256"
         ):
             try:
-                from cryptography.fernet import Fernet
-                from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-                from cryptography.hazmat.primitives import hashes
-                from cryptography.hazmat.backends import default_backend
                 import base64
                 import io
+
+                from cryptography.fernet import Fernet
+                from cryptography.hazmat.backends import default_backend
+                from cryptography.hazmat.primitives import hashes
+                from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
                 # Get encryption key (must match the one used during export)
                 app_secret = current_app.config.get("BACKUP_ENCRYPTION_KEY")

@@ -10,15 +10,16 @@ These tests simulate the COMPLETE user journey from:
 Run with: python -m pytest tests/test_e2e_flow.py -v
 """
 
-import pytest
-import json
-import time
 import hashlib
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock
-from decimal import Decimal
+import json
 import os
 import sys
+import time
+from datetime import datetime, timedelta
+from decimal import Decimal
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

@@ -3,9 +3,10 @@ WhitelabelSettings Model
 Stores per-user branding configuration for the ForensicBridge dashboard.
 """
 
-from models.database import db
-from datetime import datetime, timezone
 import re
+from datetime import datetime, timezone
+
+from models.database import db
 
 
 class WhitelabelSettings(db.Model):

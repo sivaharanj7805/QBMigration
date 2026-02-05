@@ -7,11 +7,12 @@ Features:
 - Activation audit trail
 """
 
-from models.database import db
-from datetime import datetime, timedelta, timezone
-import secrets
 import hashlib
 import json
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from models.database import db
 
 # License tier configuration
 LICENSE_TIERS = {

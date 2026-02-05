@@ -1,50 +1,52 @@
-import os
 import logging
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, jsonify, request, redirect
-from flask_login import LoginManager
+import sys
+from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+
+from api.auth import auth_bp
+from api.dashboard_api import dashboard_bp
+from api.extractor import extractor_bp
+from api.health import health_bp
+from api.health_check import health_check_bp
+from api.internal import internal_bp  # CRIT-09 FIX: Internal API for Lambda
+from api.legal import legal_bp
+from api.license_api import license_bp
+from api.migrations import migrations_bp
+from api.projects import projects_bp
+from api.qbo import qbo_bp
+from api.reports import reports_bp
+from api.s3_upload import s3_upload_bp
+from api.security_txt import security_txt_bp  # FIX 100/100: RFC 9116 security.txt
+from api.session_validation import session_validation_bp
+from api.settings import settings_bp
+from api.sso_provider import sso_bp
+from api.upload import upload_bp
+from api.vault import vault_bp
+from api.webhook_delivery_log import webhook_logs_bp
+from api.webhooks import webhooks_bp
+from api.websocket import init_socketio, websocket_bp
+from config import config  # Import config BEFORE dashboard_api to avoid path conflict
+from extensions import limiter
+from flask import Flask, jsonify, redirect, request
 from flask_cors import CORS
-from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_login import LoginManager
+from flask_wtf.csrf import CSRFError, CSRFProtect
 from models.database import db, init_db
 from models.user import User
-from config import config  # Import config BEFORE dashboard_api to avoid path conflict
-from api.auth import auth_bp
-from api.upload import upload_bp
-from extensions import limiter
-from api.migrations import migrations_bp
-from api.webhooks import webhooks_bp
-from api.dashboard_api import dashboard_bp
+from sqlalchemy import text
 from utils.backup import init_backup_scheduler
 from utils.cleanup_scheduler import init_cleanup_scheduler
 from utils.error_sanitizer import (
-    sanitize_error_message,
     create_error_response,
     is_production,
+    sanitize_error_message,
 )
-from sqlalchemy import text
-from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone
-from api.health import health_bp
-from api.projects import projects_bp
-from api.health_check import health_check_bp
-from api.websocket import websocket_bp, init_socketio
-from api.s3_upload import s3_upload_bp
-from api.sso_provider import sso_bp
-from api.webhook_delivery_log import webhook_logs_bp
-from api.license_api import license_bp
-from api.qbo import qbo_bp
-from api.legal import legal_bp
-from api.extractor import extractor_bp
-from api.session_validation import session_validation_bp
-from api.reports import reports_bp
-from api.internal import internal_bp  # CRIT-09 FIX: Internal API for Lambda
-from api.settings import settings_bp
-from api.vault import vault_bp
-from api.security_txt import security_txt_bp  # FIX 100/100: RFC 9116 security.txt
-import sys
 
 logger = logging.getLogger(__name__)
 
@@ -484,8 +486,9 @@ def create_app(config_name="development"):
 
     # SECURITY: Validate critical encryption keys at startup
     # FIX #43: Validate BACKUP_ENCRYPTION_KEY is a valid Fernet key
-    from cryptography.fernet import Fernet, InvalidToken
     import base64
+
+    from cryptography.fernet import Fernet, InvalidToken
 
     backup_key = app.config.get("BACKUP_ENCRYPTION_KEY")
     if not backup_key:
@@ -590,8 +593,10 @@ def create_app(config_name="development"):
 
         if request.content_length and request.content_length > max_size:
             # FIX: Use app.logger instead of logger
+            from utils.pii_redaction import hash_ip
+
             app.logger.warning(
-                f"Request too large ({request.content_length} bytes) from {request.remote_addr}"
+                f"Request too large ({request.content_length} bytes) from {hash_ip(request.remote_addr)}"
             )
             return (
                 jsonify(
@@ -739,8 +744,10 @@ def create_app(config_name="development"):
     @app.errorhandler(CSRFError)
     def handle_csrf_error(e):
         """Handle CSRF validation failures"""
+        from utils.pii_redaction import hash_ip
+
         app.logger.warning(
-            f"CSRF validation failed from {request.remote_addr}: {e.description}"
+            f"CSRF validation failed from {hash_ip(request.remote_addr)}: {e.description}"
         )
         return (
             jsonify(
@@ -1361,7 +1368,9 @@ def create_app(config_name="development"):
     @app.errorhandler(413)
     def request_entity_too_large(error):
         """Handle 413 Payload Too Large errors"""
-        app.logger.warning(f"Request too large from {request.remote_addr}")
+        from utils.pii_redaction import hash_ip
+
+        app.logger.warning(f"Request too large from {hash_ip(request.remote_addr)}")
         max_size = app.config.get("MAX_CONTENT_LENGTH", 0) / 1024 / 1024
         return (
             jsonify(
@@ -1377,8 +1386,10 @@ def create_app(config_name="development"):
     @app.errorhandler(429)
     def too_many_requests(error):
         """Handle 429 Too Many Requests errors"""
+        from utils.pii_redaction import hash_ip
+
         app.logger.warning(
-            f"Rate limit exceeded from {request.remote_addr} on {request.path}"
+            f"Rate limit exceeded from {hash_ip(request.remote_addr)} on {request.path}"
         )
         return (
             jsonify(
@@ -1459,14 +1470,15 @@ if __name__ == "__main__":
     # FIX: Bind to localhost only by default (consistent with run.py)
     host = os.environ.get("DEV_HOST", "127.0.0.1")
 
-    if host == "0.0.0.0":
+    if host == "0.0.0.0":  # nosec B104
         logger.info("WARNING: Server is binding to all interfaces (0.0.0.0)")
         logger.info("This should ONLY be used in isolated development environments!")
         logger.info("=" * 80)
         logger.info("")
 
     try:
-        app.run(host=host, port=5000, debug=True)
+        is_debug = os.environ.get("FLASK_ENV") != "production"
+        app.run(host=host, port=5000, debug=is_debug)  # nosec B201
     except KeyboardInterrupt:
         logger.info("\n\nServer stopped by user")
     except Exception as e:

@@ -7,19 +7,19 @@ NOT Flask login sessions. Authentication is done via session_id + device_fingerp
 rather than Flask-Login.
 """
 
-import pytest
 import json
+import os
+import sys
 from datetime import datetime, timezone
 
-import sys
-import os
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.database import db
-from models.user import User
-from models.project import Project
 from models.migration_credit import MigrationCredit
+from models.project import Project
+from models.user import User
 
 # ---------------------------------------------------------------------------
 # Fixtures

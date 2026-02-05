@@ -26,12 +26,12 @@ import csv
 import hashlib
 import json
 import logging
-from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Generator, Callable
 import os
 import threading
+from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 # FIX #1: chardet with fallback if not installed
 try:
@@ -43,7 +43,7 @@ except ImportError:
     )
 
 # FIX #33: Import locale-aware lead sheet mapper
-from leadsheet_mapper import LeadSheetMapper, AccountingStandard
+from leadsheet_mapper import AccountingStandard, LeadSheetMapper
 
 logger = logging.getLogger(__name__)
 

@@ -1,21 +1,22 @@
-import requests
-import time
 import json
 import logging
-import sqlite3
 import os
-import signal
-import sys
-import uuid
 import random
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime
+import signal
+import sqlite3
+import sys
+import threading
+import time
+import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from threading import Lock
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from threading import Lock
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 # Import configuration settings (HIGH PRIORITY FROM TESTING REPORT)
 try:
@@ -202,7 +203,7 @@ class PremiumQBOClient:
             # FIX #81: check_same_thread=False for multi-threading
             # AUDIT FIX: Use config constants instead of magic numbers
             try:
-                from config import SQLITE_TIMEOUT_SECONDS, SQLITE_BUSY_TIMEOUT_MS
+                from config import SQLITE_BUSY_TIMEOUT_MS, SQLITE_TIMEOUT_SECONDS
 
                 timeout = SQLITE_TIMEOUT_SECONDS
                 busy_timeout = SQLITE_BUSY_TIMEOUT_MS

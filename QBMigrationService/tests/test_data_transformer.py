@@ -14,11 +14,12 @@ Tests cover:
 TEST-01: Unit tests for QBDataTransformer
 """
 
-import pytest
-from decimal import Decimal
-from datetime import datetime
-import sys
 import os
+import sys
+from datetime import datetime
+from decimal import Decimal
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
