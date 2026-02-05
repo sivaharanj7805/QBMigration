@@ -11,8 +11,8 @@ from models.migration import Migration
 logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
-sys.path.insert(
-    0, os.path.join(os.path.dirname(__file__), "..", "..", "QBMigrationService")
+sys.path.append(
+    os.path.join(os.path.dirname(__file__), "..", "..", "QBMigrationService")
 )
 
 

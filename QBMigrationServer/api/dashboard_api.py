@@ -46,7 +46,7 @@ _service_path = os.getenv(
     ),
 )
 if _service_path not in sys.path:
-    sys.path.insert(0, _service_path)
+    sys.path.append(_service_path)
 
 logger = logging.getLogger(__name__)
 
