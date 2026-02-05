@@ -28,7 +28,7 @@ SERVICE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "QBMigrationService"
 )
 if SERVICE_PATH not in sys.path:
-    sys.path.insert(0, SERVICE_PATH)
+    sys.path.append(SERVICE_PATH)
 
 logger = logging.getLogger(__name__)
 

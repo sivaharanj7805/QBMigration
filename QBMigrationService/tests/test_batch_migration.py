@@ -10,6 +10,7 @@ Tests the batch migration methods added to MigrationOrchestrator:
 6. Full integration: batch migration through the orchestrator flow
 """
 
+import base64
 import json
 import os
 import sys
@@ -1265,9 +1266,11 @@ class TestBatchOrchestratorIntegration:
             mock_verifier.verify_migration.return_value = {"status": "OK"}
             mock_ver_init.return_value = mock_verifier
 
+            # Use valid base64-encoded 32-byte AES key for AUDIT FIX HIGH-09 validation
+            valid_key = base64.b64encode(b"\x00" * 32).decode()
             result = orchestrator.run_migration(
                 encrypted_data=b"test",
-                encryption_metadata={"key": "k", "iv": "i", "tag": "t"},
+                encryption_metadata={"key": valid_key, "iv": "i", "tag": "t"},
                 company_name="Test Co",
             )
 
@@ -1312,9 +1315,11 @@ class TestBatchOrchestratorIntegration:
             mock_verifier.verify_migration.return_value = {"status": "OK"}
             mock_ver_init.return_value = mock_verifier
 
+            # Use valid base64-encoded 32-byte AES key for AUDIT FIX HIGH-09 validation
+            valid_key = base64.b64encode(b"\x00" * 32).decode()
             orchestrator.run_migration(
                 encrypted_data=b"test",
-                encryption_metadata={"key": "k", "iv": "i", "tag": "t"},
+                encryption_metadata={"key": valid_key, "iv": "i", "tag": "t"},
                 company_name="Test Co",
             )
 

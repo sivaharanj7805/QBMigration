@@ -1865,13 +1865,8 @@ class QBDataTransformer:
                 if item_lines and "ItemLines" not in normalized:
                     normalized["ItemLines"] = item_lines
             else:
-                existing = normalized.get(line_key)
-                if existing is None:
+                if line_key not in normalized:
                     normalized[line_key] = list(norm_lines)
-                elif isinstance(existing, list):
-                    existing.extend(norm_lines)
-                else:
-                    normalized[line_key] = [existing] + list(norm_lines)
 
         return normalized
 
