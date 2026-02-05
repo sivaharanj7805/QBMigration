@@ -6,7 +6,7 @@
 # Run as: sudo ./deploy.sh [--branch main] [--restart-services]
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 # Configuration
 APP_USER="qbmigration"
@@ -161,18 +161,52 @@ else
 fi
 
 # =============================================================================
-# Health check
+# Health check with automatic rollback
 # =============================================================================
 echo ""
 echo "Running health check..."
 
-sleep 3
+HEALTH_CHECK_RETRIES=5
+HEALTH_CHECK_PASSED=false
 
-if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
-    echo "API health check: PASSED"
-else
-    echo "API health check: FAILED"
-    echo "Check logs: journalctl -u qbmigration-api -n 50"
+for i in $(seq 1 $HEALTH_CHECK_RETRIES); do
+    sleep 5
+    echo "Health check attempt $i/$HEALTH_CHECK_RETRIES..."
+    if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+        echo "API health check: PASSED"
+        HEALTH_CHECK_PASSED=true
+        break
+    else
+        echo "API health check: attempt $i failed"
+    fi
+done
+
+if [ "$HEALTH_CHECK_PASSED" = false ] && [ "$RESTART_SERVICES" = true ]; then
+    echo ""
+    echo "=========================================="
+    echo "HEALTH CHECK FAILED - INITIATING AUTOMATIC ROLLBACK"
+    echo "=========================================="
+
+    echo "Restoring from backup: $BACKUP_DIR/$BACKUP_NAME.tar.gz"
+    tar -xzf "$BACKUP_DIR/$BACKUP_NAME.tar.gz" -C /opt
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+
+    echo "Restarting services with previous version..."
+    systemctl restart qbmigration-api
+    systemctl restart qbmigration-celery-worker
+    systemctl restart qbmigration-celery-beat
+    systemctl restart qbmigration-frontend
+
+    sleep 5
+
+    if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+        echo "Rollback successful - API is healthy with previous version"
+    else
+        echo "CRITICAL: Rollback also failed. Manual intervention required."
+        echo "Check logs: journalctl -u qbmigration-api -n 100"
+    fi
+
+    exit 1
 fi
 
 if curl -sf http://localhost:3000 > /dev/null 2>&1; then

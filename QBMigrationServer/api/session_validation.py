@@ -516,15 +516,36 @@ def start_extraction():
             'transactions_used': project.transactions_used
         }), 403
 
-    # Generate extraction token (used to complete extraction)
+    # Generate extraction token and store its hash for verification
+    # at complete-extraction time. This prevents replay attacks where
+    # a stolen token could be used to record fraudulent transaction counts.
     extraction_token = secrets.token_urlsafe(32)
+    extraction_token_hash = hashlib.sha256(extraction_token.encode()).hexdigest()
 
-    # Update activation tracking
+    # Store the token hash on the activation record for later verification
     activation.extraction_count += 1
     activation.last_extraction_at = datetime.now(timezone.utc)
     activation.last_used_at = datetime.now(timezone.utc)
 
+    # Store token hash as a simple attribute for verification
+    # Using a dedicated field would require a migration; use a JSON-safe approach
+    if not hasattr(activation, '_pending_extraction_tokens'):
+        activation._pending_extraction_tokens = {}
+
+    # Store in database via a simple column update
+    # We store the hash in the device_name suffix temporarily - not ideal but avoids migration
+    # Better: Add an extraction_token_hash column in next migration
     try:
+        # Store token hash in the session validation log for verification
+        token_log = SessionValidationLog(
+            session_id=session_id,
+            device_fingerprint=fingerprint_hash,
+            ip_address=ip_address,
+            action='extraction_token',
+            result=extraction_token_hash,
+            error_message=None
+        )
+        db.session.add(token_log)
         db.session.commit()
 
         log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'success')
@@ -585,7 +606,34 @@ def complete_extraction():
             'error': 'Session ID and device fingerprint are required'
         }), 400
 
+    # SECURITY FIX: Verify extraction token to prevent unauthorized completions
+    if not extraction_token:
+        return jsonify({
+            'success': False,
+            'error': 'Extraction token is required (from start-extraction response)'
+        }), 400
+
     fingerprint_hash = hash_fingerprint(device_fingerprint)
+
+    # Verify the extraction token matches one issued by start-extraction
+    token_hash = hashlib.sha256(extraction_token.encode()).hexdigest()
+    token_log = SessionValidationLog.query.filter_by(
+        session_id=session_id,
+        device_fingerprint=fingerprint_hash,
+        action='extraction_token',
+        result=token_hash
+    ).first()
+
+    if not token_log:
+        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'failed',
+                              'Invalid or expired extraction token')
+        return jsonify({
+            'success': False,
+            'error': 'Invalid extraction token. Please start a new extraction.'
+        }), 403
+
+    # Delete the token log to prevent replay attacks (one-time use)
+    db.session.delete(token_log)
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()

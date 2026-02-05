@@ -31,19 +31,42 @@ class EncryptionManager:
     3. If hash doesn't match → HARD ABORT (no "continue anyway")
     """
     
-    # HIGH-15 FIX: KDF salt should be generated randomly per-key or loaded from secure config
-    # AUDIT FIX: Use a deterministic fallback salt for consistency, but warn loudly
-    # WARNING: Production MUST set QBM_KDF_SALT environment variable!
+    # KDF salt configuration - used for password-based key derivation
+    # SECURITY FIX: Production MUST set QBM_KDF_SALT environment variable.
+    # The fallback generates a random salt on first use and persists it to disk,
+    # ensuring it's not predictable from machine metadata (hostname+user).
     _ENV_SALT = os.environ.get('QBM_KDF_SALT', '')
     if _ENV_SALT:
         DEFAULT_KDF_SALT = _ENV_SALT.encode()
     else:
-        # Use a deterministic but unique-per-installation fallback
-        # This allows decryption to work across process restarts
-        import hashlib as _hs
-        _machine_id = os.environ.get('HOSTNAME', '') + os.environ.get('USER', 'default')
-        DEFAULT_KDF_SALT = _hs.sha256(f"QBMigration-KDF-{_machine_id}".encode()).digest()
-        # Note: This is logged at first use, not at import time
+        # Generate and persist a random salt instead of using predictable machine info
+        _salt_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.kdf_salt')
+        try:
+            if os.path.exists(_salt_file):
+                with open(_salt_file, 'rb') as _f:
+                    DEFAULT_KDF_SALT = _f.read()
+                if len(DEFAULT_KDF_SALT) != 32:
+                    raise ValueError("Invalid salt file length")
+            else:
+                DEFAULT_KDF_SALT = os.urandom(32)
+                # Write with restrictive permissions atomically
+                _fd = os.open(_salt_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                try:
+                    os.write(_fd, DEFAULT_KDF_SALT)
+                finally:
+                    os.close(_fd)
+        except (OSError, ValueError):
+            # If file operations fail, fall back to env-derived salt with warning
+            import hashlib as _hs
+            _machine_id = os.environ.get('HOSTNAME', '') + os.environ.get('USER', 'default')
+            DEFAULT_KDF_SALT = _hs.sha256(f"QBMigration-KDF-{_machine_id}".encode()).digest()
+            import warnings
+            warnings.warn(
+                "QBM_KDF_SALT not set and salt file creation failed. "
+                "Using machine-derived salt (less secure). Set QBM_KDF_SALT in production.",
+                UserWarning,
+                stacklevel=2
+            )
     
     @staticmethod
     def encrypt_data(plaintext: bytes) -> Dict[str, str]:
@@ -72,20 +95,84 @@ class EncryptionManager:
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(plaintext) + encryptor.finalize()
         
-        result = {
+        # SECURITY FIX: Return key separately from ciphertext payload.
+        # Storing the key alongside the ciphertext defeats encryption entirely.
+        # The encrypted payload (for storage/transmission) must NOT contain the key.
+        encrypted_payload = {
             'iv': base64.b64encode(iv).decode('utf-8'),
             'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
             'ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
-            'key': base64.b64encode(key).decode('utf-8'),
             'data_hash_sha256': data_hash,  # CRITICAL: Forensic integrity
             'algorithm': 'AES-256-GCM',
-            'version': '2.0'
+            'version': '2.1'
         }
-        
+
+        # Key is returned separately - caller MUST store it in a secure
+        # key management system (AWS KMS, HashiCorp Vault, etc.), NOT
+        # alongside the ciphertext.
+        key_material = {
+            'key': base64.b64encode(key).decode('utf-8'),
+            'algorithm': 'AES-256-GCM',
+            'key_length_bits': 256
+        }
+
         # SECURITY: Clear sensitive key from memory
         EncryptionManager.secure_zero_memory(key)
-        
+
+        # BACKWARD COMPATIBILITY: Return combined dict but mark version 2.1
+        # to signal that key should be stored separately.
+        # Callers should migrate to using encrypt_data_v2() which enforces separation.
+        result = dict(encrypted_payload)
+        result['key'] = key_material['key']
+
+        logger.warning(
+            "SECURITY: encrypt_data() returns key in payload for backward compatibility. "
+            "Migrate to encrypt_data_v2() which enforces key separation."
+        )
+
         return result
+
+    @staticmethod
+    def encrypt_data_v2(plaintext: bytes) -> tuple:
+        """
+        Encrypt data with proper key separation (recommended).
+
+        Returns:
+            Tuple[encrypted_payload, key_material] where:
+            - encrypted_payload: Dict for storage (NO key included)
+            - key_material: Dict with key (store in KMS/Vault separately)
+        """
+        data_hash = hashlib.sha256(plaintext).hexdigest()
+        key = os.urandom(32)
+        iv = os.urandom(12)
+
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.GCM(iv),
+            backend=default_backend()
+        )
+
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+
+        encrypted_payload = {
+            'iv': base64.b64encode(iv).decode('utf-8'),
+            'tag': base64.b64encode(encryptor.tag).decode('utf-8'),
+            'ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
+            'data_hash_sha256': data_hash,
+            'algorithm': 'AES-256-GCM',
+            'version': '2.1'
+        }
+
+        key_material = {
+            'key': base64.b64encode(key).decode('utf-8'),
+            'algorithm': 'AES-256-GCM',
+            'key_length_bits': 256
+        }
+
+        EncryptionManager.secure_zero_memory(key)
+
+        return encrypted_payload, key_material
     
     @staticmethod
     def decrypt_data(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes) -> bytes:
@@ -562,23 +649,31 @@ class EncryptionManager:
         progress_callback=None
     ) -> bool:
         """
-        $25M FIX: Stream-decrypt large files without loading into RAM.
-        
-        This prevents memory crashes on 2GB+ files.
-        
+        Decrypt an encrypted JSON file to disk, writing output in chunks.
+
+        WARNING: Despite the name, AES-256-GCM requires the full ciphertext
+        for authentication tag verification before any plaintext is produced.
+        The entire ciphertext MUST be loaded into memory for decryption.
+        Only the OUTPUT write is chunked to reduce peak memory during disk I/O.
+
+        MEMORY REQUIREMENTS:
+            - Peak RAM usage is approximately 3x the ciphertext size:
+              1x for base64-encoded ciphertext string
+              1x for decoded ciphertext bytes
+              1x for decrypted plaintext bytes
+            - Example: 500MB plaintext -> ~2GB peak RAM
+            - For files > 500MB, ensure sufficient memory is available.
+            - Files > 1GB may cause OOM on systems with < 8GB RAM.
+
         Args:
             input_path: Path to encrypted JSON file
             output_path: Path to save decrypted file
-            chunk_size: Size of decryption chunks in bytes (default 64KB)
+            chunk_size: Size of output write chunks in bytes (default 64KB)
             verify_hash: Whether to verify SHA-256 hash (default True)
             progress_callback: Optional callback function(bytes_processed, total_bytes)
-            
+
         Returns:
             True if decryption succeeded
-            
-        Performance:
-            - 2GB file: ~128MB RAM peak (vs 4GB+ with full load)
-            - 10GB file: ~128MB RAM peak (vs OOM crash)
         """
         try:
             # Read encryption metadata
@@ -662,7 +757,7 @@ class EncryptionManager:
             return True
             
         except Exception as e:
-            logger.info(f"Streaming decryption failed: {e}")
+            logger.error(f"File decryption failed: {e}")
             return False
     
     @staticmethod

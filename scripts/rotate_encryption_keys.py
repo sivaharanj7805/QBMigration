@@ -156,26 +156,25 @@ def main():
     print("Never commit these keys to git or share via unencrypted channels.")
     print()
 
-    # Write to a temporary secure file
-    output_file = Path(__file__).parent.parent / '.keys_rotation_temp'
-    with open(output_file, 'w') as f:
-        f.write(f"# ForensicBridge Key Rotation - {datetime.now(timezone.utc).isoformat()}\n")
-        f.write(f"# DELETE THIS FILE AFTER COPYING KEYS\n\n")
-        f.write(f"ENCRYPTION_KEY_B64={aes_key_b64}\n")
-        f.write(f"FERNET_KEY={fernet_key}\n")
-        f.write(f"SECRET_KEY={secret_key}\n")
-        f.write(f"ADMIN_API_KEY={admin_api_key}\n")
-        f.write(f"ARCHIVE_API_KEY={archive_api_key}\n")
-        f.write(f"QBM_KDF_SALT={kdf_salt}\n")
+    # Only write to file if explicitly requested via --write-file flag
+    if '--write-file' in sys.argv:
+        output_file = Path(__file__).parent.parent / '.keys_rotation_temp'
+        fd = os.open(str(output_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(f"# ForensicBridge Key Rotation - {datetime.now(timezone.utc).isoformat()}\n")
+            f.write(f"# DELETE THIS FILE AFTER COPYING KEYS\n\n")
+            f.write(f"ENCRYPTION_KEY_B64={aes_key_b64}\n")
+            f.write(f"FERNET_KEY={fernet_key}\n")
+            f.write(f"SECRET_KEY={secret_key}\n")
+            f.write(f"ADMIN_API_KEY={admin_api_key}\n")
+            f.write(f"ARCHIVE_API_KEY={archive_api_key}\n")
+            f.write(f"QBM_KDF_SALT={kdf_salt}\n")
 
-    # Set restrictive permissions
-    try:
-        os.chmod(output_file, 0o600)
-    except (OSError, AttributeError):
-        pass
-
-    print(f"Keys also saved to: {output_file}")
-    print("DELETE THIS FILE after copying keys to your secure configuration!")
+        print(f"Keys saved to: {output_file}")
+        print("DELETE THIS FILE after copying keys to your secure configuration!")
+    else:
+        print("Keys were printed to stdout only (not saved to disk).")
+        print("Use --write-file flag to save keys to a temporary file.")
     print()
 
 

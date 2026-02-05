@@ -13,7 +13,7 @@
 # Usage: Paste this into EC2 User Data or run on a fresh Ubuntu 22.04 instance
 # =============================================================================
 
-set -e
+set -euo pipefail
 exec > >(tee /var/log/qbmigration-setup.log) 2>&1
 
 echo "=========================================="
@@ -165,14 +165,24 @@ ExecStart=$APP_DIR/venv/bin/gunicorn \
     --worker-class gevent \
     --timeout 120 \
     --keep-alive 5 \
+    --graceful-timeout 30 \
     --access-logfile /var/log/qbmigration/gunicorn-access.log \
     --error-logfile /var/log/qbmigration/gunicorn-error.log \
     app:app
 ExecReload=/bin/kill -s HUP \$MAINPID
+ExecStop=/bin/kill -s TERM \$MAINPID
+TimeoutStopSec=30
+KillMode=mixed
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/qbmigration /app/data
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -194,8 +204,17 @@ ExecStart=$APP_DIR/venv/bin/celery -A celery_worker worker \
     --loglevel=info \
     --concurrency=4 \
     --logfile=/var/log/qbmigration/celery-worker.log
+ExecStop=/bin/kill -s TERM \$MAINPID
+TimeoutStopSec=120
+KillMode=mixed
 Restart=always
 RestartSec=10
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/qbmigration /app/data
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -217,8 +236,17 @@ ExecStart=$APP_DIR/venv/bin/celery -A celery_worker beat \
     --loglevel=info \
     --logfile=/var/log/qbmigration/celery-beat.log \
     --schedule=/var/lib/qbmigration/celerybeat-schedule
+ExecStop=/bin/kill -s TERM \$MAINPID
+TimeoutStopSec=30
+KillMode=mixed
 Restart=always
 RestartSec=10
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/qbmigration /var/lib/qbmigration
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -238,8 +266,16 @@ Environment="PATH=/usr/bin"
 Environment="NODE_ENV=production"
 EnvironmentFile=/etc/qbmigration/environment
 ExecStart=/usr/bin/npm start
+ExecStop=/bin/kill -s TERM \$MAINPID
+TimeoutStopSec=30
+KillMode=mixed
 Restart=always
 RestartSec=5
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -285,6 +321,11 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    # Hide Nginx version
+    server_tokens off;
 
     # Gzip compression
     gzip on;

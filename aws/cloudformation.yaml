@@ -305,6 +305,7 @@ Resources:
             Effect: Allow
             Principal:
               AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+              # NOTE: The double-colon above is correct for IAM ARNs (no region)
             Action: 'kms:*'
             Resource: '*'
           - Sid: Allow S3 Service
@@ -439,6 +440,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+        # NOTE: Double-colon is intentional for AWS managed policy ARNs
 
   # ============================================================================
   # ELASTICACHE REDIS (Celery Broker)

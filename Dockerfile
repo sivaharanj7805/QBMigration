@@ -78,9 +78,13 @@ USER qbmigration
 # Expose port
 EXPOSE 5000
 
+# Graceful shutdown: gunicorn handles SIGTERM
+STOPSIGNAL SIGTERM
+
 # Run with gunicorn for production
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", \
      "--worker-class", "gthread", "--timeout", "120", "--keep-alive", "5", \
+     "--graceful-timeout", "30", \
      "--access-logfile", "-", "--error-logfile", "-", \
      "QBMigrationServer.app:create_app()"]
 

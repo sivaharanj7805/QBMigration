@@ -21,7 +21,7 @@ services:
     container_name: qbmigration-server
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${SERVER_EXPOSE_PORT:-127.0.0.1:5000}:5000"
     volumes:
       - ./QBMigrationServer:/app/QBMigrationServer:ro
       - ./QBMigrationService:/app/QBMigrationService:ro
@@ -48,7 +48,18 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
@@ -77,6 +88,15 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required - generate with: openssl rand -base64 32}
       - POSTGRES_DB=${POSTGRES_DB:-qbmigration}
       - PGDATA=/var/lib/postgresql/data/pgdata
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    shm_size: 256m
     healthcheck:
       # PRODUCTION FIX: Use environment variables for username and database
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qbmigration} -d ${POSTGRES_DB:-qbmigration}"]
@@ -95,12 +115,20 @@ services:
     container_name: qbmigration-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_EXPOSE_PORT:-127.0.0.1:6379}:6379"
     volumes:
       - redis-data:/data
     # SECURITY FIX: Add password authentication to Redis
     # CRITICAL FIX: Require REDIS_PASSWORD - no empty default allowed in production
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required for Redis authentication}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
     healthcheck:
       # SECURITY FIX: Don't expose password in process list - use shell to hide it
       test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]
@@ -135,8 +163,19 @@ services:
       - QBO_CLIENT_ID=${QBO_CLIENT_ID:-}
       - QBO_CLIENT_SECRET=${QBO_CLIENT_SECRET:-}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    stop_grace_period: 60s
     networks:
       - qbmigration-network
 
@@ -158,8 +197,19 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    stop_grace_period: 30s
     networks:
       - qbmigration-network
 
@@ -177,7 +227,22 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
-      - server
+      server:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     profiles:
       - production
     networks:

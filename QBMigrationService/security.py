@@ -327,36 +327,69 @@ class SecurityManager:
     
     @staticmethod
     def _check_duplicate_doc_numbers(data: Dict) -> List[str]:
-        """Check for duplicate invoice/bill DocNumbers"""
-        doc_numbers = {}
+        """
+        Check for duplicate DocNumbers across all transaction types.
+
+        QBO enforces DocNumber uniqueness within each transaction type.
+        Previously only checked Invoices - now covers all transaction types
+        that have RefNumber/DocNumber fields.
+        """
         duplicates = []
-        
-        for invoice in data.get('Invoices', []):
-            doc_num = invoice.get('RefNumber')
-            if doc_num:
-                if doc_num in doc_numbers:
-                    duplicates.append(f"Invoice #{doc_num}")
-                else:
-                    doc_numbers[doc_num] = True
-        
+
+        # All transaction types that have RefNumber/DocNumber fields
+        transaction_types = [
+            ('Invoices', 'Invoice'),
+            ('Bills', 'Bill'),
+            ('SalesReceipts', 'SalesReceipt'),
+            ('CreditMemos', 'CreditMemo'),
+            ('VendorCredits', 'VendorCredit'),
+            ('Estimates', 'Estimate'),
+            ('PurchaseOrders', 'PurchaseOrder'),
+            ('RefundReceipts', 'RefundReceipt'),
+            ('JournalEntries', 'JournalEntry'),
+        ]
+
+        for data_key, type_label in transaction_types:
+            doc_numbers = {}
+            for record in data.get(data_key, []):
+                doc_num = record.get('RefNumber') or record.get('DocNumber')
+                if doc_num:
+                    if doc_num in doc_numbers:
+                        duplicates.append(f"{type_label} #{doc_num}")
+                    else:
+                        doc_numbers[doc_num] = True
+
         return duplicates
     
     @staticmethod
     def _check_invalid_characters(data: Dict) -> List[str]:
-        """Check for invalid characters in names"""
+        """
+        Check for invalid characters in entity names.
+
+        QBO rejects names containing certain special characters.
+        Previously only checked Customers and Vendors - now covers all
+        entity types with name fields.
+        """
         invalid_pattern = re.compile(r'[<>:"/\\|?*]')
         invalid_names = []
-        
-        for customer in data.get('Customers', []):
-            name = customer.get('Name', '')
-            if invalid_pattern.search(name):
-                invalid_names.append(f"Customer: {name}")
-        
-        for vendor in data.get('Vendors', []):
-            name = vendor.get('Name', '')
-            if invalid_pattern.search(name):
-                invalid_names.append(f"Vendor: {name}")
-        
+
+        # All entity types that have Name/DisplayName fields
+        entity_types = [
+            ('Customers', 'Customer'),
+            ('Vendors', 'Vendor'),
+            ('Employees', 'Employee'),
+            ('Items', 'Item'),
+            ('Accounts', 'Account'),
+            ('Classes', 'Class'),
+            ('Departments', 'Department'),
+        ]
+
+        for data_key, type_label in entity_types:
+            for entity in data.get(data_key, []):
+                name = entity.get('Name', '') or entity.get('DisplayName', '')
+                if name and invalid_pattern.search(name):
+                    invalid_names.append(f"{type_label}: {name}")
+
         return invalid_names
     
     @staticmethod

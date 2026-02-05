@@ -73,7 +73,16 @@ class PremiumQBOClient:
         self.rate_limit_lock = Lock()  # FIX #14: Thread-safe counter
         
         # FIX #81: SQLite with check_same_thread=False
-        self.db_path = Path(db_path) if db_path else Path("data/migration_state.db")
+        # SECURITY FIX: Validate db_path to prevent arbitrary file creation
+        if db_path:
+            db_path_resolved = Path(db_path).resolve()
+            # Reject paths in system directories
+            system_dirs = ['/etc', '/proc', '/sys', '/dev', '/usr', '/bin', '/sbin']
+            if any(str(db_path_resolved).startswith(d) for d in system_dirs):
+                raise ValueError(f"db_path cannot be in system directory: {db_path}")
+            self.db_path = db_path_resolved
+        else:
+            self.db_path = Path("data/migration_state.db")
         self.db_lock = Lock()
         self._init_database()
         
@@ -793,6 +802,58 @@ class PremiumQBOClient:
             logger.error(f"Failed to delete {entity_type} {qbo_id}: {e}")
             return False
     
+    def update_entity(
+        self,
+        entity_type: str,
+        qbo_id: str,
+        update_data: Dict,
+        oauth_manager: Optional[Any] = None
+    ) -> Dict:
+        """
+        Update an existing entity in QuickBooks Online.
+
+        Used by rollback_migration() to deactivate entities that cannot be deleted
+        (e.g., Accounts, Items). Sets Active=False to effectively remove them.
+
+        Args:
+            entity_type: Type of entity (Customer, Vendor, Account, etc.)
+            qbo_id: QBO entity ID
+            update_data: Fields to update (e.g., {'Active': False})
+            oauth_manager: Optional OAuth manager for token refresh
+
+        Returns:
+            QBO API response dict
+
+        Raises:
+            Exception: If update fails
+        """
+        # Get current SyncToken (required for all QBO updates)
+        sync_token = self.get_synctoken(entity_type, qbo_id)
+
+        endpoint = entity_type.lower()
+
+        # Build update payload with required fields
+        payload = {
+            'Id': qbo_id,
+            'SyncToken': sync_token,
+            'sparse': True,  # Sparse update: only change specified fields
+        }
+        payload.update(update_data)
+
+        response = self._make_request(
+            "POST", endpoint, payload, oauth_manager=oauth_manager
+        )
+
+        # Update SyncToken cache from response
+        if response and entity_type in response:
+            new_sync_token = response[entity_type].get('SyncToken')
+            if new_sync_token:
+                with self.synctoken_lock:
+                    self.synctoken_cache[(entity_type, qbo_id)] = new_sync_token
+
+        logger.info(f"Updated {entity_type} {qbo_id}: {update_data}")
+        return response
+
     def create_entity(
         self,
         entity_type: str,
@@ -801,12 +862,12 @@ class PremiumQBOClient:
     ) -> Dict:
         """
         Create a single entity in QuickBooks Online.
-        
+
         Args:
             entity_type: Type of entity (Customer, Vendor, Invoice, etc.)
             entity_data: Entity data to create
             oauth_manager: Optional OAuth manager for token refresh
-            
+
         Returns:
             Created entity data from QBO
             

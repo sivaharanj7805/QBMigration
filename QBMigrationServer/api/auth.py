@@ -346,7 +346,11 @@ def verify_mfa():
     # Verify TOTP code
     try:
         import pyotp
-        totp_secret = getattr(user, 'mfa_secret', None)
+        # CRITICAL FIX: Use _get_mfa_secret() which reads from the encrypted
+        # column (_mfa_secret_encrypted) first, falling back to the deprecated
+        # plaintext mfa_secret column. Reading mfa_secret directly returns None
+        # for users whose secret was properly encrypted, breaking MFA verification.
+        totp_secret = user._get_mfa_secret()
         if not totp_secret:
             return jsonify({'success': False, 'error': 'MFA not configured properly'}), 500
 
@@ -1104,9 +1108,60 @@ def select_tier():
                 'success': False,
                 'error': 'Payment required for this tier. Please provide payment_intent_id.'
             }), 402
-        # Note: In production, verify payment_intent_id with Stripe API
-        # For now, just validate it's provided
-        payment_status = 'paid'
+
+        # CRITICAL FIX: Verify payment_intent_id with Stripe API
+        # Without this, anyone can obtain paid credits by sending any string
+        try:
+            import stripe
+            stripe.api_key = current_app.config.get('STRIPE_SECRET_KEY')
+            if not stripe.api_key:
+                logger.error("STRIPE_SECRET_KEY not configured - cannot verify payments")
+                return jsonify({
+                    'success': False,
+                    'error': 'Payment processing is not configured. Contact support.'
+                }), 503
+
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if payment_intent.status != 'succeeded':
+                logger.warning(
+                    f"Payment intent {payment_intent_id} has status '{payment_intent.status}' "
+                    f"(expected 'succeeded') for user {user_id}"
+                )
+                return jsonify({
+                    'success': False,
+                    'error': f'Payment not completed. Status: {payment_intent.status}'
+                }), 402
+
+            if payment_intent.amount != price_cents:
+                logger.warning(
+                    f"Payment amount mismatch: expected {price_cents}, "
+                    f"got {payment_intent.amount} for user {user_id}"
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'Payment amount does not match tier price.'
+                }), 402
+
+            payment_status = 'paid'
+        except ImportError:
+            logger.error("stripe package not installed - payment verification disabled")
+            return jsonify({
+                'success': False,
+                'error': 'Payment processing unavailable. Contact support.'
+            }), 503
+        except stripe.error.InvalidRequestError:
+            logger.warning(f"Invalid payment_intent_id: {payment_intent_id} for user {user_id}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid payment reference. Please try again.'
+            }), 400
+        except Exception as e:
+            logger.error(f"Stripe verification failed: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'Payment verification failed. Please try again.'
+            }), 500
     else:
         payment_status = 'paid'  # Free tier
 
@@ -1188,9 +1243,49 @@ def upgrade_tier():
                 'success': False,
                 'error': 'Payment required for this tier upgrade. Please provide payment_intent_id.'
             }), 402
-        # Note: In production, verify payment_intent_id with Stripe API
-        # For now, just validate it's provided
-        payment_status = 'paid'
+
+        # CRITICAL FIX: Verify payment with Stripe API (same as select_tier)
+        try:
+            import stripe
+            stripe.api_key = current_app.config.get('STRIPE_SECRET_KEY')
+            if not stripe.api_key:
+                logger.error("STRIPE_SECRET_KEY not configured")
+                return jsonify({
+                    'success': False,
+                    'error': 'Payment processing is not configured. Contact support.'
+                }), 503
+
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if payment_intent.status != 'succeeded':
+                return jsonify({
+                    'success': False,
+                    'error': f'Payment not completed. Status: {payment_intent.status}'
+                }), 402
+
+            if payment_intent.amount != price_cents:
+                logger.warning(
+                    f"Upgrade payment mismatch: expected {price_cents}, "
+                    f"got {payment_intent.amount} for user {user_id}"
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'Payment amount does not match tier price.'
+                }), 402
+
+            payment_status = 'paid'
+        except ImportError:
+            logger.error("stripe package not installed")
+            return jsonify({
+                'success': False,
+                'error': 'Payment processing unavailable. Contact support.'
+            }), 503
+        except Exception as e:
+            logger.error(f"Stripe verification failed for upgrade: {e}")
+            return jsonify({
+                'success': False,
+                'error': 'Payment verification failed. Please try again.'
+            }), 500
     else:
         payment_status = 'paid'
 

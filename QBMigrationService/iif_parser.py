@@ -303,15 +303,36 @@ class QuickBooksExportParser:
             raise ValueError(f"Invalid file path (not a file): {file_path}")
         return real_path
 
+    # Maximum file sizes for parsed formats
+    MAX_CSV_SIZE_BYTES = 100 * 1024 * 1024   # 100 MB
+    MAX_EXCEL_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+    MAX_CSV_ROWS = 1_000_000                   # 1M rows
+
     def _parse_csv(self, file_path: str) -> Dict[str, Any]:
         """Parse CSV export from QuickBooks"""
         # Security: Validate path
         real_path = self._validate_file_path(file_path)
+
+        # SECURITY FIX: Enforce file size limit to prevent memory exhaustion
+        file_size = os.path.getsize(real_path)
+        if file_size > self.MAX_CSV_SIZE_BYTES:
+            raise ValueError(
+                f"CSV file too large: {file_size / (1024*1024):.1f}MB "
+                f"(limit: {self.MAX_CSV_SIZE_BYTES / (1024*1024):.0f}MB)"
+            )
+
         records = []
+        row_count = 0
 
         with open(real_path, 'r', encoding='utf-8-sig') as f:
             reader = csv.DictReader(f)
             for row in reader:
+                row_count += 1
+                if row_count > self.MAX_CSV_ROWS:
+                    raise ValueError(
+                        f"CSV file exceeds maximum row count of {self.MAX_CSV_ROWS:,}. "
+                        f"Split the file into smaller batches."
+                    )
                 # Clean up keys and values (handle None keys from extra columns)
                 clean_row = {
                     (k.strip() if k else '_unknown'): v.strip() if v else ''
@@ -336,6 +357,15 @@ class QuickBooksExportParser:
         """Parse Excel export from QuickBooks"""
         # Security: Validate path
         real_path = self._validate_file_path(file_path)
+
+        # SECURITY FIX: Enforce file size limit to prevent memory exhaustion
+        file_size = os.path.getsize(real_path)
+        if file_size > self.MAX_EXCEL_SIZE_BYTES:
+            raise ValueError(
+                f"Excel file too large: {file_size / (1024*1024):.1f}MB "
+                f"(limit: {self.MAX_EXCEL_SIZE_BYTES / (1024*1024):.0f}MB)"
+            )
+
         try:
             import openpyxl
         except ImportError:

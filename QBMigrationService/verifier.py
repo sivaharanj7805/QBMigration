@@ -432,8 +432,20 @@ class PremiumMigrationVerifier:
             qbo_balanced = abs(qbo_debits - qbo_credits) < Decimal('0.05')
             
             # Verify QBD matches QBO
-            debit_match = abs(qbd_debits - qbo_debits) < Decimal('1.00')
-            credit_match = abs(qbd_credits - qbo_credits) < Decimal('1.00')
+            # SECURITY FIX: Use both absolute and percentage-based tolerance
+            # to prevent masking financial discrepancies. The $1.00 tolerance
+            # was too generous - a $0.99 discrepancy on a $100 balance sheet
+            # is a 1% error which is unacceptable for financial data.
+            #
+            # New approach: Use $0.05 absolute tolerance (matching internal check)
+            # OR 0.01% of total, whichever is larger. This scales appropriately
+            # for both small and large balance sheets.
+            max_debits = max(qbd_debits, qbo_debits, Decimal('1'))
+            max_credits = max(qbd_credits, qbo_credits, Decimal('1'))
+            debit_tolerance = max(Decimal('0.05'), max_debits * Decimal('0.0001'))
+            credit_tolerance = max(Decimal('0.05'), max_credits * Decimal('0.0001'))
+            debit_match = abs(qbd_debits - qbo_debits) < debit_tolerance
+            credit_match = abs(qbd_credits - qbo_credits) < credit_tolerance
             
             self.report["critical_metrics"]["trial_balance"] = {
                 "qbd": {

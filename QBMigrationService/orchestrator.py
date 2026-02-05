@@ -197,29 +197,51 @@ class MigrationOrchestrator:
             TimeoutError: If migration exceeds timeout_seconds
         """
         import signal
+        import threading as _threading
 
-        # FIX #12: Add timeout protection to prevent infinite migrations
+        # FIX: Cross-platform timeout protection
         def _migration_timeout_handler(signum, frame):
             raise TimeoutError(
                 f"Migration exceeded {timeout_seconds} second ({timeout_seconds // 3600}h) timeout. "
                 f"Company: {company_name}. Migration may need to be split into smaller batches."
             )
 
-        # Set up timeout (Unix only)
         old_handler = None
+        timer = None
+
         if hasattr(signal, 'SIGALRM'):
+            # Unix: Use SIGALRM for precise timeout
             old_handler = signal.signal(signal.SIGALRM, _migration_timeout_handler)
             signal.alarm(timeout_seconds)
-            logger.info(f"Migration timeout set to {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
+            logger.info(f"Migration timeout set to {timeout_seconds}s (SIGALRM)")
+        else:
+            # Windows: Use threading.Timer as fallback
+            import _thread
+            def _timer_timeout():
+                logger.error(
+                    f"Migration exceeded {timeout_seconds}s timeout (Windows timer). "
+                    f"Company: {company_name}. Raising interrupt."
+                )
+                _thread.interrupt_main()
+            timer = _threading.Timer(timeout_seconds, _timer_timeout)
+            timer.daemon = True
+            timer.start()
+            logger.info(f"Migration timeout set to {timeout_seconds}s (threading.Timer)")
 
         try:
             return self._run_migration_impl(encrypted_data, encryption_metadata, company_name)
+        except KeyboardInterrupt:
+            raise TimeoutError(
+                f"Migration exceeded {timeout_seconds} second ({timeout_seconds // 3600}h) timeout. "
+                f"Company: {company_name}. Migration may need to be split into smaller batches."
+            )
         finally:
-            # Always restore signal handler and cancel alarm
             if hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
+            if timer is not None:
+                timer.cancel()
 
     def _run_migration_impl(
         self,
@@ -1397,20 +1419,44 @@ if __name__ == '__main__':
     parser.add_argument('--metadata', required=True)
     parser.add_argument('--credentials', required=True)
     parser.add_argument('--server-url', required=True)
-    parser.add_argument('--webhook-secret', required=True)
+    # SECURITY FIX: Read webhook secret from environment variable instead of CLI arg.
+    # CLI arguments are visible in process listings (ps aux, /proc/*/cmdline).
+    parser.add_argument('--webhook-secret', required=False,
+                        help='DEPRECATED: Use QBM_WEBHOOK_SECRET env var instead')
     
     args = parser.parse_args()
-    
+
+    # SECURITY FIX: Validate file paths before opening to prevent path traversal
+    # when CLI arguments come from automated systems or web interfaces
+    def _validate_cli_path(file_path: str, description: str) -> str:
+        """Validate CLI file path is safe to read."""
+        real_path = os.path.realpath(file_path)
+        # Reject paths containing traversal sequences
+        if '..' in os.path.normpath(file_path):
+            raise ValueError(f"Path traversal detected in {description}: {file_path}")
+        # Ensure file exists and is a regular file (not a symlink to sensitive files)
+        if not os.path.isfile(real_path):
+            raise ValueError(f"{description} file not found: {file_path}")
+        # Reject system files
+        sensitive_prefixes = ['/etc/', '/proc/', '/sys/', '/dev/']
+        if any(real_path.startswith(p) for p in sensitive_prefixes):
+            raise ValueError(f"{description} path points to system directory: {real_path}")
+        return real_path
+
+    credentials_path = _validate_cli_path(args.credentials, 'credentials')
+    metadata_path = _validate_cli_path(args.metadata, 'metadata')
+    encrypted_data_path = _validate_cli_path(args.encrypted_data, 'encrypted-data')
+
     # Load credentials
-    with open(args.credentials, 'r') as f:
+    with open(credentials_path, 'r') as f:
         creds = json.load(f)
-    
+
     # Load metadata
-    with open(args.metadata, 'r') as f:
+    with open(metadata_path, 'r') as f:
         metadata = json.load(f)
-    
+
     # Load encrypted data
-    with open(args.encrypted_data, 'rb') as f:
+    with open(encrypted_data_path, 'rb') as f:
         encrypted_data = f.read()
     
     # Create orchestrator
@@ -1431,13 +1477,19 @@ if __name__ == '__main__':
     import hashlib
     from datetime import datetime
 
+    # SECURITY FIX: Read webhook secret from env var (preferred) or CLI arg (deprecated)
+    webhook_secret = os.environ.get('QBM_WEBHOOK_SECRET') or args.webhook_secret
+    if not webhook_secret:
+        logger.error("No webhook secret provided. Set QBM_WEBHOOK_SECRET env var.")
+        sys.exit(2)
+
     # SECURITY FIX: Align signature algorithm with server expectations
     # Server expects: HMAC-SHA256(migration_id:timestamp)
     webhook_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     message = f"{args.migration_id}:{webhook_timestamp}"
 
     signature = hmac.new(
-        args.webhook_secret.encode('utf-8'),
+        webhook_secret.encode('utf-8'),
         message.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()

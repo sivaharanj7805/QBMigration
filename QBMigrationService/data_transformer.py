@@ -63,9 +63,14 @@ QB_DECIMAL_CONTEXT = Context(
     traps=[InvalidOperation]    # Trap only invalid operations
 )
 
-# Set as default context
-getcontext().prec = 28
-getcontext().rounding = ROUND_HALF_UP
+# SECURITY FIX: Do NOT modify the global/thread-local Decimal context.
+# Modifying getcontext() silently changes rounding behavior for ALL modules
+# that use Decimal, including third-party libraries. This can cause silent
+# financial calculation errors. Use localcontext(QB_DECIMAL_CONTEXT) instead
+# wherever QB-specific rounding is needed.
+#
+# Previously: getcontext().prec = 28; getcontext().rounding = ROUND_HALF_UP
+# This was removed because it contaminated the global state.
 
 # FIX #13: Don't override global logging configuration
 # Let the application configure logging instead
@@ -181,27 +186,53 @@ class QBDataTransformer:
         """
         import signal
 
-        # FIX #2: Add timeout protection to prevent infinite hangs
+        # FIX: Cross-platform timeout protection
+        # SIGALRM is Unix-only; use threading.Timer as fallback on Windows
         def _timeout_handler(signum, frame):
             raise TimeoutError(
                 f"Transformation exceeded {timeout_seconds} second timeout. "
                 f"Data may be too large or contain circular references."
             )
 
-        # Set up timeout (Unix only - Windows doesn't support SIGALRM)
         old_handler = None
+        timer = None
+
         if hasattr(signal, 'SIGALRM'):
+            # Unix: Use SIGALRM for precise timeout
             old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
             signal.alarm(timeout_seconds)
+            logger.info(f"Transformation timeout set to {timeout_seconds}s (SIGALRM)")
+        else:
+            # Windows: Use threading.Timer to interrupt via sys.exit
+            # This is a best-effort timeout since Python threads cannot be
+            # forcibly interrupted, but it will prevent infinite hangs.
+            import _thread
+            def _timer_timeout():
+                logger.error(
+                    f"Transformation exceeded {timeout_seconds}s timeout (Windows timer). "
+                    f"Raising interrupt in main thread."
+                )
+                _thread.interrupt_main()
+            timer = threading.Timer(timeout_seconds, _timer_timeout)
+            timer.daemon = True
+            timer.start()
+            logger.info(f"Transformation timeout set to {timeout_seconds}s (threading.Timer)")
 
         try:
             return self._transform_parallel_impl(qb_data, max_workers)
+        except KeyboardInterrupt:
+            # Catch the interrupt raised by _thread.interrupt_main() on Windows
+            raise TimeoutError(
+                f"Transformation exceeded {timeout_seconds} second timeout. "
+                f"Data may be too large or contain circular references."
+            )
         finally:
-            # Always restore signal handler and cancel alarm
             if hasattr(signal, 'SIGALRM'):
-                signal.alarm(0)  # Cancel pending alarm
+                signal.alarm(0)
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
+            if timer is not None:
+                timer.cancel()
 
     def _transform_parallel_impl(self, qb_data: Dict, max_workers: int = None) -> Dict:
         """Internal implementation of parallel transformation (called with timeout wrapper)."""
