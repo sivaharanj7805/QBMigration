@@ -15,6 +15,7 @@ from enum import Enum
 
 class ExtractionStatus(Enum):
     """Status of extraction process."""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -25,6 +26,7 @@ class ExtractionStatus(Enum):
 @dataclass
 class ExtractionResult:
     """Result of an extraction operation."""
+
     status: ExtractionStatus
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -39,6 +41,7 @@ class ExtractionResult:
 @dataclass
 class BaseExtractionConfig:
     """Base configuration for extraction."""
+
     include_transactions: bool = True
     include_lists: bool = True
     include_deleted: bool = False
@@ -142,7 +145,9 @@ class BaseAccountingConnector(ABC):
         pass
 
     @abstractmethod
-    def extract_journal_entries(self, date_from: Optional[datetime] = None) -> List[Dict]:
+    def extract_journal_entries(
+        self, date_from: Optional[datetime] = None
+    ) -> List[Dict]:
         """Extract journal entries."""
         pass
 
@@ -183,13 +188,13 @@ class BaseAccountingConnector(ABC):
             List of supported entity type names
         """
         return [
-            'accounts',
-            'customers',
-            'vendors',
-            'invoices',
-            'bills',
-            'payments',
-            'journal_entries',
+            "accounts",
+            "customers",
+            "vendors",
+            "invoices",
+            "bills",
+            "payments",
+            "journal_entries",
         ]
 
     def get_platform_info(self) -> Dict[str, str]:
@@ -200,7 +205,7 @@ class BaseAccountingConnector(ABC):
             Dictionary with platform details
         """
         return {
-            'platform_name': self.platform_name,
-            'is_connected': str(self._is_connected),
-            'session_id': self._session_id or 'N/A',
+            "platform_name": self.platform_name,
+            "is_connected": str(self._is_connected),
+            "session_id": self._session_id or "N/A",
         }

@@ -25,25 +25,25 @@ logger = logging.getLogger(__name__)
 
 # CAPTCHA provider configurations
 CAPTCHA_PROVIDERS = {
-    'recaptcha_v2': {
-        'verify_url': 'https://www.google.com/recaptcha/api/siteverify',
-        'secret_env': 'RECAPTCHA_V2_SECRET_KEY',
-        'score_threshold': None,  # v2 doesn't use scores
+    "recaptcha_v2": {
+        "verify_url": "https://www.google.com/recaptcha/api/siteverify",
+        "secret_env": "RECAPTCHA_V2_SECRET_KEY",
+        "score_threshold": None,  # v2 doesn't use scores
     },
-    'recaptcha_v3': {
-        'verify_url': 'https://www.google.com/recaptcha/api/siteverify',
-        'secret_env': 'RECAPTCHA_V3_SECRET_KEY',
-        'score_threshold': 0.5,  # Minimum acceptable score (0.0 - 1.0)
+    "recaptcha_v3": {
+        "verify_url": "https://www.google.com/recaptcha/api/siteverify",
+        "secret_env": "RECAPTCHA_V3_SECRET_KEY",
+        "score_threshold": 0.5,  # Minimum acceptable score (0.0 - 1.0)
     },
-    'hcaptcha': {
-        'verify_url': 'https://hcaptcha.com/siteverify',
-        'secret_env': 'HCAPTCHA_SECRET_KEY',
-        'score_threshold': None,
+    "hcaptcha": {
+        "verify_url": "https://hcaptcha.com/siteverify",
+        "secret_env": "HCAPTCHA_SECRET_KEY",
+        "score_threshold": None,
     },
-    'turnstile': {
-        'verify_url': 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-        'secret_env': 'TURNSTILE_SECRET_KEY',
-        'score_threshold': None,
+    "turnstile": {
+        "verify_url": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        "secret_env": "TURNSTILE_SECRET_KEY",
+        "score_threshold": None,
     },
 }
 
@@ -57,16 +57,17 @@ def get_captcha_provider() -> str:
     """
     # Check environment variables for configured provider
     for provider_name, config in CAPTCHA_PROVIDERS.items():
-        if os.getenv(config['secret_env']):
+        if os.getenv(config["secret_env"]):
             logger.info(f"CAPTCHA provider configured: {provider_name}")
             return provider_name
 
     logger.warning("No CAPTCHA provider configured - CAPTCHA verification disabled")
-    return 'none'
+    return "none"
 
 
-def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
-                          provider: Optional[str] = None) -> Tuple[bool, str]:
+def verify_captcha_token(
+    token: str, remote_ip: Optional[str] = None, provider: Optional[str] = None
+) -> Tuple[bool, str]:
     """
     Verify CAPTCHA token with the configured provider.
 
@@ -95,8 +96,8 @@ def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
     # CRITICAL FIX: Fail-closed when CAPTCHA not configured in production
     # In production, if CAPTCHA is required but not configured, we MUST fail
     # This prevents attackers from bypassing CAPTCHA by removing the config
-    if provider == 'none':
-        is_production = os.getenv('FLASK_ENV', 'development') == 'production'
+    if provider == "none":
+        is_production = os.getenv("FLASK_ENV", "development") == "production"
 
         if is_production:
             # FAIL-CLOSED: In production, missing CAPTCHA config is a security failure
@@ -119,41 +120,37 @@ def verify_captcha_token(token: str, remote_ip: Optional[str] = None,
         logger.error(f"Unknown CAPTCHA provider: {provider}")
         return False, "Invalid CAPTCHA provider"
 
-    secret_key = os.getenv(config['secret_env'])
+    secret_key = os.getenv(config["secret_env"])
     if not secret_key:
         logger.error(f"CAPTCHA secret key not configured: {config['secret_env']}")
         return False, "CAPTCHA configuration error"
 
     # Prepare verification request
     verify_data = {
-        'secret': secret_key,
-        'response': token,
+        "secret": secret_key,
+        "response": token,
     }
 
     # Add remote IP if provided (recommended for security)
     if remote_ip:
-        verify_data['remoteip'] = remote_ip
+        verify_data["remoteip"] = remote_ip
 
     try:
         # Make verification request
-        response = requests.post(
-            config['verify_url'],
-            data=verify_data,
-            timeout=5
-        )
+        response = requests.post(config["verify_url"], data=verify_data, timeout=5)
         response.raise_for_status()
         result = response.json()
 
         # Check verification result
-        if not result.get('success'):
-            error_codes = result.get('error-codes', [])
+        if not result.get("success"):
+            error_codes = result.get("error-codes", [])
             logger.warning(f"CAPTCHA verification failed: {error_codes}")
             return False, "CAPTCHA verification failed"
 
         # For reCAPTCHA v3, check score
-        if provider == 'recaptcha_v3':
-            score = result.get('score', 0.0)
-            threshold = config['score_threshold']
+        if provider == "recaptcha_v3":
+            score = result.get("score", 0.0)
+            threshold = config["score_threshold"]
             if score < threshold:
                 logger.warning(f"CAPTCHA score too low: {score} < {threshold}")
                 return False, f"CAPTCHA score too low: {score}"
@@ -190,8 +187,9 @@ def is_captcha_required(email: str, failed_attempts: int = 0) -> bool:
         True if CAPTCHA should be required, False otherwise
     """
     import os
+
     # Skip CAPTCHA in testing environment
-    if os.getenv('FLASK_ENV') == 'testing':
+    if os.getenv("FLASK_ENV") == "testing":
         return False
 
     # FIX #38: Require CAPTCHA after 3 failed attempts
@@ -215,19 +213,19 @@ def get_client_ip() -> str:
         Client IP address
     """
     # Check X-Forwarded-For header (used by proxies/load balancers)
-    x_forwarded_for = request.headers.get('X-Forwarded-For')
+    x_forwarded_for = request.headers.get("X-Forwarded-For")
     if x_forwarded_for:
         # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
         # First IP is the original client
-        return x_forwarded_for.split(',')[0].strip()
+        return x_forwarded_for.split(",")[0].strip()
 
     # Check X-Real-IP header (used by some proxies)
-    x_real_ip = request.headers.get('X-Real-IP')
+    x_real_ip = request.headers.get("X-Real-IP")
     if x_real_ip:
         return x_real_ip.strip()
 
     # Fallback to direct connection IP
-    return request.remote_addr or 'unknown'
+    return request.remote_addr or "unknown"
 
 
 def get_captcha_config() -> Dict[str, Any]:
@@ -244,22 +242,22 @@ def get_captcha_config() -> Dict[str, Any]:
     provider = get_captcha_provider()
 
     config = {
-        'enabled': provider != 'none',
-        'provider': provider,
-        'threshold': 3,  # CAPTCHA required after 3 failed attempts
+        "enabled": provider != "none",
+        "provider": provider,
+        "threshold": 3,  # CAPTCHA required after 3 failed attempts
     }
 
     # Add site key if available (public key for frontend)
     site_key_env_map = {
-        'recaptcha_v2': 'RECAPTCHA_V2_SITE_KEY',
-        'recaptcha_v3': 'RECAPTCHA_V3_SITE_KEY',
-        'hcaptcha': 'HCAPTCHA_SITE_KEY',
-        'turnstile': 'TURNSTILE_SITE_KEY',
+        "recaptcha_v2": "RECAPTCHA_V2_SITE_KEY",
+        "recaptcha_v3": "RECAPTCHA_V3_SITE_KEY",
+        "hcaptcha": "HCAPTCHA_SITE_KEY",
+        "turnstile": "TURNSTILE_SITE_KEY",
     }
 
     if provider in site_key_env_map:
         site_key = os.getenv(site_key_env_map[provider])
         if site_key:
-            config['site_key'] = site_key
+            config["site_key"] = site_key
 
     return config

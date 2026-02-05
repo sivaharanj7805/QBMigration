@@ -50,26 +50,30 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
         # Find migrations older than cutoff that have sensitive data
         migrations_to_clean = Migration.query.filter(
             db.or_(
-                Migration.created_at < cutoff_time,
-                Migration.completed_at < cutoff_time
+                Migration.created_at < cutoff_time, Migration.completed_at < cutoff_time
             ),
             db.or_(
                 Migration.trial_balance_data.isnot(None),
-                Migration.live_status_data.isnot(None)
-            )
+                Migration.live_status_data.isnot(None),
+            ),
         ).all()
 
-        logger.info(f"Found {len(migrations_to_clean)} migrations older than {retention_hours}h with sensitive data")
+        logger.info(
+            f"Found {len(migrations_to_clean)} migrations older than {retention_hours}h with sensitive data"
+        )
 
         for migration in migrations_to_clean:
             try:
                 # Check if data is already stripped (parse JSON, don't substring-match)
                 already_stripped = False
-                for field_data in [migration.trial_balance_data, migration.live_status_data]:
+                for field_data in [
+                    migration.trial_balance_data,
+                    migration.live_status_data,
+                ]:
                     if field_data:
                         try:
                             parsed = json.loads(field_data)
-                            if isinstance(parsed, dict) and 'stripped_at' in parsed:
+                            if isinstance(parsed, dict) and "stripped_at" in parsed:
                                 already_stripped = True
                                 break
                         except (json.JSONDecodeError, TypeError):
@@ -78,11 +82,15 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
                     continue
 
                 if dry_run:
-                    logger.info(f"[DRY RUN] Would strip data from migration {migration.migration_id}")
+                    logger.info(
+                        f"[DRY RUN] Would strip data from migration {migration.migration_id}"
+                    )
                 else:
                     migration.strip_sensitive_data()
                     db.session.add(migration)
-                    logger.info(f"Stripped sensitive data from migration {migration.migration_id} (created: {migration.created_at})")
+                    logger.info(
+                        f"Stripped sensitive data from migration {migration.migration_id} (created: {migration.created_at})"
+                    )
 
                 cleaned_count += 1
 
@@ -99,11 +107,11 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
             logger.info(f"[DRY RUN] Would clean {cleaned_count} migrations")
 
         return {
-            'success': True,
-            'migrations_cleaned': cleaned_count,
-            'errors': errors,
-            'dry_run': dry_run,
-            'cutoff_time': cutoff_time.isoformat()
+            "success": True,
+            "migrations_cleaned": cleaned_count,
+            "errors": errors,
+            "dry_run": dry_run,
+            "cutoff_time": cutoff_time.isoformat(),
         }
 
     except Exception as e:
@@ -111,10 +119,10 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
         error_msg = f"Fatal error during cleanup: {str(e)}"
         logger.exception(error_msg)
         return {
-            'success': False,
-            'migrations_cleaned': cleaned_count,
-            'errors': errors + [error_msg],
-            'dry_run': dry_run
+            "success": False,
+            "migrations_cleaned": cleaned_count,
+            "errors": errors + [error_msg],
+            "dry_run": dry_run,
         }
 
 
@@ -146,34 +154,36 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
 
     try:
         # Get S3 bucket from environment
-        bucket_name = os.getenv('S3_BUCKET_NAME')
+        bucket_name = os.getenv("S3_BUCKET_NAME")
         if not bucket_name:
             return {
-                'success': False,
-                'files_deleted': 0,
-                'bytes_freed': 0,
-                'errors': ['S3_BUCKET_NAME not configured'],
-                'dry_run': dry_run
+                "success": False,
+                "files_deleted": 0,
+                "bytes_freed": 0,
+                "errors": ["S3_BUCKET_NAME not configured"],
+                "dry_run": dry_run,
             }
 
-        s3 = boto3.client('s3')
+        s3 = boto3.client("s3")
 
         # List objects in uploads/ prefix (temporary upload location)
-        paginator = s3.get_paginator('list_objects_v2')
-        pages = paginator.paginate(Bucket=bucket_name, Prefix='uploads/')
+        paginator = s3.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=bucket_name, Prefix="uploads/")
 
         for page in pages:
-            if 'Contents' not in page:
+            if "Contents" not in page:
                 continue
 
-            for obj in page['Contents']:
+            for obj in page["Contents"]:
                 # Check if object is older than cutoff
-                if obj['LastModified'].replace(tzinfo=None) < cutoff_time:
-                    key = obj['Key']
-                    size = obj['Size']
+                if obj["LastModified"].replace(tzinfo=None) < cutoff_time:
+                    key = obj["Key"]
+                    size = obj["Size"]
 
                     if dry_run:
-                        logger.info(f"[DRY RUN] Would delete S3 object: {key} ({size} bytes)")
+                        logger.info(
+                            f"[DRY RUN] Would delete S3 object: {key} ({size} bytes)"
+                        )
                     else:
                         try:
                             s3.delete_object(Bucket=bucket_name, Key=key)
@@ -188,28 +198,32 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
                     bytes_freed += size
 
         if not dry_run:
-            logger.info(f"Successfully deleted {deleted_count} S3 objects, freed {bytes_freed} bytes")
+            logger.info(
+                f"Successfully deleted {deleted_count} S3 objects, freed {bytes_freed} bytes"
+            )
         else:
-            logger.info(f"[DRY RUN] Would delete {deleted_count} S3 objects, free {bytes_freed} bytes")
+            logger.info(
+                f"[DRY RUN] Would delete {deleted_count} S3 objects, free {bytes_freed} bytes"
+            )
 
         return {
-            'success': True,
-            'files_deleted': deleted_count,
-            'bytes_freed': bytes_freed,
-            'errors': errors,
-            'dry_run': dry_run,
-            'cutoff_time': cutoff_time.isoformat()
+            "success": True,
+            "files_deleted": deleted_count,
+            "bytes_freed": bytes_freed,
+            "errors": errors,
+            "dry_run": dry_run,
+            "cutoff_time": cutoff_time.isoformat(),
         }
 
     except Exception as e:
         error_msg = f"Fatal error during S3 cleanup: {str(e)}"
         logger.exception(error_msg)
         return {
-            'success': False,
-            'files_deleted': deleted_count,
-            'bytes_freed': bytes_freed,
-            'errors': errors + [error_msg],
-            'dry_run': dry_run
+            "success": False,
+            "files_deleted": deleted_count,
+            "bytes_freed": bytes_freed,
+            "errors": errors + [error_msg],
+            "dry_run": dry_run,
         }
 
 
@@ -224,25 +238,29 @@ def run_full_cleanup(retention_hours=24, dry_run=False):
     Returns:
         dict: Combined results from both cleanup operations
     """
-    logger.info(f"Starting full cleanup (retention: {retention_hours}h, dry_run: {dry_run})")
+    logger.info(
+        f"Starting full cleanup (retention: {retention_hours}h, dry_run: {dry_run})"
+    )
 
-    db_result = cleanup_old_migration_data(retention_hours=retention_hours, dry_run=dry_run)
+    db_result = cleanup_old_migration_data(
+        retention_hours=retention_hours, dry_run=dry_run
+    )
     s3_result = cleanup_s3_temp_files(retention_hours=retention_hours, dry_run=dry_run)
 
     return {
-        'success': db_result['success'] and s3_result['success'],
-        'database_cleanup': db_result,
-        's3_cleanup': s3_result,
-        'summary': {
-            'migrations_cleaned': db_result['migrations_cleaned'],
-            's3_files_deleted': s3_result['files_deleted'],
-            's3_bytes_freed': s3_result['bytes_freed'],
-            'total_errors': len(db_result['errors']) + len(s3_result['errors'])
-        }
+        "success": db_result["success"] and s3_result["success"],
+        "database_cleanup": db_result,
+        "s3_cleanup": s3_result,
+        "summary": {
+            "migrations_cleaned": db_result["migrations_cleaned"],
+            "s3_files_deleted": s3_result["files_deleted"],
+            "s3_bytes_freed": s3_result["bytes_freed"],
+            "total_errors": len(db_result["errors"]) + len(s3_result["errors"]),
+        },
     }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     """
     CLI entry point for running cleanup as a scheduled job.
 
@@ -257,19 +275,20 @@ if __name__ == '__main__':
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('/var/log/qb-migration/cleanup.log', mode='a')
-        ]
+            logging.FileHandler("/var/log/qb-migration/cleanup.log", mode="a"),
+        ],
     )
 
     # Read configuration from environment
-    retention_hours = int(os.getenv('DATA_RETENTION_HOURS', '24'))
-    dry_run = os.getenv('DRY_RUN', 'false').lower() in ('1', 'true', 'yes')
+    retention_hours = int(os.getenv("DATA_RETENTION_HOURS", "24"))
+    dry_run = os.getenv("DRY_RUN", "false").lower() in ("1", "true", "yes")
 
     # Create Flask app context for database access
     from app import create_app
+
     app = create_app()
 
     with app.app_context():
@@ -292,4 +311,4 @@ if __name__ == '__main__':
         logger.info(json.dumps(result, indent=2))
 
         # Exit with appropriate code
-        sys.exit(0 if result['success'] else 1)
+        sys.exit(0 if result["success"] else 1)

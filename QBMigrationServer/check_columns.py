@@ -5,7 +5,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-db_url = os.getenv('DATABASE_URL', 'postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_dev')
+db_url = os.getenv(
+    "DATABASE_URL",
+    "postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_dev",
+)
 engine = create_engine(db_url)
 
 with engine.connect() as conn:
@@ -16,6 +19,6 @@ with engine.connect() as conn:
         AND column_name IN ('subscription_tier', 'migrations_purchased', 'migrations_used', 'stripe_customer_id', 'tier_purchased_at')
         ORDER BY column_name
     """))
-    logger.info('Tier columns in users table:')
+    logger.info("Tier columns in users table:")
     for row in result:
-        logger.info(f'  - {row[0]}: {row[1]}')
+        logger.info(f"  - {row[0]}: {row[1]}")

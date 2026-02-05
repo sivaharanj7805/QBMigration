@@ -30,27 +30,25 @@ logger = logging.getLogger(__name__)
 # Anomaly thresholds
 ANOMALY_THRESHOLDS = {
     # Login patterns
-    'login_hour_start': 6,  # Normal login hours: 6 AM - 11 PM
-    'login_hour_end': 23,
-    'max_logins_per_hour': 10,  # Max login attempts per hour
-    'max_logins_per_day': 50,   # Max logins per day
-    'unusual_location_distance_km': 500,  # Travel > 500km in < 1 hour is suspicious
-
+    "login_hour_start": 6,  # Normal login hours: 6 AM - 11 PM
+    "login_hour_end": 23,
+    "max_logins_per_hour": 10,  # Max login attempts per hour
+    "max_logins_per_day": 50,  # Max logins per day
+    "unusual_location_distance_km": 500,  # Travel > 500km in < 1 hour is suspicious
     # File uploads
-    'large_file_threshold_mb': 2000,  # Files > 2GB are flagged
-    'max_uploads_per_hour': 5,  # Max file uploads per hour
-    'max_upload_size_per_day_gb': 10,  # Max total upload size per day
-
+    "large_file_threshold_mb": 2000,  # Files > 2GB are flagged
+    "max_uploads_per_hour": 5,  # Max file uploads per hour
+    "max_upload_size_per_day_gb": 10,  # Max total upload size per day
     # Migration patterns
-    'rapid_migrations_count': 3,  # Starting 3+ migrations in 10 minutes is suspicious
-    'rapid_migrations_window_minutes': 10,
-    'unusual_migration_count_per_day': 20,  # > 20 migrations per day is unusual
+    "rapid_migrations_count": 3,  # Starting 3+ migrations in 10 minutes is suspicious
+    "rapid_migrations_window_minutes": 10,
+    "unusual_migration_count_per_day": 20,  # > 20 migrations per day is unusual
 }
 
 # Known IP ranges for common VPNs and proxies (basic list)
 SUSPICIOUS_IP_RANGES = [
-    '10.8.0.',    # OpenVPN default
-    '192.168.',   # Private networks (could be corporate VPN)
+    "10.8.0.",  # OpenVPN default
+    "192.168.",  # Private networks (could be corporate VPN)
 ]
 
 
@@ -69,13 +67,18 @@ def is_unusual_login_time(timestamp: datetime) -> Tuple[bool, str]:
     """
     hour = timestamp.hour
 
-    if hour < ANOMALY_THRESHOLDS['login_hour_start'] or hour > ANOMALY_THRESHOLDS['login_hour_end']:
+    if (
+        hour < ANOMALY_THRESHOLDS["login_hour_start"]
+        or hour > ANOMALY_THRESHOLDS["login_hour_end"]
+    ):
         return True, f"Login at unusual hour: {hour}:00 (outside 6 AM - 11 PM)"
 
     return False, ""
 
 
-def detect_rapid_login_attempts(user_id: int, window_hours: int = 1) -> Tuple[bool, str]:
+def detect_rapid_login_attempts(
+    user_id: int, window_hours: int = 1
+) -> Tuple[bool, str]:
     """
     Detect rapid login attempts that may indicate brute force or account takeover.
 
@@ -93,11 +96,14 @@ def detect_rapid_login_attempts(user_id: int, window_hours: int = 1) -> Tuple[bo
         # and the attempts occurred within the time window.
         window_start = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
-        result = db.session.execute(text("""
+        result = db.session.execute(
+            text("""
             SELECT failed_login_attempts, last_login_at
             FROM users
             WHERE id = :user_id
-        """), {'user_id': user_id})
+        """),
+            {"user_id": user_id},
+        )
 
         row = result.fetchone()
         if not row:
@@ -107,9 +113,12 @@ def detect_rapid_login_attempts(user_id: int, window_hours: int = 1) -> Tuple[bo
         last_login = row[1]
 
         # Only flag if the failed attempts are recent (within the window)
-        if failed_attempts > ANOMALY_THRESHOLDS['max_logins_per_hour']:
+        if failed_attempts > ANOMALY_THRESHOLDS["max_logins_per_hour"]:
             if last_login and last_login >= window_start:
-                return True, f"Rapid login attempts: {failed_attempts} failed in {window_hours}h (threshold: {ANOMALY_THRESHOLDS['max_logins_per_hour']})"
+                return (
+                    True,
+                    f"Rapid login attempts: {failed_attempts} failed in {window_hours}h (threshold: {ANOMALY_THRESHOLDS['max_logins_per_hour']})",
+                )
 
         return False, ""
 
@@ -143,15 +152,18 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
 
     try:
         # Get previous login IP within last hour
-        result = db.session.execute(text("""
+        result = db.session.execute(
+            text("""
             SELECT last_login_ip, last_login_at
             FROM users
             WHERE id = :user_id
             AND last_login_at >= :window_start
-        """), {
-            'user_id': user_id,
-            'window_start': datetime.now(timezone.utc) - timedelta(hours=1)
-        })
+        """),
+            {
+                "user_id": user_id,
+                "window_start": datetime.now(timezone.utc) - timedelta(hours=1),
+            },
+        )
 
         row = result.fetchone()
         if not row:
@@ -162,13 +174,16 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
         # If IP changed significantly in < 1 hour, flag as suspicious
         # Simplified: check if first 2 octets changed (crude location proxy)
         if prev_ip and current_ip:
-            prev_prefix = '.'.join(prev_ip.split('.')[:2])
-            curr_prefix = '.'.join(current_ip.split('.')[:2])
+            prev_prefix = ".".join(prev_ip.split(".")[:2])
+            curr_prefix = ".".join(current_ip.split(".")[:2])
 
             if prev_prefix != curr_prefix:
                 time_diff = datetime.now(timezone.utc) - prev_login
                 if time_diff < timedelta(hours=1):
-                    return True, f"Impossible travel: IP changed from {prev_ip} to {current_ip} in {time_diff.seconds // 60} minutes"
+                    return (
+                        True,
+                        f"Impossible travel: IP changed from {prev_ip} to {current_ip} in {time_diff.seconds // 60} minutes",
+                    )
 
         return False, ""
 
@@ -208,20 +223,26 @@ def detect_large_file_upload(file_size_bytes: int, user_id: int) -> Tuple[bool, 
     file_size_mb = file_size_bytes / (1024 * 1024)
 
     # Check if single file exceeds threshold
-    if file_size_mb > ANOMALY_THRESHOLDS['large_file_threshold_mb']:
-        return True, f"Large file upload: {file_size_mb:.1f} MB (threshold: {ANOMALY_THRESHOLDS['large_file_threshold_mb']} MB)"
+    if file_size_mb > ANOMALY_THRESHOLDS["large_file_threshold_mb"]:
+        return (
+            True,
+            f"Large file upload: {file_size_mb:.1f} MB (threshold: {ANOMALY_THRESHOLDS['large_file_threshold_mb']} MB)",
+        )
 
     # Check total upload volume in last 24 hours
     try:
-        result = db.session.execute(text("""
+        result = db.session.execute(
+            text("""
             SELECT COALESCE(SUM(encrypted_data_size_bytes), 0) as total_size
             FROM migrations
             WHERE user_id = :user_id
             AND created_at >= :window_start
-        """), {
-            'user_id': user_id,
-            'window_start': datetime.now(timezone.utc) - timedelta(days=1)
-        })
+        """),
+            {
+                "user_id": user_id,
+                "window_start": datetime.now(timezone.utc) - timedelta(days=1),
+            },
+        )
 
         row = result.fetchone()
         total_size_bytes = row[0] if row else 0
@@ -230,8 +251,11 @@ def detect_large_file_upload(file_size_bytes: int, user_id: int) -> Tuple[bool, 
         # Add current upload to total
         total_size_gb += file_size_bytes / (1024 * 1024 * 1024)
 
-        if total_size_gb > ANOMALY_THRESHOLDS['max_upload_size_per_day_gb']:
-            return True, f"Daily upload limit exceeded: {total_size_gb:.2f} GB (threshold: {ANOMALY_THRESHOLDS['max_upload_size_per_day_gb']} GB)"
+        if total_size_gb > ANOMALY_THRESHOLDS["max_upload_size_per_day_gb"]:
+            return (
+                True,
+                f"Daily upload limit exceeded: {total_size_gb:.2f} GB (threshold: {ANOMALY_THRESHOLDS['max_upload_size_per_day_gb']} GB)",
+            )
 
         return False, ""
 
@@ -252,22 +276,28 @@ def detect_rapid_migrations(user_id: int) -> Tuple[bool, str]:
     """
     try:
         window_start = datetime.now(timezone.utc) - timedelta(
-            minutes=ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']
+            minutes=ANOMALY_THRESHOLDS["rapid_migrations_window_minutes"]
         )
 
-        result = db.session.execute(text("""
+        result = db.session.execute(
+            text("""
             SELECT COUNT(*) as migration_count
             FROM migrations
             WHERE user_id = :user_id
             AND created_at >= :window_start
             AND status IN ('pending', 'processing', 'uploading')
-        """), {'user_id': user_id, 'window_start': window_start})
+        """),
+            {"user_id": user_id, "window_start": window_start},
+        )
 
         row = result.fetchone()
         migration_count = row[0] if row else 0
 
-        if migration_count >= ANOMALY_THRESHOLDS['rapid_migrations_count']:
-            return True, f"Rapid migrations: {migration_count} started in {ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']} minutes"
+        if migration_count >= ANOMALY_THRESHOLDS["rapid_migrations_count"]:
+            return (
+                True,
+                f"Rapid migrations: {migration_count} started in {ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']} minutes",
+            )
 
         return False, ""
 
@@ -292,42 +322,50 @@ def check_login_anomalies(user_id: int, ip_address: str) -> List[Dict]:
     # Check login time
     is_unusual, reason = is_unusual_login_time(datetime.now(timezone.utc))
     if is_unusual:
-        anomalies.append({
-            'type': 'unusual_login_time',
-            'severity': 'low',
-            'reason': reason,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        anomalies.append(
+            {
+                "type": "unusual_login_time",
+                "severity": "low",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     # Check rapid login attempts
     is_suspicious, reason = detect_rapid_login_attempts(user_id)
     if is_suspicious:
-        anomalies.append({
-            'type': 'rapid_login_attempts',
-            'severity': 'high',
-            'reason': reason,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        anomalies.append(
+            {
+                "type": "rapid_login_attempts",
+                "severity": "high",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     # Check impossible travel
     is_suspicious, reason = detect_impossible_travel(user_id, ip_address)
     if is_suspicious:
-        anomalies.append({
-            'type': 'impossible_travel',
-            'severity': 'critical',
-            'reason': reason,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        anomalies.append(
+            {
+                "type": "impossible_travel",
+                "severity": "critical",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     # Check suspicious IP
     is_suspicious, reason = is_suspicious_ip(ip_address)
     if is_suspicious:
-        anomalies.append({
-            'type': 'suspicious_ip',
-            'severity': 'medium',
-            'reason': reason,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        anomalies.append(
+            {
+                "type": "suspicious_ip",
+                "severity": "medium",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     return anomalies
 
@@ -348,14 +386,16 @@ def check_upload_anomalies(user_id: int, file_size_bytes: int) -> List[Dict]:
     # Check large file upload
     is_suspicious, reason = detect_large_file_upload(file_size_bytes, user_id)
     if is_suspicious:
-        severity = 'critical' if file_size_bytes > (5 * 1024 * 1024 * 1024) else 'high'
-        anomalies.append({
-            'type': 'large_file_upload',
-            'severity': severity,
-            'reason': reason,
-            'file_size_mb': file_size_bytes / (1024 * 1024),
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        severity = "critical" if file_size_bytes > (5 * 1024 * 1024 * 1024) else "high"
+        anomalies.append(
+            {
+                "type": "large_file_upload",
+                "severity": severity,
+                "reason": reason,
+                "file_size_mb": file_size_bytes / (1024 * 1024),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     return anomalies
 
@@ -375,12 +415,14 @@ def check_migration_anomalies(user_id: int) -> List[Dict]:
     # Check rapid migrations
     is_suspicious, reason = detect_rapid_migrations(user_id)
     if is_suspicious:
-        anomalies.append({
-            'type': 'rapid_migrations',
-            'severity': 'high',
-            'reason': reason,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        })
+        anomalies.append(
+            {
+                "type": "rapid_migrations",
+                "severity": "high",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     return anomalies
 
@@ -406,6 +448,6 @@ def log_anomaly(user_id: int, anomaly: Dict) -> None:
     # 4. Update user risk score
 
     # For critical anomalies, could trigger immediate action
-    if anomaly['severity'] == 'critical':
+    if anomaly["severity"] == "critical":
         logger.critical(f"CRITICAL ANOMALY - Immediate review required: {anomaly}")
         # In production: Send email/Slack alert to security team

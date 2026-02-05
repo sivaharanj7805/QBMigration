@@ -12,96 +12,109 @@ logger = logging.getLogger(__name__)
 
 class Config:
     """Base configuration with comprehensive security and AWS integration"""
-    
+
     # ============================================================================
     # FLASK CORE
     # ============================================================================
-    SECRET_KEY = os.getenv('SECRET_KEY')
+    SECRET_KEY = os.getenv("SECRET_KEY")
     if not SECRET_KEY:
-        if os.getenv('FLASK_ENV') == 'production':
+        if os.getenv("FLASK_ENV") == "production":
             raise ValueError("SECRET_KEY must be set in production!")
         else:
-            SECRET_KEY = 'dev-secret-key-CHANGE-IN-PRODUCTION-' + secrets.token_hex(16)
+            SECRET_KEY = "dev-secret-key-CHANGE-IN-PRODUCTION-" + secrets.token_hex(16)
             logger.info("⚠️  WARNING: Using generated SECRET_KEY for development")
-    
+
     if len(SECRET_KEY) < 32:
         raise ValueError("SECRET_KEY must be at least 32 characters!")
-    
+
     DEBUG = False
     TESTING = False
-    
+
     # ============================================================================
     # DATABASE - PostgreSQL
     # ============================================================================
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     if not SQLALCHEMY_DATABASE_URI:
-        if os.getenv('FLASK_ENV') == 'production':
+        if os.getenv("FLASK_ENV") == "production":
             raise ValueError("DATABASE_URL must be set in production!")
         else:
             logger.warning("DATABASE_URL not set - using SQLite for development")
-            SQLALCHEMY_DATABASE_URI = 'sqlite:///qb_migration_dev.db'
-    
+            SQLALCHEMY_DATABASE_URI = "sqlite:///qb_migration_dev.db"
+
     # Fix Heroku/Railway postgres:// URLs
 
-    if SQLALCHEMY_DATABASE_URI and SQLALCHEMY_DATABASE_URI.startswith('postgres://'):
-        SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace('postgres://', 'postgresql://', 1)
-    
+    if SQLALCHEMY_DATABASE_URI and SQLALCHEMY_DATABASE_URI.startswith("postgres://"):
+        SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace(
+            "postgres://", "postgresql://", 1
+        )
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_size': 10,
-        'pool_recycle': 3600,
-        'pool_pre_ping': True,
-        'pool_timeout': 30,
-        'max_overflow': 20,
-        'echo': False  # Set True for SQL debugging
+        "pool_size": 10,
+        "pool_recycle": 3600,
+        "pool_pre_ping": True,
+        "pool_timeout": 30,
+        "max_overflow": 20,
+        "echo": False,  # Set True for SQL debugging
     }
-    
+
     # ============================================================================
     # AWS CONFIGURATION
     # ============================================================================
-    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
     # SECURITY WARNING: Check if using access keys in production
     @staticmethod
     def warn_aws_credentials():
         """Warn if using AWS access keys instead of IAM roles in production"""
-        if os.getenv('FLASK_ENV') == 'production':
-            if os.getenv('AWS_ACCESS_KEY_ID') or os.getenv('AWS_SECRET_ACCESS_KEY'):
+        if os.getenv("FLASK_ENV") == "production":
+            if os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_SECRET_ACCESS_KEY"):
                 import warnings
+
                 warnings.warn(
                     "⚠️  SECURITY WARNING: Using AWS access keys in production. "
                     "Consider using IAM roles instead for better security.",
-                    UserWarning
+                    UserWarning,
                 )
 
-    AWS_REGION = os.getenv('AWS_REGION', 'ca-central-1')  # Canadian data residency per legal docs
-    
+    AWS_REGION = os.getenv(
+        "AWS_REGION", "ca-central-1"
+    )  # Canadian data residency per legal docs
+
     # S3
-    AWS_S3_BUCKET = os.getenv('AWS_S3_BUCKET')
-    if not AWS_S3_BUCKET and os.getenv('FLASK_ENV') == 'production':
+    AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
+    if not AWS_S3_BUCKET and os.getenv("FLASK_ENV") == "production":
         raise ValueError("AWS_S3_BUCKET must be set in production!")
-    AWS_S3_CODE_BUCKET = os.getenv('AWS_S3_CODE_BUCKET', 'qb-migration-worker-code')  # Bucket for migration worker code
-    AWS_S3_ENCRYPTION = 'AES256'
-    AWS_S3_FILE_TTL_HOURS = int(os.getenv('S3_FILE_TTL_HOURS', '24'))
-    
+    AWS_S3_CODE_BUCKET = os.getenv(
+        "AWS_S3_CODE_BUCKET", "qb-migration-worker-code"
+    )  # Bucket for migration worker code
+    AWS_S3_ENCRYPTION = "AES256"
+    AWS_S3_FILE_TTL_HOURS = int(os.getenv("S3_FILE_TTL_HOURS", "24"))
+
     # EC2
     # FIX #49: Remove hardcoded US AMI - require explicit configuration per region
     # Default ami-0c55b159cbfafe1f0 was for us-east-1, causing data sovereignty violations
-    AWS_EC2_AMI_ID = os.getenv('AWS_EC2_AMI_ID', '')  # MUST be set explicitly for your region
-    AWS_EC2_INSTANCE_TYPE = os.getenv('AWS_EC2_INSTANCE_TYPE', 't3.micro')
-    AWS_EC2_KEY_NAME = os.getenv('AWS_EC2_KEY_NAME', 'qb-migration-key')
-    AWS_EC2_SECURITY_GROUP = os.getenv('AWS_EC2_SECURITY_GROUP')
-    AWS_EC2_SUBNET_ID = os.getenv('AWS_EC2_SUBNET_ID')
-    
+    AWS_EC2_AMI_ID = os.getenv(
+        "AWS_EC2_AMI_ID", ""
+    )  # MUST be set explicitly for your region
+    AWS_EC2_INSTANCE_TYPE = os.getenv("AWS_EC2_INSTANCE_TYPE", "t3.micro")
+    AWS_EC2_KEY_NAME = os.getenv("AWS_EC2_KEY_NAME", "qb-migration-key")
+    AWS_EC2_SECURITY_GROUP = os.getenv("AWS_EC2_SECURITY_GROUP")
+    AWS_EC2_SUBNET_ID = os.getenv("AWS_EC2_SUBNET_ID")
+
     # IAM
-    AWS_IAM_INSTANCE_PROFILE = os.getenv('AWS_IAM_INSTANCE_PROFILE', 'QB-Migration-Instance-Role')
-    
+    AWS_IAM_INSTANCE_PROFILE = os.getenv(
+        "AWS_IAM_INSTANCE_PROFILE", "QB-Migration-Instance-Role"
+    )
+
     # Secrets Manager
-    AWS_SECRETS_MANAGER_ARN = os.getenv('AWS_SECRETS_MANAGER_ARN')
-    
+    AWS_SECRETS_MANAGER_ARN = os.getenv("AWS_SECRETS_MANAGER_ARN")
+
     # Lambda
-    AWS_LAMBDA_CLEANUP_FUNCTION = os.getenv('AWS_LAMBDA_CLEANUP_FUNCTION', 'qb-migration-cleanup')
+    AWS_LAMBDA_CLEANUP_FUNCTION = os.getenv(
+        "AWS_LAMBDA_CLEANUP_FUNCTION", "qb-migration-cleanup"
+    )
 
     # ============================================================================
     # AWS VALIDATION
@@ -119,19 +132,19 @@ class Config:
 
         # AMI IDs are region-specific - we can't validate without AWS API call
         # But we can warn about known mismatches
-        known_us_east_amis = ['ami-0c55b159cbfafe1f0', 'ami-0d5eff06f840b0e53']
+        known_us_east_amis = ["ami-0c55b159cbfafe1f0", "ami-0d5eff06f840b0e53"]
 
-        if region == 'ca-central-1' and ami_id in known_us_east_amis:
+        if region == "ca-central-1" and ami_id in known_us_east_amis:
             warnings.warn(
                 f"⚠️  DATA SOVEREIGNTY WARNING: AWS_REGION is set to '{region}' "
                 f"but AWS_EC2_AMI_ID '{ami_id}' appears to be a US region AMI. "
                 f"This violates PIPEDA Canadian data residency requirements. "
                 f"Update AWS_EC2_AMI_ID to a ca-central-1 AMI.",
-                UserWarning
+                UserWarning,
             )
 
         # Additional validation: Region format
-        if not region.startswith(('us-', 'ca-', 'eu-', 'ap-', 'sa-', 'af-', 'me-')):
+        if not region.startswith(("us-", "ca-", "eu-", "ap-", "sa-", "af-", "me-")):
             raise ValueError(
                 f"Invalid AWS_REGION format: '{region}'. "
                 f"Must be a valid AWS region (e.g., 'ca-central-1')"
@@ -142,38 +155,42 @@ class Config:
     # ============================================================================
     # SECURITY FIX: SESSION_COOKIE_SECURE should be True in production
     # Set to True when FLASK_ENV=production to enforce HTTPS-only cookies
-    SESSION_COOKIE_SECURE = os.getenv('FLASK_ENV') == 'production'
+    SESSION_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-    PERMANENT_SESSION_LIFETIME = timedelta(hours=int(os.getenv('SESSION_TIMEOUT_HOURS', '24')))
-    SESSION_COOKIE_NAME = 'qb_session'
+    SESSION_COOKIE_SAMESITE = "Lax"
+    PERMANENT_SESSION_LIFETIME = timedelta(
+        hours=int(os.getenv("SESSION_TIMEOUT_HOURS", "24"))
+    )
+    SESSION_COOKIE_NAME = "qb_session"
     # FIX: Allow SESSION_COOKIE_DOMAIN from environment for cross-subdomain auth
-    SESSION_COOKIE_DOMAIN = os.getenv('SESSION_COOKIE_DOMAIN', None)
-    
+    SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", None)
+
     # Rate Limiting
     # SECURITY FIX: Require Redis in production for cross-worker rate limiting
     RATELIMIT_ENABLED = True
-    RATELIMIT_STORAGE_URL = os.getenv('REDIS_URL')
+    RATELIMIT_STORAGE_URL = os.getenv("REDIS_URL")
     if not RATELIMIT_STORAGE_URL:
-        if os.getenv('FLASK_ENV') == 'production':
+        if os.getenv("FLASK_ENV") == "production":
             raise ValueError(
                 "REDIS_URL must be set in production for rate limiting! "
                 "In-memory rate limiting is per-worker and ineffective."
             )
-        RATELIMIT_STORAGE_URL = 'memory://'
+        RATELIMIT_STORAGE_URL = "memory://"
         logger.warning("Using in-memory rate limiting (development only)")
-    RATELIMIT_STRATEGY = 'fixed-window'
+    RATELIMIT_STRATEGY = "fixed-window"
     RATELIMIT_HEADERS_ENABLED = True
-    
+
     # File Upload
-    MAX_CONTENT_LENGTH = int(os.getenv('MAX_UPLOAD_SIZE_MB', '50')) * 1024 * 1024
-    ALLOWED_ENCRYPTION_PREFIXES = ['IV:', 'AES:', 'ENC:']
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
+    ALLOWED_ENCRYPTION_PREFIXES = ["IV:", "AES:", "ENC:"]
     MIN_ENCRYPTED_DATA_LENGTH = 100
     MAX_ENCRYPTED_DATA_LENGTH = MAX_CONTENT_LENGTH
-    
+
     # Account Protection
-    MAX_LOGIN_ATTEMPTS = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
-    ACCOUNT_LOCKOUT_DURATION = timedelta(minutes=int(os.getenv('ACCOUNT_LOCKOUT_MINUTES', '15')))
+    MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+    ACCOUNT_LOCKOUT_DURATION = timedelta(
+        minutes=int(os.getenv("ACCOUNT_LOCKOUT_MINUTES", "15"))
+    )
     PASSWORD_MIN_LENGTH = 12  # PCI DSS v4.0.1 requires minimum 12 characters
     PASSWORD_REQUIRE_UPPERCASE = True
     PASSWORD_REQUIRE_LOWERCASE = True
@@ -184,90 +201,104 @@ class Config:
     # MED-03 FIX: Configurable JWT algorithm for RS256 readiness
     # HS256 (symmetric) is default; set to RS256 for distributed/microservice deployments
     # When using RS256, set JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH
-    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
-    JWT_ALLOWED_ALGORITHMS = os.getenv('JWT_ALLOWED_ALGORITHMS', 'HS256').split(',')
-    JWT_PRIVATE_KEY_PATH = os.getenv('JWT_PRIVATE_KEY_PATH')  # For RS256: path to PEM private key
-    JWT_PUBLIC_KEY_PATH = os.getenv('JWT_PUBLIC_KEY_PATH')    # For RS256: path to PEM public key
+    JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_ALLOWED_ALGORITHMS = os.getenv("JWT_ALLOWED_ALGORITHMS", "HS256").split(",")
+    JWT_PRIVATE_KEY_PATH = os.getenv(
+        "JWT_PRIVATE_KEY_PATH"
+    )  # For RS256: path to PEM private key
+    JWT_PUBLIC_KEY_PATH = os.getenv(
+        "JWT_PUBLIC_KEY_PATH"
+    )  # For RS256: path to PEM public key
 
     # CAPTCHA
-    CAPTCHA_THRESHOLD = int(os.getenv('CAPTCHA_THRESHOLD', '3'))
-    RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY')
-    RECAPTCHA_SECRET_KEY = os.getenv('RECAPTCHA_SECRET_KEY')
-    
+    CAPTCHA_THRESHOLD = int(os.getenv("CAPTCHA_THRESHOLD", "3"))
+    RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY")
+    RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY")
+
     # Encryption
-    BACKUP_ENCRYPTION_KEY = os.getenv('BACKUP_ENCRYPTION_KEY')
+    BACKUP_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
     # MED-02 FIX: Separate encryption key for QBO tokens and MFA secrets.
     # Falls back to BACKUP_ENCRYPTION_KEY for backwards compatibility, but
     # production deployments should set a dedicated QBO_ENCRYPTION_KEY.
-    QBO_ENCRYPTION_KEY = os.getenv('QBO_ENCRYPTION_KEY') or os.getenv('BACKUP_ENCRYPTION_KEY')
-    ENCRYPTION_KEY_VERSION = os.getenv('ENCRYPTION_KEY_VERSION', 'v1')
-    
+    QBO_ENCRYPTION_KEY = os.getenv("QBO_ENCRYPTION_KEY") or os.getenv(
+        "BACKUP_ENCRYPTION_KEY"
+    )
+    ENCRYPTION_KEY_VERSION = os.getenv("ENCRYPTION_KEY_VERSION", "v1")
+
     # ============================================================================
     # TIMEOUTS & LIMITS
     # ============================================================================
-    EC2_STARTUP_TIMEOUT_MINUTES = int(os.getenv('EC2_STARTUP_TIMEOUT_MINUTES', '15'))
-    MIGRATION_MAX_DURATION_HOURS = int(os.getenv('MIGRATION_MAX_DURATION_HOURS', '8'))
-    WEBHOOK_RETRY_ATTEMPTS = int(os.getenv('WEBHOOK_RETRY_ATTEMPTS', '3'))
-    WEBHOOK_TIMEOUT_SECONDS = int(os.getenv('WEBHOOK_TIMEOUT_SECONDS', '30'))
+    EC2_STARTUP_TIMEOUT_MINUTES = int(os.getenv("EC2_STARTUP_TIMEOUT_MINUTES", "15"))
+    MIGRATION_MAX_DURATION_HOURS = int(os.getenv("MIGRATION_MAX_DURATION_HOURS", "8"))
+    WEBHOOK_RETRY_ATTEMPTS = int(os.getenv("WEBHOOK_RETRY_ATTEMPTS", "3"))
+    WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "30"))
     WEBHOOK_REPLAY_WINDOW_MINUTES = 5  # Reject webhooks older than 5 minutes
-    
+
     # ============================================================================
     # CLEANUP & RETENTION
     # ============================================================================
-    AUTO_CLEANUP_ENABLED = os.getenv('AUTO_CLEANUP_ENABLED', 'true').lower() == 'true'
-    CLEANUP_CHECK_INTERVAL_MINUTES = int(os.getenv('CLEANUP_CHECK_INTERVAL_MINUTES', '15'))
-    ORPHANED_INSTANCE_TIMEOUT_HOURS = int(os.getenv('ORPHANED_INSTANCE_TIMEOUT_HOURS', '6'))
-    FORCE_CLEANUP_AFTER_HOURS = int(os.getenv('FORCE_CLEANUP_AFTER_HOURS', '48'))
-    
-    MIGRATION_METADATA_RETENTION_DAYS = int(os.getenv('MIGRATION_METADATA_RETENTION_DAYS', '2555'))  # 7 years per legal docs
-    USER_DATA_RETENTION_DAYS = int(os.getenv('USER_DATA_RETENTION_DAYS', '365'))
-    
+    AUTO_CLEANUP_ENABLED = os.getenv("AUTO_CLEANUP_ENABLED", "true").lower() == "true"
+    CLEANUP_CHECK_INTERVAL_MINUTES = int(
+        os.getenv("CLEANUP_CHECK_INTERVAL_MINUTES", "15")
+    )
+    ORPHANED_INSTANCE_TIMEOUT_HOURS = int(
+        os.getenv("ORPHANED_INSTANCE_TIMEOUT_HOURS", "6")
+    )
+    FORCE_CLEANUP_AFTER_HOURS = int(os.getenv("FORCE_CLEANUP_AFTER_HOURS", "48"))
+
+    MIGRATION_METADATA_RETENTION_DAYS = int(
+        os.getenv("MIGRATION_METADATA_RETENTION_DAYS", "2555")
+    )  # 7 years per legal docs
+    USER_DATA_RETENTION_DAYS = int(os.getenv("USER_DATA_RETENTION_DAYS", "365"))
+
     # ============================================================================
     # BACKUPS
     # ============================================================================
-    BACKUP_ENABLED = os.getenv('ENABLE_BACKUP_TO_S3', 'true').lower() == 'true'
+    BACKUP_ENABLED = os.getenv("ENABLE_BACKUP_TO_S3", "true").lower() == "true"
     BACKUP_INTERVAL_HOURS = 6
-    BACKUP_RETENTION_DAYS = int(os.getenv('BACKUP_RETENTION_DAYS', '7'))
-    BACKUP_DIR = os.path.join(os.path.dirname(__file__), 'backups')
-    BACKUP_TO_S3 = os.getenv('ENABLE_BACKUP_TO_S3', 'true').lower() == 'true'
-    
+    BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "7"))
+    BACKUP_DIR = os.path.join(os.path.dirname(__file__), "backups")
+    BACKUP_TO_S3 = os.getenv("ENABLE_BACKUP_TO_S3", "true").lower() == "true"
+
     # ============================================================================
     # MONITORING & ALERTING
     # ============================================================================
-    SENTRY_DSN = os.getenv('SENTRY_DSN')
-    SENTRY_ENVIRONMENT = os.getenv('FLASK_ENV', 'development')
+    SENTRY_DSN = os.getenv("SENTRY_DSN")
+    SENTRY_ENVIRONMENT = os.getenv("FLASK_ENV", "development")
     SENTRY_TRACES_SAMPLE_RATE = 0.1
-    
-    CLOUDWATCH_LOG_GROUP = os.getenv('CLOUDWATCH_LOG_GROUP', '/aws/qb-migration')
-    CLOUDWATCH_LOG_STREAM = os.getenv('CLOUDWATCH_LOG_STREAM', 'app-logs')
-    
+
+    CLOUDWATCH_LOG_GROUP = os.getenv("CLOUDWATCH_LOG_GROUP", "/aws/qb-migration")
+    CLOUDWATCH_LOG_STREAM = os.getenv("CLOUDWATCH_LOG_STREAM", "app-logs")
+
     # PRODUCTION FIX: No placeholder email - must be set explicitly
-    ALERT_EMAIL = os.getenv('ALERT_EMAIL')
-    if not ALERT_EMAIL and os.getenv('FLASK_ENV') == 'production':
-        logger.warning("ALERT_EMAIL not set - migration failure alerts will not be sent")
+    ALERT_EMAIL = os.getenv("ALERT_EMAIL")
+    if not ALERT_EMAIL and os.getenv("FLASK_ENV") == "production":
+        logger.warning(
+            "ALERT_EMAIL not set - migration failure alerts will not be sent"
+        )
     ALERT_ON_MIGRATION_FAILURE_COUNT = 3
     ALERT_ON_STUCK_MIGRATION_HOURS = 4
-    
-    LOG_LEVEL = 'INFO'
+
+    LOG_LEVEL = "INFO"
     LOG_MAX_BYTES = 10 * 1024 * 1024
     LOG_BACKUP_COUNT = 10
-    
+
     # ============================================================================
     # COST TRACKING
     # ============================================================================
-    ENABLE_COST_TRACKING = os.getenv('ENABLE_COST_TRACKING', 'true').lower() == 'true'
-    S3_COST_PER_GB = float(os.getenv('S3_COST_PER_GB', '0.023'))
-    EC2_COST_PER_HOUR = float(os.getenv('EC2_COST_PER_HOUR', '0.0416'))
-    
+    ENABLE_COST_TRACKING = os.getenv("ENABLE_COST_TRACKING", "true").lower() == "true"
+    S3_COST_PER_GB = float(os.getenv("S3_COST_PER_GB", "0.023"))
+    EC2_COST_PER_HOUR = float(os.getenv("EC2_COST_PER_HOUR", "0.0416"))
+
     # ============================================================================
     # WEBHOOKS
     # ============================================================================
     # SECURITY FIX: WEBHOOK_SECRET must be persistent across restarts
     # In production, this MUST be set via environment variable or Secrets Manager
     # A generated secret would break webhook signature verification on restart
-    WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET')
+    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
     if not WEBHOOK_SECRET:
-        if os.getenv('FLASK_ENV') == 'production':
+        if os.getenv("FLASK_ENV") == "production":
             raise ValueError(
                 "CRITICAL: WEBHOOK_SECRET must be set in production! "
                 "This secret is used to sign webhook requests and must persist across restarts. "
@@ -276,85 +307,105 @@ class Config:
         else:
             # Development only - generate ephemeral secret with warning
             WEBHOOK_SECRET = secrets.token_hex(32)
-            print("⚠️  WARNING: Using generated WEBHOOK_SECRET for development. "
-                  "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence.")
+            print(
+                "⚠️  WARNING: Using generated WEBHOOK_SECRET for development. "
+                "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence."
+            )
 
-    SERVER_URL = os.getenv('SERVER_URL', 'http://localhost:5000')
-    
+    SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000")
+
     # ============================================================================
     # EMAIL
     # ============================================================================
-    MAIL_SERVER = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
-    MAIL_PORT = int(os.getenv('MAIL_PORT', 587))
+    MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+    MAIL_PORT = int(os.getenv("MAIL_PORT", 587))
     MAIL_USE_TLS = True
-    MAIL_USERNAME = os.getenv('MAIL_USERNAME')
-    MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
-    MAIL_DEFAULT_SENDER = os.getenv('MAIL_DEFAULT_SENDER', 'noreply@qbmigrate.io')
-    
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME")
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "noreply@qbmigrate.io")
+
     # ============================================================================
     # QUICKBOOKS ONLINE
     # ============================================================================
-    QBO_CLIENT_ID = os.getenv('QBO_CLIENT_ID')
-    QBO_CLIENT_SECRET = os.getenv('QBO_CLIENT_SECRET')
-    QBO_ENVIRONMENT = os.getenv('QBO_ENVIRONMENT', 'sandbox')
-    QBO_REDIRECT_URI = os.getenv('QBO_REDIRECT_URI', 'http://localhost:5000/api/qbo/callback')
-    
+    QBO_CLIENT_ID = os.getenv("QBO_CLIENT_ID")
+    QBO_CLIENT_SECRET = os.getenv("QBO_CLIENT_SECRET")
+    QBO_ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox")
+    QBO_REDIRECT_URI = os.getenv(
+        "QBO_REDIRECT_URI", "http://localhost:5000/api/qbo/callback"
+    )
+
     # ============================================================================
     # FEATURE FLAGS
     # ============================================================================
     # MFA/2FA: Enabled by default in production for security compliance
     # Users can optionally enable MFA; privileged operations may require it
-    ENABLE_2FA = os.getenv('ENABLE_2FA', 'true').lower() == 'true'
+    ENABLE_2FA = os.getenv("ENABLE_2FA", "true").lower() == "true"
     # Require MFA for privileged operations (account deletion, payment changes, etc.)
-    REQUIRE_MFA_FOR_PRIVILEGED_OPS = os.getenv('REQUIRE_MFA_FOR_PRIVILEGED_OPS', 'true').lower() == 'true'
-    ENABLE_VIRUS_SCANNING = os.getenv('ENABLE_VIRUS_SCANNING', 'false').lower() == 'true'
-    ENABLE_METRICS_DASHBOARD = os.getenv('ENABLE_METRICS_DASHBOARD', 'false').lower() == 'true'
-    
+    REQUIRE_MFA_FOR_PRIVILEGED_OPS = (
+        os.getenv("REQUIRE_MFA_FOR_PRIVILEGED_OPS", "true").lower() == "true"
+    )
+    ENABLE_VIRUS_SCANNING = (
+        os.getenv("ENABLE_VIRUS_SCANNING", "false").lower() == "true"
+    )
+    ENABLE_METRICS_DASHBOARD = (
+        os.getenv("ENABLE_METRICS_DASHBOARD", "false").lower() == "true"
+    )
+
     # ============================================================================
     # ENTERPRISE FEATURES (v2.0)
     # ============================================================================
     # SSO / SAML 2.0
-    ENABLE_SSO = os.getenv('ENABLE_SSO', 'false').lower() == 'true'
-    SSO_PROVIDERS = os.getenv('SSO_PROVIDERS', '').split(',') if os.getenv('SSO_PROVIDERS') else []
-    SAML_SP_ENTITY_ID = os.getenv('SAML_SP_ENTITY_ID', 'https://forensicbridge.io')
-    SAML_ACS_URL = os.getenv('SAML_ACS_URL', '/api/sso/acs')
-    
+    ENABLE_SSO = os.getenv("ENABLE_SSO", "false").lower() == "true"
+    SSO_PROVIDERS = (
+        os.getenv("SSO_PROVIDERS", "").split(",") if os.getenv("SSO_PROVIDERS") else []
+    )
+    SAML_SP_ENTITY_ID = os.getenv("SAML_SP_ENTITY_ID", "https://forensicbridge.io")
+    SAML_ACS_URL = os.getenv("SAML_ACS_URL", "/api/sso/acs")
+
     # S3 Object Locking (WORM - Write Once, Read Many)
-    ENABLE_WORM_STORAGE = os.getenv('ENABLE_WORM_STORAGE', 'false').lower() == 'true'
-    WORM_RETENTION_YEARS = int(os.getenv('WORM_RETENTION_YEARS', '7'))
-    WORM_RETENTION_MODE = os.getenv('WORM_RETENTION_MODE', 'COMPLIANCE')  # GOVERNANCE or COMPLIANCE
-    
+    ENABLE_WORM_STORAGE = os.getenv("ENABLE_WORM_STORAGE", "false").lower() == "true"
+    WORM_RETENTION_YEARS = int(os.getenv("WORM_RETENTION_YEARS", "7"))
+    WORM_RETENTION_MODE = os.getenv(
+        "WORM_RETENTION_MODE", "COMPLIANCE"
+    )  # GOVERNANCE or COMPLIANCE
+
     # Customer-Managed Keys (CMK)
-    ENABLE_CMK = os.getenv('ENABLE_CMK', 'false').lower() == 'true'
-    DEFAULT_CMK_ARN = os.getenv('DEFAULT_CMK_ARN', '')
-    
+    ENABLE_CMK = os.getenv("ENABLE_CMK", "false").lower() == "true"
+    DEFAULT_CMK_ARN = os.getenv("DEFAULT_CMK_ARN", "")
+
     # Multi-AZ Deployment
-    ENABLE_MULTI_AZ = os.getenv('ENABLE_MULTI_AZ', 'false').lower() == 'true'
-    PREFERRED_AVAILABILITY_ZONES = os.getenv('PREFERRED_AZS', 'ca-central-1a,ca-central-1b,ca-central-1d').split(',')
-    
+    ENABLE_MULTI_AZ = os.getenv("ENABLE_MULTI_AZ", "false").lower() == "true"
+    PREFERRED_AVAILABILITY_ZONES = os.getenv(
+        "PREFERRED_AZS", "ca-central-1a,ca-central-1b,ca-central-1d"
+    ).split(",")
+
     # Forensic Archival (Glacier)
-    ENABLE_FORENSIC_ARCHIVAL = os.getenv('ENABLE_FORENSIC_ARCHIVAL', 'false').lower() == 'true'
-    GLACIER_RETENTION_YEARS = int(os.getenv('GLACIER_RETENTION_YEARS', '7'))
-    
+    ENABLE_FORENSIC_ARCHIVAL = (
+        os.getenv("ENABLE_FORENSIC_ARCHIVAL", "false").lower() == "true"
+    )
+    GLACIER_RETENTION_YEARS = int(os.getenv("GLACIER_RETENTION_YEARS", "7"))
+
     # Webhook Delivery Logging
-    ENABLE_WEBHOOK_LOGGING = os.getenv('ENABLE_WEBHOOK_LOGGING', 'true').lower() == 'true'
-    WEBHOOK_LOG_RETENTION_DAYS = int(os.getenv('WEBHOOK_LOG_RETENTION_DAYS', '90'))
-    
+    ENABLE_WEBHOOK_LOGGING = (
+        os.getenv("ENABLE_WEBHOOK_LOGGING", "true").lower() == "true"
+    )
+    WEBHOOK_LOG_RETENTION_DAYS = int(os.getenv("WEBHOOK_LOG_RETENTION_DAYS", "90"))
+
     # ============================================================================
     # PAGINATION
     # ============================================================================
     DEFAULT_PAGE_SIZE = 50
     MAX_PAGE_SIZE = 100
     MAX_OFFSET = 10000
-    
+
     # ============================================================================
     # LICENSING
     # ============================================================================
     # CRITICAL SECURITY FIX: LICENSE_SECRET_KEY must be persistent
     # Generating a random key on each import would invalidate all existing license tokens
-    LICENSE_SECRET_KEY = os.getenv('LICENSE_SECRET_KEY')
+    LICENSE_SECRET_KEY = os.getenv("LICENSE_SECRET_KEY")
     if not LICENSE_SECRET_KEY:
-        if os.getenv('FLASK_ENV') == 'production':
+        if os.getenv("FLASK_ENV") == "production":
             raise ValueError(
                 "CRITICAL: LICENSE_SECRET_KEY must be set in production! "
                 "This secret is used to sign license tokens and must persist across restarts. "
@@ -363,45 +414,47 @@ class Config:
         else:
             # Development only - generate ephemeral secret with warning
             LICENSE_SECRET_KEY = secrets.token_hex(32)
-            print("WARNING: Using generated LICENSE_SECRET_KEY for development. "
-                  "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence.")
-    LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv('LICENSE_TOKEN_EXPIRY_HOURS', '24'))
-    
+            print(
+                "WARNING: Using generated LICENSE_SECRET_KEY for development. "
+                "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence."
+            )
+    LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv("LICENSE_TOKEN_EXPIRY_HOURS", "24"))
+
     # License/Pricing tiers - Per-file pricing model
     LICENSE_TIERS = {
-        'standard': {
-            'name': 'Standard',
-            'price_per_file': 199,
-            'max_file_size_mb': 100,
-            'description': 'Files under 100MB'
+        "standard": {
+            "name": "Standard",
+            "price_per_file": 199,
+            "max_file_size_mb": 100,
+            "description": "Files under 100MB",
         },
-        'industrial': {
-            'name': 'Industrial', 
-            'price_per_file': 499,
-            'max_file_size_mb': 1024,
-            'description': 'Files 100MB - 1GB'
+        "industrial": {
+            "name": "Industrial",
+            "price_per_file": 499,
+            "max_file_size_mb": 1024,
+            "description": "Files 100MB - 1GB",
         },
-        'forensic': {
-            'name': 'Monster/Forensic',
-            'price_per_file': 1499,
-            'max_file_size_mb': -1,  # Unlimited
-            'description': 'Files over 1GB, full SHA-256 pipeline'
-        }
+        "forensic": {
+            "name": "Monster/Forensic",
+            "price_per_file": 1499,
+            "max_file_size_mb": -1,  # Unlimited
+            "description": "Files over 1GB, full SHA-256 pipeline",
+        },
     }
-    
+
     # Legacy subscription tiers (for backwards compatibility)
     SUBSCRIPTION_TIERS = {
-        'starter': {'migrations': 10, 'name': 'Starter'},
-        'professional': {'migrations': 50, 'name': 'Professional'},
-        'enterprise': {'migrations': -1, 'name': 'Enterprise'}  # -1 = unlimited
+        "starter": {"migrations": 10, "name": "Starter"},
+        "professional": {"migrations": 50, "name": "Professional"},
+        "enterprise": {"migrations": -1, "name": "Enterprise"},  # -1 = unlimited
     }
-    
+
     # Admin emails for license management (properly parse empty values)
     @staticmethod
     def get_admin_emails():
-        raw = os.getenv('ADMIN_EMAILS', '')
-        return [e.strip() for e in raw.split(',') if e.strip()]
-    
+        raw = os.getenv("ADMIN_EMAILS", "")
+        return [e.strip() for e in raw.split(",") if e.strip()]
+
     @staticmethod
     def init_app(app):
         """Initialize app - override in subclasses for specific setup"""
@@ -410,6 +463,7 @@ class Config:
 
 class DevelopmentConfig(Config):
     """Development configuration"""
+
     DEBUG = True
     RATELIMIT_ENABLED = False
     AUTO_CLEANUP_ENABLED = False
@@ -418,11 +472,12 @@ class DevelopmentConfig(Config):
 
 class TestingConfig(Config):
     """Testing configuration with validation for test environment"""
+
     TESTING = True
     DEBUG = False
 
     # Use DATABASE_URL env var if available, otherwise use SQLite for testing
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///:memory:')
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///:memory:")
 
     RATELIMIT_ENABLED = False
     AUTO_CLEANUP_ENABLED = False
@@ -439,25 +494,25 @@ class TestingConfig(Config):
     # Use simpler connection pool for tests (only for non-SQLite)
     @property
     def SQLALCHEMY_ENGINE_OPTIONS(self):
-        if 'sqlite' in str(self.SQLALCHEMY_DATABASE_URI):
+        if "sqlite" in str(self.SQLALCHEMY_DATABASE_URI):
             return {}  # SQLite doesn't support connection pooling
         return {
-            'pool_size': 5,
-            'pool_recycle': 1800,
-            'pool_pre_ping': True,
-            'pool_timeout': 10,
-            'max_overflow': 5,
+            "pool_size": 5,
+            "pool_recycle": 1800,
+            "pool_pre_ping": True,
+            "pool_timeout": 10,
+            "max_overflow": 5,
         }
 
     @classmethod
     def init_app(cls, app):
         """Initialize app with test database and validate test configuration"""
         # Use environment variable if set, otherwise use class default
-        db_url = os.getenv('DATABASE_URL', cls.SQLALCHEMY_DATABASE_URI)
-        app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+        db_url = os.getenv("DATABASE_URL", cls.SQLALCHEMY_DATABASE_URI)
+        app.config["SQLALCHEMY_DATABASE_URI"] = db_url
         # Adjust engine options based on database type
-        if 'sqlite' in db_url:
-            app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {}
+        if "sqlite" in db_url:
+            app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {}
 
         # TESTING CONFIG VALIDATION: Ensure test-specific settings are correct
         cls._validate_test_config(app)
@@ -469,64 +524,80 @@ class TestingConfig(Config):
         tests don't accidentally affect production resources.
         """
         import logging
+
         logger = logging.getLogger(__name__)
 
         issues = []
 
         # Ensure we're not pointing to production database
-        db_url = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        db_url = app.config.get("SQLALCHEMY_DATABASE_URI", "")
         if db_url:
-            if 'production' in db_url.lower():
-                issues.append("Database URL contains 'production' - refusing to run tests against production DB")
-            if 'rds.amazonaws.com' in db_url and 'test' not in db_url.lower():
-                issues.append("Database URL appears to be production RDS - ensure test database is used")
+            if "production" in db_url.lower():
+                issues.append(
+                    "Database URL contains 'production' - refusing to run tests against production DB"
+                )
+            if "rds.amazonaws.com" in db_url and "test" not in db_url.lower():
+                issues.append(
+                    "Database URL appears to be production RDS - ensure test database is used"
+                )
 
         # Ensure S3 bucket is not production
-        s3_bucket = app.config.get('AWS_S3_BUCKET', '')
-        if s3_bucket and 'prod' in s3_bucket.lower() and 'test' not in s3_bucket.lower():
-            issues.append(f"S3 bucket '{s3_bucket}' appears to be production - use test bucket")
+        s3_bucket = app.config.get("AWS_S3_BUCKET", "")
+        if (
+            s3_bucket
+            and "prod" in s3_bucket.lower()
+            and "test" not in s3_bucket.lower()
+        ):
+            issues.append(
+                f"S3 bucket '{s3_bucket}' appears to be production - use test bucket"
+            )
 
         # Ensure dangerous features are disabled for tests
-        if app.config.get('AUTO_CLEANUP_ENABLED'):
+        if app.config.get("AUTO_CLEANUP_ENABLED"):
             issues.append("AUTO_CLEANUP_ENABLED should be False in testing")
 
-        if app.config.get('BACKUP_TO_S3'):
+        if app.config.get("BACKUP_TO_S3"):
             issues.append("BACKUP_TO_S3 should be False in testing")
 
         # Validate encryption key is present (tests need this for encryption tests)
-        backup_key = app.config.get('BACKUP_ENCRYPTION_KEY')
+        backup_key = app.config.get("BACKUP_ENCRYPTION_KEY")
         if not backup_key:
             # Generate a test key if not provided
             from cryptography.fernet import Fernet
+
             test_key = Fernet.generate_key().decode()
-            app.config['BACKUP_ENCRYPTION_KEY'] = test_key
+            app.config["BACKUP_ENCRYPTION_KEY"] = test_key
             logger.info("Generated test BACKUP_ENCRYPTION_KEY")
 
         # Validate SECRET_KEY
-        secret_key = app.config.get('SECRET_KEY')
+        secret_key = app.config.get("SECRET_KEY")
         if not secret_key or len(secret_key) < 32:
             import secrets as secrets_module
-            test_secret = 'test-secret-key-' + secrets_module.token_hex(16)
-            app.config['SECRET_KEY'] = test_secret
+
+            test_secret = "test-secret-key-" + secrets_module.token_hex(16)
+            app.config["SECRET_KEY"] = test_secret
             logger.info("Generated test SECRET_KEY")
 
         # Report any issues
         if issues:
             for issue in issues:
                 logger.error(f"TEST CONFIG ISSUE: {issue}")
-            raise RuntimeError(f"Test configuration validation failed: {'; '.join(issues)}")
+            raise RuntimeError(
+                f"Test configuration validation failed: {'; '.join(issues)}"
+            )
 
         logger.info("Test configuration validated successfully")
 
 
 class ProductionConfig(Config):
     """Production configuration"""
+
     DEBUG = False
     SESSION_COOKIE_SECURE = True
     RATELIMIT_ENABLED = True
     AUTO_CLEANUP_ENABLED = True
     BACKUP_ENABLED = True
-    
+
     @classmethod
     def init_app(cls, app):
         """Initialize production app"""
@@ -540,29 +611,31 @@ class ProductionConfig(Config):
 
         # Validate critical production settings
         required_vars = [
-            'SECRET_KEY',
-            'DATABASE_URL',
-            'AWS_S3_BUCKET',
-            'AWS_EC2_AMI_ID',
-            'SENTRY_DSN',
-            'WEBHOOK_SECRET',
-            'BACKUP_ENCRYPTION_KEY'
+            "SECRET_KEY",
+            "DATABASE_URL",
+            "AWS_S3_BUCKET",
+            "AWS_EC2_AMI_ID",
+            "SENTRY_DSN",
+            "WEBHOOK_SECRET",
+            "BACKUP_ENCRYPTION_KEY",
         ]
 
         missing = [var for var in required_vars if not os.getenv(var)]
         if missing:
-            raise ValueError(f"Missing required production environment variables: {', '.join(missing)}")
+            raise ValueError(
+                f"Missing required production environment variables: {', '.join(missing)}"
+            )
 
         # Validate SECRET_KEY strength
-        if len(os.getenv('SECRET_KEY', '')) < 32:
+        if len(os.getenv("SECRET_KEY", "")) < 32:
             raise ValueError("SECRET_KEY must be at least 32 characters in production!")
 
 
 config = {
-    'development': DevelopmentConfig,
-    'testing': TestingConfig,
-    'production': ProductionConfig,
-    'default': DevelopmentConfig
+    "development": DevelopmentConfig,
+    "testing": TestingConfig,
+    "production": ProductionConfig,
+    "default": DevelopmentConfig,
 }
 
 
@@ -575,26 +648,27 @@ def validate_config():
         RuntimeError: If required configuration is missing
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
-    env = os.getenv('FLASK_ENV', 'development')
+    env = os.getenv("FLASK_ENV", "development")
 
     # Always required settings
-    base_required = ['SECRET_KEY', 'DATABASE_URL']
+    base_required = ["SECRET_KEY", "DATABASE_URL"]
 
     # Production-only required settings
     production_required = [
-        'AWS_S3_BUCKET',
-        'AWS_EC2_AMI_ID',
-        'WEBHOOK_SECRET',
-        'BACKUP_ENCRYPTION_KEY'
+        "AWS_S3_BUCKET",
+        "AWS_EC2_AMI_ID",
+        "WEBHOOK_SECRET",
+        "BACKUP_ENCRYPTION_KEY",
     ]
 
     # Check base requirements
     missing = [k for k in base_required if not os.getenv(k)]
 
     # Add production requirements in production
-    if env == 'production':
+    if env == "production":
         missing.extend([k for k in production_required if not os.getenv(k)])
 
     if missing:
@@ -603,16 +677,19 @@ def validate_config():
         raise RuntimeError(error_msg)
 
     # Validate SECRET_KEY length
-    secret_key = os.getenv('SECRET_KEY', '')
+    secret_key = os.getenv("SECRET_KEY", "")
     if len(secret_key) < 32:
         raise RuntimeError("SECRET_KEY must be at least 32 characters")
 
     # Validate BACKUP_ENCRYPTION_KEY format if set
-    backup_key = os.getenv('BACKUP_ENCRYPTION_KEY')
+    backup_key = os.getenv("BACKUP_ENCRYPTION_KEY")
     if backup_key:
         try:
             from cryptography.fernet import Fernet
-            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+
+            key_bytes = (
+                backup_key.encode() if isinstance(backup_key, str) else backup_key
+            )
             Fernet(key_bytes)  # Will raise if invalid
         except Exception as e:
             raise RuntimeError(
@@ -621,25 +698,26 @@ def validate_config():
             )
 
     # MED-02 FIX: Validate QBO_ENCRYPTION_KEY if set (separate from backup key)
-    qbo_key = os.getenv('QBO_ENCRYPTION_KEY')
+    qbo_key = os.getenv("QBO_ENCRYPTION_KEY")
     if qbo_key:
         try:
             from cryptography.fernet import Fernet
+
             Fernet(qbo_key.encode() if isinstance(qbo_key, str) else qbo_key)
         except Exception as e:
             raise RuntimeError(
                 f"QBO_ENCRYPTION_KEY is invalid: {e}. "
                 "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
             )
-    elif env == 'production' and backup_key:
+    elif env == "production" and backup_key:
         logger.warning(
             "QBO_ENCRYPTION_KEY not set - falling back to BACKUP_ENCRYPTION_KEY. "
             "Set a dedicated QBO_ENCRYPTION_KEY for key separation best practice."
         )
 
     # Validate DATABASE_URL format
-    db_url = os.getenv('DATABASE_URL', '')
-    if db_url and not db_url.startswith(('postgresql://', 'postgres://', 'sqlite://')):
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url and not db_url.startswith(("postgresql://", "postgres://", "sqlite://")):
         logger.warning(f"Unusual DATABASE_URL format: {db_url[:20]}...")
 
     logger.info(f"Configuration validated successfully for environment: {env}")

@@ -12,7 +12,7 @@ load_dotenv()
 # STEP 3: Now import app (config.py will find SECRET_KEY)
 from app import app
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("QB MIGRATION SERVER - DEVELOPMENT MODE")
     logger.info("=" * 80)
@@ -25,9 +25,9 @@ if __name__ == '__main__':
 
     # FIX CRIT-02: Bind to localhost only by default for security
     # To expose to network, set DEV_HOST environment variable
-    host = os.environ.get('DEV_HOST', '127.0.0.1')
+    host = os.environ.get("DEV_HOST", "127.0.0.1")
 
-    if host == '0.0.0.0':
+    if host == "0.0.0.0":
         logger.info("WARNING: Server is binding to all interfaces (0.0.0.0)")
         logger.info("This should ONLY be used in isolated development environments!")
         logger.info("=" * 80)

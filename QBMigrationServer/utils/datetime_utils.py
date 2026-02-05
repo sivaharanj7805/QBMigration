@@ -160,7 +160,9 @@ def from_iso(iso_str: str, ensure_aware: bool = True) -> datetime:
     return dt
 
 
-def from_iso_safe(iso_str: str, default: Optional[datetime] = None) -> Optional[datetime]:
+def from_iso_safe(
+    iso_str: str, default: Optional[datetime] = None
+) -> Optional[datetime]:
     """
     Safely parse ISO 8601 datetime string with error handling.
 
@@ -290,5 +292,5 @@ def _warn_deprecated_utcnow():
         "datetime.now(timezone.utc) is deprecated in Python 3.12+. "
         "Use utils.datetime_utils.now(timezone.utc) instead.",
         DeprecationWarning,
-        stacklevel=3
+        stacklevel=3,
     )

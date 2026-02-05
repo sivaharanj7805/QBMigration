@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 class MigrationOrchestrator:
     """
     Unified orchestrator for QB Desktop → QBO migration.
-    
+
     Handles:
     1. Decryption of uploaded data
     2. Data transformation (31 entity types)
@@ -53,7 +53,7 @@ class MigrationOrchestrator:
     4. Trial balance verification
     5. Progress reporting
     """
-    
+
     def __init__(
         self,
         qbo_client_id: str,
@@ -62,11 +62,11 @@ class MigrationOrchestrator:
         realm_id: str,
         qbo_environment: str = "sandbox",
         progress_callback: Optional[Callable[[int, str], None]] = None,
-        log_level: int = logging.INFO
+        log_level: int = logging.INFO,
     ):
         """
         Initialize the orchestrator with QBO credentials.
-        
+
         Args:
             qbo_client_id: QuickBooks Online OAuth client ID
             qbo_client_secret: QuickBooks Online OAuth client secret
@@ -76,7 +76,12 @@ class MigrationOrchestrator:
             progress_callback: Function(percent, message) called for progress updates
             log_level: Logging level
         """
-        if not qbo_client_id or not qbo_client_secret or not qbo_refresh_token or not realm_id:
+        if (
+            not qbo_client_id
+            or not qbo_client_secret
+            or not qbo_refresh_token
+            or not realm_id
+        ):
             raise ValueError(
                 "All QBO credentials are required: client_id, client_secret, refresh_token, realm_id"
             )
@@ -98,23 +103,26 @@ class MigrationOrchestrator:
         self._qbo_client = None
         self._transformer = None
         self._verifier = None
-    
+
     def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback."""
         logger.info(f"[{percent}%] {message}")
         try:
             self.progress_callback(percent, message)
         except Exception as e:
-            logger.error(f"progress_callback failed: {e} — caller may not see status updates")
+            logger.error(
+                f"progress_callback failed: {e} — caller may not see status updates"
+            )
 
-    def _init_encryption(self) -> 'EncryptionManager':
+    def _init_encryption(self) -> "EncryptionManager":
         """Initialize encryption manager"""
         if self._encryption_manager is None:
             from encryption import EncryptionManager
+
             self._encryption_manager = EncryptionManager()
         return self._encryption_manager
 
-    def _init_oauth(self) -> 'OAuthManager':
+    def _init_oauth(self) -> "OAuthManager":
         """Initialize OAuth manager"""
         if self._oauth_manager is None:
             from oauth_manager import OAuthManager
@@ -129,11 +137,11 @@ class MigrationOrchestrator:
                 oauth_token_url=svc_config.OAUTH_TOKEN_URL,
                 oauth_introspect_url=svc_config.OAUTH_INTROSPECT_URL,
                 oauth_revoke_url=svc_config.OAUTH_REVOKE_URL,
-                data_dir=Path(svc_config.DATA_DIR)
+                data_dir=Path(svc_config.DATA_DIR),
             )
         return self._oauth_manager
 
-    def _init_qbo_client(self, access_token: str) -> 'PremiumQBOClient':
+    def _init_qbo_client(self, access_token: str) -> "PremiumQBOClient":
         """Initialize or update QBO client with current access token."""
         if self._qbo_client is None:
             from qbo_client import PremiumQBOClient
@@ -142,33 +150,37 @@ class MigrationOrchestrator:
             self._qbo_client = PremiumQBOClient(
                 access_token=access_token,
                 base_url=svc_config.BASE_URL,
-                db_path=str(svc_config.DATA_DIR / "migration_state.db")
+                db_path=str(svc_config.DATA_DIR / "migration_state.db"),
             )
         else:
             # Update access token in case it was refreshed
             self._qbo_client._base_access_token = access_token
         return self._qbo_client
 
-    def _init_transformer(self) -> 'QBDataTransformer':
+    def _init_transformer(self) -> "QBDataTransformer":
         """Initialize data transformer"""
         if self._transformer is None:
             from data_transformer import QBDataTransformer
+
             self._transformer = QBDataTransformer()
         return self._transformer
 
-    def _init_verifier(self, qbo_client: 'PremiumQBOClient') -> 'PremiumMigrationVerifier':
+    def _init_verifier(
+        self, qbo_client: "PremiumQBOClient"
+    ) -> "PremiumMigrationVerifier":
         """Initialize migration verifier"""
         if self._verifier is None:
             from verifier import PremiumMigrationVerifier
+
             self._verifier = PremiumMigrationVerifier(qbo_client)
         return self._verifier
-    
+
     def run_migration(
         self,
         encrypted_data: bytes,
         encryption_metadata: Dict[str, Any],
         company_name: str = "Unknown",
-        timeout_seconds: int = 7200  # 2 hour default timeout
+        timeout_seconds: int = 7200,  # 2 hour default timeout
     ) -> Dict[str, Any]:
         """
         Run the complete migration process.
@@ -207,25 +219,29 @@ class MigrationOrchestrator:
 
         # Set up timeout (Unix only)
         old_handler = None
-        if hasattr(signal, 'SIGALRM'):
+        if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, _migration_timeout_handler)
             signal.alarm(timeout_seconds)
-            logger.info(f"Migration timeout set to {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
+            logger.info(
+                f"Migration timeout set to {timeout_seconds} seconds ({timeout_seconds // 60} minutes)"
+            )
 
         try:
-            return self._run_migration_impl(encrypted_data, encryption_metadata, company_name)
+            return self._run_migration_impl(
+                encrypted_data, encryption_metadata, company_name
+            )
         except Exception:
             # AUDIT FIX MED-21: Ensure QBO client session is closed on exception
-            if hasattr(self, 'qbo_client') and self.qbo_client:
+            if hasattr(self, "qbo_client") and self.qbo_client:
                 try:
-                    if hasattr(self.qbo_client, 'session') and self.qbo_client.session:
+                    if hasattr(self.qbo_client, "session") and self.qbo_client.session:
                         self.qbo_client.session.close()
                 except Exception:
                     pass
             raise
         finally:
             # Always restore signal handler and cancel alarm
-            if hasattr(signal, 'SIGALRM'):
+            if hasattr(signal, "SIGALRM"):
                 signal.alarm(0)
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
@@ -234,7 +250,7 @@ class MigrationOrchestrator:
         self,
         encrypted_data: bytes,
         encryption_metadata: Dict[str, Any],
-        company_name: str = "Unknown"
+        company_name: str = "Unknown",
     ) -> Dict[str, Any]:
         """Internal implementation of migration (called with timeout wrapper)."""
         start_time = datetime.now(timezone.utc)
@@ -249,38 +265,46 @@ class MigrationOrchestrator:
         try:
             # Step 1: Decrypt data (5%)
             self._report_progress(5, "Decrypting data")
-            
+
             enc_mgr = self._init_encryption()
-            aes_key = encryption_metadata.get('key') or encryption_metadata.get('aes_key')
+            aes_key = encryption_metadata.get("key") or encryption_metadata.get(
+                "aes_key"
+            )
             if not aes_key:
-                raise ValueError("Missing encryption key in metadata (expected 'key' or 'aes_key')")
+                raise ValueError(
+                    "Missing encryption key in metadata (expected 'key' or 'aes_key')"
+                )
             # AUDIT FIX HIGH-09: Validate encryption metadata format and key length
             import base64
+
             try:
                 decoded_key = base64.b64decode(aes_key)
                 if len(decoded_key) != 32:
-                    raise ValueError(f"Invalid AES key length: expected 32 bytes, got {len(decoded_key)}")
+                    raise ValueError(
+                        f"Invalid AES key length: expected 32 bytes, got {len(decoded_key)}"
+                    )
             except Exception as e:
-                if 'Invalid AES key length' in str(e):
+                if "Invalid AES key length" in str(e):
                     raise
                 raise ValueError(f"Invalid base64-encoded AES key: {type(e).__name__}")
-            iv = encryption_metadata.get('iv')
+            iv = encryption_metadata.get("iv")
             if not iv:
                 raise ValueError("Missing 'iv' in encryption metadata")
-            tag = encryption_metadata.get('tag')
+            tag = encryption_metadata.get("tag")
             if not tag:
-                raise ValueError("Missing 'tag' in encryption metadata - required for authenticated decryption")
+                raise ValueError(
+                    "Missing 'tag' in encryption metadata - required for authenticated decryption"
+                )
 
             decrypted_json = enc_mgr.decrypt_chunked(
-                encrypted_data,
-                key=aes_key,
-                iv=iv,
-                tag=tag
+                encrypted_data, key=aes_key, iv=iv, tag=tag
             )
-            
+
             data = json.loads(decrypted_json)
             if not isinstance(data, dict):
-                raise ValueError(f"Expected JSON object from decrypted data, got {type(data).__name__}")
+                raise ValueError(
+                    f"Expected JSON object from decrypted data, got {type(data).__name__}"
+                )
             logger.info(f"Decrypted {len(decrypted_json):,} bytes")
             # AUDIT FIX CRIT-04: Clear decrypted plaintext from memory immediately after parsing
             del decrypted_json
@@ -290,63 +314,113 @@ class MigrationOrchestrator:
             for key, value in data.items():
                 key_map = {
                     # Master lists
-                    'account': 'Accounts', 'accounts': 'Accounts',
-                    'customer': 'Customers', 'customers': 'Customers',
-                    'vendor': 'Vendors', 'vendors': 'Vendors',
-                    'item': 'Items', 'items': 'Items',
-                    'employee': 'Employees', 'employees': 'Employees',
+                    "account": "Accounts",
+                    "accounts": "Accounts",
+                    "customer": "Customers",
+                    "customers": "Customers",
+                    "vendor": "Vendors",
+                    "vendors": "Vendors",
+                    "item": "Items",
+                    "items": "Items",
+                    "employee": "Employees",
+                    "employees": "Employees",
                     # Configuration lists
-                    'class': 'Classes', 'classes': 'Classes',
-                    'department': 'Departments', 'departments': 'Departments',
-                    'term': 'Terms', 'terms': 'Terms',
-                    'paymentmethod': 'PaymentMethods', 'paymentmethods': 'PaymentMethods',
-                    'taxcode': 'TaxCodes', 'taxcodes': 'TaxCodes',
-                    'salestaxcodes': 'TaxCodes',
-                    'taxrate': 'TaxRates', 'taxrates': 'TaxRates',
-                    'taxagency': 'TaxAgencies', 'taxagencies': 'TaxAgencies',
-                    'companycurrency': 'CompanyCurrencies', 'companycurrencies': 'CompanyCurrencies',
-                    'currencies': 'CompanyCurrencies',
+                    "class": "Classes",
+                    "classes": "Classes",
+                    "department": "Departments",
+                    "departments": "Departments",
+                    "term": "Terms",
+                    "terms": "Terms",
+                    "paymentmethod": "PaymentMethods",
+                    "paymentmethods": "PaymentMethods",
+                    "taxcode": "TaxCodes",
+                    "taxcodes": "TaxCodes",
+                    "salestaxcodes": "TaxCodes",
+                    "taxrate": "TaxRates",
+                    "taxrates": "TaxRates",
+                    "taxagency": "TaxAgencies",
+                    "taxagencies": "TaxAgencies",
+                    "companycurrency": "CompanyCurrencies",
+                    "companycurrencies": "CompanyCurrencies",
+                    "currencies": "CompanyCurrencies",
                     # Transactions
-                    'invoice': 'Invoices', 'invoices': 'Invoices',
-                    'bill': 'Bills', 'bills': 'Bills',
-                    'payment': 'Payments', 'payments': 'Payments',
-                    'receivepayments': 'Payments',
-                    'estimate': 'Estimates', 'estimates': 'Estimates',
-                    'salesreceipt': 'SalesReceipts', 'salesreceipts': 'SalesReceipts',
-                    'creditmemo': 'CreditMemos', 'creditmemos': 'CreditMemos',
-                    'vendorcredit': 'VendorCredits', 'vendorcredits': 'VendorCredits',
-                    'billpayment': 'BillPayments', 'billpayments': 'BillPayments',
-                    'purchaseorder': 'PurchaseOrders', 'purchaseorders': 'PurchaseOrders',
-                    'purchase': 'Purchases', 'purchases': 'Purchases',
-                    'checks': 'Purchases', 'creditcardcharges': 'Purchases',
-                    'journalentry': 'JournalEntries', 'journalentries': 'JournalEntries',
-                    'deposit': 'Deposits', 'deposits': 'Deposits',
-                    'transfer': 'Transfers', 'transfers': 'Transfers',
-                    'refundreceipt': 'RefundReceipts', 'refundreceipts': 'RefundReceipts',
-                    'timeactivity': 'TimeActivities', 'timeactivities': 'TimeActivities',
-                    'inventoryadjustment': 'InventoryAdjustments', 'inventoryadjustments': 'InventoryAdjustments',
-                    'taxpayment': 'TaxPayments', 'taxpayments': 'TaxPayments',
-                    'salestaxpayments': 'TaxPayments',
-                    'attachable': 'Attachables', 'attachables': 'Attachables',
+                    "invoice": "Invoices",
+                    "invoices": "Invoices",
+                    "bill": "Bills",
+                    "bills": "Bills",
+                    "payment": "Payments",
+                    "payments": "Payments",
+                    "receivepayments": "Payments",
+                    "estimate": "Estimates",
+                    "estimates": "Estimates",
+                    "salesreceipt": "SalesReceipts",
+                    "salesreceipts": "SalesReceipts",
+                    "creditmemo": "CreditMemos",
+                    "creditmemos": "CreditMemos",
+                    "vendorcredit": "VendorCredits",
+                    "vendorcredits": "VendorCredits",
+                    "billpayment": "BillPayments",
+                    "billpayments": "BillPayments",
+                    "purchaseorder": "PurchaseOrders",
+                    "purchaseorders": "PurchaseOrders",
+                    "purchase": "Purchases",
+                    "purchases": "Purchases",
+                    "checks": "Purchases",
+                    "creditcardcharges": "Purchases",
+                    "journalentry": "JournalEntries",
+                    "journalentries": "JournalEntries",
+                    "deposit": "Deposits",
+                    "deposits": "Deposits",
+                    "transfer": "Transfers",
+                    "transfers": "Transfers",
+                    "refundreceipt": "RefundReceipts",
+                    "refundreceipts": "RefundReceipts",
+                    "timeactivity": "TimeActivities",
+                    "timeactivities": "TimeActivities",
+                    "inventoryadjustment": "InventoryAdjustments",
+                    "inventoryadjustments": "InventoryAdjustments",
+                    "taxpayment": "TaxPayments",
+                    "taxpayments": "TaxPayments",
+                    "salestaxpayments": "TaxPayments",
+                    "attachable": "Attachables",
+                    "attachables": "Attachables",
                     # New entity types
-                    'salesorder': 'SalesOrders', 'salesorders': 'SalesOrders',
-                    'itemreceipt': 'ItemReceipts', 'itemreceipts': 'ItemReceipts',
-                    'charge': 'Charges', 'charges': 'Charges',
-                    'othername': 'OtherNames', 'othernames': 'OtherNames',
-                    'datedriventerm': 'DateDrivenTerms', 'datedriventerms': 'DateDrivenTerms',
-                    'lead': 'Leads', 'leads': 'Leads',
-                    'buildassembly': 'BuildAssemblies', 'buildassemblies': 'BuildAssemblies',
-                    'inventorytransfer': 'InventoryTransfers', 'inventorytransfers': 'InventoryTransfers',
-                    'dataextension': 'DataExtensions', 'dataextensions': 'DataExtensions',
-                    'salesrep': 'SalesReps', 'salesreps': 'SalesReps',
-                    'customermessage': 'CustomerMessages', 'customermessages': 'CustomerMessages',
-                    'jobtype': 'JobTypes', 'jobtypes': 'JobTypes',
-                    'vendortype': 'VendorTypes', 'vendortypes': 'VendorTypes',
-                    'pricelevel': 'PriceLevels', 'pricelevels': 'PriceLevels',
-                    'salestaxgroup': 'SalesTaxGroups', 'salestaxgroups': 'SalesTaxGroups',
-                    'shipmethod': 'ShipMethods', 'shipmethods': 'ShipMethods',
-                    'inventorysite': 'InventorySites', 'inventorysites': 'InventorySites',
-                    'customertype': 'CustomerTypes', 'customertypes': 'CustomerTypes',
+                    "salesorder": "SalesOrders",
+                    "salesorders": "SalesOrders",
+                    "itemreceipt": "ItemReceipts",
+                    "itemreceipts": "ItemReceipts",
+                    "charge": "Charges",
+                    "charges": "Charges",
+                    "othername": "OtherNames",
+                    "othernames": "OtherNames",
+                    "datedriventerm": "DateDrivenTerms",
+                    "datedriventerms": "DateDrivenTerms",
+                    "lead": "Leads",
+                    "leads": "Leads",
+                    "buildassembly": "BuildAssemblies",
+                    "buildassemblies": "BuildAssemblies",
+                    "inventorytransfer": "InventoryTransfers",
+                    "inventorytransfers": "InventoryTransfers",
+                    "dataextension": "DataExtensions",
+                    "dataextensions": "DataExtensions",
+                    "salesrep": "SalesReps",
+                    "salesreps": "SalesReps",
+                    "customermessage": "CustomerMessages",
+                    "customermessages": "CustomerMessages",
+                    "jobtype": "JobTypes",
+                    "jobtypes": "JobTypes",
+                    "vendortype": "VendorTypes",
+                    "vendortypes": "VendorTypes",
+                    "pricelevel": "PriceLevels",
+                    "pricelevels": "PriceLevels",
+                    "salestaxgroup": "SalesTaxGroups",
+                    "salestaxgroups": "SalesTaxGroups",
+                    "shipmethod": "ShipMethods",
+                    "shipmethods": "ShipMethods",
+                    "inventorysite": "InventorySites",
+                    "inventorysites": "InventorySites",
+                    "customertype": "CustomerTypes",
+                    "customertypes": "CustomerTypes",
                 }
                 mapped = key_map.get(key.lower(), key)
                 normalized_data[mapped] = value
@@ -354,16 +428,16 @@ class MigrationOrchestrator:
 
             # Step 2: OAuth refresh (10%)
             self._report_progress(10, "Authenticating with QuickBooks Online")
-            
+
             oauth_mgr = self._init_oauth()
             access_token = oauth_mgr.get_valid_access_token()
-            
+
             if not access_token:
                 raise Exception("Failed to obtain valid access token")
-            
+
             # Step 3: Initialize QBO client (15%)
             self._report_progress(15, "Connecting to QuickBooks Online")
-            
+
             qbo_client = self._init_qbo_client(access_token)
             transformer = self._init_transformer()
 
@@ -371,20 +445,22 @@ class MigrationOrchestrator:
             # TaxAgency cannot be created via API — must map to existing ones
             try:
                 existing_agencies = qbo_client.query_tax_agencies(
-                    oauth_manager=oauth_mgr)
+                    oauth_manager=oauth_mgr
+                )
                 for agency in existing_agencies:
-                    agency_id = agency.get('Id')
-                    agency_name = agency.get('DisplayName', '')
+                    agency_id = agency.get("Id")
+                    agency_name = agency.get("DisplayName", "")
                     if agency_id and agency_name:
-                        transformer.id_mapping['tax_agencies'][agency_name] = agency_id
+                        transformer.id_mapping["tax_agencies"][agency_name] = agency_id
                 logger.info(
-                    f"Found {len(existing_agencies)} existing TaxAgencies in QBO")
+                    f"Found {len(existing_agencies)} existing TaxAgencies in QBO"
+                )
             except Exception as e:
                 logger.warning(f"Could not query TaxAgencies: {e}")
 
             # Step 4: Migrate entities (20-85%)
             entity_id_mappings = {}  # Separate dict for ID mappings
-            entity_counts = {}       # Separate dict for counts
+            entity_counts = {}  # Separate dict for counts
             total_failed = 0
             total_skipped = 0
 
@@ -399,61 +475,61 @@ class MigrationOrchestrator:
             entity_order = [
                 # Phase 0: Skip-with-logging types (no QBO creation, just log)
                 # These run first so their ID mappings are available if needed
-                ('SalesReps', 20, 20),
-                ('CustomerMessages', 20, 20),
-                ('JobTypes', 20, 20),
-                ('VendorTypes', 20, 20),
-                ('PriceLevels', 20, 20),
-                ('ShipMethods', 20, 20),
-                ('DataExtensions', 20, 20),
-                ('InventorySites', 20, 20),
-                ('SalesTaxGroups', 20, 20),
+                ("SalesReps", 20, 20),
+                ("CustomerMessages", 20, 20),
+                ("JobTypes", 20, 20),
+                ("VendorTypes", 20, 20),
+                ("PriceLevels", 20, 20),
+                ("ShipMethods", 20, 20),
+                ("DataExtensions", 20, 20),
+                ("InventorySites", 20, 20),
+                ("SalesTaxGroups", 20, 20),
                 # Phase 1: Configuration (20-25%)
-                ('CompanyCurrencies', 20, 21),
-                ('TaxAgencies', 21, 22),
-                ('TaxRates', 22, 22),
-                ('TaxCodes', 22, 23),
-                ('Terms', 23, 23),
-                ('DateDrivenTerms', 23, 23),
-                ('PaymentMethods', 23, 24),
-                ('Classes', 24, 25),
-                ('Departments', 25, 25),
+                ("CompanyCurrencies", 20, 21),
+                ("TaxAgencies", 21, 22),
+                ("TaxRates", 22, 22),
+                ("TaxCodes", 22, 23),
+                ("Terms", 23, 23),
+                ("DateDrivenTerms", 23, 23),
+                ("PaymentMethods", 23, 24),
+                ("Classes", 24, 25),
+                ("Departments", 25, 25),
                 # Phase 2: Chart of Accounts (25-35%)
-                ('Accounts', 25, 35),
+                ("Accounts", 25, 35),
                 # Phase 3: Master Lists (35-50%)
-                ('Customers', 35, 40),
-                ('Leads', 40, 41),       # -> inactive Customer
-                ('Vendors', 41, 45),
-                ('OtherNames', 45, 46),  # -> Vendor
-                ('Employees', 46, 49),
-                ('Items', 49, 55),
+                ("Customers", 35, 40),
+                ("Leads", 40, 41),  # -> inactive Customer
+                ("Vendors", 41, 45),
+                ("OtherNames", 45, 46),  # -> Vendor
+                ("Employees", 46, 49),
+                ("Items", 49, 55),
                 # Phase 4: Opening Balances (55-60%)
-                ('JournalEntries', 55, 58),
-                ('InventoryAdjustments', 58, 60),
+                ("JournalEntries", 55, 58),
+                ("InventoryAdjustments", 58, 60),
                 # Phase 5: Transactions (60-84%)
-                ('Estimates', 60, 62),
-                ('SalesOrders', 62, 63),   # -> Estimate
-                ('Invoices', 63, 67),
-                ('Charges', 67, 68),       # -> Invoice
-                ('SalesReceipts', 68, 69),
-                ('PurchaseOrders', 69, 70),
-                ('Purchases', 70, 72),
-                ('Bills', 72, 74),
-                ('ItemReceipts', 74, 75),  # -> Bill
-                ('Payments', 75, 77),
-                ('BillPayments', 77, 78),
-                ('Deposits', 78, 79),
-                ('Transfers', 79, 80),
-                ('CreditMemos', 80, 81),
-                ('VendorCredits', 81, 81),
-                ('RefundReceipts', 81, 82),
-                ('TimeActivities', 82, 83),
-                ('TaxPayments', 83, 84),
+                ("Estimates", 60, 62),
+                ("SalesOrders", 62, 63),  # -> Estimate
+                ("Invoices", 63, 67),
+                ("Charges", 67, 68),  # -> Invoice
+                ("SalesReceipts", 68, 69),
+                ("PurchaseOrders", 69, 70),
+                ("Purchases", 70, 72),
+                ("Bills", 72, 74),
+                ("ItemReceipts", 74, 75),  # -> Bill
+                ("Payments", 75, 77),
+                ("BillPayments", 77, 78),
+                ("Deposits", 78, 79),
+                ("Transfers", 79, 80),
+                ("CreditMemos", 80, 81),
+                ("VendorCredits", 81, 81),
+                ("RefundReceipts", 81, 82),
+                ("TimeActivities", 82, 83),
+                ("TaxPayments", 83, 84),
                 # Phase 5b: Skip-only transactions (no QBO equivalent)
-                ('BuildAssemblies', 84, 84),
-                ('InventoryTransfers', 84, 84),
+                ("BuildAssemblies", 84, 84),
+                ("InventoryTransfers", 84, 84),
                 # Phase 6: Attachments (84-85%)
-                ('Attachables', 84, 85),
+                ("Attachables", 84, 85),
             ]
 
             for entity_name, start_pct, end_pct in entity_order:
@@ -471,13 +547,15 @@ class MigrationOrchestrator:
                         data[entity_name],
                         entity_id_mappings,  # Pass mappings dict
                         oauth_mgr,  # Auto-refresh tokens during long migrations
-                        migration_id=migration_id  # For SQLite dedup & crash recovery
+                        migration_id=migration_id,  # For SQLite dedup & crash recovery
                     )
 
                     entity_counts[entity_name] = success
                     total_failed += failed
                     total_skipped += skipped
-                    logger.info(f"Migrated {success} {entity_name} ({failed} failed, {skipped} skipped)")
+                    logger.info(
+                        f"Migrated {success} {entity_name} ({failed} failed, {skipped} skipped)"
+                    )
 
             # Step 5: Verify migration (85-95%)
             self._report_progress(85, "Verifying migration")
@@ -485,8 +563,11 @@ class MigrationOrchestrator:
             verifier = self._init_verifier(qbo_client)
             verification_result = verifier.verify_migration(
                 entities=data,
-                upload_result={'successful': sum(entity_counts.values()), 'failed': total_failed},
-                oauth_manager=oauth_mgr
+                upload_result={
+                    "successful": sum(entity_counts.values()),
+                    "failed": total_failed,
+                },
+                oauth_manager=oauth_mgr,
             )
 
             # Step 6: Complete (100%)
@@ -497,67 +578,71 @@ class MigrationOrchestrator:
             # Collect transformer diagnostics for the caller
             transformer_stats = dict(transformer.stats)
             # Convert defaultdict to regular dict for JSON serialization
-            transformer_stats['by_entity_type'] = dict(transformer_stats.get('by_entity_type', {}))
+            transformer_stats["by_entity_type"] = dict(
+                transformer_stats.get("by_entity_type", {})
+            )
 
             result = {
-                'success': True,
-                'migration_id': migration_id,
-                'company_name': company_name,
-                'entities_migrated': entity_counts,  # Use counts, not mappings
-                'total_failed': total_failed,
-                'total_skipped': total_skipped,
-                'verification': verification_result,
-                'manual_review': transformer.manual_review,
-                'transformer_stats': transformer_stats,
-                'duration_seconds': duration,
-                'completed_at': datetime.now(timezone.utc).isoformat()
+                "success": True,
+                "migration_id": migration_id,
+                "company_name": company_name,
+                "entities_migrated": entity_counts,  # Use counts, not mappings
+                "total_failed": total_failed,
+                "total_skipped": total_skipped,
+                "verification": verification_result,
+                "manual_review": transformer.manual_review,
+                "transformer_stats": transformer_stats,
+                "duration_seconds": duration,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
 
             if transformer.manual_review:
                 logger.warning(
                     f"Migration {migration_id}: {len(transformer.manual_review)} "
-                    f"entities flagged for manual review")
-            if transformer.stats.get('unsupported_entities'):
+                    f"entities flagged for manual review"
+                )
+            if transformer.stats.get("unsupported_entities"):
                 logger.warning(
                     f"Migration {migration_id}: {transformer.stats['unsupported_entities']} "
-                    f"entities skipped (no transform method)")
+                    f"entities skipped (no transform method)"
+                )
 
             logger.info(f"Migration {migration_id} completed in {duration:.1f}s")
             return result
-            
+
         except Exception as e:
             logger.exception(f"Migration {migration_id} failed: {str(e)}")
-            
+
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
-            
+
             # Preserve partial progress and manual_review even on failure
             error_result = {
-                'success': False,
-                'migration_id': migration_id,
-                'error': str(e),
-                'duration_seconds': duration,
-                'failed_at': datetime.now(timezone.utc).isoformat()
+                "success": False,
+                "migration_id": migration_id,
+                "error": str(e),
+                "duration_seconds": duration,
+                "failed_at": datetime.now(timezone.utc).isoformat(),
             }
             # Include manual_review if transformer was initialized before crash
             try:
-                if transformer and hasattr(transformer, 'manual_review'):
-                    error_result['manual_review'] = transformer.manual_review
-                if transformer and hasattr(transformer, 'stats'):
+                if transformer and hasattr(transformer, "manual_review"):
+                    error_result["manual_review"] = transformer.manual_review
+                if transformer and hasattr(transformer, "stats"):
                     ts = dict(transformer.stats)
-                    ts['by_entity_type'] = dict(ts.get('by_entity_type', {}))
-                    error_result['transformer_stats'] = ts
+                    ts["by_entity_type"] = dict(ts.get("by_entity_type", {}))
+                    error_result["transformer_stats"] = ts
             except Exception:
                 pass  # Don't let diagnostic collection mask the real error
             return error_result
-    
+
     def _migrate_entity(
         self,
-        qbo_client: 'PremiumQBOClient',
-        transformer: 'QBDataTransformer',
+        qbo_client: "PremiumQBOClient",
+        transformer: "QBDataTransformer",
         entity_name: str,
         source_data: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
-        oauth_manager: Optional['OAuthManager'] = None
+        oauth_manager: Optional["OAuthManager"] = None,
     ) -> Tuple[int, int, int]:
         """
         Migrate a single entity type.
@@ -588,7 +673,8 @@ class MigrationOrchestrator:
                 source_id = self._extract_source_id(record)
                 if source_id:
                     existing_qbo_id = qbo_client.was_entity_created(
-                        api_entity_type, source_id)
+                        api_entity_type, source_id
+                    )
                     if existing_qbo_id:
                         if entity_name not in existing_maps:
                             existing_maps[entity_name] = {}
@@ -599,9 +685,7 @@ class MigrationOrchestrator:
                 # Transform to QBO format
                 # AUDIT FIX: Use the correct transform method
                 transformed = transformer.transform_entity(
-                    entity_name,
-                    record,
-                    id_mapping=existing_maps
+                    entity_name, record, id_mapping=existing_maps
                 )
 
                 if not transformed:
@@ -611,23 +695,25 @@ class MigrationOrchestrator:
                 # RELIABILITY FIX: Pass oauth_manager for auto-refresh on token expiry
                 # CRITICAL FIX: Use singular entity type for QBO API endpoint
                 # Route TaxCode to TaxService endpoint (different payload/URL)
-                if transformed.get('_use_tax_service'):
-                    tax_code_name = transformed.pop('TaxCode', '')
-                    tax_rate_details = transformed.pop('TaxRateDetails', [])
-                    transformed.pop('_use_tax_service', None)
+                if transformed.get("_use_tax_service"):
+                    tax_code_name = transformed.pop("TaxCode", "")
+                    tax_rate_details = transformed.pop("TaxRateDetails", [])
+                    transformed.pop("_use_tax_service", None)
                     result = qbo_client.create_tax_service(
-                        tax_code_name, tax_rate_details,
-                        oauth_manager=oauth_manager)
+                        tax_code_name, tax_rate_details, oauth_manager=oauth_manager
+                    )
                 else:
-                    result = qbo_client.create_entity(api_entity_type, transformed, oauth_manager=oauth_manager)
+                    result = qbo_client.create_entity(
+                        api_entity_type, transformed, oauth_manager=oauth_manager
+                    )
 
-                if result and 'Id' in result:
+                if result and "Id" in result:
                     # Track mapping for references
                     source_id = self._extract_source_id(record)
                     if source_id:
                         if entity_name not in existing_maps:
                             existing_maps[entity_name] = {}
-                        existing_maps[entity_name][source_id] = result['Id']
+                        existing_maps[entity_name][source_id] = result["Id"]
 
                     success_count += 1
                 else:
@@ -658,49 +744,74 @@ class MigrationOrchestrator:
             Source ID string, or None if no ID field found
         """
         source_id = (
-            record.get('ListID') or record.get('listId') or
-            record.get('TxnID') or record.get('txnId') or
-            record.get('Id'))
+            record.get("ListID")
+            or record.get("listId")
+            or record.get("TxnID")
+            or record.get("txnId")
+            or record.get("Id")
+        )
         return str(source_id) if source_id else None
 
     # Entity types with parent-child hierarchies that require layered processing.
     # Parents must be created before children so QBO assigns IDs we can reference.
-    PARENT_CHILD_ENTITY_TYPES = frozenset({
-        'Accounts', 'Customers', 'Items', 'Classes', 'Departments',
-    })
+    PARENT_CHILD_ENTITY_TYPES = frozenset(
+        {
+            "Accounts",
+            "Customers",
+            "Items",
+            "Classes",
+            "Departments",
+        }
+    )
 
     # Reuse the same plural→singular mapping as _migrate_entity
     PLURAL_TO_SINGULAR = {
         # Configuration
-        'CompanyCurrencies': 'CompanyCurrency', 'TaxAgencies': 'TaxAgency',
-        'TaxRates': 'TaxRate', 'TaxCodes': 'TaxCode',
-        'Terms': 'Term', 'PaymentMethods': 'PaymentMethod',
-        'Classes': 'Class', 'Departments': 'Department',
+        "CompanyCurrencies": "CompanyCurrency",
+        "TaxAgencies": "TaxAgency",
+        "TaxRates": "TaxRate",
+        "TaxCodes": "TaxCode",
+        "Terms": "Term",
+        "PaymentMethods": "PaymentMethod",
+        "Classes": "Class",
+        "Departments": "Department",
         # Master lists
-        'Accounts': 'Account', 'Customers': 'Customer', 'Vendors': 'Vendor',
-        'Items': 'Item', 'Employees': 'Employee',
+        "Accounts": "Account",
+        "Customers": "Customer",
+        "Vendors": "Vendor",
+        "Items": "Item",
+        "Employees": "Employee",
         # Transactions
-        'Invoices': 'Invoice', 'Bills': 'Bill', 'Payments': 'Payment',
-        'Estimates': 'Estimate', 'Deposits': 'Deposit', 'Transfers': 'Transfer',
-        'JournalEntries': 'JournalEntry', 'CreditMemos': 'CreditMemo',
-        'PurchaseOrders': 'PurchaseOrder', 'SalesReceipts': 'SalesReceipt',
-        'BillPayments': 'BillPayment', 'VendorCredits': 'VendorCredit',
-        'RefundReceipts': 'RefundReceipt', 'TimeActivities': 'TimeActivity',
-        'InventoryAdjustments': 'InventoryAdjustment',
-        'Purchases': 'Purchase', 'TaxPayments': 'TaxPayment',
+        "Invoices": "Invoice",
+        "Bills": "Bill",
+        "Payments": "Payment",
+        "Estimates": "Estimate",
+        "Deposits": "Deposit",
+        "Transfers": "Transfer",
+        "JournalEntries": "JournalEntry",
+        "CreditMemos": "CreditMemo",
+        "PurchaseOrders": "PurchaseOrder",
+        "SalesReceipts": "SalesReceipt",
+        "BillPayments": "BillPayment",
+        "VendorCredits": "VendorCredit",
+        "RefundReceipts": "RefundReceipt",
+        "TimeActivities": "TimeActivity",
+        "InventoryAdjustments": "InventoryAdjustment",
+        "Purchases": "Purchase",
+        "TaxPayments": "TaxPayment",
         # Attachments
-        'Attachables': 'Attachable',
+        "Attachables": "Attachable",
     }
 
     def _migrate_entity_batch(
         self,
-        qbo_client: 'PremiumQBOClient',
-        transformer: 'QBDataTransformer',
+        qbo_client: "PremiumQBOClient",
+        transformer: "QBDataTransformer",
         entity_name: str,
         source_data: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
-        oauth_manager: Optional['OAuthManager'] = None,
-        migration_id: Optional[str] = None
+        oauth_manager: Optional["OAuthManager"] = None,
+        migration_id: Optional[str] = None,
     ) -> Tuple[int, int, int]:
         """
         Batch-optimized migration for a single entity type.
@@ -735,8 +846,13 @@ class MigrationOrchestrator:
         # For very small datasets (≤1 entity), skip batch overhead
         if len(source_data) <= 1:
             return self._migrate_entity(
-                qbo_client, transformer, entity_name, source_data,
-                existing_maps, oauth_manager)
+                qbo_client,
+                transformer,
+                entity_name,
+                source_data,
+                existing_maps,
+                oauth_manager,
+            )
 
         success_count = 0
         fail_count = 0
@@ -747,29 +863,43 @@ class MigrationOrchestrator:
             layers = self._split_parent_child_layers(source_data)
             logger.info(
                 f"Batch {entity_name}: {len(source_data)} records in "
-                f"{len(layers)} dependency layers")
+                f"{len(layers)} dependency layers"
+            )
 
             for layer_idx, layer in enumerate(layers):
                 s, f, sk = self._batch_create_layer(
-                    qbo_client, transformer, entity_name, api_entity_type,
-                    layer, existing_maps, oauth_manager, migration_id)
+                    qbo_client,
+                    transformer,
+                    entity_name,
+                    api_entity_type,
+                    layer,
+                    existing_maps,
+                    oauth_manager,
+                    migration_id,
+                )
                 success_count += s
                 fail_count += f
                 skipped_count += sk
                 logger.debug(
-                    f"  Layer {layer_idx}: {s} succeeded, {f} failed, "
-                    f"{sk} skipped")
+                    f"  Layer {layer_idx}: {s} succeeded, {f} failed, " f"{sk} skipped"
+                )
         else:
             # Flat entity type — batch all at once
             success_count, fail_count, skipped_count = self._batch_create_layer(
-                qbo_client, transformer, entity_name, api_entity_type,
-                source_data, existing_maps, oauth_manager, migration_id)
+                qbo_client,
+                transformer,
+                entity_name,
+                api_entity_type,
+                source_data,
+                existing_maps,
+                oauth_manager,
+                migration_id,
+            )
 
         return success_count, fail_count, skipped_count
 
     def _split_parent_child_layers(
-        self,
-        source_data: List[Dict[str, Any]]
+        self, source_data: List[Dict[str, Any]]
     ) -> List[List[Dict[str, Any]]]:
         """
         Split records into dependency layers for parent-child entity types.
@@ -815,13 +945,18 @@ class MigrationOrchestrator:
                 # this layer and let QBO validation catch the error.
                 logger.warning(
                     f"Parent-child layering: {len(still_remaining)} records "
-                    f"have unresolvable parent references. Processing anyway.")
+                    f"have unresolvable parent references. Processing anyway."
+                )
                 current_layer = still_remaining
                 still_remaining = []
 
             # Track IDs from this layer for the next layer's parent lookups
             for record in current_layer:
-                record_id = self._extract_source_id(record) or record.get('Name') or record.get('name')
+                record_id = (
+                    self._extract_source_id(record)
+                    or record.get("Name")
+                    or record.get("name")
+                )
                 if record_id:
                     created_ids.add(str(record_id))
 
@@ -833,7 +968,8 @@ class MigrationOrchestrator:
         if remaining:
             logger.warning(
                 f"Parent-child layering: max depth ({max_depth}) reached with "
-                f"{len(remaining)} records remaining. Adding as final layer.")
+                f"{len(remaining)} records remaining. Adding as final layer."
+            )
             layers.append(remaining)
 
         return layers
@@ -856,13 +992,17 @@ class MigrationOrchestrator:
             Parent ID string, or None if no parent reference exists
         """
         # Object-style reference (dict)
-        parent_ref = record.get('ParentRef') or record.get('parentRef')
+        parent_ref = record.get("ParentRef") or record.get("parentRef")
         if isinstance(parent_ref, dict):
             pid = (
-                parent_ref.get('ListID') or parent_ref.get('listId') or
-                parent_ref.get('listID') or
-                parent_ref.get('value') or parent_ref.get('Value') or
-                parent_ref.get('FullName') or parent_ref.get('fullName'))
+                parent_ref.get("ListID")
+                or parent_ref.get("listId")
+                or parent_ref.get("listID")
+                or parent_ref.get("value")
+                or parent_ref.get("Value")
+                or parent_ref.get("FullName")
+                or parent_ref.get("fullName")
+            )
             if pid:
                 return str(pid)
 
@@ -873,16 +1013,17 @@ class MigrationOrchestrator:
         # Flat-style references — check both PascalCase (normalized)
         # and camelCase (raw C# extractor output like parentRefListId)
         flat_id = (
-            record.get('ParentRef_ListID') or
-            record.get('parentRef_ListID') or
-            record.get('parentRefListId') or   # C# extractor camelCase
-            record.get('ParentRef_listID') or
-            record.get('ParentListID') or
-            record.get('parentListID') or
-            record.get('ParentRef_FullName') or
-            record.get('parentRef_FullName') or
-            record.get('parentRefFullName') or  # C# extractor camelCase
-            record.get('ParentRefFullName'))
+            record.get("ParentRef_ListID")
+            or record.get("parentRef_ListID")
+            or record.get("parentRefListId")  # C# extractor camelCase
+            or record.get("ParentRef_listID")
+            or record.get("ParentListID")
+            or record.get("parentListID")
+            or record.get("ParentRef_FullName")
+            or record.get("parentRef_FullName")
+            or record.get("parentRefFullName")  # C# extractor camelCase
+            or record.get("ParentRefFullName")
+        )
         if flat_id:
             return str(flat_id)
 
@@ -890,14 +1031,14 @@ class MigrationOrchestrator:
 
     def _batch_create_layer(
         self,
-        qbo_client: 'PremiumQBOClient',
-        transformer: 'QBDataTransformer',
+        qbo_client: "PremiumQBOClient",
+        transformer: "QBDataTransformer",
         entity_name: str,
         api_entity_type: str,
         records: List[Dict[str, Any]],
         existing_maps: Dict[str, Dict[str, str]],
-        oauth_manager: Optional['OAuthManager'] = None,
-        migration_id: Optional[str] = None
+        oauth_manager: Optional["OAuthManager"] = None,
+        migration_id: Optional[str] = None,
     ) -> Tuple[int, int, int]:
         """
         Transform and batch-create a set of records at the same dependency level.
@@ -942,7 +1083,8 @@ class MigrationOrchestrator:
                 source_id = self._extract_source_id(record)
                 if source_id:
                     existing_qbo_id = qbo_client.was_entity_created(
-                        api_entity_type, source_id)
+                        api_entity_type, source_id
+                    )
                     if existing_qbo_id:
                         # Already migrated — restore mapping and skip
                         if entity_name not in existing_maps:
@@ -952,20 +1094,22 @@ class MigrationOrchestrator:
                         continue
 
                 transformed = transformer.transform_entity(
-                    entity_name, record, id_mapping=existing_maps)
+                    entity_name, record, id_mapping=existing_maps
+                )
 
                 if not transformed:
                     skipped_count += 1
                     continue
 
-                if transformed.get('_use_tax_service'):
+                if transformed.get("_use_tax_service"):
                     # TaxService entities use a special endpoint and can't be
                     # included in batch requests
-                    tax_code_name = transformed.pop('TaxCode', '')
-                    tax_rate_details = transformed.pop('TaxRateDetails', [])
-                    transformed.pop('_use_tax_service', None)
+                    tax_code_name = transformed.pop("TaxCode", "")
+                    tax_rate_details = transformed.pop("TaxRateDetails", [])
+                    transformed.pop("_use_tax_service", None)
                     tax_service_items.append(
-                        (source_id, tax_code_name, tax_rate_details))
+                        (source_id, tax_code_name, tax_rate_details)
+                    )
                 else:
                     transformed_pairs.append((source_id, transformed))
 
@@ -977,23 +1121,26 @@ class MigrationOrchestrator:
         for source_id, tax_code_name, tax_rate_details in tax_service_items:
             try:
                 result = qbo_client.create_tax_service(
-                    tax_code_name, tax_rate_details,
-                    oauth_manager=oauth_manager)
+                    tax_code_name, tax_rate_details, oauth_manager=oauth_manager
+                )
 
                 if result:
                     # TaxService returns TaxCodeId (not standard 'Id')
-                    tax_code_obj = result.get('TaxCode')
+                    tax_code_obj = result.get("TaxCode")
                     result_id = (
-                        result.get('Id') or
-                        result.get('TaxCodeId') or
-                        (tax_code_obj.get('Id')
-                         if isinstance(tax_code_obj, dict) else None))
+                        result.get("Id")
+                        or result.get("TaxCodeId")
+                        or (
+                            tax_code_obj.get("Id")
+                            if isinstance(tax_code_obj, dict)
+                            else None
+                        )
+                    )
                     if result_id:
                         if source_id:
                             if entity_name not in existing_maps:
                                 existing_maps[entity_name] = {}
-                            existing_maps[entity_name][source_id] = str(
-                                result_id)
+                            existing_maps[entity_name][source_id] = str(result_id)
                         success_count += 1
                     else:
                         fail_count += 1
@@ -1002,8 +1149,7 @@ class MigrationOrchestrator:
 
             except Exception as e:
                 fail_count += 1
-                logger.warning(
-                    f"TaxService creation failed for '{tax_code_name}': {e}")
+                logger.warning(f"TaxService creation failed for '{tax_code_name}': {e}")
 
         # ── Step 3: Batch-create regular entities ───────────────────────────
         if not transformed_pairs:
@@ -1012,6 +1158,7 @@ class MigrationOrchestrator:
         # Import batch size from config
         try:
             from config import BATCH_SIZE
+
             batch_size = BATCH_SIZE
         except ImportError:
             batch_size = 30
@@ -1019,7 +1166,7 @@ class MigrationOrchestrator:
         # Build batches of up to batch_size items
         batches = []
         for i in range(0, len(transformed_pairs), batch_size):
-            batches.append(transformed_pairs[i:i + batch_size])
+            batches.append(transformed_pairs[i : i + batch_size])
 
         # Determine worker count for parallel batch submission
         max_workers = min(qbo_client.max_workers, len(batches))
@@ -1028,8 +1175,13 @@ class MigrationOrchestrator:
             # Sequential processing — single batch or single worker
             for batch_idx, batch in enumerate(batches):
                 mappings, batch_fails = self._send_batch_request(
-                    qbo_client, api_entity_type, batch, oauth_manager,
-                    migration_id, batch_idx)
+                    qbo_client,
+                    api_entity_type,
+                    batch,
+                    oauth_manager,
+                    migration_id,
+                    batch_idx,
+                )
                 success_count += len(mappings)
                 fail_count += batch_fails
                 # Update existing_maps with new IDs for downstream dependencies
@@ -1039,7 +1191,7 @@ class MigrationOrchestrator:
                             existing_maps[entity_name] = {}
                         existing_maps[entity_name][src_id] = qbo_id
                         # FIX #13: Track created IDs for potential rollback
-                        if hasattr(self, '_created_entity_ids'):
+                        if hasattr(self, "_created_entity_ids"):
                             self._created_entity_ids[api_entity_type].append(qbo_id)
         else:
             # Parallel batch submission with ThreadPoolExecutor
@@ -1051,8 +1203,13 @@ class MigrationOrchestrator:
                 for batch_idx, batch in enumerate(batches):
                     future = executor.submit(
                         self._send_batch_request,
-                        qbo_client, api_entity_type, batch, oauth_manager,
-                        migration_id, batch_idx)
+                        qbo_client,
+                        api_entity_type,
+                        batch,
+                        oauth_manager,
+                        migration_id,
+                        batch_idx,
+                    )
                     futures[future] = batch
 
                 for future in as_completed(futures):
@@ -1073,19 +1230,19 @@ class MigrationOrchestrator:
                         existing_maps[entity_name] = {}
                     existing_maps[entity_name][src_id] = qbo_id
                     # FIX #13: Track created IDs for potential rollback
-                    if hasattr(self, '_created_entity_ids'):
+                    if hasattr(self, "_created_entity_ids"):
                         self._created_entity_ids[api_entity_type].append(qbo_id)
 
         return success_count, fail_count, skipped_count
 
     def _send_batch_request(
         self,
-        qbo_client: 'PremiumQBOClient',
+        qbo_client: "PremiumQBOClient",
         api_entity_type: str,
         batch_items: List[Tuple[Optional[str], Dict[str, Any]]],
-        oauth_manager: Optional['OAuthManager'] = None,
+        oauth_manager: Optional["OAuthManager"] = None,
         migration_id: Optional[str] = None,
-        batch_idx: int = 0
+        batch_idx: int = 0,
     ) -> Tuple[List[Tuple[Optional[str], str]], int]:
         """
         Send a single batch request to the QBO Batch API endpoint.
@@ -1123,11 +1280,13 @@ class MigrationOrchestrator:
         for j, (source_id, entity_data) in enumerate(batch_items):
             bid = f"bid_{j}"
             bid_to_source[bid] = source_id
-            batch_data["BatchItemRequest"].append({
-                "bId": bid,
-                "operation": "create",
-                api_entity_type: entity_data,
-            })
+            batch_data["BatchItemRequest"].append(
+                {
+                    "bId": bid,
+                    "operation": "create",
+                    api_entity_type: entity_data,
+                }
+            )
 
         if not batch_data["BatchItemRequest"]:
             return success_mappings, fail_count
@@ -1135,13 +1294,18 @@ class MigrationOrchestrator:
         # Idempotency key for crash recovery (matches _process_single_batch format)
         idempotency_key = (
             f"batch_{api_entity_type}_{batch_idx}_{migration_id}"
-            if migration_id else None)
+            if migration_id
+            else None
+        )
 
         try:
             response = qbo_client._make_request(
-                "POST", "batch", batch_data,
+                "POST",
+                "batch",
+                batch_data,
                 oauth_manager=oauth_manager,
-                idempotency_key=idempotency_key)
+                idempotency_key=idempotency_key,
+            )
 
             batch_responses = response.get("BatchItemResponse", [])
 
@@ -1149,7 +1313,8 @@ class MigrationOrchestrator:
                 # QBO returned empty response — treat all items as failed
                 logger.error(
                     f"Empty BatchItemResponse for {api_entity_type} batch "
-                    f"({len(batch_items)} items)")
+                    f"({len(batch_items)} items)"
+                )
                 return success_mappings, len(batch_items)
 
             for batch_item in batch_responses:
@@ -1159,8 +1324,8 @@ class MigrationOrchestrator:
                 if batch_item.get(api_entity_type):
                     # Success — extract created entity
                     created = batch_item[api_entity_type]
-                    qbo_id = created.get('Id')
-                    sync_token = created.get('SyncToken', '0')
+                    qbo_id = created.get("Id")
+                    sync_token = created.get("SyncToken", "0")
 
                     if qbo_id:
                         success_mappings.append((source_id, qbo_id))
@@ -1170,7 +1335,8 @@ class MigrationOrchestrator:
                             source_id or f"batch_{bid}",
                             qbo_id,
                             migration_id,
-                            sync_token)
+                            sync_token,
+                        )
                     else:
                         fail_count += 1
 
@@ -1179,20 +1345,23 @@ class MigrationOrchestrator:
                     fail_count += 1
                     fault = batch_item["Fault"]
                     errors = fault.get("Error", [{}])
-                    error_msg = (errors[0].get("Message", "Unknown error")
-                                 if errors else "Unknown error")
-                    error_detail = (errors[0].get("Detail", "")
-                                    if errors else "")
+                    error_msg = (
+                        errors[0].get("Message", "Unknown error")
+                        if errors
+                        else "Unknown error"
+                    )
+                    error_detail = errors[0].get("Detail", "") if errors else ""
                     logger.warning(
                         f"Batch item {bid} ({api_entity_type}) failed: "
-                        f"{error_msg}"
-                        + (f" - {error_detail}" if error_detail else ""))
+                        f"{error_msg}" + (f" - {error_detail}" if error_detail else "")
+                    )
                 else:
                     # Unexpected response format
                     fail_count += 1
                     logger.warning(
                         f"Batch item {bid} ({api_entity_type}): "
-                        f"unexpected response format")
+                        f"unexpected response format"
+                    )
 
             # If QBO returned fewer responses than items sent, count
             # the missing items as failures so counts stay consistent
@@ -1202,57 +1371,60 @@ class MigrationOrchestrator:
                 fail_count += unaccounted
                 logger.warning(
                     f"Batch response for {api_entity_type} missing "
-                    f"{unaccounted} of {len(batch_items)} items")
+                    f"{unaccounted} of {len(batch_items)} items"
+                )
 
         except Exception as e:
             # Entire batch request failed — fall back to sequential creates
             logger.error(
                 f"Batch request failed for {api_entity_type} "
-                f"({len(batch_items)} items): {e} — retrying individually")
+                f"({len(batch_items)} items): {e} — retrying individually"
+            )
             for source_id, entity_data in batch_items:
                 try:
                     result = qbo_client.create_entity(
-                        api_entity_type, entity_data,
-                        oauth_manager=oauth_manager)
-                    if result and 'Id' in result:
-                        qbo_id = result['Id']
+                        api_entity_type, entity_data, oauth_manager=oauth_manager
+                    )
+                    if result and "Id" in result:
+                        qbo_id = result["Id"]
                         success_mappings.append((source_id, qbo_id))
                         qbo_client.record_created(
                             api_entity_type,
                             source_id or f"fallback_{len(success_mappings)}",
-                            qbo_id, migration_id,
-                            result.get('SyncToken', '0'))
+                            qbo_id,
+                            migration_id,
+                            result.get("SyncToken", "0"),
+                        )
                     else:
                         fail_count += 1
                 except Exception as individual_err:
                     fail_count += 1
                     logger.warning(
                         f"Individual create also failed for {api_entity_type} "
-                        f"({source_id}): {individual_err}")
+                        f"({source_id}): {individual_err}"
+                    )
 
         return success_mappings, fail_count
 
     def run_migration_from_s3(
-        self,
-        s3_uri: str,
-        aws_region: str = 'us-east-1'
+        self, s3_uri: str, aws_region: str = "us-east-1"
     ) -> Dict[str, Any]:
         """
         Run migration from S3-stored data.
-        
+
         Args:
             s3_uri: S3 URI (s3://bucket/key)
             aws_region: AWS region
-            
+
         Returns:
             Migration result dict
         """
         import boto3
 
         # Parse S3 URI (case-insensitive prefix check)
-        if not s3_uri.lower().startswith('s3://'):
+        if not s3_uri.lower().startswith("s3://"):
             raise ValueError(f"Invalid S3 URI format (must start with s3://): {s3_uri}")
-        parts = s3_uri[5:].split('/', 1)  # Skip 's3://' regardless of case
+        parts = s3_uri[5:].split("/", 1)  # Skip 's3://' regardless of case
         bucket = parts[0]
         if not bucket:
             raise ValueError(f"Invalid S3 URI - empty bucket name: {s3_uri}")
@@ -1260,33 +1432,35 @@ class MigrationOrchestrator:
             raise ValueError(f"Invalid S3 URI - missing object key: {s3_uri}")
         key = parts[1]
 
-        s3 = boto3.client('s3', region_name=aws_region)
+        s3 = boto3.client("s3", region_name=aws_region)
 
         # Download encrypted data
         self._report_progress(2, "Downloading data from S3")
 
         response = s3.get_object(Bucket=bucket, Key=key)
-        encrypted_data = response['Body'].read()
+        encrypted_data = response["Body"].read()
 
         # Get company name from the data file's S3 metadata
         data_response = s3.head_object(Bucket=bucket, Key=key)
-        company_name = data_response.get('Metadata', {}).get('company-name', 'Unknown')
+        company_name = data_response.get("Metadata", {}).get("company-name", "Unknown")
 
         # Get encryption metadata — use endswith so keys like
         # 'migrations/123/encrypted_data.bin' work but stray substrings
         # like 'encrypted_data.bin.bak' don't
-        if not key.endswith('encrypted_data.bin'):
-            raise ValueError(f"S3 key does not follow expected pattern (must end with 'encrypted_data.bin'): {key}")
-        metadata_key = key[:-len('encrypted_data.bin')] + 'encryption_metadata.json'
+        if not key.endswith("encrypted_data.bin"):
+            raise ValueError(
+                f"S3 key does not follow expected pattern (must end with 'encrypted_data.bin'): {key}"
+            )
+        metadata_key = key[: -len("encrypted_data.bin")] + "encryption_metadata.json"
         response = s3.get_object(Bucket=bucket, Key=metadata_key)
-        encryption_metadata = json.loads(response['Body'].read().decode('utf-8'))
+        encryption_metadata = json.loads(response["Body"].read().decode("utf-8"))
 
         return self.run_migration(encrypted_data, encryption_metadata, company_name)
 
     def rollback_migration(
         self,
-        qbo_client: Optional['PremiumQBOClient'] = None,
-        oauth_manager: Optional['OAuthManager'] = None
+        qbo_client: Optional["PremiumQBOClient"] = None,
+        oauth_manager: Optional["OAuthManager"] = None,
     ) -> Dict[str, Any]:
         """
         FIX #13: Rollback a failed migration by deleting created entities.
@@ -1310,24 +1484,24 @@ class MigrationOrchestrator:
                 'errors': [...]
             }
         """
-        if not hasattr(self, '_created_entity_ids') or not self._created_entity_ids:
+        if not hasattr(self, "_created_entity_ids") or not self._created_entity_ids:
             logger.info("No entities to rollback - _created_entity_ids is empty")
             return {
-                'success': True,
-                'deleted': {},
-                'failed': {},
-                'errors': [],
-                'message': 'No entities to rollback'
+                "success": True,
+                "deleted": {},
+                "failed": {},
+                "errors": [],
+                "message": "No entities to rollback",
             }
 
         if qbo_client is None:
             if self._qbo_client is None:
                 logger.error("Cannot rollback - no QBO client available")
                 return {
-                    'success': False,
-                    'deleted': {},
-                    'failed': {},
-                    'errors': ['No QBO client available for rollback']
+                    "success": False,
+                    "deleted": {},
+                    "failed": {},
+                    "errors": ["No QBO client available for rollback"],
                 }
             qbo_client = self._qbo_client
 
@@ -1343,15 +1517,39 @@ class MigrationOrchestrator:
         # This prevents foreign key violations
         rollback_order = [
             # Transactions first (they reference master data)
-            'Attachable', 'TaxPayment', 'InventoryAdjustment', 'TimeActivity',
-            'RefundReceipt', 'VendorCredit', 'CreditMemo', 'JournalEntry',
-            'Transfer', 'Deposit', 'BillPayment', 'Payment', 'Bill',
-            'Purchase', 'PurchaseOrder', 'SalesReceipt', 'Invoice', 'Estimate',
+            "Attachable",
+            "TaxPayment",
+            "InventoryAdjustment",
+            "TimeActivity",
+            "RefundReceipt",
+            "VendorCredit",
+            "CreditMemo",
+            "JournalEntry",
+            "Transfer",
+            "Deposit",
+            "BillPayment",
+            "Payment",
+            "Bill",
+            "Purchase",
+            "PurchaseOrder",
+            "SalesReceipt",
+            "Invoice",
+            "Estimate",
             # Master lists next
-            'Item', 'Employee', 'Vendor', 'Customer',
+            "Item",
+            "Employee",
+            "Vendor",
+            "Customer",
             # Configuration last (accounts often can't be deleted, only deactivated)
-            'Department', 'Class', 'PaymentMethod', 'Term',
-            'TaxCode', 'TaxRate', 'TaxAgency', 'CompanyCurrency', 'Account'
+            "Department",
+            "Class",
+            "PaymentMethod",
+            "Term",
+            "TaxCode",
+            "TaxRate",
+            "TaxAgency",
+            "CompanyCurrency",
+            "Account",
         ]
 
         for entity_type in rollback_order:
@@ -1371,7 +1569,8 @@ class MigrationOrchestrator:
                 try:
                     # Try to delete the entity
                     success = qbo_client.delete_entity(
-                        entity_type, qbo_id, oauth_manager=oauth_manager)
+                        entity_type, qbo_id, oauth_manager=oauth_manager
+                    )
 
                     if success:
                         deleted_counts[entity_type] += 1
@@ -1379,11 +1578,15 @@ class MigrationOrchestrator:
                         # Some entities can't be deleted, try to deactivate
                         try:
                             qbo_client.update_entity(
-                                entity_type, qbo_id,
-                                {'Active': False},
-                                oauth_manager=oauth_manager)
+                                entity_type,
+                                qbo_id,
+                                {"Active": False},
+                                oauth_manager=oauth_manager,
+                            )
                             deleted_counts[entity_type] += 1
-                            logger.info(f"Deactivated {entity_type} {qbo_id} (delete not supported)")
+                            logger.info(
+                                f"Deactivated {entity_type} {qbo_id} (delete not supported)"
+                            )
                         except Exception:
                             failed_counts[entity_type] += 1
 
@@ -1397,55 +1600,57 @@ class MigrationOrchestrator:
         total_deleted = sum(deleted_counts.values())
         total_failed = sum(failed_counts.values())
 
-        logger.info(f"Rollback complete: {total_deleted} deleted, {total_failed} failed")
+        logger.info(
+            f"Rollback complete: {total_deleted} deleted, {total_failed} failed"
+        )
 
         return {
-            'success': total_failed == 0,
-            'deleted': deleted_counts,
-            'failed': failed_counts,
-            'errors': errors,
-            'summary': f"Deleted {total_deleted} entities, {total_failed} failures"
+            "success": total_failed == 0,
+            "deleted": deleted_counts,
+            "failed": failed_counts,
+            "errors": errors,
+            "summary": f"Deleted {total_deleted} entities, {total_failed} failures",
         }
 
 
 # CLI entry point for standalone execution
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
-    
-    parser = argparse.ArgumentParser(description='Run QB Migration')
-    parser.add_argument('--migration-id', required=True)
-    parser.add_argument('--encrypted-data', required=True)
-    parser.add_argument('--metadata', required=True)
-    parser.add_argument('--credentials', required=True)
-    parser.add_argument('--server-url', required=True)
-    parser.add_argument('--webhook-secret', required=True)
-    
+
+    parser = argparse.ArgumentParser(description="Run QB Migration")
+    parser.add_argument("--migration-id", required=True)
+    parser.add_argument("--encrypted-data", required=True)
+    parser.add_argument("--metadata", required=True)
+    parser.add_argument("--credentials", required=True)
+    parser.add_argument("--server-url", required=True)
+    parser.add_argument("--webhook-secret", required=True)
+
     args = parser.parse_args()
-    
+
     # Load credentials
-    with open(args.credentials, 'r') as f:
+    with open(args.credentials, "r") as f:
         creds = json.load(f)
-    
+
     # Load metadata
-    with open(args.metadata, 'r') as f:
+    with open(args.metadata, "r") as f:
         metadata = json.load(f)
-    
+
     # Load encrypted data
-    with open(args.encrypted_data, 'rb') as f:
+    with open(args.encrypted_data, "rb") as f:
         encrypted_data = f.read()
-    
+
     # Create orchestrator
     orchestrator = MigrationOrchestrator(
-        qbo_client_id=creds['client_id'],
-        qbo_client_secret=creds['client_secret'],
-        qbo_refresh_token=creds['refresh_token'],
-        realm_id=creds.get('realm_id', ''),
-        qbo_environment=creds.get('environment', 'sandbox')
+        qbo_client_id=creds["client_id"],
+        qbo_client_secret=creds["client_secret"],
+        qbo_refresh_token=creds["refresh_token"],
+        realm_id=creds.get("realm_id", ""),
+        qbo_environment=creds.get("environment", "sandbox"),
     )
-    
+
     # Run migration
     result = orchestrator.run_migration(encrypted_data, metadata)
-    
+
     # Report result to server via webhook
     import requests
     import hmac
@@ -1454,19 +1659,17 @@ if __name__ == '__main__':
 
     # SECURITY FIX: Align signature algorithm with server expectations
     # Server expects: HMAC-SHA256(migration_id:timestamp)
-    webhook_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    webhook_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     message = f"{args.migration_id}:{webhook_timestamp}"
 
     signature = hmac.new(
-        args.webhook_secret.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
+        args.webhook_secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     ).hexdigest()
 
     # Generate unique webhook ID for idempotency
     webhook_id = str(uuid.uuid4())
 
-    endpoint = 'migration-completed' if result['success'] else 'migration-failed'
+    endpoint = "migration-completed" if result["success"] else "migration-failed"
 
     # RELIABILITY FIX: Report result to server via webhook with exponential backoff
     max_retries = 5
@@ -1474,19 +1677,16 @@ if __name__ == '__main__':
 
     webhook_url = f"{args.server_url}/api/webhooks/{endpoint}"
     webhook_headers = {
-        'X-Migration-Id': args.migration_id,
-        'X-Webhook-Signature': signature,
-        'X-Webhook-Timestamp': webhook_timestamp,
-        'X-Webhook-Id': webhook_id
+        "X-Migration-Id": args.migration_id,
+        "X-Webhook-Signature": signature,
+        "X-Webhook-Timestamp": webhook_timestamp,
+        "X-Webhook-Id": webhook_id,
     }
 
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                webhook_url,
-                json=result,
-                headers=webhook_headers,
-                timeout=30
+                webhook_url, json=result, headers=webhook_headers, timeout=30
             )
             response.raise_for_status()
             logger.info(f"Webhook delivered successfully on attempt {attempt + 1}")
@@ -1495,11 +1695,13 @@ if __name__ == '__main__':
         except requests.exceptions.RequestException as e:
             if attempt < max_retries - 1:
                 # Calculate exponential backoff: 2s, 4s, 8s, 16s
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Webhook attempt {attempt + 1} failed: {e}. Retrying in {delay}s..."
+                )
                 time.sleep(delay)
             else:
                 logger.error(f"Webhook failed after {max_retries} attempts: {e}")
                 # Don't raise - allow migration to continue even if webhook fails
-    
-    sys.exit(0 if result['success'] else 1)
+
+    sys.exit(0 if result["success"] else 1)

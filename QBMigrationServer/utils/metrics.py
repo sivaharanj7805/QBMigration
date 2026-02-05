@@ -35,15 +35,22 @@ from typing import Optional, Callable, Any
 logger = logging.getLogger(__name__)
 
 # Metrics collection enabled flag
-METRICS_ENABLED = os.getenv('ENABLE_PROMETHEUS_METRICS', 'true').lower() == 'true'
+METRICS_ENABLED = os.getenv("ENABLE_PROMETHEUS_METRICS", "true").lower() == "true"
 
 # Try to import prometheus_client, gracefully degrade if not available
 try:
     from prometheus_client import (
-        Counter, Histogram, Gauge, Info,
-        generate_latest, CONTENT_TYPE_LATEST,
-        CollectorRegistry, multiprocess, REGISTRY
+        Counter,
+        Histogram,
+        Gauge,
+        Info,
+        generate_latest,
+        CONTENT_TYPE_LATEST,
+        CollectorRegistry,
+        multiprocess,
+        REGISTRY,
     )
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -57,115 +64,95 @@ except ImportError:
 if PROMETHEUS_AVAILABLE and METRICS_ENABLED:
     # Request metrics
     REQUEST_COUNT = Counter(
-        'http_requests_total',
-        'Total HTTP requests',
-        ['method', 'endpoint', 'status_code']
+        "http_requests_total",
+        "Total HTTP requests",
+        ["method", "endpoint", "status_code"],
     )
 
     REQUEST_LATENCY = Histogram(
-        'http_request_duration_seconds',
-        'HTTP request latency in seconds',
-        ['method', 'endpoint'],
-        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+        "http_request_duration_seconds",
+        "HTTP request latency in seconds",
+        ["method", "endpoint"],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
     )
 
-    ACTIVE_REQUESTS = Gauge(
-        'http_requests_active',
-        'Number of active HTTP requests'
-    )
+    ACTIVE_REQUESTS = Gauge("http_requests_active", "Number of active HTTP requests")
 
     # Database metrics
-    DB_POOL_SIZE = Gauge(
-        'db_connection_pool_size',
-        'Database connection pool size'
-    )
+    DB_POOL_SIZE = Gauge("db_connection_pool_size", "Database connection pool size")
 
     DB_POOL_CHECKED_OUT = Gauge(
-        'db_connections_checked_out',
-        'Database connections currently in use'
+        "db_connections_checked_out", "Database connections currently in use"
     )
 
     DB_POOL_OVERFLOW = Gauge(
-        'db_connections_overflow',
-        'Database connections in overflow'
+        "db_connections_overflow", "Database connections in overflow"
     )
 
     # Migration metrics
     MIGRATIONS_TOTAL = Counter(
-        'migrations_total',
-        'Total migrations by status',
-        ['status']
+        "migrations_total", "Total migrations by status", ["status"]
     )
 
     MIGRATIONS_IN_PROGRESS = Gauge(
-        'migrations_in_progress',
-        'Number of migrations currently in progress'
+        "migrations_in_progress", "Number of migrations currently in progress"
     )
 
     MIGRATION_DURATION = Histogram(
-        'migration_duration_seconds',
-        'Migration duration in seconds',
-        ['destination'],
-        buckets=[60, 300, 600, 1800, 3600, 7200, 14400]
+        "migration_duration_seconds",
+        "Migration duration in seconds",
+        ["destination"],
+        buckets=[60, 300, 600, 1800, 3600, 7200, 14400],
     )
 
     # Celery task metrics
     CELERY_TASKS_TOTAL = Counter(
-        'celery_tasks_total',
-        'Total Celery tasks by name and status',
-        ['task_name', 'status']
+        "celery_tasks_total",
+        "Total Celery tasks by name and status",
+        ["task_name", "status"],
     )
 
     CELERY_TASK_DURATION = Histogram(
-        'celery_task_duration_seconds',
-        'Celery task duration in seconds',
-        ['task_name'],
-        buckets=[1, 5, 10, 30, 60, 300, 600, 1800]
+        "celery_task_duration_seconds",
+        "Celery task duration in seconds",
+        ["task_name"],
+        buckets=[1, 5, 10, 30, 60, 300, 600, 1800],
     )
 
     # Error metrics
     ERROR_COUNT = Counter(
-        'errors_total',
-        'Total errors by type and endpoint',
-        ['error_type', 'endpoint']
+        "errors_total", "Total errors by type and endpoint", ["error_type", "endpoint"]
     )
 
     # Authentication metrics
     AUTH_ATTEMPTS = Counter(
-        'auth_attempts_total',
-        'Authentication attempts',
-        ['method', 'result']
+        "auth_attempts_total", "Authentication attempts", ["method", "result"]
     )
 
     # Rate limiting metrics
     RATE_LIMIT_HITS = Counter(
-        'rate_limit_hits_total',
-        'Rate limit hits by endpoint',
-        ['endpoint']
+        "rate_limit_hits_total", "Rate limit hits by endpoint", ["endpoint"]
     )
 
     # Upload metrics
     UPLOAD_SIZE_BYTES = Histogram(
-        'upload_size_bytes',
-        'Upload file sizes in bytes',
-        buckets=[1024, 10240, 102400, 1048576, 10485760, 104857600, 1073741824]
+        "upload_size_bytes",
+        "Upload file sizes in bytes",
+        buckets=[1024, 10240, 102400, 1048576, 10485760, 104857600, 1073741824],
     )
 
     UPLOADS_IN_PROGRESS = Gauge(
-        'uploads_in_progress',
-        'Number of uploads currently in progress'
+        "uploads_in_progress", "Number of uploads currently in progress"
     )
 
     # Application info
-    APP_INFO = Info(
-        'qbmigration_app',
-        'Application information'
-    )
+    APP_INFO = Info("qbmigration_app", "Application information")
 
 
 # =============================================================================
 # MIDDLEWARE AND DECORATORS
 # =============================================================================
+
 
 def track_request_metrics():
     """
@@ -178,6 +165,7 @@ def track_request_metrics():
 
     def before_request():
         from flask import request, g
+
         g.start_time = time.time()
         ACTIVE_REQUESTS.inc()
 
@@ -185,26 +173,23 @@ def track_request_metrics():
         from flask import request, g
 
         # Skip metrics endpoint to avoid recursion
-        if request.path == '/metrics':
+        if request.path == "/metrics":
             return response
 
         # Calculate latency
-        latency = time.time() - getattr(g, 'start_time', time.time())
+        latency = time.time() - getattr(g, "start_time", time.time())
 
         # Normalize endpoint for cardinality control
         endpoint = _normalize_endpoint(request.path)
 
         # Record metrics
         REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=endpoint,
-            status_code=response.status_code
+            method=request.method, endpoint=endpoint, status_code=response.status_code
         ).inc()
 
-        REQUEST_LATENCY.labels(
-            method=request.method,
-            endpoint=endpoint
-        ).observe(latency)
+        REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(
+            latency
+        )
 
         ACTIVE_REQUESTS.dec()
 
@@ -223,22 +208,22 @@ def _normalize_endpoint(path: str) -> str:
 
     # Replace UUIDs
     path = re.sub(
-        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
-        '{id}',
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        "{id}",
         path,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
     # Replace numeric IDs
-    path = re.sub(r'/\d+(?=/|$)', '/{id}', path)
+    path = re.sub(r"/\d+(?=/|$)", "/{id}", path)
 
     # Replace upload IDs (alphanumeric with underscores)
-    path = re.sub(r'/upload_[a-zA-Z0-9_]+', '/upload_{id}', path)
+    path = re.sub(r"/upload_[a-zA-Z0-9_]+", "/upload_{id}", path)
 
     return path
 
 
-def track_error(error_type: str, endpoint: str = 'unknown'):
+def track_error(error_type: str, endpoint: str = "unknown"):
     """Track an error occurrence."""
     if PROMETHEUS_AVAILABLE and METRICS_ENABLED:
         ERROR_COUNT.labels(error_type=error_type, endpoint=endpoint).inc()
@@ -248,8 +233,7 @@ def track_auth_attempt(method: str, success: bool):
     """Track an authentication attempt."""
     if PROMETHEUS_AVAILABLE and METRICS_ENABLED:
         AUTH_ATTEMPTS.labels(
-            method=method,
-            result='success' if success else 'failure'
+            method=method, result="success" if success else "failure"
         ).inc()
 
 
@@ -269,14 +253,14 @@ def track_migration_start():
     """Track a migration start."""
     if PROMETHEUS_AVAILABLE and METRICS_ENABLED:
         MIGRATIONS_IN_PROGRESS.inc()
-        MIGRATIONS_TOTAL.labels(status='started').inc()
+        MIGRATIONS_TOTAL.labels(status="started").inc()
 
 
 def track_migration_complete(destination: str, duration_seconds: float, success: bool):
     """Track a migration completion."""
     if PROMETHEUS_AVAILABLE and METRICS_ENABLED:
         MIGRATIONS_IN_PROGRESS.dec()
-        status = 'completed' if success else 'failed'
+        status = "completed" if success else "failed"
         MIGRATIONS_TOTAL.labels(status=status).inc()
         MIGRATION_DURATION.labels(destination=destination).observe(duration_seconds)
 
@@ -292,6 +276,7 @@ def track_celery_task(task_name: str, status: str, duration_seconds: float = Non
 # =============================================================================
 # DATABASE METRICS COLLECTION
 # =============================================================================
+
 
 def collect_db_metrics(app):
     """Collect database connection pool metrics."""
@@ -316,6 +301,7 @@ def collect_db_metrics(app):
 # INITIALIZATION
 # =============================================================================
 
+
 def init_metrics(app):
     """
     Initialize Prometheus metrics for the Flask application.
@@ -332,11 +318,13 @@ def init_metrics(app):
         return
 
     # Set application info
-    APP_INFO.info({
-        'version': '4.3.0',
-        'environment': os.getenv('FLASK_ENV', 'development'),
-        'aws_region': os.getenv('AWS_REGION', 'ca-central-1')
-    })
+    APP_INFO.info(
+        {
+            "version": "4.3.0",
+            "environment": os.getenv("FLASK_ENV", "development"),
+            "aws_region": os.getenv("AWS_REGION", "ca-central-1"),
+        }
+    )
 
     # Register request tracking middleware
     before_request, after_request = track_request_metrics()
@@ -344,7 +332,7 @@ def init_metrics(app):
     app.after_request(after_request)
 
     # Add metrics endpoint
-    @app.route('/metrics')
+    @app.route("/metrics")
     def metrics():
         """Prometheus metrics endpoint."""
         from flask import Response
@@ -353,7 +341,7 @@ def init_metrics(app):
         collect_db_metrics(app)
 
         # Check for multiprocess mode (gunicorn with multiple workers)
-        prometheus_multiproc_dir = os.getenv('PROMETHEUS_MULTIPROC_DIR')
+        prometheus_multiproc_dir = os.getenv("PROMETHEUS_MULTIPROC_DIR")
         if prometheus_multiproc_dir:
             registry = CollectorRegistry()
             multiprocess.MultiProcessCollector(registry)
@@ -369,6 +357,7 @@ def init_metrics(app):
 # =============================================================================
 # CELERY SIGNAL HANDLERS
 # =============================================================================
+
 
 def setup_celery_metrics():
     """
@@ -390,16 +379,16 @@ def setup_celery_metrics():
         @task_postrun.connect
         def task_postrun_handler(task_id, task, retval, state, *args, **kwargs):
             """Track task completion."""
-            duration = time.time() - getattr(task, 'start_time', time.time())
-            track_celery_task(task.name, 'success', duration)
+            duration = time.time() - getattr(task, "start_time", time.time())
+            track_celery_task(task.name, "success", duration)
 
         @task_failure.connect
         def task_failure_handler(task_id, exception, traceback, *args, **kwargs):
             """Track task failure."""
-            task = kwargs.get('sender')
+            task = kwargs.get("sender")
             if task:
-                duration = time.time() - getattr(task, 'start_time', time.time())
-                track_celery_task(task.name, 'failure', duration)
+                duration = time.time() - getattr(task, "start_time", time.time())
+                track_celery_task(task.name, "failure", duration)
 
         logger.info("Celery metrics signals registered")
 

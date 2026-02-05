@@ -8,6 +8,7 @@ Usage:
     celery -A QBMigrationServer.celery_worker worker --loglevel=info
     celery -A QBMigrationServer.celery_worker beat --loglevel=info
 """
+
 import os
 import logging
 from celery import Celery
@@ -27,52 +28,46 @@ def make_celery(app: Flask = None) -> Celery:
         Configured Celery instance
     """
     # Get broker URL from environment
-    broker_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-    result_backend = os.getenv('CELERY_RESULT_BACKEND', broker_url)
+    broker_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    result_backend = os.getenv("CELERY_RESULT_BACKEND", broker_url)
 
     celery = Celery(
-        'qbmigration',
+        "qbmigration",
         broker=broker_url,
         backend=result_backend,
-        include=['QBMigrationServer.tasks']
+        include=["QBMigrationServer.tasks"],
     )
 
     # Celery configuration
     celery.conf.update(
         # Serialization
-        task_serializer='json',
-        accept_content=['json'],
-        result_serializer='json',
-
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
         # Timezone
-        timezone='UTC',
+        timezone="UTC",
         enable_utc=True,
-
         # Task settings
         task_track_started=True,
         task_time_limit=3600,  # 1 hour max per task
         task_soft_time_limit=3300,  # Soft limit at 55 minutes
-
         # Worker settings
         worker_prefetch_multiplier=1,  # Fair task distribution
         task_acks_late=True,  # Acknowledge after completion for reliability
-
         # Result expiration
         result_expires=86400,  # 24 hours
-
         # Retry settings
         task_default_retry_delay=60,  # 1 minute
         task_max_retries=3,
-
         # Beat schedule for periodic tasks
         beat_schedule={
-            'cleanup-orphaned-resources': {
-                'task': 'QBMigrationServer.tasks.cleanup_orphaned_resources',
-                'schedule': 900.0,  # Every 15 minutes
+            "cleanup-orphaned-resources": {
+                "task": "QBMigrationServer.tasks.cleanup_orphaned_resources",
+                "schedule": 900.0,  # Every 15 minutes
             },
-            'cleanup-expired-uploads': {
-                'task': 'QBMigrationServer.tasks.cleanup_expired_upload_sessions',
-                'schedule': 3600.0,  # Every hour
+            "cleanup-expired-uploads": {
+                "task": "QBMigrationServer.tasks.cleanup_expired_upload_sessions",
+                "schedule": 3600.0,  # Every hour
             },
         },
     )

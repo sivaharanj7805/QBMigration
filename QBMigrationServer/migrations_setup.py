@@ -16,24 +16,25 @@ from models.project import Project
 #   flask db migrate -m "Initial migration"
 #   flask db upgrade
 
+
 def create_app():
     app = Flask(__name__)
-    
+
     # Load configuration
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///forensicbridge.db'  # Dev default
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///forensicbridge.db"  # Dev default
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
     # Initialize database
     db.init_app(app)
-    
+
     # Initialize migrations
     Migrate(app, db)
-    
+
     return app
 
 
 # Migration commands:
-# 
+#
 # 1. Initialize (first time only):
 #    flask db init
 #

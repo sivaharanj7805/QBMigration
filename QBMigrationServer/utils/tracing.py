@@ -44,7 +44,7 @@ from typing import Optional, Dict, Any, Generator
 logger = logging.getLogger(__name__)
 
 # Tracing enabled flag
-TRACING_ENABLED = os.getenv('ENABLE_TRACING', 'true').lower() == 'true'
+TRACING_ENABLED = os.getenv("ENABLE_TRACING", "true").lower() == "true"
 
 # Try to import OpenTelemetry, gracefully degrade if not available
 try:
@@ -53,7 +53,10 @@ try:
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.trace import Status, StatusCode
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+    from opentelemetry.trace.propagation.tracecontext import (
+        TraceContextTextMapPropagator,
+    )
+
     OPENTELEMETRY_AVAILABLE = True
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
@@ -71,9 +74,7 @@ def get_tracer():
 
 @contextmanager
 def trace_span(
-    name: str,
-    attributes: Optional[Dict[str, Any]] = None,
-    kind: Optional[Any] = None
+    name: str, attributes: Optional[Dict[str, Any]] = None, kind: Optional[Any] = None
 ) -> Generator:
     """
     Create a traced span for a block of code.
@@ -123,7 +124,9 @@ def trace_span(
             raise
 
 
-def trace_function(name: Optional[str] = None, attributes: Optional[Dict[str, Any]] = None):
+def trace_function(
+    name: Optional[str] = None, attributes: Optional[Dict[str, Any]] = None
+):
     """
     Decorator to trace a function.
 
@@ -136,6 +139,7 @@ def trace_function(name: Optional[str] = None, attributes: Optional[Dict[str, An
         def process_customer(customer_id):
             # ... business logic ...
     """
+
     def decorator(func):
         if not OPENTELEMETRY_AVAILABLE or not TRACING_ENABLED:
             return func
@@ -151,6 +155,7 @@ def trace_function(name: Optional[str] = None, attributes: Optional[Dict[str, An
                 return func(*args, **kwargs)
 
         return wrapper
+
     return decorator
 
 
@@ -173,59 +178,64 @@ def init_tracing(app):
 
     try:
         # Service name from environment or config
-        service_name = os.getenv('OTEL_SERVICE_NAME', 'qbmigration')
-        environment = os.getenv('FLASK_ENV', 'development')
+        service_name = os.getenv("OTEL_SERVICE_NAME", "qbmigration")
+        environment = os.getenv("FLASK_ENV", "development")
 
         # Create resource with service info
-        resource = Resource.create({
-            SERVICE_NAME: service_name,
-            "service.version": "4.3.0",
-            "deployment.environment": environment,
-            "service.namespace": "forensicbridge"
-        })
+        resource = Resource.create(
+            {
+                SERVICE_NAME: service_name,
+                "service.version": "4.3.0",
+                "deployment.environment": environment,
+                "service.namespace": "forensicbridge",
+            }
+        )
 
         # Create tracer provider
         provider = TracerProvider(resource=resource)
 
         # Configure exporter based on environment
-        exporter_type = os.getenv('OTEL_EXPORTER_TYPE', 'otlp').lower()
+        exporter_type = os.getenv("OTEL_EXPORTER_TYPE", "otlp").lower()
 
-        if exporter_type == 'console':
+        if exporter_type == "console":
             # Console exporter for development
             exporter = ConsoleSpanExporter()
             provider.add_span_processor(BatchSpanProcessor(exporter))
             logger.info("OpenTelemetry console exporter configured")
 
-        elif exporter_type == 'jaeger':
+        elif exporter_type == "jaeger":
             # Jaeger exporter
             try:
                 from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 
                 jaeger_endpoint = os.getenv(
-                    'OTEL_EXPORTER_JAEGER_ENDPOINT',
-                    'http://localhost:14268/api/traces'
+                    "OTEL_EXPORTER_JAEGER_ENDPOINT", "http://localhost:14268/api/traces"
                 )
                 exporter = JaegerExporter(
                     collector_endpoint=jaeger_endpoint,
                 )
                 provider.add_span_processor(BatchSpanProcessor(exporter))
-                logger.info(f"OpenTelemetry Jaeger exporter configured: {jaeger_endpoint}")
+                logger.info(
+                    f"OpenTelemetry Jaeger exporter configured: {jaeger_endpoint}"
+                )
             except ImportError:
                 logger.warning("Jaeger exporter not installed, falling back to console")
                 provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
 
-        elif exporter_type == 'zipkin':
+        elif exporter_type == "zipkin":
             # Zipkin exporter
             try:
                 from opentelemetry.exporter.zipkin.json import ZipkinExporter
 
                 zipkin_endpoint = os.getenv(
-                    'OTEL_EXPORTER_ZIPKIN_ENDPOINT',
-                    'http://localhost:9411/api/v2/spans'
+                    "OTEL_EXPORTER_ZIPKIN_ENDPOINT",
+                    "http://localhost:9411/api/v2/spans",
                 )
                 exporter = ZipkinExporter(endpoint=zipkin_endpoint)
                 provider.add_span_processor(BatchSpanProcessor(exporter))
-                logger.info(f"OpenTelemetry Zipkin exporter configured: {zipkin_endpoint}")
+                logger.info(
+                    f"OpenTelemetry Zipkin exporter configured: {zipkin_endpoint}"
+                )
             except ImportError:
                 logger.warning("Zipkin exporter not installed, falling back to console")
                 provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
@@ -233,11 +243,12 @@ def init_tracing(app):
         else:
             # OTLP exporter (default) - works with Datadog, New Relic, Grafana, etc.
             try:
-                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                    OTLPSpanExporter,
+                )
 
                 otlp_endpoint = os.getenv(
-                    'OTEL_EXPORTER_OTLP_ENDPOINT',
-                    'http://localhost:4317'
+                    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
                 )
                 exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
                 provider.add_span_processor(BatchSpanProcessor(exporter))
@@ -255,6 +266,7 @@ def init_tracing(app):
         # Instrument Flask
         try:
             from opentelemetry.instrumentation.flask import FlaskInstrumentor
+
             FlaskInstrumentor().instrument_app(app)
             logger.info("Flask instrumented with OpenTelemetry")
         except ImportError:
@@ -264,6 +276,7 @@ def init_tracing(app):
         try:
             from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
             from models.database import db
+
             SQLAlchemyInstrumentor().instrument(engine=db.engine)
             logger.info("SQLAlchemy instrumented with OpenTelemetry")
         except ImportError:
@@ -274,6 +287,7 @@ def init_tracing(app):
         # Instrument requests library
         try:
             from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
             RequestsInstrumentor().instrument()
             logger.info("Requests library instrumented with OpenTelemetry")
         except ImportError:
@@ -282,6 +296,7 @@ def init_tracing(app):
         # Instrument Redis
         try:
             from opentelemetry.instrumentation.redis import RedisInstrumentor
+
             RedisInstrumentor().instrument()
             logger.info("Redis instrumented with OpenTelemetry")
         except ImportError:
@@ -305,6 +320,7 @@ def setup_celery_tracing():
 
     try:
         from opentelemetry.instrumentation.celery import CeleryInstrumentor
+
         CeleryInstrumentor().instrument()
         logger.info("Celery instrumented with OpenTelemetry")
     except ImportError:

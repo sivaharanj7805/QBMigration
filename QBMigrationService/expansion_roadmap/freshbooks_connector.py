@@ -23,7 +23,7 @@ from .base_connector import (
     BaseAccountingConnector,
     BaseExtractionConfig,
     ExtractionResult,
-    ExtractionStatus
+    ExtractionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FreshBooksExtractionConfig(BaseExtractionConfig):
     """FreshBooks-specific extraction configuration."""
+
     account_id: Optional[str] = None  # FreshBooks account/business ID
     include_time_tracking: bool = True
     include_projects: bool = True
@@ -91,7 +92,9 @@ class FreshBooksConnector(BaseAccountingConnector):
             'account_id': 'freshbooks_account_id'  # Required
         }
         """
-        logger.info("FreshBooks connector: connect() called (ROADMAP - not implemented)")
+        logger.info(
+            "FreshBooks connector: connect() called (ROADMAP - not implemented)"
+        )
 
         raise NotImplementedError(
             "FreshBooks connector is on the roadmap for Q3 2026. "
@@ -131,7 +134,7 @@ class FreshBooksConnector(BaseAccountingConnector):
         return ExtractionResult(
             status=ExtractionStatus.FAILED,
             started_at=datetime.now(timezone.utc),
-            errors=["FreshBooks connector not yet implemented - roadmap Q3 2026"]
+            errors=["FreshBooks connector not yet implemented - roadmap Q3 2026"],
         )
 
     def extract_accounts(self) -> List[Dict]:
@@ -205,7 +208,9 @@ class FreshBooksConnector(BaseAccountingConnector):
         logger.info("FreshBooks connector: extract_payments() called (ROADMAP)")
         return []
 
-    def extract_journal_entries(self, date_from: Optional[datetime] = None) -> List[Dict]:
+    def extract_journal_entries(
+        self, date_from: Optional[datetime] = None
+    ) -> List[Dict]:
         """
         Extract FreshBooks journal entries.
 
@@ -279,19 +284,19 @@ class FreshBooksConnector(BaseAccountingConnector):
     def get_supported_entity_types(self) -> List[str]:
         """Get FreshBooks-specific supported entity types."""
         return [
-            'accounts',
-            'clients',  # Customers
-            'invoices',
-            'expenses',  # Bills/Expenses
-            'payments',
-            'credits',
-            'items',
-            'services',
-            'taxes',
-            'projects',
-            'time_entries',
-            'retainers',
-            'recurring_templates',
+            "accounts",
+            "clients",  # Customers
+            "invoices",
+            "expenses",  # Bills/Expenses
+            "payments",
+            "credits",
+            "items",
+            "services",
+            "taxes",
+            "projects",
+            "time_entries",
+            "retainers",
+            "recurring_templates",
         ]
 
     def list_businesses(self) -> List[Dict]:
@@ -316,5 +321,5 @@ class FreshBooksConnector(BaseAccountingConnector):
             "limit": 350,
             "remaining": 350,
             "reset_at": None,
-            "status": "ROADMAP - not connected"
+            "status": "ROADMAP - not connected",
         }

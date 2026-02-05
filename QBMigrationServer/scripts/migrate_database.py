@@ -21,18 +21,21 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+
 def get_database_url():
     """Get database URL from environment"""
-    url = os.getenv('DATABASE_URL')
+    url = os.getenv("DATABASE_URL")
     if not url:
         logger.info("ERROR: DATABASE_URL environment variable not set")
         sys.exit(1)
     return url
+
 
 def run_migration(engine, sql, description):
     """Run a single migration SQL statement"""
@@ -53,16 +56,17 @@ def run_migration(engine, sql, description):
         logger.info(f"  ✗ {description}: {str(e)}")
         return False
 
+
 def main():
     logger.info("=" * 60)
     logger.info("ForensicBridge Database Migration")
     logger.info("=" * 60)
     logger.info()
-    
+
     # Connect to database
     database_url = get_database_url()
     logger.info(f"Connecting to database...")
-    
+
     try:
         engine = create_engine(database_url)
         with engine.connect() as conn:
@@ -71,48 +75,50 @@ def main():
     except OperationalError as e:
         logger.info(f"  ✗ Failed to connect to database: {str(e)}")
         sys.exit(1)
-    
+
     logger.info()
     logger.info("Running migrations...")
     logger.info()
-    
+
     # =========================================================================
     # USERS TABLE MIGRATIONS
     # =========================================================================
     logger.info("─" * 40)
     logger.info("Users Table Migrations")
     logger.info("─" * 40)
-    
+
     users_migrations = [
         (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qbo_access_token TEXT;",
-            "Add qbo_access_token column"
+            "Add qbo_access_token column",
         ),
         (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qbo_refresh_token TEXT;",
-            "Add qbo_refresh_token column"
+            "Add qbo_refresh_token column",
         ),
         (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qbo_realm_id VARCHAR(50);",
-            "Add qbo_realm_id column"
+            "Add qbo_realm_id column",
         ),
         (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qbo_token_expires_at TIMESTAMP;",
-            "Add qbo_token_expires_at column"
+            "Add qbo_token_expires_at column",
         ),
         (
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS qbo_connected_at TIMESTAMP;",
-            "Add qbo_connected_at column"
+            "Add qbo_connected_at column",
         ),
     ]
-    
+
     users_success = 0
     for sql, desc in users_migrations:
         if run_migration(engine, sql, desc):
             users_success += 1
-    
-    logger.info(f"\nUsers table: {users_success}/{len(users_migrations)} migrations successful")
-    
+
+    logger.info(
+        f"\nUsers table: {users_success}/{len(users_migrations)} migrations successful"
+    )
+
     # =========================================================================
     # MIGRATIONS TABLE MIGRATIONS
     # =========================================================================
@@ -120,29 +126,31 @@ def main():
     logger.info("─" * 40)
     logger.info("Migrations Table Migrations")
     logger.info("─" * 40)
-    
+
     migrations_migrations = [
         (
             "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS destination VARCHAR(50) DEFAULT 'qbo';",
-            "Add destination column"
+            "Add destination column",
         ),
         (
             "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS caseware_bundle_path TEXT;",
-            "Add caseware_bundle_path column"
+            "Add caseware_bundle_path column",
         ),
         (
             "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS caseware_bundle_ready BOOLEAN DEFAULT FALSE;",
-            "Add caseware_bundle_ready column"
+            "Add caseware_bundle_ready column",
         ),
     ]
-    
+
     migrations_success = 0
     for sql, desc in migrations_migrations:
         if run_migration(engine, sql, desc):
             migrations_success += 1
-    
-    logger.info(f"\nMigrations table: {migrations_success}/{len(migrations_migrations)} migrations successful")
-    
+
+    logger.info(
+        f"\nMigrations table: {migrations_success}/{len(migrations_migrations)} migrations successful"
+    )
+
     # =========================================================================
     # SUMMARY
     # =========================================================================
@@ -150,7 +158,7 @@ def main():
     logger.info("=" * 60)
     total = len(users_migrations) + len(migrations_migrations)
     success = users_success + migrations_success
-    
+
     if success == total:
         logger.info("✓ ALL MIGRATIONS COMPLETED SUCCESSFULLY")
         logger.info()
@@ -166,8 +174,9 @@ def main():
     else:
         logger.info(f"⚠ {success}/{total} migrations completed")
         logger.info("Some migrations failed. Check the error messages above.")
-    
+
     logger.info("=" * 60)
+
 
 if __name__ == "__main__":
     main()

@@ -35,15 +35,17 @@ logger = logging.getLogger(__name__)
 
 class AiDAConfidenceLevel(Enum):
     """Confidence levels for AiDA data quality assessment."""
-    VERIFIED = "verified"           # Merkle root verified, all hashes match
-    HIGH = "high"                   # Hashes verified, no anomalies
-    MEDIUM = "medium"               # Minor anomalies detected, verified source
-    LOW = "low"                     # Significant anomalies, requires manual review
-    UNVERIFIED = "unverified"       # Data not cryptographically verified
+
+    VERIFIED = "verified"  # Merkle root verified, all hashes match
+    HIGH = "high"  # Hashes verified, no anomalies
+    MEDIUM = "medium"  # Minor anomalies detected, verified source
+    LOW = "low"  # Significant anomalies, requires manual review
+    UNVERIFIED = "unverified"  # Data not cryptographically verified
 
 
 class AiDAAnomalyType(Enum):
     """Types of anomalies that AiDA should flag for auditor attention."""
+
     UNUSUAL_AMOUNT = "unusual_amount"
     DUPLICATE_TRANSACTION = "duplicate_transaction"
     WEEKEND_TRANSACTION = "weekend_transaction"
@@ -58,6 +60,7 @@ class AiDAAnomalyType(Enum):
 @dataclass
 class AiDATransactionContext:
     """Context information for a single transaction for AiDA analysis."""
+
     transaction_id: str
     transaction_type: str
     date: str
@@ -86,6 +89,7 @@ class AiDATransactionContext:
 @dataclass
 class AiDADataPackage:
     """Complete data package prepared for Caseware AiDA consumption."""
+
     # Package metadata
     package_id: str
     created_at: str
@@ -132,9 +136,9 @@ class AiDAIntegrationService:
 
     def __init__(self):
         self._anomaly_thresholds = {
-            'large_transaction_threshold': Decimal('50000'),
-            'round_number_variance': Decimal('0.01'),
-            'sequence_gap_threshold': 10,
+            "large_transaction_threshold": Decimal("50000"),
+            "round_number_variance": Decimal("0.01"),
+            "sequence_gap_threshold": 10,
         }
 
     def prepare_aida_package(
@@ -142,7 +146,7 @@ class AiDAIntegrationService:
         extracted_data: Dict[str, Any],
         merkle_root: str,
         company_name: str,
-        fiscal_year_end: str
+        fiscal_year_end: str,
     ) -> AiDADataPackage:
         """
         Prepare a complete data package for Caseware AiDA.
@@ -164,7 +168,7 @@ class AiDAIntegrationService:
             company_name=company_name,
             fiscal_year_end=fiscal_year_end,
             merkle_root=merkle_root,
-            hash_algorithm="SHA-256"
+            hash_algorithm="SHA-256",
         )
 
         # Process trial balance
@@ -186,39 +190,58 @@ class AiDAIntegrationService:
         package.verification_confidence = self._assess_confidence(package, merkle_root)
         package.total_records_verified = len(package.transactions)
 
-        logger.info(f"AiDA package prepared: {len(package.transactions)} transactions, "
-                   f"confidence: {package.verification_confidence.value}")
+        logger.info(
+            f"AiDA package prepared: {len(package.transactions)} transactions, "
+            f"confidence: {package.verification_confidence.value}"
+        )
 
         return package
 
     def _process_trial_balance(
-        self,
-        package: AiDADataPackage,
-        extracted_data: Dict[str, Any]
+        self, package: AiDADataPackage, extracted_data: Dict[str, Any]
     ) -> None:
         """Process trial balance for AiDA."""
-        accounts = extracted_data.get('accounts', [])
+        accounts = extracted_data.get("accounts", [])
 
         for account in accounts:
-            account_type = account.get('AccountType') or account.get('account_type', '')
-            balance = float(account.get('Balance') or account.get('balance') or 0)
+            account_type = account.get("AccountType") or account.get("account_type", "")
+            balance = float(account.get("Balance") or account.get("balance") or 0)
 
             # Categorize by account type
-            if account_type in ['Bank', 'Accounts Receivable', 'AccountsReceivable',
-                               'Other Current Asset', 'OtherCurrentAsset',
-                               'Fixed Asset', 'FixedAsset', 'Other Asset', 'OtherAsset']:
+            if account_type in [
+                "Bank",
+                "Accounts Receivable",
+                "AccountsReceivable",
+                "Other Current Asset",
+                "OtherCurrentAsset",
+                "Fixed Asset",
+                "FixedAsset",
+                "Other Asset",
+                "OtherAsset",
+            ]:
                 package.total_assets += balance
-            elif account_type in ['Accounts Payable', 'AccountsPayable',
-                                 'Credit Card', 'CreditCard',
-                                 'Other Current Liability', 'OtherCurrentLiability',
-                                 'Long Term Liability', 'LongTermLiability']:
+            elif account_type in [
+                "Accounts Payable",
+                "AccountsPayable",
+                "Credit Card",
+                "CreditCard",
+                "Other Current Liability",
+                "OtherCurrentLiability",
+                "Long Term Liability",
+                "LongTermLiability",
+            ]:
                 package.total_liabilities += balance
-            elif account_type in ['Equity', 'OpeningBalanceEquity', 'RetainedEarnings']:
+            elif account_type in ["Equity", "OpeningBalanceEquity", "RetainedEarnings"]:
                 package.total_equity += balance
-            elif account_type in ['Income', 'Other Income', 'OtherIncome']:
+            elif account_type in ["Income", "Other Income", "OtherIncome"]:
                 package.total_revenue += balance
-            elif account_type in ['Expense', 'Other Expense', 'OtherExpense',
-                                 'Cost of Goods Sold', 'CostOfGoodsSold']:
+            elif account_type in [
+                "Expense",
+                "Other Expense",
+                "OtherExpense",
+                "Cost of Goods Sold",
+                "CostOfGoodsSold",
+            ]:
                 package.total_expenses += balance
 
         # Calculate variance
@@ -229,78 +252,83 @@ class AiDAIntegrationService:
         package.is_balanced = package.trial_balance_variance < 0.01
 
     def _process_transactions(
-        self,
-        package: AiDADataPackage,
-        extracted_data: Dict[str, Any]
+        self, package: AiDADataPackage, extracted_data: Dict[str, Any]
     ) -> None:
         """Process transactions with anomaly detection for AiDA."""
         # Process invoices
-        for inv in extracted_data.get('invoices', []):
+        for inv in extracted_data.get("invoices", []):
             txn = self._create_transaction_context(
-                transaction_id=inv.get('TxnID') or inv.get('txn_id', ''),
-                transaction_type='Invoice',
-                date=str(inv.get('TxnDate') or inv.get('txn_date', '')),
-                amount=float(inv.get('Subtotal') or inv.get('subtotal') or 0),
-                entity_name=inv.get('CustomerRefFullName') or inv.get('customer_name', ''),
-                description=inv.get('Memo') or inv.get('memo', ''),
-                account_code='1200',  # A/R
-                lead_sheet_code='A2',
-                integrity_hash=inv.get('IntegrityHash') or inv.get('integrity_hash', '')
+                transaction_id=inv.get("TxnID") or inv.get("txn_id", ""),
+                transaction_type="Invoice",
+                date=str(inv.get("TxnDate") or inv.get("txn_date", "")),
+                amount=float(inv.get("Subtotal") or inv.get("subtotal") or 0),
+                entity_name=inv.get("CustomerRefFullName")
+                or inv.get("customer_name", ""),
+                description=inv.get("Memo") or inv.get("memo", ""),
+                account_code="1200",  # A/R
+                lead_sheet_code="A2",
+                integrity_hash=inv.get("IntegrityHash")
+                or inv.get("integrity_hash", ""),
             )
             self._detect_anomalies(txn)
             package.transactions.append(txn)
 
         # Process bills
-        for bill in extracted_data.get('bills', []):
+        for bill in extracted_data.get("bills", []):
             txn = self._create_transaction_context(
-                transaction_id=bill.get('TxnID') or bill.get('txn_id', ''),
-                transaction_type='Bill',
-                date=str(bill.get('TxnDate') or bill.get('txn_date', '')),
-                amount=float(bill.get('AmountDue') or bill.get('amount_due') or 0),
-                entity_name=bill.get('VendorRefFullName') or bill.get('vendor_name', ''),
-                description=bill.get('Memo') or bill.get('memo', ''),
-                account_code='2000',  # A/P
-                lead_sheet_code='L1',
-                integrity_hash=bill.get('IntegrityHash') or bill.get('integrity_hash', '')
+                transaction_id=bill.get("TxnID") or bill.get("txn_id", ""),
+                transaction_type="Bill",
+                date=str(bill.get("TxnDate") or bill.get("txn_date", "")),
+                amount=float(bill.get("AmountDue") or bill.get("amount_due") or 0),
+                entity_name=bill.get("VendorRefFullName")
+                or bill.get("vendor_name", ""),
+                description=bill.get("Memo") or bill.get("memo", ""),
+                account_code="2000",  # A/P
+                lead_sheet_code="L1",
+                integrity_hash=bill.get("IntegrityHash")
+                or bill.get("integrity_hash", ""),
             )
             self._detect_anomalies(txn)
             package.transactions.append(txn)
 
         # Process journal entries
-        for je in extracted_data.get('journal_entries', []):
-            lines = je.get('Lines') or je.get('lines') or []
+        for je in extracted_data.get("journal_entries", []):
+            lines = je.get("Lines") or je.get("lines") or []
             total_debits = sum(
-                float(line.get('Amount') or line.get('amount') or 0)
+                float(line.get("Amount") or line.get("amount") or 0)
                 for line in lines
-                if (line.get('JournalLineType') or line.get('journal_line_type')) == 'Debit'
+                if (line.get("JournalLineType") or line.get("journal_line_type"))
+                == "Debit"
             )
 
             txn = self._create_transaction_context(
-                transaction_id=je.get('TxnID') or je.get('txn_id', ''),
-                transaction_type='JournalEntry',
-                date=str(je.get('TxnDate') or je.get('txn_date', '')),
+                transaction_id=je.get("TxnID") or je.get("txn_id", ""),
+                transaction_type="JournalEntry",
+                date=str(je.get("TxnDate") or je.get("txn_date", "")),
                 amount=total_debits,
-                entity_name='',
-                description=je.get('Memo') or je.get('memo', ''),
-                account_code='MULTI',
-                lead_sheet_code='JE',
-                integrity_hash=je.get('IntegrityHash') or je.get('integrity_hash', '')
+                entity_name="",
+                description=je.get("Memo") or je.get("memo", ""),
+                account_code="MULTI",
+                lead_sheet_code="JE",
+                integrity_hash=je.get("IntegrityHash") or je.get("integrity_hash", ""),
             )
             self._detect_anomalies(txn)
             package.transactions.append(txn)
 
         # Process checks
-        for chk in extracted_data.get('checks', []):
+        for chk in extracted_data.get("checks", []):
             txn = self._create_transaction_context(
-                transaction_id=chk.get('TxnID') or chk.get('txn_id', ''),
-                transaction_type='Check',
-                date=str(chk.get('TxnDate') or chk.get('txn_date', '')),
-                amount=float(chk.get('Amount') or chk.get('amount') or 0),
-                entity_name=chk.get('PayeeEntityRefFullName') or chk.get('payee_name', ''),
-                description=chk.get('Memo') or chk.get('memo', ''),
-                account_code='1000',  # Cash
-                lead_sheet_code='A1',
-                integrity_hash=chk.get('IntegrityHash') or chk.get('integrity_hash', '')
+                transaction_id=chk.get("TxnID") or chk.get("txn_id", ""),
+                transaction_type="Check",
+                date=str(chk.get("TxnDate") or chk.get("txn_date", "")),
+                amount=float(chk.get("Amount") or chk.get("amount") or 0),
+                entity_name=chk.get("PayeeEntityRefFullName")
+                or chk.get("payee_name", ""),
+                description=chk.get("Memo") or chk.get("memo", ""),
+                account_code="1000",  # Cash
+                lead_sheet_code="A1",
+                integrity_hash=chk.get("IntegrityHash")
+                or chk.get("integrity_hash", ""),
             )
             self._detect_anomalies(txn)
             package.transactions.append(txn)
@@ -315,7 +343,7 @@ class AiDAIntegrationService:
         description: str,
         account_code: str,
         lead_sheet_code: str,
-        integrity_hash: str
+        integrity_hash: str,
     ) -> AiDATransactionContext:
         """Create a transaction context object."""
         return AiDATransactionContext(
@@ -328,46 +356,56 @@ class AiDAIntegrationService:
             account_code=account_code,
             lead_sheet_code=lead_sheet_code,
             integrity_hash=integrity_hash,
-            verification_status=AiDAConfidenceLevel.VERIFIED if integrity_hash else AiDAConfidenceLevel.UNVERIFIED,
+            verification_status=(
+                AiDAConfidenceLevel.VERIFIED
+                if integrity_hash
+                else AiDAConfidenceLevel.UNVERIFIED
+            ),
             merkle_proof_available=bool(integrity_hash),
-            nl_summary=f"{transaction_type} for ${amount:,.2f} to/from {entity_name or 'N/A'}"
+            nl_summary=f"{transaction_type} for ${amount:,.2f} to/from {entity_name or 'N/A'}",
         )
 
     def _detect_anomalies(self, txn: AiDATransactionContext) -> None:
         """Detect anomalies in a transaction for AiDA flagging."""
         # Large transaction
-        if txn.amount > float(self._anomaly_thresholds['large_transaction_threshold']):
+        if txn.amount > float(self._anomaly_thresholds["large_transaction_threshold"]):
             txn.anomalies.append(AiDAAnomalyType.UNUSUAL_AMOUNT)
-            txn.anomaly_details['unusual_amount'] = {
-                'threshold': float(self._anomaly_thresholds['large_transaction_threshold']),
-                'actual': txn.amount
+            txn.anomaly_details["unusual_amount"] = {
+                "threshold": float(
+                    self._anomaly_thresholds["large_transaction_threshold"]
+                ),
+                "actual": txn.amount,
             }
 
         # Round number (potential estimate or fraud indicator)
         if txn.amount > 0:
             if txn.amount == round(txn.amount, -3):  # Rounded to thousands
                 txn.anomalies.append(AiDAAnomalyType.ROUND_NUMBER)
-                txn.anomaly_details['round_number'] = {
-                    'amount': txn.amount,
-                    'rounded_to': 'thousands'
+                txn.anomaly_details["round_number"] = {
+                    "amount": txn.amount,
+                    "rounded_to": "thousands",
                 }
 
         # Weekend transaction (may require explanation)
         try:
             if txn.date:
                 from datetime import datetime as dt
-                date_obj = dt.fromisoformat(txn.date.replace('Z', '+00:00'))
+
+                date_obj = dt.fromisoformat(txn.date.replace("Z", "+00:00"))
                 if date_obj.weekday() >= 5:  # Saturday or Sunday
                     txn.anomalies.append(AiDAAnomalyType.WEEKEND_TRANSACTION)
-                    txn.anomaly_details['weekend'] = {
-                        'date': txn.date,
-                        'day': date_obj.strftime('%A')
+                    txn.anomaly_details["weekend"] = {
+                        "date": txn.date,
+                        "day": date_obj.strftime("%A"),
                     }
         except (ValueError, TypeError, AttributeError) as e:
             # CRITICAL FIX: Specific exceptions instead of bare except
             # Log the error instead of silently ignoring
             import logging
-            logging.getLogger(__name__).debug(f"Could not parse transaction date for anomaly detection: {e}")
+
+            logging.getLogger(__name__).debug(
+                f"Could not parse transaction date for anomaly detection: {e}"
+            )
 
     def _compute_anomaly_summary(self, package: AiDADataPackage) -> None:
         """Compute anomaly summary statistics."""
@@ -378,19 +416,19 @@ class AiDAIntegrationService:
 
     def _generate_focus_areas(self, package: AiDADataPackage) -> None:
         """Generate suggested audit focus areas based on anomalies."""
-        if package.anomaly_summary.get('unusual_amount', 0) > 5:
+        if package.anomaly_summary.get("unusual_amount", 0) > 5:
             package.suggested_focus_areas.append(
                 f"Review {package.anomaly_summary['unusual_amount']} large transactions "
                 f"exceeding ${float(self._anomaly_thresholds['large_transaction_threshold']):,.0f}"
             )
 
-        if package.anomaly_summary.get('round_number', 0) > 10:
+        if package.anomaly_summary.get("round_number", 0) > 10:
             package.suggested_focus_areas.append(
                 f"Investigate {package.anomaly_summary['round_number']} round-number transactions "
                 f"for potential estimation or manipulation"
             )
 
-        if package.anomaly_summary.get('weekend_transaction', 0) > 3:
+        if package.anomaly_summary.get("weekend_transaction", 0) > 3:
             package.suggested_focus_areas.append(
                 f"Verify authorization for {package.anomaly_summary['weekend_transaction']} "
                 f"weekend transactions"
@@ -436,9 +474,7 @@ The Merkle root provides cryptographic proof of data integrity suitable for audi
         """.strip()
 
     def _assess_confidence(
-        self,
-        package: AiDADataPackage,
-        merkle_root: str
+        self, package: AiDADataPackage, merkle_root: str
     ) -> AiDAConfidenceLevel:
         """Assess overall confidence level for the data package."""
         if not merkle_root:
@@ -472,12 +508,13 @@ The Merkle root provides cryptographic proof of data integrity suitable for audi
         Returns:
             JSON string ready for AiDA import
         """
+
         def serialize(obj):
             if isinstance(obj, Enum):
                 return obj.value
             if isinstance(obj, Decimal):
                 return float(obj)
-            if hasattr(obj, '__dict__'):
+            if hasattr(obj, "__dict__"):
                 return {k: serialize(v) for k, v in obj.__dict__.items()}
             if isinstance(obj, list):
                 return [serialize(i) for i in obj]

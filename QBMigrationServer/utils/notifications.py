@@ -21,34 +21,34 @@ def init_mail(app):
 def send_email(to, subject, body, html=None):
     """
     Send email
-    
+
     Args:
         to: Recipient email or list of emails
         subject: Email subject
         body: Plain text body
         html: HTML body (optional)
-    
+
     Returns:
         bool: True if sent successfully
     """
     try:
-        if not current_app.config.get('MAIL_USERNAME'):
+        if not current_app.config.get("MAIL_USERNAME"):
             logger.warning("Email not configured, skipping notification")
             return False
-        
+
         msg = Message(
             subject=subject,
             recipients=[to] if isinstance(to, str) else to,
             body=body,
             html=html,
-            sender=current_app.config.get('MAIL_DEFAULT_SENDER')
+            sender=current_app.config.get("MAIL_DEFAULT_SENDER"),
         )
-        
+
         mail.send(msg)
-        
+
         logger.info(f"Email sent to {to}: {subject}")
         return True
-        
+
     except Exception as e:
         logger.exception(f"Failed to send email: {str(e)}")
         return False
@@ -57,11 +57,11 @@ def send_email(to, subject, body, html=None):
 def send_verification_email(email, token):
     """Send email verification"""
     try:
-        server_url = current_app.config.get('SERVER_URL')
+        server_url = current_app.config.get("SERVER_URL")
         verify_url = f"{server_url}/api/auth/verify/{token}"
-        
+
         subject = "Verify your QB Migration account"
-        
+
         body = f"""
 Welcome to QB Migration!
 
@@ -76,7 +76,7 @@ If you didn't create this account, please ignore this email.
 Best regards,
 QB Migration Team
 """
-        
+
         html = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -105,9 +105,9 @@ QB Migration Team
 </body>
 </html>
 """
-        
+
         return send_email(email, subject, body, html)
-        
+
     except Exception as e:
         logger.exception(f"Failed to send verification email: {str(e)}")
         return False
@@ -119,7 +119,7 @@ def send_new_device_alert(email, ip_address):
         subject = "New device detected on your QB Migration account"
 
         # FIX MED-05: Escape user-controllable data in HTML
-        safe_ip = str(html_escape(ip_address or 'Unknown'))
+        safe_ip = str(html_escape(ip_address or "Unknown"))
 
         body = f"""
 Security Alert: New Device Login
@@ -164,9 +164,9 @@ QB Migration Security Team
 </body>
 </html>
 """
-        
+
         return send_email(email, subject, body, html)
-        
+
     except Exception as e:
         logger.exception(f"Failed to send new device alert: {str(e)}")
         return False
@@ -175,14 +175,14 @@ QB Migration Security Team
 def send_migration_failure_alert(migration):
     """Send alert for migration failure"""
     try:
-        admin_email = current_app.config.get('ALERT_EMAIL')
-        
+        admin_email = current_app.config.get("ALERT_EMAIL")
+
         if not admin_email:
             logger.warning("Admin alert email not configured")
             return False
-        
+
         subject = f"Migration Failed: {migration.migration_id}"
-        
+
         body = f"""
 Migration Failure Alert
 
@@ -200,9 +200,9 @@ S3 URI: {migration.s3_uri or 'N/A'}
 
 Action Required: {"Maximum retries reached" if not migration.can_retry() else "Available for retry"}
 """
-        
+
         return send_email(admin_email, subject, body)
-        
+
     except Exception as e:
         logger.exception(f"Failed to send failure alert: {str(e)}")
         return False
@@ -212,7 +212,7 @@ def send_migration_complete_notification(user_email, migration):
     """Send migration completion notification to user"""
     try:
         subject = "Your QuickBooks migration is complete!"
-        
+
         body = f"""
 Great news! Your QuickBooks migration has completed successfully.
 
@@ -230,7 +230,7 @@ You can now log in to QuickBooks Online to access your migrated data.
 Best regards,
 QB Migration Team
 """
-        
+
         html = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -257,9 +257,9 @@ QB Migration Team
 </body>
 </html>
 """
-        
+
         return send_email(user_email, subject, body, html)
-        
+
     except Exception as e:
         logger.exception(f"Failed to send completion notification: {str(e)}")
         return False

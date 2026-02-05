@@ -6,5 +6,5 @@ from .tier_config import (
     get_transaction_limit,
     get_price_cents,
     is_valid_tier,
-    get_all_tier_types
+    get_all_tier_types,
 )

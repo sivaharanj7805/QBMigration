@@ -66,9 +66,7 @@ import uuid
 
 # Configure audit logger
 AUDIT_LOG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    'logs',
-    'audit.log'
+    os.path.dirname(os.path.dirname(__file__)), "logs", "audit.log"
 )
 
 # Ensure logs directory exists
@@ -162,7 +160,9 @@ class AuditEvent:
 
     # Event identification
     event_type: str  # From AuditEventType or custom string
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     # Actor information (who performed the action)
@@ -188,7 +188,9 @@ class AuditEvent:
     session_id: Optional[str] = None  # Session identifier
 
     # Compliance fields
-    data_classification: Optional[str] = None  # "public", "internal", "confidential", "restricted"
+    data_classification: Optional[str] = (
+        None  # "public", "internal", "confidential", "restricted"
+    )
     retention_days: int = 2555  # 7 years default for SOC2
 
     def to_dict(self) -> Dict[str, Any]:
@@ -215,7 +217,7 @@ class AuditLogger:
 
     def _setup_logger(self):
         """Configure the audit logger with file handler."""
-        self.logger = logging.getLogger('audit')
+        self.logger = logging.getLogger("audit")
         self.logger.setLevel(logging.INFO)
 
         # Prevent duplicate handlers
@@ -230,12 +232,12 @@ class AuditLogger:
                 AUDIT_LOG_FILE,
                 maxBytes=50 * 1024 * 1024,  # 50MB per file
                 backupCount=100,  # Keep 100 files (covers retention period)
-                encoding='utf-8'
+                encoding="utf-8",
             )
             file_handler.setLevel(logging.INFO)
 
             # JSON format for structured logging
-            file_handler.setFormatter(logging.Formatter('%(message)s'))
+            file_handler.setFormatter(logging.Formatter("%(message)s"))
             self.logger.addHandler(file_handler)
         except Exception as e:
             logging.warning(f"Failed to setup audit file handler: {e}")
@@ -255,11 +257,12 @@ class AuditLogger:
             from flask import request, g
 
             return {
-                'ip': request.remote_addr,
-                'user_agent': request.headers.get('User-Agent', ''),
-                'correlation_id': getattr(g, 'correlation_id', None) or request.headers.get('X-Correlation-ID'),
-                'endpoint': request.endpoint,
-                'method': request.method
+                "ip": request.remote_addr,
+                "user_agent": request.headers.get("User-Agent", ""),
+                "correlation_id": getattr(g, "correlation_id", None)
+                or request.headers.get("X-Correlation-ID"),
+                "endpoint": request.endpoint,
+                "method": request.method,
             }
         except RuntimeError:
             # Not in request context
@@ -274,12 +277,12 @@ class AuditLogger:
         """
         # Add request context if available
         ctx = self._get_request_context()
-        if ctx.get('ip') and not event.actor_ip:
-            event.actor_ip = self._hash_pii(ctx['ip'])
-        if ctx.get('user_agent') and not event.actor_user_agent_hash:
-            event.actor_user_agent_hash = self._hash_pii(ctx['user_agent'])
-        if ctx.get('correlation_id') and not event.correlation_id:
-            event.correlation_id = ctx['correlation_id']
+        if ctx.get("ip") and not event.actor_ip:
+            event.actor_ip = self._hash_pii(ctx["ip"])
+        if ctx.get("user_agent") and not event.actor_user_agent_hash:
+            event.actor_user_agent_hash = self._hash_pii(ctx["user_agent"])
+        if ctx.get("correlation_id") and not event.correlation_id:
+            event.correlation_id = ctx["correlation_id"]
 
         # Log to audit file (JSON format)
         self.logger.info(event.to_json())
@@ -294,186 +297,249 @@ class AuditLogger:
     # Convenience Methods for Common Events
     # =========================================================================
 
-    def auth_login(self, user_id: int, success: bool, email: str = None,
-                   ip: str = None, failure_reason: str = None):
+    def auth_login(
+        self,
+        user_id: int,
+        success: bool,
+        email: str = None,
+        ip: str = None,
+        failure_reason: str = None,
+    ):
         """Log authentication attempt."""
-        event_type = AuditEventType.AUTH_LOGIN_SUCCESS if success else AuditEventType.AUTH_LOGIN_FAILURE
+        event_type = (
+            AuditEventType.AUTH_LOGIN_SUCCESS
+            if success
+            else AuditEventType.AUTH_LOGIN_FAILURE
+        )
 
-        self.log(AuditEvent(
-            event_type=event_type.value,
-            actor_id=user_id,
-            actor_email_hash=self._hash_pii(email) if email else None,
-            actor_ip=self._hash_pii(ip) if ip else None,
-            resource_type="session",
-            action="login",
-            outcome="success" if success else "failure",
-            outcome_reason=failure_reason,
-            data_classification="confidential"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=event_type.value,
+                actor_id=user_id,
+                actor_email_hash=self._hash_pii(email) if email else None,
+                actor_ip=self._hash_pii(ip) if ip else None,
+                resource_type="session",
+                action="login",
+                outcome="success" if success else "failure",
+                outcome_reason=failure_reason,
+                data_classification="confidential",
+            )
+        )
 
     def auth_logout(self, user_id: int):
         """Log logout event."""
-        self.log(AuditEvent(
-            event_type=AuditEventType.AUTH_LOGOUT.value,
-            actor_id=user_id,
-            resource_type="session",
-            action="logout",
-            outcome="success"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=AuditEventType.AUTH_LOGOUT.value,
+                actor_id=user_id,
+                resource_type="session",
+                action="logout",
+                outcome="success",
+            )
+        )
 
     def auth_mfa(self, user_id: int, action: str, success: bool):
         """Log MFA event."""
         event_types = {
-            ('enabled', True): AuditEventType.AUTH_MFA_ENABLED,
-            ('disabled', True): AuditEventType.AUTH_MFA_DISABLED,
-            ('verified', True): AuditEventType.AUTH_MFA_VERIFIED,
-            ('verified', False): AuditEventType.AUTH_MFA_FAILED,
+            ("enabled", True): AuditEventType.AUTH_MFA_ENABLED,
+            ("disabled", True): AuditEventType.AUTH_MFA_DISABLED,
+            ("verified", True): AuditEventType.AUTH_MFA_VERIFIED,
+            ("verified", False): AuditEventType.AUTH_MFA_FAILED,
         }
-        event_type = event_types.get((action, success), AuditEventType.AUTH_MFA_VERIFIED)
+        event_type = event_types.get(
+            (action, success), AuditEventType.AUTH_MFA_VERIFIED
+        )
 
-        self.log(AuditEvent(
-            event_type=event_type.value,
-            actor_id=user_id,
-            resource_type="mfa",
-            action=action,
-            outcome="success" if success else "failure",
-            data_classification="confidential"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=event_type.value,
+                actor_id=user_id,
+                resource_type="mfa",
+                action=action,
+                outcome="success" if success else "failure",
+                data_classification="confidential",
+            )
+        )
 
-    def data_access(self, user_id: int, resource_type: str, resource_id: str,
-                    action: str, success: bool = True, metadata: Dict = None):
+    def data_access(
+        self,
+        user_id: int,
+        resource_type: str,
+        resource_id: str,
+        action: str,
+        success: bool = True,
+        metadata: Dict = None,
+    ):
         """Log data access event."""
         action_types = {
-            'read': AuditEventType.DATA_READ,
-            'create': AuditEventType.DATA_CREATE,
-            'update': AuditEventType.DATA_UPDATE,
-            'delete': AuditEventType.DATA_DELETE,
-            'export': AuditEventType.DATA_EXPORT,
-            'import': AuditEventType.DATA_IMPORT,
+            "read": AuditEventType.DATA_READ,
+            "create": AuditEventType.DATA_CREATE,
+            "update": AuditEventType.DATA_UPDATE,
+            "delete": AuditEventType.DATA_DELETE,
+            "export": AuditEventType.DATA_EXPORT,
+            "import": AuditEventType.DATA_IMPORT,
         }
         event_type = action_types.get(action, AuditEventType.DATA_READ)
 
-        self.log(AuditEvent(
-            event_type=event_type.value,
-            actor_id=user_id,
-            resource_type=resource_type,
-            resource_id=str(resource_id),
-            action=action,
-            outcome="success" if success else "failure",
-            metadata=metadata or {},
-            data_classification="confidential"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=event_type.value,
+                actor_id=user_id,
+                resource_type=resource_type,
+                resource_id=str(resource_id),
+                action=action,
+                outcome="success" if success else "failure",
+                metadata=metadata or {},
+                data_classification="confidential",
+            )
+        )
 
-    def migration_event(self, user_id: int, migration_id: str, action: str,
-                        success: bool = True, metadata: Dict = None):
+    def migration_event(
+        self,
+        user_id: int,
+        migration_id: str,
+        action: str,
+        success: bool = True,
+        metadata: Dict = None,
+    ):
         """Log migration event."""
         action_types = {
-            'started': AuditEventType.MIGRATION_STARTED,
-            'completed': AuditEventType.MIGRATION_COMPLETED,
-            'failed': AuditEventType.MIGRATION_FAILED,
-            'cancelled': AuditEventType.MIGRATION_CANCELLED,
-            'retry': AuditEventType.MIGRATION_RETRY,
+            "started": AuditEventType.MIGRATION_STARTED,
+            "completed": AuditEventType.MIGRATION_COMPLETED,
+            "failed": AuditEventType.MIGRATION_FAILED,
+            "cancelled": AuditEventType.MIGRATION_CANCELLED,
+            "retry": AuditEventType.MIGRATION_RETRY,
         }
         event_type = action_types.get(action, AuditEventType.MIGRATION_STARTED)
 
-        self.log(AuditEvent(
-            event_type=event_type.value,
-            actor_id=user_id,
-            resource_type="migration",
-            resource_id=migration_id,
-            action=action,
-            outcome="success" if success else "failure",
-            metadata=metadata or {},
-            data_classification="confidential"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=event_type.value,
+                actor_id=user_id,
+                resource_type="migration",
+                resource_id=migration_id,
+                action=action,
+                outcome="success" if success else "failure",
+                metadata=metadata or {},
+                data_classification="confidential",
+            )
+        )
 
-    def security_event(self, event_type: str, user_id: int = None, ip: str = None,
-                       details: str = None, metadata: Dict = None):
+    def security_event(
+        self,
+        event_type: str,
+        user_id: int = None,
+        ip: str = None,
+        details: str = None,
+        metadata: Dict = None,
+    ):
         """Log security event."""
         security_types = {
-            'rate_limit': AuditEventType.SECURITY_RATE_LIMIT_HIT,
-            'suspicious': AuditEventType.SECURITY_SUSPICIOUS_ACTIVITY,
-            'lockout': AuditEventType.SECURITY_ACCOUNT_LOCKOUT,
-            'captcha_required': AuditEventType.SECURITY_CAPTCHA_REQUIRED,
-            'captcha_failed': AuditEventType.SECURITY_CAPTCHA_FAILED,
-            'ip_blocked': AuditEventType.SECURITY_IP_BLOCKED,
-            'webhook_invalid': AuditEventType.SECURITY_WEBHOOK_INVALID,
+            "rate_limit": AuditEventType.SECURITY_RATE_LIMIT_HIT,
+            "suspicious": AuditEventType.SECURITY_SUSPICIOUS_ACTIVITY,
+            "lockout": AuditEventType.SECURITY_ACCOUNT_LOCKOUT,
+            "captcha_required": AuditEventType.SECURITY_CAPTCHA_REQUIRED,
+            "captcha_failed": AuditEventType.SECURITY_CAPTCHA_FAILED,
+            "ip_blocked": AuditEventType.SECURITY_IP_BLOCKED,
+            "webhook_invalid": AuditEventType.SECURITY_WEBHOOK_INVALID,
         }
-        audit_event_type = security_types.get(event_type, AuditEventType.SECURITY_SUSPICIOUS_ACTIVITY)
+        audit_event_type = security_types.get(
+            event_type, AuditEventType.SECURITY_SUSPICIOUS_ACTIVITY
+        )
 
-        self.log(AuditEvent(
-            event_type=audit_event_type.value,
-            actor_id=user_id,
-            actor_ip=self._hash_pii(ip) if ip else None,
-            resource_type="security",
-            action=event_type,
-            outcome="triggered",
-            outcome_reason=details,
-            metadata=metadata or {},
-            data_classification="restricted"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=audit_event_type.value,
+                actor_id=user_id,
+                actor_ip=self._hash_pii(ip) if ip else None,
+                resource_type="security",
+                action=event_type,
+                outcome="triggered",
+                outcome_reason=details,
+                metadata=metadata or {},
+                data_classification="restricted",
+            )
+        )
 
-    def config_change(self, user_id: int, setting_name: str, old_value: str = None,
-                      new_value: str = None, resource_type: str = "setting"):
+    def config_change(
+        self,
+        user_id: int,
+        setting_name: str,
+        old_value: str = None,
+        new_value: str = None,
+        resource_type: str = "setting",
+    ):
         """Log configuration change."""
-        self.log(AuditEvent(
-            event_type=AuditEventType.CONFIG_SETTING_CHANGED.value,
-            actor_id=user_id,
-            resource_type=resource_type,
-            resource_id=setting_name,
-            action="changed",
-            outcome="success",
-            metadata={
-                'old_value': '[REDACTED]' if old_value else None,
-                'new_value': '[REDACTED]' if new_value else None,
-                'setting_name': setting_name
-            },
-            data_classification="restricted"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=AuditEventType.CONFIG_SETTING_CHANGED.value,
+                actor_id=user_id,
+                resource_type=resource_type,
+                resource_id=setting_name,
+                action="changed",
+                outcome="success",
+                metadata={
+                    "old_value": "[REDACTED]" if old_value else None,
+                    "new_value": "[REDACTED]" if new_value else None,
+                    "setting_name": setting_name,
+                },
+                data_classification="restricted",
+            )
+        )
 
-    def user_management(self, actor_id: int, target_user_id: int, action: str,
-                        success: bool = True, metadata: Dict = None):
+    def user_management(
+        self,
+        actor_id: int,
+        target_user_id: int,
+        action: str,
+        success: bool = True,
+        metadata: Dict = None,
+    ):
         """Log user management event."""
         action_types = {
-            'created': AuditEventType.USER_CREATED,
-            'updated': AuditEventType.USER_UPDATED,
-            'deleted': AuditEventType.USER_DELETED,
-            'locked': AuditEventType.USER_LOCKED,
-            'unlocked': AuditEventType.USER_UNLOCKED,
+            "created": AuditEventType.USER_CREATED,
+            "updated": AuditEventType.USER_UPDATED,
+            "deleted": AuditEventType.USER_DELETED,
+            "locked": AuditEventType.USER_LOCKED,
+            "unlocked": AuditEventType.USER_UNLOCKED,
         }
         event_type = action_types.get(action, AuditEventType.USER_UPDATED)
 
-        self.log(AuditEvent(
-            event_type=event_type.value,
-            actor_id=actor_id,
-            resource_type="user",
-            resource_id=str(target_user_id),
-            action=action,
-            outcome="success" if success else "failure",
-            metadata=metadata or {},
-            data_classification="confidential"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=event_type.value,
+                actor_id=actor_id,
+                resource_type="user",
+                resource_id=str(target_user_id),
+                action=action,
+                outcome="success" if success else "failure",
+                metadata=metadata or {},
+                data_classification="confidential",
+            )
+        )
 
     def system_event(self, event_type: str, details: str = None, metadata: Dict = None):
         """Log system event."""
         system_types = {
-            'startup': AuditEventType.SYSTEM_STARTUP,
-            'shutdown': AuditEventType.SYSTEM_SHUTDOWN,
-            'error': AuditEventType.SYSTEM_ERROR,
-            'backup': AuditEventType.SYSTEM_BACKUP_COMPLETED,
-            'cleanup': AuditEventType.SYSTEM_CLEANUP_COMPLETED,
+            "startup": AuditEventType.SYSTEM_STARTUP,
+            "shutdown": AuditEventType.SYSTEM_SHUTDOWN,
+            "error": AuditEventType.SYSTEM_ERROR,
+            "backup": AuditEventType.SYSTEM_BACKUP_COMPLETED,
+            "cleanup": AuditEventType.SYSTEM_CLEANUP_COMPLETED,
         }
         audit_event_type = system_types.get(event_type, AuditEventType.SYSTEM_ERROR)
 
-        self.log(AuditEvent(
-            event_type=audit_event_type.value,
-            resource_type="system",
-            action=event_type,
-            outcome="completed",
-            outcome_reason=details,
-            metadata=metadata or {},
-            data_classification="internal"
-        ))
+        self.log(
+            AuditEvent(
+                event_type=audit_event_type.value,
+                resource_type="system",
+                action=event_type,
+                outcome="completed",
+                outcome_reason=details,
+                metadata=metadata or {},
+                data_classification="internal",
+            )
+        )
 
 
 # Global audit logger instance
@@ -484,6 +550,7 @@ audit_log = AuditLogger()
 # Flask Integration
 # =============================================================================
 
+
 def init_audit_logging(app):
     """
     Initialize audit logging for Flask application.
@@ -492,12 +559,15 @@ def init_audit_logging(app):
         app: Flask application instance
     """
     # Log application startup
-    audit_log.system_event('startup', details=f"Flask environment: {app.config.get('ENV', 'unknown')}")
+    audit_log.system_event(
+        "startup", details=f"Flask environment: {app.config.get('ENV', 'unknown')}"
+    )
 
     # Add correlation ID to each request
     @app.before_request
     def add_correlation_id():
         from flask import request, g
-        g.correlation_id = request.headers.get('X-Correlation-ID', str(uuid.uuid4()))
+
+        g.correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
 
     app.logger.info("SOC2 audit logging initialized")

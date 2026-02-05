@@ -21,9 +21,11 @@ from typing import Dict, Any
 # API RATE LIMITING
 # =============================================================================
 
+
 # Rate limits per endpoint (requests per time window)
 class RateLimits:
     """Rate limiting constants for API endpoints"""
+
     # Auth endpoints
     REGISTER_PER_HOUR = 3
     LOGIN_PER_15_MIN = 5
@@ -47,8 +49,10 @@ class RateLimits:
 # TIMEOUTS AND DELAYS
 # =============================================================================
 
+
 class Timeouts:
     """Timeout constants in seconds"""
+
     # HTTP/Network
     HTTP_CONNECT = 10
     HTTP_READ = 30
@@ -81,6 +85,7 @@ class Timeouts:
 
 class Delays:
     """Delay/sleep constants in seconds"""
+
     RATE_LIMIT_BACKOFF = 0.15
     RETRY_BASE_DELAY = 2.0
     RETRY_MAX_DELAY = 60
@@ -91,8 +96,10 @@ class Delays:
 # SIZE LIMITS
 # =============================================================================
 
+
 class SizeLimits:
     """Size limit constants"""
+
     # File uploads (in bytes)
     MAX_UPLOAD_SIZE_MB = 100
     MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -118,8 +125,10 @@ class SizeLimits:
 # RETRY CONFIGURATION
 # =============================================================================
 
+
 class RetryConfig:
     """Retry configuration constants"""
+
     MAX_ATTEMPTS = 3
     BACKOFF_BASE = 2.0
     BACKOFF_MAX = 60
@@ -129,21 +138,25 @@ class RetryConfig:
     RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
     # Retryable exception types (as strings for matching)
-    RETRYABLE_EXCEPTIONS = frozenset({
-        'ConnectionError',
-        'Timeout',
-        'ChunkedEncodingError',
-        'ConnectionResetError',
-        'BrokenPipeError'
-    })
+    RETRYABLE_EXCEPTIONS = frozenset(
+        {
+            "ConnectionError",
+            "Timeout",
+            "ChunkedEncodingError",
+            "ConnectionResetError",
+            "BrokenPipeError",
+        }
+    )
 
 
 # =============================================================================
 # SECURITY PARAMETERS
 # =============================================================================
 
+
 class Security:
     """Security-related constants"""
+
     # Password requirements
     MIN_PASSWORD_LENGTH = 8
     MAX_PASSWORD_LENGTH = 128
@@ -179,8 +192,10 @@ class Security:
 # DATABASE CONFIGURATION
 # =============================================================================
 
+
 class Database:
     """Database configuration constants"""
+
     # Connection pool
     POOL_SIZE_DEFAULT = 10
     POOL_SIZE_MAX = 20
@@ -201,13 +216,15 @@ class Database:
 # AWS CONFIGURATION
 # =============================================================================
 
+
 class AWS:
     """AWS-related constants"""
+
     # Default region
-    DEFAULT_REGION = 'ca-central-1'  # Montreal - Canadian data residency
+    DEFAULT_REGION = "ca-central-1"  # Montreal - Canadian data residency
 
     # S3
-    S3_ENCRYPTION_ALGORITHM = 'AES256'
+    S3_ENCRYPTION_ALGORITHM = "AES256"
     S3_FILE_TTL_HOURS = 24
     S3_PRESIGNED_URL_EXPIRY = 3600  # 1 hour
     S3_MULTIPART_THRESHOLD = 8 * 1024 * 1024  # 8MB
@@ -220,8 +237,10 @@ class AWS:
 # QUICKBOOKS ONLINE API
 # =============================================================================
 
+
 class QBO:
     """QuickBooks Online API constants"""
+
     # Rate limits
     RATE_LIMIT_PER_MINUTE = 500
     BATCH_SIZE_LIMIT = 30
@@ -233,7 +252,7 @@ class QBO:
         "Simple Start": 2,
         "Essentials": 3,
         "Plus": 5,
-        "Advanced": 8
+        "Advanced": 8,
     }
 
     # Valid plans
@@ -250,8 +269,10 @@ class QBO:
 # HTTP STATUS CODES (for clarity)
 # =============================================================================
 
+
 class HTTPStatus:
     """Common HTTP status codes"""
+
     OK = 200
     CREATED = 201
     NO_CONTENT = 204
@@ -272,8 +293,10 @@ class HTTPStatus:
 # ERROR CODES
 # =============================================================================
 
+
 class ErrorCodes:
     """Application-specific error codes"""
+
     # Authentication
     AUTH_INVALID_CREDENTIALS = "AUTH001"
     AUTH_TOKEN_EXPIRED = "AUTH002"
@@ -306,33 +329,34 @@ class ErrorCodes:
 # HELPER FUNCTIONS
 # =============================================================================
 
+
 def get_all_constants() -> Dict[str, Any]:
     """
     Get all constants as a dictionary for debugging/logging.
     Useful for configuration validation.
     """
     return {
-        'rate_limits': {
-            'register_per_hour': RateLimits.REGISTER_PER_HOUR,
-            'login_per_15_min': RateLimits.LOGIN_PER_15_MIN,
-            'default_per_minute': RateLimits.DEFAULT_PER_MINUTE,
+        "rate_limits": {
+            "register_per_hour": RateLimits.REGISTER_PER_HOUR,
+            "login_per_15_min": RateLimits.LOGIN_PER_15_MIN,
+            "default_per_minute": RateLimits.DEFAULT_PER_MINUTE,
         },
-        'timeouts': {
-            'http_connect': Timeouts.HTTP_CONNECT,
-            'http_read': Timeouts.HTTP_READ,
-            'db_query': Timeouts.DB_QUERY_DEFAULT,
+        "timeouts": {
+            "http_connect": Timeouts.HTTP_CONNECT,
+            "http_read": Timeouts.HTTP_READ,
+            "db_query": Timeouts.DB_QUERY_DEFAULT,
         },
-        'size_limits': {
-            'max_upload_mb': SizeLimits.MAX_UPLOAD_SIZE_MB,
-            'max_batch_size': SizeLimits.MAX_BATCH_SIZE,
+        "size_limits": {
+            "max_upload_mb": SizeLimits.MAX_UPLOAD_SIZE_MB,
+            "max_batch_size": SizeLimits.MAX_BATCH_SIZE,
         },
-        'security': {
-            'min_password_length': Security.MIN_PASSWORD_LENGTH,
-            'bcrypt_rounds': Security.BCRYPT_DEFAULT_ROUNDS,
-            'max_failed_logins': Security.MAX_FAILED_LOGINS,
+        "security": {
+            "min_password_length": Security.MIN_PASSWORD_LENGTH,
+            "bcrypt_rounds": Security.BCRYPT_DEFAULT_ROUNDS,
+            "max_failed_logins": Security.MAX_FAILED_LOGINS,
         },
-        'qbo': {
-            'batch_size_limit': QBO.BATCH_SIZE_LIMIT,
-            'rate_limit_per_minute': QBO.RATE_LIMIT_PER_MINUTE,
-        }
+        "qbo": {
+            "batch_size_limit": QBO.BATCH_SIZE_LIMIT,
+            "rate_limit_per_minute": QBO.RATE_LIMIT_PER_MINUTE,
+        },
     }

@@ -36,10 +36,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from caseware_exporter import CasewareExporter
 from leadsheet_mapper import LeadSheetMapper, AccountingStandard
 
-
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def exporter(tmp_path):
@@ -191,6 +191,7 @@ def full_qb_data(sample_accounts):
 # 1. SHA-256 HASH COMPUTATION
 # =============================================================================
 
+
 class TestSHA256HashComputation:
     """Tests for CasewareExporter.compute_sha256_hash."""
 
@@ -213,15 +214,18 @@ class TestSHA256HashComputation:
         """Different input data must produce different hashes."""
         data_a = {"txnId": "TXN-A", "amount": 100.00}
         data_b = {"txnId": "TXN-B", "amount": 100.00}
-        assert CasewareExporter.compute_sha256_hash(data_a) != CasewareExporter.compute_sha256_hash(data_b)
+        assert CasewareExporter.compute_sha256_hash(
+            data_a
+        ) != CasewareExporter.compute_sha256_hash(data_b)
 
     def test_hash_key_fields_canonical_order(self):
         """Key fields (txnId, amount, etc.) should be processed in canonical order."""
         data_ordered = {"amount": 500.00, "txnId": "TXN-X"}
         data_reversed = {"txnId": "TXN-X", "amount": 500.00}
         # Both should produce the same hash because canonical ordering is enforced
-        assert CasewareExporter.compute_sha256_hash(data_ordered) == \
-               CasewareExporter.compute_sha256_hash(data_reversed)
+        assert CasewareExporter.compute_sha256_hash(
+            data_ordered
+        ) == CasewareExporter.compute_sha256_hash(data_reversed)
 
     def test_hash_formats_numbers_to_two_decimals(self):
         """Numeric values should be formatted to 2 decimal places in the canonical string."""
@@ -242,13 +246,15 @@ class TestSHA256HashComputation:
         """Fields with None values should be excluded from hash input."""
         data_with_none = {"txnId": "TXN-1", "amount": None, "name": "Test"}
         data_without = {"txnId": "TXN-1", "name": "Test"}
-        assert CasewareExporter.compute_sha256_hash(data_with_none) == \
-               CasewareExporter.compute_sha256_hash(data_without)
+        assert CasewareExporter.compute_sha256_hash(
+            data_with_none
+        ) == CasewareExporter.compute_sha256_hash(data_without)
 
 
 # =============================================================================
 # 2. HASH VERIFICATION ROUNDTRIP
 # =============================================================================
+
 
 class TestHashVerification:
     """Tests for CasewareExporter.verify_hash roundtrip."""
@@ -275,6 +281,7 @@ class TestHashVerification:
 # =============================================================================
 # 3. CSV INJECTION PREVENTION
 # =============================================================================
+
 
 class TestCSVInjectionPrevention:
     """Tests for CasewareExporter._sanitize_csv_value."""
@@ -324,18 +331,22 @@ class TestCSVInjectionPrevention:
 # 4. SINGULARIZE
 # =============================================================================
 
+
 class TestSingularize:
     """Tests for CasewareExporter._singularize."""
 
-    @pytest.mark.parametrize("plural,expected", [
-        ("invoices", "invoice"),
-        ("journalentries", "journalentry"),
-        ("bills", "bill"),
-        ("classes", "class"),
-        ("deposits", "deposit"),
-        ("transfers", "transfer"),
-        ("checks", "check"),
-    ])
+    @pytest.mark.parametrize(
+        "plural,expected",
+        [
+            ("invoices", "invoice"),
+            ("journalentries", "journalentry"),
+            ("bills", "bill"),
+            ("classes", "class"),
+            ("deposits", "deposit"),
+            ("transfers", "transfer"),
+            ("checks", "check"),
+        ],
+    )
     def test_singularize_known_forms(self, exporter, plural, expected):
         """Known plural forms should singularize correctly."""
         assert exporter._singularize(plural) == expected
@@ -360,6 +371,7 @@ class TestSingularize:
 # =============================================================================
 # 5. DATE PARSING
 # =============================================================================
+
 
 class TestDateParsing:
     """Tests for CasewareExporter._parse_date."""
@@ -401,6 +413,7 @@ class TestDateParsing:
 # =============================================================================
 # 6. LEAD SHEET CODE MAPPING
 # =============================================================================
+
 
 class TestLeadSheetCodeMapping:
     """Tests for LeadSheetMapper.get_lead_sheet_code under US GAAP."""
@@ -462,6 +475,7 @@ class TestLeadSheetCodeMapping:
 # 7. ACCOUNTING STANDARD DETECTION
 # =============================================================================
 
+
 class TestAccountingStandardDetection:
     """Tests for LeadSheetMapper.detect_accounting_standard."""
 
@@ -512,6 +526,7 @@ class TestAccountingStandardDetection:
 # 8. DEBIT/CREDIT CLASSIFICATION
 # =============================================================================
 
+
 class TestDebitCreditClassification:
     """Tests for debit-normal vs credit-normal account classification."""
 
@@ -545,7 +560,14 @@ class TestDebitCreditClassification:
 
     def test_trial_balance_debit_for_bank_positive(self, exporter, tmp_path):
         """A positive Bank balance should appear in the Debit column."""
-        accounts = [{"accountNumber": "1000", "name": "Cash", "accountType": "Bank", "balance": 1000.00}]
+        accounts = [
+            {
+                "accountNumber": "1000",
+                "name": "Cash",
+                "accountType": "Bank",
+                "balance": 1000.00,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         tb_file = tmp_path / "Audit_TB.csv"
         with open(tb_file, "r", encoding="utf-8-sig") as f:
@@ -559,7 +581,14 @@ class TestDebitCreditClassification:
 
     def test_trial_balance_credit_for_ap_positive(self, exporter, tmp_path):
         """A positive AP balance should appear in the Credit column."""
-        accounts = [{"accountNumber": "2000", "name": "AP", "accountType": "Accounts Payable", "balance": 500.00}]
+        accounts = [
+            {
+                "accountNumber": "2000",
+                "name": "AP",
+                "accountType": "Accounts Payable",
+                "balance": 500.00,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         tb_file = tmp_path / "Audit_TB.csv"
         with open(tb_file, "r", encoding="utf-8-sig") as f:
@@ -576,6 +605,7 @@ class TestDebitCreditClassification:
 # 9. OUTPUT FILE GENERATION
 # =============================================================================
 
+
 class TestOutputFileGeneration:
     """Tests for correct file creation, encoding, and structure."""
 
@@ -591,7 +621,9 @@ class TestOutputFileGeneration:
             bom = f.read(3)
         assert bom == b"\xef\xbb\xbf", "File must start with UTF-8 BOM bytes"
 
-    def test_trial_balance_header_row_is_first(self, exporter, tmp_path, sample_accounts):
+    def test_trial_balance_header_row_is_first(
+        self, exporter, tmp_path, sample_accounts
+    ):
         """The first row of Audit_TB.csv must be the column headers (Caseware requirement)."""
         exporter.export_trial_balance(sample_accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
@@ -600,7 +632,9 @@ class TestOutputFileGeneration:
         assert header[0] == "Account Number"
         assert "Forensic_Integrity_Hash" in header
 
-    def test_trial_balance_correct_column_count(self, exporter, tmp_path, sample_accounts):
+    def test_trial_balance_correct_column_count(
+        self, exporter, tmp_path, sample_accounts
+    ):
         """Each data row should have the same number of columns as the header (8)."""
         exporter.export_trial_balance(sample_accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
@@ -609,7 +643,9 @@ class TestOutputFileGeneration:
             for row in reader:
                 assert len(row) == len(header), f"Row column count mismatch: {row}"
 
-    def test_trial_balance_no_totals_row_in_csv(self, exporter, tmp_path, sample_accounts):
+    def test_trial_balance_no_totals_row_in_csv(
+        self, exporter, tmp_path, sample_accounts
+    ):
         """The TOTALS row should NOT be written to the CSV (breaks Caseware import)."""
         exporter.export_trial_balance(sample_accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
@@ -621,7 +657,9 @@ class TestOutputFileGeneration:
         exporter.export_general_ledger(sample_transactions)
         assert (tmp_path / "Audit_GL.csv").exists()
 
-    def test_general_ledger_utf8_bom_encoding(self, exporter, tmp_path, sample_transactions):
+    def test_general_ledger_utf8_bom_encoding(
+        self, exporter, tmp_path, sample_transactions
+    ):
         """Audit_GL.csv should be written with UTF-8 BOM."""
         exporter.export_general_ledger(sample_transactions)
         with open(tmp_path / "Audit_GL.csv", "rb") as f:
@@ -648,6 +686,7 @@ class TestOutputFileGeneration:
 # =============================================================================
 # 10. STATS TRACKING
 # =============================================================================
+
 
 class TestStatsTracking:
     """Tests for exporter statistics counters."""
@@ -690,27 +729,54 @@ class TestStatsTracking:
 # 11. TRIAL BALANCE BALANCING
 # =============================================================================
 
+
 class TestTrialBalanceBalancing:
     """Tests that trial balance debits equal credits for balanced data."""
 
     def test_balanced_accounts_produce_equal_totals(self, exporter, tmp_path):
         """When accounts are balanced, total debits should equal total credits."""
         balanced_accounts = [
-            {"accountNumber": "1000", "name": "Cash", "accountType": "Bank", "balance": 10000.00},
-            {"accountNumber": "2000", "name": "Loan", "accountType": "Long Term Liabilities", "balance": 7000.00},
-            {"accountNumber": "3000", "name": "Equity", "accountType": "Equity", "balance": 3000.00},
+            {
+                "accountNumber": "1000",
+                "name": "Cash",
+                "accountType": "Bank",
+                "balance": 10000.00,
+            },
+            {
+                "accountNumber": "2000",
+                "name": "Loan",
+                "accountType": "Long Term Liabilities",
+                "balance": 7000.00,
+            },
+            {
+                "accountNumber": "3000",
+                "name": "Equity",
+                "accountType": "Equity",
+                "balance": 3000.00,
+            },
         ]
         exporter.export_trial_balance(balanced_accounts, "2024-12-31")
         debits = exporter.stats["total_debits"]
         credits = exporter.stats["total_credits"]
-        assert abs(debits - credits) < Decimal("0.01"), \
-            f"Trial balance not balanced: debits={debits}, credits={credits}"
+        assert abs(debits - credits) < Decimal(
+            "0.01"
+        ), f"Trial balance not balanced: debits={debits}, credits={credits}"
 
     def test_unbalanced_accounts_flag_in_bundle(self, exporter, tmp_path):
         """Unbalanced accounts should be flagged in bundle statistics."""
         unbalanced = [
-            {"accountNumber": "1000", "name": "Cash", "accountType": "Bank", "balance": 10000.00},
-            {"accountNumber": "2000", "name": "Loan", "accountType": "Long Term Liabilities", "balance": 5000.00},
+            {
+                "accountNumber": "1000",
+                "name": "Cash",
+                "accountType": "Bank",
+                "balance": 10000.00,
+            },
+            {
+                "accountNumber": "2000",
+                "name": "Loan",
+                "accountType": "Long Term Liabilities",
+                "balance": 5000.00,
+            },
         ]
         exporter.export_trial_balance(unbalanced, "2024-12-31")
         debits = exporter.stats["total_debits"]
@@ -721,6 +787,7 @@ class TestTrialBalanceBalancing:
 # =============================================================================
 # 12. EDGE CASES
 # =============================================================================
+
 
 class TestEdgeCases:
     """Tests for edge cases: empty data, None, unicode, long strings, special chars."""
@@ -744,7 +811,14 @@ class TestEdgeCases:
 
     def test_none_balance_treated_as_zero(self, exporter, tmp_path):
         """An account with None balance should be treated as zero."""
-        accounts = [{"accountNumber": "1000", "name": "Cash", "accountType": "Bank", "balance": None}]
+        accounts = [
+            {
+                "accountNumber": "1000",
+                "name": "Cash",
+                "accountType": "Bank",
+                "balance": None,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
             reader = csv.reader(f)
@@ -755,7 +829,14 @@ class TestEdgeCases:
 
     def test_unicode_account_name(self, exporter, tmp_path):
         """Unicode characters in account names should be preserved in output."""
-        accounts = [{"accountNumber": "9001", "name": "Cuentas por Cobrar (Espanol)", "accountType": "Bank", "balance": 100}]
+        accounts = [
+            {
+                "accountNumber": "9001",
+                "name": "Cuentas por Cobrar (Espanol)",
+                "accountType": "Bank",
+                "balance": 100,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
             content = f.read()
@@ -763,7 +844,14 @@ class TestEdgeCases:
 
     def test_unicode_cjk_characters(self, exporter, tmp_path):
         """CJK (Chinese/Japanese/Korean) characters should survive roundtrip."""
-        accounts = [{"accountNumber": "8888", "name": "\u92f6\u884c\u53e3\u5ea7", "accountType": "Bank", "balance": 50000}]
+        accounts = [
+            {
+                "accountNumber": "8888",
+                "name": "\u92f6\u884c\u53e3\u5ea7",
+                "accountType": "Bank",
+                "balance": 50000,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
             content = f.read()
@@ -772,14 +860,26 @@ class TestEdgeCases:
     def test_very_long_account_name(self, exporter, tmp_path):
         """Very long account names should not crash the exporter."""
         long_name = "A" * 5000
-        accounts = [{"accountNumber": "0001", "name": long_name, "accountType": "Bank", "balance": 1}]
+        accounts = [
+            {
+                "accountNumber": "0001",
+                "name": long_name,
+                "accountType": "Bank",
+                "balance": 1,
+            }
+        ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         assert (tmp_path / "Audit_TB.csv").exists()
 
     def test_special_characters_in_name(self, exporter, tmp_path):
         """Special characters (quotes, commas, ampersands) should be CSV-safe."""
         accounts = [
-            {"accountNumber": "7777", "name": 'O\'Brien & Sons, "LLC"', "accountType": "Bank", "balance": 100}
+            {
+                "accountNumber": "7777",
+                "name": 'O\'Brien & Sons, "LLC"',
+                "accountType": "Bank",
+                "balance": 100,
+            }
         ]
         exporter.export_trial_balance(accounts, "2024-12-31")
         with open(tmp_path / "Audit_TB.csv", "r", encoding="utf-8-sig") as f:
@@ -792,7 +892,12 @@ class TestEdgeCases:
     def test_non_dict_account_skipped(self, exporter, tmp_path):
         """Non-dict entries in accounts list should be skipped without error."""
         accounts = [
-            {"accountNumber": "1000", "name": "Valid", "accountType": "Bank", "balance": 100},
+            {
+                "accountNumber": "1000",
+                "name": "Valid",
+                "accountType": "Bank",
+                "balance": 100,
+            },
             "this is not a dict",
             42,
             None,
@@ -816,6 +921,7 @@ class TestEdgeCases:
 # =============================================================================
 # 13. FULL END-TO-END AUDIT BUNDLE GENERATION
 # =============================================================================
+
 
 class TestFullAuditBundle:
     """End-to-end tests for generate_audit_bundle."""
@@ -890,7 +996,9 @@ class TestFullAuditBundle:
             as_of_date="2024-12-31",
             progress_callback=callback,
         )
-        assert callback.call_count >= 3  # At least start, TB done, GL done, mapping done
+        assert (
+            callback.call_count >= 3
+        )  # At least start, TB done, GL done, mapping done
 
     def test_bundle_manifest_contains_hash_algorithm(self, tmp_path, full_qb_data):
         """bundle_manifest.json should document SHA-256 as the hash algorithm."""
@@ -909,12 +1017,30 @@ class TestFullAuditBundle:
         """GL export should filter transactions outside the date range."""
         exporter = CasewareExporter(output_dir=str(tmp_path), company_name="Test")
         transactions = [
-            {"txnId": "T1", "txnDate": "2024-01-15", "amount": 100, "accountNumber": "1000",
-             "accountName": "Cash", "accountType": "Bank", "refNumber": "R1", "memo": "In range"},
-            {"txnId": "T2", "txnDate": "2023-06-01", "amount": 200, "accountNumber": "1000",
-             "accountName": "Cash", "accountType": "Bank", "refNumber": "R2", "memo": "Out of range"},
+            {
+                "txnId": "T1",
+                "txnDate": "2024-01-15",
+                "amount": 100,
+                "accountNumber": "1000",
+                "accountName": "Cash",
+                "accountType": "Bank",
+                "refNumber": "R1",
+                "memo": "In range",
+            },
+            {
+                "txnId": "T2",
+                "txnDate": "2023-06-01",
+                "amount": 200,
+                "accountNumber": "1000",
+                "accountName": "Cash",
+                "accountType": "Bank",
+                "refNumber": "R2",
+                "memo": "Out of range",
+            },
         ]
-        exporter.export_general_ledger(transactions, start_date="2024-01-01", end_date="2024-12-31")
+        exporter.export_general_ledger(
+            transactions, start_date="2024-01-01", end_date="2024-12-31"
+        )
         with open(tmp_path / "Audit_GL.csv", "r", encoding="utf-8-sig") as f:
             reader = csv.reader(f)
             next(reader)  # header
@@ -928,6 +1054,7 @@ class TestFullAuditBundle:
 # =============================================================================
 # 14. TYPE CODE MAPPING
 # =============================================================================
+
 
 class TestTypeCodeMapping:
     """Tests for LeadSheetMapper.get_type_code."""

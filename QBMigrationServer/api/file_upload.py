@@ -14,9 +14,9 @@ from pathlib import Path
 from api.auth import require_auth
 from models import db, Migration
 
-file_upload_bp = Blueprint('file_upload', __name__, url_prefix='/api/files')
+file_upload_bp = Blueprint("file_upload", __name__, url_prefix="/api/files")
 
-ALLOWED_EXTENSIONS = {'iif', 'csv', 'xls', 'xlsx', 'qbw'}
+ALLOWED_EXTENSIONS = {"iif", "csv", "xls", "xlsx", "qbw"}
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
 
 
@@ -33,54 +33,60 @@ def allowed_file(filename: str) -> bool:
     Returns:
         True if the file extension is allowed, False otherwise
     """
-    if not filename or '.' not in filename:
+    if not filename or "." not in filename:
         return False
 
     # HIGH FIX: Reject files with multiple extensions (common attack vector)
     # Count extensions by looking for patterns like ".xxx" (dot followed by alphanumeric)
     import re
-    extensions = re.findall(r'\.[a-zA-Z0-9]+', filename)
+
+    extensions = re.findall(r"\.[a-zA-Z0-9]+", filename)
     if len(extensions) > 1:
         # Multiple extensions detected - potential bypass attempt
         return False
 
     # Get the last extension and validate
-    ext = filename.rsplit('.', 1)[1].lower()
+    ext = filename.rsplit(".", 1)[1].lower()
     return ext in ALLOWED_EXTENSIONS
 
 
-@file_upload_bp.route('/upload', methods=['POST'])
+@file_upload_bp.route("/upload", methods=["POST"])
 @require_auth
 def upload_qb_export():
     """
     Upload QuickBooks Desktop export files (IIF, CSV, Excel)
-    
+
     This replaces the need for the C# extractor + QBFC SDK.
     Users export from QB Desktop manually, then upload here.
     """
-    user_id = request.current_user['user_id']
-    
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-    
-    file = request.files['file']
-    session_id = request.form.get('session_id')
-    file_type = request.form.get('file_type', 'unknown')  # customers, vendors, etc.
-    
+    user_id = request.current_user["user_id"]
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files["file"]
+    session_id = request.form.get("session_id")
+    file_type = request.form.get("file_type", "unknown")  # customers, vendors, etc.
+
     if not file.filename:
-        return jsonify({'error': 'No file selected'}), 400
-    
+        return jsonify({"error": "No file selected"}), 400
+
     if not allowed_file(file.filename):
-        return jsonify({
-            'error': f'File type not allowed. Supported: {", ".join(ALLOWED_EXTENSIONS)}'
-        }), 400
-    
+        return (
+            jsonify(
+                {
+                    "error": f'File type not allowed. Supported: {", ".join(ALLOWED_EXTENSIONS)}'
+                }
+            ),
+            400,
+        )
+
     # Save file temporarily
     # HIGH FIX: Path traversal protection using pathlib.Path.resolve() with relative_to()
     # This is more robust than string prefix matching
     filename = secure_filename(file.filename)
-    if not filename or filename == '':
-        return jsonify({'error': 'Invalid filename'}), 400
+    if not filename or filename == "":
+        return jsonify({"error": "Invalid filename"}), 400
 
     # FIX: Wrap entire function in try/finally to ensure temp_dir cleanup
     temp_dir = tempfile.mkdtemp()
@@ -98,7 +104,7 @@ def upload_qb_export():
             resolved_file_path.relative_to(temp_dir_path)
         except ValueError:
             # Path traversal attempt detected
-            return jsonify({'error': 'Invalid file path'}), 400
+            return jsonify({"error": "Invalid file path"}), 400
 
         # Convert back to string for compatibility with existing code
         file_path = str(resolved_file_path)
@@ -115,42 +121,45 @@ def upload_qb_export():
 
         # Create or update migration record
         migration = Migration.query.filter_by(
-            session_id=session_id,
-            user_id=user_id
+            session_id=session_id, user_id=user_id
         ).first()
 
         if not migration:
             migration = Migration(
                 user_id=user_id,
                 session_id=session_id,
-                status='parsing',
-                ip_address=request.remote_addr
+                status="parsing",
+                ip_address=request.remote_addr,
             )
             db.session.add(migration)
 
         migration.data_size_bytes = file_size
-        migration.status = 'parsed'
+        migration.status = "parsed"
 
         db.session.commit()
 
-        return jsonify({
-            'success': True,
-            'migration_id': migration.migration_id,
-            'filename': filename,
-            'file_size': file_size,
-            'summary': parsed_data.get('summary', {}),
-            'message': f'File parsed successfully. Found {sum(parsed_data.get("summary", {}).values())} records.'
-        })
+        return jsonify(
+            {
+                "success": True,
+                "migration_id": migration.migration_id,
+                "filename": filename,
+                "file_size": file_size,
+                "summary": parsed_data.get("summary", {}),
+                "message": f'File parsed successfully. Found {sum(parsed_data.get("summary", {}).values())} records.',
+            }
+        )
 
     except Exception as e:
         # FIX #34: Sanitize error message for security
         from utils.error_sanitizer import sanitize_error_message
-        sanitized_error = sanitize_error_message(e, context='upload')
-        return jsonify({'error': sanitized_error}), 500
+
+        sanitized_error = sanitize_error_message(e, context="upload")
+        return jsonify({"error": sanitized_error}), 500
 
     finally:
         # FIX: Guaranteed cleanup of temp directory regardless of success or failure
         import shutil
+
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
@@ -164,141 +173,148 @@ def upload_qb_export():
             pass  # Directory already removed or inaccessible
 
 
-@file_upload_bp.route('/supported-exports', methods=['GET'])
+@file_upload_bp.route("/supported-exports", methods=["GET"])
 def get_supported_exports():
     """Get list of supported QuickBooks export types"""
-    return jsonify({
-        'formats': [
-            {
-                'extension': 'iif',
-                'name': 'IIF (Intuit Interchange Format)',
-                'description': 'Export from QB Desktop: File > Utilities > Export > Lists/Transactions to IIF'
-            },
-            {
-                'extension': 'csv',
-                'name': 'CSV (Comma Separated Values)',
-                'description': 'Export reports or lists to Excel, then save as CSV'
-            },
-            {
-                'extension': 'xlsx',
-                'name': 'Excel Spreadsheet',
-                'description': 'Export reports directly to Excel'
-            }
-        ],
-        'entity_types': [
-            'customers',
-            'vendors', 
-            'items',
-            'accounts',
-            'invoices',
-            'bills',
-            'payments',
-            'journal_entries',
-            'employees'
-        ],
-        'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
-        'instructions': {
-            'iif_export': [
-                '1. Open QuickBooks Desktop',
-                '2. Go to File > Utilities > Export',
-                '3. Select "Lists to IIF Files" or "Transactions"',
-                '4. Choose what to export (Customers, Vendors, etc.)',
-                '5. Save the .IIF file',
-                '6. Upload it here'
+    return jsonify(
+        {
+            "formats": [
+                {
+                    "extension": "iif",
+                    "name": "IIF (Intuit Interchange Format)",
+                    "description": "Export from QB Desktop: File > Utilities > Export > Lists/Transactions to IIF",
+                },
+                {
+                    "extension": "csv",
+                    "name": "CSV (Comma Separated Values)",
+                    "description": "Export reports or lists to Excel, then save as CSV",
+                },
+                {
+                    "extension": "xlsx",
+                    "name": "Excel Spreadsheet",
+                    "description": "Export reports directly to Excel",
+                },
             ],
-            'csv_export': [
-                '1. Open QuickBooks Desktop',
-                '2. Go to Reports > Customers & Receivables > Customer Contact List',
-                '3. Click "Export" at top of report',
-                '4. Choose "Export to Excel" or "Export to CSV"',
-                '5. Upload the file here'
-            ]
+            "entity_types": [
+                "customers",
+                "vendors",
+                "items",
+                "accounts",
+                "invoices",
+                "bills",
+                "payments",
+                "journal_entries",
+                "employees",
+            ],
+            "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
+            "instructions": {
+                "iif_export": [
+                    "1. Open QuickBooks Desktop",
+                    "2. Go to File > Utilities > Export",
+                    '3. Select "Lists to IIF Files" or "Transactions"',
+                    "4. Choose what to export (Customers, Vendors, etc.)",
+                    "5. Save the .IIF file",
+                    "6. Upload it here",
+                ],
+                "csv_export": [
+                    "1. Open QuickBooks Desktop",
+                    "2. Go to Reports > Customers & Receivables > Customer Contact List",
+                    '3. Click "Export" at top of report',
+                    '4. Choose "Export to Excel" or "Export to CSV"',
+                    "5. Upload the file here",
+                ],
+            },
         }
-    })
+    )
 
 
-@file_upload_bp.route('/export-guide/<entity_type>', methods=['GET'])
+@file_upload_bp.route("/export-guide/<entity_type>", methods=["GET"])
 def get_export_guide(entity_type):
     """Get specific export instructions for an entity type"""
-    
+
     guides = {
-        'customers': {
-            'title': 'Export Customer List',
-            'steps': [
-                'Open QuickBooks Desktop',
-                'Go to: Customers > Customer Center',
+        "customers": {
+            "title": "Export Customer List",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: Customers > Customer Center",
                 'Click "Excel" dropdown at top',
                 'Select "Export Customer List"',
-                'Save the Excel/CSV file',
-                'Upload the file to ForensicBridge'
+                "Save the Excel/CSV file",
+                "Upload the file to ForensicBridge",
             ],
-            'alternative_iif': [
-                'Go to: File > Utilities > Export > Lists to IIF Files',
+            "alternative_iif": [
+                "Go to: File > Utilities > Export > Lists to IIF Files",
                 'Check "Customer List"',
-                'Click OK and save the .IIF file'
-            ]
+                "Click OK and save the .IIF file",
+            ],
         },
-        'vendors': {
-            'title': 'Export Vendor List',
-            'steps': [
-                'Open QuickBooks Desktop',
-                'Go to: Vendors > Vendor Center',
+        "vendors": {
+            "title": "Export Vendor List",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: Vendors > Vendor Center",
                 'Click "Excel" dropdown at top',
                 'Select "Export Vendor List"',
-                'Save the Excel/CSV file',
-                'Upload the file to ForensicBridge'
-            ]
+                "Save the Excel/CSV file",
+                "Upload the file to ForensicBridge",
+            ],
         },
-        'chart_of_accounts': {
-            'title': 'Export Chart of Accounts',
-            'steps': [
-                'Open QuickBooks Desktop',
-                'Go to: Lists > Chart of Accounts',
+        "chart_of_accounts": {
+            "title": "Export Chart of Accounts",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: Lists > Chart of Accounts",
                 'Right-click > "Print List"',
                 'In Print dialog, choose "File" instead of Printer',
-                'Save as Tab-delimited file',
-                'Upload the file'
+                "Save as Tab-delimited file",
+                "Upload the file",
             ],
-            'alternative_iif': [
-                'Go to: File > Utilities > Export > Lists to IIF Files',
+            "alternative_iif": [
+                "Go to: File > Utilities > Export > Lists to IIF Files",
                 'Check "Chart of Accounts"',
-                'Click OK and save'
-            ]
+                "Click OK and save",
+            ],
         },
-        'items': {
-            'title': 'Export Item List',
-            'steps': [
-                'Open QuickBooks Desktop',
-                'Go to: Lists > Item List',
+        "items": {
+            "title": "Export Item List",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: Lists > Item List",
                 'Click "Excel" at bottom',
                 'Select "Export All Items"',
-                'Save the file'
-            ]
+                "Save the file",
+            ],
         },
-        'invoices': {
-            'title': 'Export Invoices',
-            'steps': [
-                'Open QuickBooks Desktop',  
-                'Go to: Reports > Customers & Receivables > Open Invoices',
-                'Or: Reports > Custom Reports > Transaction Detail Report',
-                'Set date range as needed',
-                'Click "Export" and save as Excel/CSV'
-            ]
+        "invoices": {
+            "title": "Export Invoices",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: Reports > Customers & Receivables > Open Invoices",
+                "Or: Reports > Custom Reports > Transaction Detail Report",
+                "Set date range as needed",
+                'Click "Export" and save as Excel/CSV',
+            ],
         },
-        'all': {
-            'title': 'Export Everything (IIF Bundle)',
-            'steps': [
-                'Open QuickBooks Desktop',
-                'Go to: File > Utilities > Export > Lists to IIF Files',
-                'Check ALL boxes (Customer, Vendor, Items, etc.)',
-                'Click OK',
-                'Save the .IIF file',
-                'Upload single file - contains all lists'
-            ]
-        }
+        "all": {
+            "title": "Export Everything (IIF Bundle)",
+            "steps": [
+                "Open QuickBooks Desktop",
+                "Go to: File > Utilities > Export > Lists to IIF Files",
+                "Check ALL boxes (Customer, Vendor, Items, etc.)",
+                "Click OK",
+                "Save the .IIF file",
+                "Upload single file - contains all lists",
+            ],
+        },
     }
-    
+
     if entity_type not in guides:
-        return jsonify({'error': f'Unknown entity type. Available: {list(guides.keys())}'}), 404
-    
+        return (
+            jsonify(
+                {"error": f"Unknown entity type. Available: {list(guides.keys())}"}
+            ),
+            404,
+        )
+
     return jsonify(guides[entity_type])

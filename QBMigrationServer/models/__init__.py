@@ -8,5 +8,4 @@ from models.user import User
 from models.project import Project
 from models.license import License, LicenseActivation
 
-__all__ = ['db', 'Migration', 'User', 'Project', 'License', 'LicenseActivation']
-
+__all__ = ["db", "Migration", "User", "Project", "License", "LicenseActivation"]

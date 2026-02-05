@@ -24,18 +24,25 @@ from models.migration_credit import MigrationCredit
 
 logger = logging.getLogger(__name__)
 
-session_validation_bp = Blueprint('session_validation', __name__, url_prefix='/api/session')
+session_validation_bp = Blueprint(
+    "session_validation", __name__, url_prefix="/api/session"
+)
 
 # Configuration
-MAX_DEVICES_PER_SESSION = int(os.getenv('MAX_DEVICES_PER_SESSION', '2'))  # Allow 2 devices max
-MAX_ACTIVATIONS_PER_SESSION = int(os.getenv('MAX_ACTIVATIONS_PER_SESSION', '5'))  # Max 5 activations
+MAX_DEVICES_PER_SESSION = int(
+    os.getenv("MAX_DEVICES_PER_SESSION", "2")
+)  # Allow 2 devices max
+MAX_ACTIVATIONS_PER_SESSION = int(
+    os.getenv("MAX_ACTIVATIONS_PER_SESSION", "5")
+)  # Max 5 activations
 RATE_LIMIT_WINDOW_MINUTES = 5
 RATE_LIMIT_MAX_ATTEMPTS = 10
 
 
 class SessionActivation(db.Model):
     """Tracks session activations for fraud prevention"""
-    __tablename__ = 'session_activations'
+
+    __tablename__ = "session_activations"
 
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.String(50), nullable=False, index=True)
@@ -45,7 +52,7 @@ class SessionActivation(db.Model):
     user_agent = db.Column(db.String(500))
 
     # Activation status
-    status = db.Column(db.String(50), default='active')  # active, revoked, expired
+    status = db.Column(db.String(50), default="active")  # active, revoked, expired
     activated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_used_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -54,14 +61,17 @@ class SessionActivation(db.Model):
     last_extraction_at = db.Column(db.DateTime)
 
     __table_args__ = (
-        db.Index('idx_session_device', 'session_id', 'device_fingerprint'),
-        db.UniqueConstraint('session_id', 'device_fingerprint', name='uq_session_device'),
+        db.Index("idx_session_device", "session_id", "device_fingerprint"),
+        db.UniqueConstraint(
+            "session_id", "device_fingerprint", name="uq_session_device"
+        ),
     )
 
 
 class SessionValidationLog(db.Model):
     """Audit log for validation attempts"""
-    __tablename__ = 'session_validation_logs'
+
+    __tablename__ = "session_validation_logs"
 
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.String(50), index=True)
@@ -73,7 +83,9 @@ class SessionValidationLog(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-def log_validation_attempt(session_id, device_fingerprint, ip_address, action, result, error=None):
+def log_validation_attempt(
+    session_id, device_fingerprint, ip_address, action, result, error=None
+):
     """Log a validation attempt for audit purposes"""
     try:
         log = SessionValidationLog(
@@ -82,7 +94,7 @@ def log_validation_attempt(session_id, device_fingerprint, ip_address, action, r
             ip_address=ip_address,
             action=action,
             result=result,
-            error_message=error
+            error_message=error,
         )
         db.session.add(log)
         db.session.commit()
@@ -92,12 +104,14 @@ def log_validation_attempt(session_id, device_fingerprint, ip_address, action, r
 
 def check_rate_limit(session_id, ip_address):
     """Check if the request is rate limited"""
-    window_start = datetime.now(timezone.utc) - timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
+    window_start = datetime.now(timezone.utc) - timedelta(
+        minutes=RATE_LIMIT_WINDOW_MINUTES
+    )
 
     attempt_count = SessionValidationLog.query.filter(
         SessionValidationLog.session_id == session_id,
         SessionValidationLog.ip_address == ip_address,
-        SessionValidationLog.created_at >= window_start
+        SessionValidationLog.created_at >= window_start,
     ).count()
 
     return attempt_count >= RATE_LIMIT_MAX_ATTEMPTS
@@ -114,11 +128,12 @@ def hash_fingerprint(fingerprint):
         return None
     import hmac
     from flask import current_app
-    secret = current_app.config['SECRET_KEY'].encode()
+
+    secret = current_app.config["SECRET_KEY"].encode()
     return hmac.new(secret, fingerprint.encode(), hashlib.sha256).hexdigest()
 
 
-@session_validation_bp.route('/validate', methods=['POST'])
+@session_validation_bp.route("/validate", methods=["POST"])
 def validate_session():
     """
     Validate a session code before allowing extraction.
@@ -144,90 +159,130 @@ def validate_session():
     data = request.get_json()
 
     if not data:
-        return jsonify({
-            'valid': False,
-            'error': 'No data provided'
-        }), 400
+        return jsonify({"valid": False, "error": "No data provided"}), 400
 
-    session_id = data.get('session_id', '').strip()
-    device_fingerprint = data.get('device_fingerprint', '').strip()
-    device_name = data.get('device_name', '').strip()
+    session_id = data.get("session_id", "").strip()
+    device_fingerprint = data.get("device_fingerprint", "").strip()
+    device_name = data.get("device_name", "").strip()
     ip_address = request.remote_addr
 
     if not session_id:
-        return jsonify({
-            'valid': False,
-            'error': 'Session ID is required'
-        }), 400
+        return jsonify({"valid": False, "error": "Session ID is required"}), 400
 
     if not device_fingerprint:
-        return jsonify({
-            'valid': False,
-            'error': 'Device fingerprint is required for security validation'
-        }), 400
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": "Device fingerprint is required for security validation",
+                }
+            ),
+            400,
+        )
 
     # Hash the fingerprint for storage
     fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'rate_limited')
-        return jsonify({
-            'valid': False,
-            'error': 'Too many validation attempts. Please wait a few minutes.'
-        }), 429
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "validate", "rate_limited"
+        )
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": "Too many validation attempts. Please wait a few minutes.",
+                }
+            ),
+            429,
+        )
 
     # Find the project by session ID
     project = Project.query.filter_by(session_id=session_id).first()
 
     if not project:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'invalid',
-                              'Session ID not found')
-        return jsonify({
-            'valid': False,
-            'error': 'Invalid session code. Please check your code and try again.'
-        }), 404
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "validate",
+            "invalid",
+            "Session ID not found",
+        )
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": "Invalid session code. Please check your code and try again.",
+                }
+            ),
+            404,
+        )
 
     # Check if project is archived/deleted
-    if project.status == 'archived':
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'failed',
-                              'Project is archived')
-        return jsonify({
-            'valid': False,
-            'error': 'This session has been archived and is no longer active.'
-        }), 403
+    if project.status == "archived":
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "validate",
+            "failed",
+            "Project is archived",
+        )
+        return (
+            jsonify(
+                {
+                    "valid": False,
+                    "error": "This session has been archived and is no longer active.",
+                }
+            ),
+            403,
+        )
 
     # Check device activation count
     existing_activations = SessionActivation.query.filter_by(
-        session_id=session_id,
-        status='active'
+        session_id=session_id, status="active"
     ).all()
 
     # Check if this device is already activated
     device_activation = next(
         (a for a in existing_activations if a.device_fingerprint == fingerprint_hash),
-        None
+        None,
     )
 
     if not device_activation:
         # New device - check if we've reached the limit
         if len(existing_activations) >= MAX_DEVICES_PER_SESSION:
-            log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'failed',
-                                  f'Max devices ({MAX_DEVICES_PER_SESSION}) reached')
-            return jsonify({
-                'valid': False,
-                'error': f'This session is already activated on {MAX_DEVICES_PER_SESSION} devices. '
-                         'Please contact support to deactivate old devices.',
-                'max_devices_reached': True,
-                'devices_active': len(existing_activations)
-            }), 403
+            log_validation_attempt(
+                session_id,
+                fingerprint_hash,
+                ip_address,
+                "validate",
+                "failed",
+                f"Max devices ({MAX_DEVICES_PER_SESSION}) reached",
+            )
+            return (
+                jsonify(
+                    {
+                        "valid": False,
+                        "error": f"This session is already activated on {MAX_DEVICES_PER_SESSION} devices. "
+                        "Please contact support to deactivate old devices.",
+                        "max_devices_reached": True,
+                        "devices_active": len(existing_activations),
+                    }
+                ),
+                403,
+            )
 
     # Calculate remaining extractions for this session
     total_extractions = sum(a.extraction_count for a in existing_activations)
     remaining = MAX_ACTIVATIONS_PER_SESSION - total_extractions
 
     # Log successful validation
-    log_validation_attempt(session_id, fingerprint_hash, ip_address, 'validate', 'success')
+    log_validation_attempt(
+        session_id, fingerprint_hash, ip_address, "validate", "success"
+    )
 
     # Get tier info from the project itself (set when project was created with paid credit)
     tier = project.tier_type
@@ -236,24 +291,28 @@ def validate_session():
     transactions_used = project.transactions_used
     transactions_remaining = project.get_remaining_transactions()
 
-    return jsonify({
-        'valid': True,
-        'session_id': session_id,
-        'project_name': project.name,
-        'client_name': project.client_name,
-        'tier': tier,
-        'tier_name': tier_name,
-        'transaction_limit': transaction_limit,
-        'transactions_used': transactions_used,
-        'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
-        'is_unlimited': transaction_limit == -1,
-        'remaining_extractions': max(0, remaining),
-        'is_new_device': device_activation is None,
-        'devices_active': len(existing_activations)
-    })
+    return jsonify(
+        {
+            "valid": True,
+            "session_id": session_id,
+            "project_name": project.name,
+            "client_name": project.client_name,
+            "tier": tier,
+            "tier_name": tier_name,
+            "transaction_limit": transaction_limit,
+            "transactions_used": transactions_used,
+            "transactions_remaining": (
+                transactions_remaining if transactions_remaining != -1 else "unlimited"
+            ),
+            "is_unlimited": transaction_limit == -1,
+            "remaining_extractions": max(0, remaining),
+            "is_new_device": device_activation is None,
+            "devices_active": len(existing_activations),
+        }
+    )
 
 
-@session_validation_bp.route('/activate', methods=['POST'])
+@session_validation_bp.route("/activate", methods=["POST"])
 def activate_session():
     """
     Activate a session on a new device.
@@ -269,37 +328,46 @@ def activate_session():
     data = request.get_json()
 
     if not data:
-        return jsonify({'success': False, 'error': 'No data provided'}), 400
+        return jsonify({"success": False, "error": "No data provided"}), 400
 
-    session_id = data.get('session_id', '').strip()
-    device_fingerprint = data.get('device_fingerprint', '').strip()
-    device_name = data.get('device_name', 'Unknown Device').strip()
+    session_id = data.get("session_id", "").strip()
+    device_fingerprint = data.get("device_fingerprint", "").strip()
+    device_name = data.get("device_name", "Unknown Device").strip()
     ip_address = request.remote_addr
-    user_agent = request.headers.get('User-Agent', '')
+    user_agent = request.headers.get("User-Agent", "")
 
     if not session_id or not device_fingerprint:
-        return jsonify({
-            'success': False,
-            'error': 'Session ID and device fingerprint are required'
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Session ID and device fingerprint are required",
+                }
+            ),
+            400,
+        )
 
     fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
-        return jsonify({
-            'success': False,
-            'error': 'Too many attempts. Please wait a few minutes.'
-        }), 429
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Too many attempts. Please wait a few minutes.",
+                }
+            ),
+            429,
+        )
 
     # Verify session exists
     project = Project.query.filter_by(session_id=session_id).first()
     if not project:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'invalid')
-        return jsonify({
-            'success': False,
-            'error': 'Invalid session code'
-        }), 404
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "activate", "invalid"
+        )
+        return jsonify({"success": False, "error": "Invalid session code"}), 404
 
     # RACE CONDITION FIX: Use database-level locking to prevent duplicate activations
     # This ensures that concurrent requests don't both pass the device limit check
@@ -319,7 +387,7 @@ def activate_session():
                     WHERE session_id = :session_id
                     FOR UPDATE
                 """),
-                {"session_id": session_id}
+                {"session_id": session_id},
             ).fetchall()
         else:
             locked_activations = db.session.execute(
@@ -328,7 +396,7 @@ def activate_session():
                     FROM session_activations
                     WHERE session_id = :session_id
                 """),
-                {"session_id": session_id}
+                {"session_id": session_id},
             ).fetchall()
 
         # Check for existing activation for this device
@@ -337,63 +405,86 @@ def activate_session():
         for row in locked_activations:
             if row.device_fingerprint == fingerprint_hash:
                 existing = db.session.get(SessionActivation, row.id)
-            if row.status == 'active':
+            if row.status == "active":
                 active_count += 1
 
         if existing:
             # Update last used
             existing.last_used_at = datetime.now(timezone.utc)
-            existing.status = 'active'
+            existing.status = "active"
             db.session.commit()
 
-            log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'success',
-                                  'Existing activation renewed')
+            log_validation_attempt(
+                session_id,
+                fingerprint_hash,
+                ip_address,
+                "activate",
+                "success",
+                "Existing activation renewed",
+            )
 
-            return jsonify({
-                'success': True,
-                'message': 'Device already activated',
-                'activation_id': existing.id,
-                'extractions_used': existing.extraction_count
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Device already activated",
+                    "activation_id": existing.id,
+                    "extractions_used": existing.extraction_count,
+                }
+            )
 
         # Check device limit (with lock held, this is race-safe)
         if active_count >= MAX_DEVICES_PER_SESSION:
             db.session.rollback()  # Release lock
-            log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'failed',
-                                  'Device limit reached')
-            return jsonify({
-                'success': False,
-                'error': f'Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session'
-            }), 403
+            log_validation_attempt(
+                session_id,
+                fingerprint_hash,
+                ip_address,
+                "activate",
+                "failed",
+                "Device limit reached",
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session",
+                    }
+                ),
+                403,
+            )
 
         # Create new activation (still holding lock)
         activation = SessionActivation(
             session_id=session_id,
             device_fingerprint=fingerprint_hash,
-            device_name=device_name[:255] if device_name else 'Unknown',
+            device_name=device_name[:255] if device_name else "Unknown",
             ip_address=ip_address,
             user_agent=user_agent[:500] if user_agent else None,
-            status='active'
+            status="active",
         )
 
         db.session.add(activation)
         db.session.commit()
 
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'activate', 'success')
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "activate", "success"
+        )
 
         # Update project status
-        if project.status == 'pending':
-            project.status = 'active'
+        if project.status == "pending":
+            project.status = "active"
             project.updated_at = datetime.now(timezone.utc)
             db.session.commit()
 
-        return jsonify({
-            'success': True,
-            'message': 'Device activated successfully',
-            'activation_id': activation.id,
-            'device_number': active_count + 1,
-            'max_devices': MAX_DEVICES_PER_SESSION
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": "Device activated successfully",
+                "activation_id": activation.id,
+                "device_number": active_count + 1,
+                "max_devices": MAX_DEVICES_PER_SESSION,
+            }
+        )
 
     except IntegrityError as e:
         # Unique constraint violation - device was activated by concurrent request
@@ -402,33 +493,38 @@ def activate_session():
 
         # Fetch the existing activation
         existing = SessionActivation.query.filter_by(
-            session_id=session_id,
-            device_fingerprint=fingerprint_hash
+            session_id=session_id, device_fingerprint=fingerprint_hash
         ).first()
 
         if existing:
-            return jsonify({
-                'success': True,
-                'message': 'Device already activated (concurrent request)',
-                'activation_id': existing.id,
-                'extractions_used': existing.extraction_count
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Device already activated (concurrent request)",
+                    "activation_id": existing.id,
+                    "extractions_used": existing.extraction_count,
+                }
+            )
 
-        return jsonify({
-            'success': False,
-            'error': 'Activation conflict. Please try again.'
-        }), 409
+        return (
+            jsonify(
+                {"success": False, "error": "Activation conflict. Please try again."}
+            ),
+            409,
+        )
 
     except Exception as e:
         db.session.rollback()
         logger.error(f"Activation failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Activation failed. Please try again.'
-        }), 500
+        return (
+            jsonify(
+                {"success": False, "error": "Activation failed. Please try again."}
+            ),
+            500,
+        )
 
 
-@session_validation_bp.route('/start-extraction', methods=['POST'])
+@session_validation_bp.route("/start-extraction", methods=["POST"])
 def start_extraction():
     """
     Called when the extractor starts an extraction.
@@ -446,75 +542,112 @@ def start_extraction():
     data = request.get_json()
 
     if not data:
-        return jsonify({'success': False, 'error': 'No data provided'}), 400
+        return jsonify({"success": False, "error": "No data provided"}), 400
 
-    session_id = data.get('session_id', '').strip()
-    device_fingerprint = data.get('device_fingerprint', '').strip()
-    company_name = data.get('company_name', '')
+    session_id = data.get("session_id", "").strip()
+    device_fingerprint = data.get("device_fingerprint", "").strip()
+    company_name = data.get("company_name", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:
-        return jsonify({
-            'success': False,
-            'error': 'Session ID and device fingerprint are required'
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Session ID and device fingerprint are required",
+                }
+            ),
+            400,
+        )
 
     fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session and device
     project = Project.query.filter_by(session_id=session_id).first()
     if not project:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'invalid')
-        return jsonify({
-            'success': False,
-            'error': 'Invalid session code'
-        }), 404
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "extract", "invalid"
+        )
+        return jsonify({"success": False, "error": "Invalid session code"}), 404
 
     # Verify device is activated
     activation = SessionActivation.query.filter_by(
-        session_id=session_id,
-        device_fingerprint=fingerprint_hash,
-        status='active'
+        session_id=session_id, device_fingerprint=fingerprint_hash, status="active"
     ).first()
 
     if not activation:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'failed',
-                              'Device not activated')
-        return jsonify({
-            'success': False,
-            'error': 'This device is not activated for this session. Please activate first.'
-        }), 403
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "extract",
+            "failed",
+            "Device not activated",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "This device is not activated for this session. Please activate first.",
+                }
+            ),
+            403,
+        )
 
     # Check extraction limit per session
-    total_extractions = SessionActivation.query.filter_by(
-        session_id=session_id,
-        status='active'
-    ).with_entities(db.func.sum(SessionActivation.extraction_count)).scalar() or 0
+    total_extractions = (
+        SessionActivation.query.filter_by(session_id=session_id, status="active")
+        .with_entities(db.func.sum(SessionActivation.extraction_count))
+        .scalar()
+        or 0
+    )
 
     if total_extractions >= MAX_ACTIVATIONS_PER_SESSION:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'failed',
-                              'Extraction limit reached')
-        return jsonify({
-            'success': False,
-            'error': f'Maximum extractions ({MAX_ACTIVATIONS_PER_SESSION}) reached for this session. '
-                     'Please create a new project.',
-            'limit_reached': True
-        }), 403
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "extract",
+            "failed",
+            "Extraction limit reached",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Maximum extractions ({MAX_ACTIVATIONS_PER_SESSION}) reached for this session. "
+                    "Please create a new project.",
+                    "limit_reached": True,
+                }
+            ),
+            403,
+        )
 
     # Check project's transaction limit (from the paid tier)
     transactions_remaining = project.get_remaining_transactions()
     if transactions_remaining == 0:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'failed',
-                              'Transaction limit reached')
-        return jsonify({
-            'success': False,
-            'error': f'Transaction limit ({project.transaction_limit:,}) reached for this session. '
-                     f'Used: {project.transactions_used:,}. Please purchase a higher tier.',
-            'transaction_limit_reached': True,
-            'tier': project.tier_type,
-            'transaction_limit': project.transaction_limit,
-            'transactions_used': project.transactions_used
-        }), 403
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "extract",
+            "failed",
+            "Transaction limit reached",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Transaction limit ({project.transaction_limit:,}) reached for this session. "
+                    f"Used: {project.transactions_used:,}. Please purchase a higher tier.",
+                    "transaction_limit_reached": True,
+                    "tier": project.tier_type,
+                    "transaction_limit": project.transaction_limit,
+                    "transactions_used": project.transactions_used,
+                }
+            ),
+            403,
+        )
 
     # Generate extraction token (used to complete extraction)
     extraction_token = secrets.token_urlsafe(32)
@@ -527,30 +660,37 @@ def start_extraction():
     try:
         db.session.commit()
 
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'extract', 'success')
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "extract", "success"
+        )
 
-        return jsonify({
-            'success': True,
-            'extraction_token': extraction_token,
-            'extraction_number': activation.extraction_count,
-            'remaining_extractions': MAX_ACTIVATIONS_PER_SESSION - total_extractions - 1,
-            'tier': project.tier_type,
-            'tier_name': project.get_tier_name(),
-            'transaction_limit': project.transaction_limit,
-            'transactions_used': project.transactions_used,
-            'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
-            'is_unlimited': project.transaction_limit == -1
-        })
+        return jsonify(
+            {
+                "success": True,
+                "extraction_token": extraction_token,
+                "extraction_number": activation.extraction_count,
+                "remaining_extractions": MAX_ACTIVATIONS_PER_SESSION
+                - total_extractions
+                - 1,
+                "tier": project.tier_type,
+                "tier_name": project.get_tier_name(),
+                "transaction_limit": project.transaction_limit,
+                "transactions_used": project.transactions_used,
+                "transactions_remaining": (
+                    transactions_remaining
+                    if transactions_remaining != -1
+                    else "unlimited"
+                ),
+                "is_unlimited": project.transaction_limit == -1,
+            }
+        )
     except Exception as e:
         db.session.rollback()
         logger.error(f"Start extraction failed: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Failed to start extraction'
-        }), 500
+        return jsonify({"success": False, "error": "Failed to start extraction"}), 500
 
 
-@session_validation_bp.route('/complete-extraction', methods=['POST'])
+@session_validation_bp.route("/complete-extraction", methods=["POST"])
 def complete_extraction():
     """
     Called when extraction completes successfully.
@@ -569,83 +709,108 @@ def complete_extraction():
     data = request.get_json()
 
     if not data:
-        return jsonify({'success': False, 'error': 'No data provided'}), 400
+        return jsonify({"success": False, "error": "No data provided"}), 400
 
-    session_id = data.get('session_id', '').strip()
-    device_fingerprint = data.get('device_fingerprint', '').strip()
-    extraction_token = data.get('extraction_token', '').strip()
-    transaction_count = data.get('transaction_count', 0)
-    company_name = data.get('company_name', '')
-    qb_version = data.get('qb_version', '')
+    session_id = data.get("session_id", "").strip()
+    device_fingerprint = data.get("device_fingerprint", "").strip()
+    extraction_token = data.get("extraction_token", "").strip()
+    transaction_count = data.get("transaction_count", 0)
+    company_name = data.get("company_name", "")
+    qb_version = data.get("qb_version", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:
-        return jsonify({
-            'success': False,
-            'error': 'Session ID and device fingerprint are required'
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Session ID and device fingerprint are required",
+                }
+            ),
+            400,
+        )
 
     fingerprint_hash = hash_fingerprint(device_fingerprint)
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()
     if not project:
-        return jsonify({
-            'success': False,
-            'error': 'Invalid session'
-        }), 404
+        return jsonify({"success": False, "error": "Invalid session"}), 404
 
     # Check if project can handle this transaction count
     if not project.can_extract_transactions(transaction_count):
         remaining = project.get_remaining_transactions()
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'failed',
-                              f'Transaction limit exceeded: {transaction_count} > {remaining}')
-        return jsonify({
-            'success': False,
-            'error': f'Transaction count ({transaction_count:,}) exceeds remaining limit ({remaining:,}). '
-                     f'Your {project.get_tier_name()} tier allows {project.transaction_limit:,} transactions.',
-            'transaction_count': transaction_count,
-            'transaction_limit': project.transaction_limit,
-            'transactions_used': project.transactions_used,
-            'transactions_remaining': remaining
-        }), 403
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "complete",
+            "failed",
+            f"Transaction limit exceeded: {transaction_count} > {remaining}",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Transaction count ({transaction_count:,}) exceeds remaining limit ({remaining:,}). "
+                    f"Your {project.get_tier_name()} tier allows {project.transaction_limit:,} transactions.",
+                    "transaction_count": transaction_count,
+                    "transaction_limit": project.transaction_limit,
+                    "transactions_used": project.transactions_used,
+                    "transactions_remaining": remaining,
+                }
+            ),
+            403,
+        )
 
     # Generate a migration ID for tracking
-    migration_id = f"MIG-{session_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    migration_id = (
+        f"MIG-{session_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    )
 
     # Record the transactions against the project
     if project.record_transactions(transaction_count):
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'success')
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "complete", "success"
+        )
 
         # Update project status if all transactions used
         remaining = project.get_remaining_transactions()
         if remaining == 0:
-            project.status = 'completed'
+            project.status = "completed"
 
         project.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        return jsonify({
-            'success': True,
-            'migration_id': migration_id,
-            'tier': project.tier_type,
-            'tier_name': project.get_tier_name(),
-            'transaction_count': transaction_count,
-            'transactions_used': project.transactions_used,
-            'transactions_remaining': remaining if remaining != -1 else 'unlimited',
-            'is_unlimited': project.transaction_limit == -1,
-            'message': 'Extraction completed successfully'
-        })
+        return jsonify(
+            {
+                "success": True,
+                "migration_id": migration_id,
+                "tier": project.tier_type,
+                "tier_name": project.get_tier_name(),
+                "transaction_count": transaction_count,
+                "transactions_used": project.transactions_used,
+                "transactions_remaining": remaining if remaining != -1 else "unlimited",
+                "is_unlimited": project.transaction_limit == -1,
+                "message": "Extraction completed successfully",
+            }
+        )
     else:
-        log_validation_attempt(session_id, fingerprint_hash, ip_address, 'complete', 'failed',
-                              'Transaction recording failed')
-        return jsonify({
-            'success': False,
-            'error': 'Failed to record transactions'
-        }), 500
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "complete",
+            "failed",
+            "Transaction recording failed",
+        )
+        return (
+            jsonify({"success": False, "error": "Failed to record transactions"}),
+            500,
+        )
 
 
-@session_validation_bp.route('/status/<session_id>', methods=['GET'])
+@session_validation_bp.route("/status/<session_id>", methods=["GET"])
 def session_status(session_id):
     """
     Get the current status of a session.
@@ -655,44 +820,50 @@ def session_status(session_id):
     """
     # SECURITY FIX: Require authentication for session status
     from flask_login import current_user
+
     if not current_user.is_authenticated:
-        return jsonify({
-            'error': 'Authentication required',
-            'message': 'Please log in to view session status'
-        }), 401
+        return (
+            jsonify(
+                {
+                    "error": "Authentication required",
+                    "message": "Please log in to view session status",
+                }
+            ),
+            401,
+        )
     project = Project.query.filter_by(session_id=session_id).first()
 
     if not project:
-        return jsonify({
-            'found': False,
-            'error': 'Session not found'
-        }), 404
+        return jsonify({"found": False, "error": "Session not found"}), 404
 
     # Get activation stats
     activations = SessionActivation.query.filter_by(
-        session_id=session_id,
-        status='active'
+        session_id=session_id, status="active"
     ).all()
 
     total_extractions = sum(a.extraction_count for a in activations)
 
     transactions_remaining = project.get_remaining_transactions()
 
-    return jsonify({
-        'found': True,
-        'session_id': session_id,
-        'project_name': project.name,
-        'client_name': project.client_name,
-        'status': project.status,
-        'tier': project.tier_type,
-        'tier_name': project.get_tier_name(),
-        'transaction_limit': project.transaction_limit,
-        'transactions_used': project.transactions_used,
-        'transactions_remaining': transactions_remaining if transactions_remaining != -1 else 'unlimited',
-        'is_unlimited': project.transaction_limit == -1,
-        'devices_active': len(activations),
-        'max_devices': MAX_DEVICES_PER_SESSION,
-        'extractions_used': total_extractions,
-        'max_extractions': MAX_ACTIVATIONS_PER_SESSION,
-        'created_at': project.created_at.isoformat()
-    })
+    return jsonify(
+        {
+            "found": True,
+            "session_id": session_id,
+            "project_name": project.name,
+            "client_name": project.client_name,
+            "status": project.status,
+            "tier": project.tier_type,
+            "tier_name": project.get_tier_name(),
+            "transaction_limit": project.transaction_limit,
+            "transactions_used": project.transactions_used,
+            "transactions_remaining": (
+                transactions_remaining if transactions_remaining != -1 else "unlimited"
+            ),
+            "is_unlimited": project.transaction_limit == -1,
+            "devices_active": len(activations),
+            "max_devices": MAX_DEVICES_PER_SESSION,
+            "extractions_used": total_extractions,
+            "max_extractions": MAX_ACTIVATIONS_PER_SESSION,
+            "created_at": project.created_at.isoformat(),
+        }
+    )

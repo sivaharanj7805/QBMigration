@@ -23,7 +23,9 @@ from datetime import datetime
 from celery.signals import task_prerun, task_postrun, task_failure
 
 # Add QBMigrationService to path
-SERVICE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'QBMigrationService')
+SERVICE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "QBMigrationService"
+)
 if SERVICE_PATH not in sys.path:
     sys.path.insert(0, SERVICE_PATH)
 
@@ -37,8 +39,13 @@ logger = logging.getLogger(__name__)
 from QBMigrationServer.celery_worker import celery
 
 
-def update_migration_status(migration_id: str, status: str, progress: int = None,
-                           message: str = None, error: str = None):
+def update_migration_status(
+    migration_id: str,
+    status: str,
+    progress: int = None,
+    message: str = None,
+    error: str = None,
+):
     """
     Update migration status in database and notify via webhook.
 
@@ -82,7 +89,7 @@ def update_migration_status(migration_id: str, status: str, progress: int = None
                 except Exception as e:
                     logger.warning(f"Could not encrypt error message: {e}")
                     # Fallback: set error_code at minimum
-                    migration.error_code = 'TASK_ERROR'
+                    migration.error_code = "TASK_ERROR"
 
             # NOTE: Migration model doesn't have updated_at - removed
             # Timestamps are handled by created_at, started_at, completed_at
@@ -93,6 +100,7 @@ def update_migration_status(migration_id: str, status: str, progress: int = None
             # Trigger webhook if configured
             try:
                 from api.webhooks import trigger_webhook
+
                 trigger_webhook(migration, status)
             except Exception as e:
                 logger.warning(f"Failed to trigger webhook: {e}")
@@ -100,139 +108,155 @@ def update_migration_status(migration_id: str, status: str, progress: int = None
             logger.error(f"Migration {migration_id} not found for status update")
 
 
-@celery.task(bind=True, name='tasks.run_migration')
-def run_migration_task(self, migration_id: str, encrypted_file_path: str, 
-                       user_id: int = None, oauth_tokens: dict = None):
+@celery.task(bind=True, name="tasks.run_migration")
+def run_migration_task(
+    self,
+    migration_id: str,
+    encrypted_file_path: str,
+    user_id: int = None,
+    oauth_tokens: dict = None,
+):
     """
     Execute QBO migration as background task.
-    
+
     Args:
         migration_id: UUID of migration record
         encrypted_file_path: Path to encrypted QB data file on S3 or local
         user_id: Optional user ID for OAuth tokens
         oauth_tokens: Optional OAuth tokens for QBO connection
-        
+
     Returns:
         dict with migration results
     """
     logger.info(f"Starting migration task: {migration_id}")
-    
+
     # Update status to processing
-    update_migration_status(migration_id, 'processing', progress=0, 
-                           message='Starting migration...')
-    
+    update_migration_status(
+        migration_id, "processing", progress=0, message="Starting migration..."
+    )
+
     try:
         # Import QBMigrationService components
         from main import MigrationOrchestrator
         from config import initialize_directories
-        
+
         # Setup environment for OAuth if provided
         if oauth_tokens:
-            os.environ['QBO_ACCESS_TOKEN'] = oauth_tokens.get('access_token', '')
-            os.environ['QBO_REFRESH_TOKEN'] = oauth_tokens.get('refresh_token', '')
-            os.environ['QBO_REALM_ID'] = oauth_tokens.get('realm_id', '')
-        
+            os.environ["QBO_ACCESS_TOKEN"] = oauth_tokens.get("access_token", "")
+            os.environ["QBO_REFRESH_TOKEN"] = oauth_tokens.get("refresh_token", "")
+            os.environ["QBO_REALM_ID"] = oauth_tokens.get("realm_id", "")
+
         # Initialize directories
         initialize_directories()
-        
+
         # Create orchestrator with progress callback
         orchestrator = MigrationOrchestrator()
-        
+
         # Update progress periodically
-        update_migration_status(migration_id, 'processing', progress=10,
-                               message='Decrypting data...')
-        
+        update_migration_status(
+            migration_id, "processing", progress=10, message="Decrypting data..."
+        )
+
         # Run the actual migration
         success = orchestrator.run_migration(encrypted_file_path)
-        
+
         if success:
-            update_migration_status(migration_id, 'completed', progress=100,
-                                   message='Migration completed successfully!')
+            update_migration_status(
+                migration_id,
+                "completed",
+                progress=100,
+                message="Migration completed successfully!",
+            )
             return {
-                'success': True,
-                'migration_id': migration_id,
-                'completed_at': datetime.now(timezone.utc).isoformat()
+                "success": True,
+                "migration_id": migration_id,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
             }
         else:
-            update_migration_status(migration_id, 'failed', progress=0,
-                                   error='Migration failed - see logs for details')
+            update_migration_status(
+                migration_id,
+                "failed",
+                progress=0,
+                error="Migration failed - see logs for details",
+            )
             return {
-                'success': False,
-                'migration_id': migration_id,
-                'error': 'Migration failed'
+                "success": False,
+                "migration_id": migration_id,
+                "error": "Migration failed",
             }
-            
+
     except Exception as e:
         logger.exception(f"Migration {migration_id} failed with error: {e}")
-        update_migration_status(migration_id, 'failed', progress=0,
-                               error=str(e))
+        update_migration_status(migration_id, "failed", progress=0, error=str(e))
         raise
 
 
-@celery.task(bind=True, name='tasks.generate_caseware_export')
+@celery.task(bind=True, name="tasks.generate_caseware_export")
 def generate_caseware_export_task(self, migration_id: str, output_path: str = None):
     """
     Generate Caseware export bundle as background task.
-    
+
     Args:
         migration_id: UUID of migration record
         output_path: Optional path for output (defaults to temp)
-        
+
     Returns:
         dict with export file path
     """
     logger.info(f"Starting Caseware export for migration: {migration_id}")
-    
+
     try:
         from caseware_exporter import CasewareExporter
         from config import OUTPUT_DIR
-        
+
         if not output_path:
             output_path = str(OUTPUT_DIR / f"{migration_id}_caseware.zip")
-        
+
         exporter = CasewareExporter()
         result = exporter.export(migration_id, output_path)
-        
+
         return {
-            'success': True,
-            'migration_id': migration_id,
-            'export_path': output_path,
-            'files_exported': result.get('file_count', 0)
+            "success": True,
+            "migration_id": migration_id,
+            "export_path": output_path,
+            "files_exported": result.get("file_count", 0),
         }
-        
+
     except Exception as e:
         logger.exception(f"Caseware export failed: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
-@celery.task(name='tasks.cleanup_expired_files')
+@celery.task(name="tasks.cleanup_expired_files")
 def cleanup_expired_files_task():
     """
     Periodic task to clean up expired migration files.
-    
+
     Schedule this with Celery Beat:
     celery -A tasks beat --loglevel=info
     """
     logger.info("Running expired file cleanup...")
-    
+
     try:
         from data_retention import DataRetentionManager
-        
+
         retention = DataRetentionManager()
         deleted = retention.cleanup_expired()
-        
+
         logger.info(f"Cleaned up {deleted} expired files")
-        return {'deleted': deleted}
-        
+        return {"deleted": deleted}
+
     except Exception as e:
         logger.exception(f"Cleanup failed: {e}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
-@celery.task(bind=True, name='tasks.cleanup_migration_async', max_retries=3, default_retry_delay=60)
+@celery.task(
+    bind=True,
+    name="tasks.cleanup_migration_async",
+    max_retries=3,
+    default_retry_delay=60,
+)
 def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
     """
     Async cleanup of AWS resources after migration completion.
@@ -255,13 +279,16 @@ def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
     with app.app_context():
         try:
             from utils.aws_manager import AWSMigrationManager
+
             aws_manager = AWSMigrationManager()
 
             # Terminate EC2 instance if provided
             if instance_id:
                 try:
                     aws_manager.terminate_instance(instance_id)
-                    logger.info(f"Terminated EC2 instance {instance_id} for migration {migration_id}")
+                    logger.info(
+                        f"Terminated EC2 instance {instance_id} for migration {migration_id}"
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to terminate instance {instance_id}: {e}")
 
@@ -276,19 +303,19 @@ def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
                 db.session.commit()
 
             logger.info(f"Cleanup completed for migration {migration_id}")
-            return {'status': 'success', 'migration_id': migration_id}
+            return {"status": "success", "migration_id": migration_id}
 
         except Exception as e:
             logger.error(f"Cleanup failed for migration {migration_id}: {e}")
             # Retry with exponential backoff
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
 
 
 # NOTE: Celery Beat schedule is defined in celery_worker.py
 # Task names registered there use full module path: 'QBMigrationServer.tasks.<task_name>'
 
 
-@celery.task(name='tasks.cleanup_orphaned_resources')
+@celery.task(name="tasks.cleanup_orphaned_resources")
 def cleanup_orphaned_resources():
     """
     Periodic task to clean up orphaned AWS resources.
@@ -310,42 +337,55 @@ def cleanup_orphaned_resources():
     with app.app_context():
         try:
             from utils.aws_manager import AWSMigrationManager
+
             aws_manager = AWSMigrationManager()
 
             # Thresholds for different scenarios
-            completed_threshold = datetime.now(timezone.utc) - timedelta(hours=6)  # Completed but not cleaned up
-            stuck_threshold = datetime.now(timezone.utc) - timedelta(hours=2)  # Processing for too long
+            completed_threshold = datetime.now(timezone.utc) - timedelta(
+                hours=6
+            )  # Completed but not cleaned up
+            stuck_threshold = datetime.now(timezone.utc) - timedelta(
+                hours=2
+            )  # Processing for too long
 
             # PRODUCTION FIX: Find migrations needing cleanup including stuck ones
             # 1. Completed/failed migrations older than 6 hours that weren't cleaned
             # 2. Processing migrations older than 2 hours (likely stuck/orphaned)
-            stale_migrations = Migration.query.filter(
-                Migration.cleanup_completed == False,
-                Migration.aws_instance_id.isnot(None),
-                or_(
-                    # Case 1: Completed/failed but not cleaned up
-                    db.and_(
-                        Migration.status.in_(['completed', 'failed']),
-                        Migration.created_at < completed_threshold
+            stale_migrations = (
+                Migration.query.filter(
+                    Migration.cleanup_completed == False,
+                    Migration.aws_instance_id.isnot(None),
+                    or_(
+                        # Case 1: Completed/failed but not cleaned up
+                        db.and_(
+                            Migration.status.in_(["completed", "failed"]),
+                            Migration.created_at < completed_threshold,
+                        ),
+                        # Case 2: Stuck in processing state for too long
+                        db.and_(
+                            Migration.status == "processing",
+                            Migration.started_at < stuck_threshold,
+                        ),
                     ),
-                    # Case 2: Stuck in processing state for too long
-                    db.and_(
-                        Migration.status == 'processing',
-                        Migration.started_at < stuck_threshold
-                    )
                 )
-            ).limit(10).all()
+                .limit(10)
+                .all()
+            )
 
             cleaned_count = 0
             for migration in stale_migrations:
                 try:
                     # PRODUCTION FIX: Mark stuck processing migrations as failed
-                    if migration.status == 'processing':
-                        logger.warning(f"Migration {migration.migration_id} stuck in processing state, marking as failed")
-                        migration.status = 'failed'
-                        migration.error_code = 'STUCK_TIMEOUT'
+                    if migration.status == "processing":
+                        logger.warning(
+                            f"Migration {migration.migration_id} stuck in processing state, marking as failed"
+                        )
+                        migration.status = "failed"
+                        migration.error_code = "STUCK_TIMEOUT"
                         try:
-                            migration.set_error_message('Migration timed out after 2 hours in processing state')
+                            migration.set_error_message(
+                                "Migration timed out after 2 hours in processing state"
+                            )
                         except Exception:
                             pass  # Error message encryption might fail
 
@@ -358,17 +398,23 @@ def cleanup_orphaned_resources():
                     migration.cleanup_completed_at = datetime.now(timezone.utc)
                     db.session.commit()
                     cleaned_count += 1
-                    logger.info(f"Cleaned orphaned resources for migration {migration.migration_id} (status: {migration.status})")
+                    logger.info(
+                        f"Cleaned orphaned resources for migration {migration.migration_id} (status: {migration.status})"
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to clean migration {migration.migration_id}: {e}")
+                    logger.warning(
+                        f"Failed to clean migration {migration.migration_id}: {e}"
+                    )
                     db.session.rollback()
 
-            logger.info(f"Orphaned resource cleanup complete: {cleaned_count} migrations cleaned")
-            return {'cleaned': cleaned_count}
+            logger.info(
+                f"Orphaned resource cleanup complete: {cleaned_count} migrations cleaned"
+            )
+            return {"cleaned": cleaned_count}
 
         except Exception as e:
             logger.error(f"Orphaned resource cleanup failed: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
 
 
 # Signal handlers for logging
