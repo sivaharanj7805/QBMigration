@@ -89,34 +89,27 @@ class EncryptionManager:
                 pass
 
         if not key_password:
-            # CRITICAL FIX: In production, do NOT generate a password - fail instead
-            # Generating a password and printing it is a security risk
-            is_production = os.environ.get('FLASK_ENV', 'development') == 'production'
+            # FIX 100/100: Require RSA_KEY_PASSWORD in ALL environments
+            # This ensures consistent security posture and key recoverability
+            flask_env = os.environ.get('FLASK_ENV', 'development')
 
-            if is_production:
-                # In production, FAIL if no password is configured
-                # This forces proper secrets management
+            # Check if we're in testing mode (allow auto-generation for tests only)
+            is_testing = flask_env == 'testing' or os.environ.get('PYTEST_CURRENT_TEST')
+
+            if is_testing:
+                # Testing only: Generate a deterministic test password
+                key_password = 'test-rsa-key-password-for-ci-cd'
+                logger.info("Testing mode: Using deterministic RSA key password for CI/CD")
+            else:
+                # All other environments (production, development, staging): FAIL
+                # This forces proper secrets management everywhere
                 raise RuntimeError(
                     "CRITICAL SECURITY ERROR: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
-                    "Cannot generate RSA keys in production without a configured password. "
-                    "Please set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager."
+                    f"Environment: {flask_env}. "
+                    "Cannot generate RSA keys without a configured password. "
+                    "Please set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
                 )
-
-            # In development only: Generate a temporary password
-            import secrets as sec
-            key_password = sec.token_urlsafe(32)
-            logger.critical(
-                "SECURITY WARNING: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
-                "A temporary password was generated for this development session. "
-                "For production, set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
-                "Keys generated in this session will NOT be recoverable without the password!"
-            )
-            # CRITICAL FIX: NEVER print password to stderr - this is a security risk
-            # Instead, log the password location hint (without the actual password)
-            logger.warning(
-                "Development mode: RSA key password was generated but NOT printed to logs. "
-                "Restart the application after setting RSA_KEY_PASSWORD for persistent keys."
-            )
 
         with open(private_key_path, 'wb') as f:
             f.write(self._private_key.private_bytes(

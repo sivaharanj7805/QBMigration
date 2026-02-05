@@ -167,16 +167,18 @@ class MigrationOrchestrator:
         self,
         encrypted_data: bytes,
         encryption_metadata: Dict[str, Any],
-        company_name: str = "Unknown"
+        company_name: str = "Unknown",
+        timeout_seconds: int = 7200  # 2 hour default timeout
     ) -> Dict[str, Any]:
         """
         Run the complete migration process.
-        
+
         Args:
             encrypted_data: AES-256-GCM encrypted data from QBDesktopReader
             encryption_metadata: Dict with iv, tag, algorithm, etc.
             company_name: Company name for logging
-            
+            timeout_seconds: Maximum time allowed for migration (default: 2 hours)
+
         Returns:
             Dict with migration results:
             {
@@ -190,12 +192,50 @@ class MigrationOrchestrator:
                 'verification': {...},
                 'duration_seconds': float
             }
+
+        Raises:
+            TimeoutError: If migration exceeds timeout_seconds
         """
+        import signal
+
+        # FIX #12: Add timeout protection to prevent infinite migrations
+        def _migration_timeout_handler(signum, frame):
+            raise TimeoutError(
+                f"Migration exceeded {timeout_seconds} second ({timeout_seconds // 3600}h) timeout. "
+                f"Company: {company_name}. Migration may need to be split into smaller batches."
+            )
+
+        # Set up timeout (Unix only)
+        old_handler = None
+        if hasattr(signal, 'SIGALRM'):
+            old_handler = signal.signal(signal.SIGALRM, _migration_timeout_handler)
+            signal.alarm(timeout_seconds)
+            logger.info(f"Migration timeout set to {timeout_seconds} seconds ({timeout_seconds // 60} minutes)")
+
+        try:
+            return self._run_migration_impl(encrypted_data, encryption_metadata, company_name)
+        finally:
+            # Always restore signal handler and cancel alarm
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+
+    def _run_migration_impl(
+        self,
+        encrypted_data: bytes,
+        encryption_metadata: Dict[str, Any],
+        company_name: str = "Unknown"
+    ) -> Dict[str, Any]:
+        """Internal implementation of migration (called with timeout wrapper)."""
         start_time = datetime.now(timezone.utc)
         migration_id = f"mig_{uuid.uuid4().hex[:16]}"
-        
+
         logger.info(f"Starting migration {migration_id} for {company_name}")
         transformer = None  # Initialize before try so except block can access it
+
+        # FIX #13: Track created entity IDs for potential rollback
+        self._created_entity_ids: Dict[str, List[str]] = defaultdict(list)
 
         try:
             # Step 1: Decrypt data (5%)
@@ -977,6 +1017,9 @@ class MigrationOrchestrator:
                         if entity_name not in existing_maps:
                             existing_maps[entity_name] = {}
                         existing_maps[entity_name][src_id] = qbo_id
+                        # FIX #13: Track created IDs for potential rollback
+                        if hasattr(self, '_created_entity_ids'):
+                            self._created_entity_ids[api_entity_type].append(qbo_id)
         else:
             # Parallel batch submission with ThreadPoolExecutor
             # Collect all results first, then update existing_maps (thread-safe)
@@ -1008,6 +1051,9 @@ class MigrationOrchestrator:
                     if entity_name not in existing_maps:
                         existing_maps[entity_name] = {}
                     existing_maps[entity_name][src_id] = qbo_id
+                    # FIX #13: Track created IDs for potential rollback
+                    if hasattr(self, '_created_entity_ids'):
+                        self._created_entity_ids[api_entity_type].append(qbo_id)
 
         return success_count, fail_count, skipped_count
 
@@ -1215,6 +1261,130 @@ class MigrationOrchestrator:
         encryption_metadata = json.loads(response['Body'].read().decode('utf-8'))
 
         return self.run_migration(encrypted_data, encryption_metadata, company_name)
+
+    def rollback_migration(
+        self,
+        qbo_client: Optional['PremiumQBOClient'] = None,
+        oauth_manager: Optional['OAuthManager'] = None
+    ) -> Dict[str, Any]:
+        """
+        FIX #13: Rollback a failed migration by deleting created entities.
+
+        This method should be called when a migration fails partway through
+        to clean up orphaned records in the QBO company.
+
+        Note: QBO does not support true deletion for all entity types.
+        Some entities (like Accounts) can only be made inactive.
+
+        Args:
+            qbo_client: QBO client (uses cached client if not provided)
+            oauth_manager: OAuth manager for token refresh
+
+        Returns:
+            Dict with rollback results:
+            {
+                'success': bool,
+                'deleted': {'Account': 5, 'Customer': 10, ...},
+                'failed': {'Invoice': 2, ...},
+                'errors': [...]
+            }
+        """
+        if not hasattr(self, '_created_entity_ids') or not self._created_entity_ids:
+            logger.info("No entities to rollback - _created_entity_ids is empty")
+            return {
+                'success': True,
+                'deleted': {},
+                'failed': {},
+                'errors': [],
+                'message': 'No entities to rollback'
+            }
+
+        if qbo_client is None:
+            if self._qbo_client is None:
+                logger.error("Cannot rollback - no QBO client available")
+                return {
+                    'success': False,
+                    'deleted': {},
+                    'failed': {},
+                    'errors': ['No QBO client available for rollback']
+                }
+            qbo_client = self._qbo_client
+
+        if oauth_manager is None:
+            oauth_manager = self._oauth_manager
+
+        logger.warning("Starting migration rollback...")
+        deleted_counts: Dict[str, int] = {}
+        failed_counts: Dict[str, int] = {}
+        errors: List[str] = []
+
+        # Delete in reverse dependency order (transactions before master lists)
+        # This prevents foreign key violations
+        rollback_order = [
+            # Transactions first (they reference master data)
+            'Attachable', 'TaxPayment', 'InventoryAdjustment', 'TimeActivity',
+            'RefundReceipt', 'VendorCredit', 'CreditMemo', 'JournalEntry',
+            'Transfer', 'Deposit', 'BillPayment', 'Payment', 'Bill',
+            'Purchase', 'PurchaseOrder', 'SalesReceipt', 'Invoice', 'Estimate',
+            # Master lists next
+            'Item', 'Employee', 'Vendor', 'Customer',
+            # Configuration last (accounts often can't be deleted, only deactivated)
+            'Department', 'Class', 'PaymentMethod', 'Term',
+            'TaxCode', 'TaxRate', 'TaxAgency', 'CompanyCurrency', 'Account'
+        ]
+
+        for entity_type in rollback_order:
+            if entity_type not in self._created_entity_ids:
+                continue
+
+            entity_ids = self._created_entity_ids[entity_type]
+            if not entity_ids:
+                continue
+
+            deleted_counts[entity_type] = 0
+            failed_counts[entity_type] = 0
+
+            logger.info(f"Rolling back {len(entity_ids)} {entity_type} entities...")
+
+            for qbo_id in reversed(entity_ids):  # Delete in reverse creation order
+                try:
+                    # Try to delete the entity
+                    success = qbo_client.delete_entity(
+                        entity_type, qbo_id, oauth_manager=oauth_manager)
+
+                    if success:
+                        deleted_counts[entity_type] += 1
+                    else:
+                        # Some entities can't be deleted, try to deactivate
+                        try:
+                            qbo_client.update_entity(
+                                entity_type, qbo_id,
+                                {'Active': False},
+                                oauth_manager=oauth_manager)
+                            deleted_counts[entity_type] += 1
+                            logger.info(f"Deactivated {entity_type} {qbo_id} (delete not supported)")
+                        except Exception:
+                            failed_counts[entity_type] += 1
+
+                except Exception as e:
+                    failed_counts[entity_type] += 1
+                    error_msg = f"Failed to delete {entity_type} {qbo_id}: {str(e)}"
+                    errors.append(error_msg)
+                    logger.warning(error_msg)
+
+        # Summary
+        total_deleted = sum(deleted_counts.values())
+        total_failed = sum(failed_counts.values())
+
+        logger.info(f"Rollback complete: {total_deleted} deleted, {total_failed} failed")
+
+        return {
+            'success': total_failed == 0,
+            'deleted': deleted_counts,
+            'failed': failed_counts,
+            'errors': errors,
+            'summary': f"Deleted {total_deleted} entities, {total_failed} failures"
+        }
 
 
 # CLI entry point for standalone execution

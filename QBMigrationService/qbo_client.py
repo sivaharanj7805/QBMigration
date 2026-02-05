@@ -697,11 +697,13 @@ class PremiumQBOClient:
             result = response.json()
             
             # FIX #33: Extract and cache SyncToken if present
+            # FIX #11: Ensure SyncToken is always a string (API may return int or string)
             if isinstance(result, dict):
                 for key in result:
                     if isinstance(result[key], dict) and 'Id' in result[key] and 'SyncToken' in result[key]:
-                        entity_id = result[key]['Id']
-                        sync_token = result[key]['SyncToken']
+                        entity_id = str(result[key]['Id'])
+                        # CRITICAL FIX: Always convert SyncToken to string for consistency
+                        sync_token = str(result[key]['SyncToken'])
                         entity_type = key
                         self.update_synctoken(entity_type, entity_id, sync_token)
             
@@ -1053,8 +1055,9 @@ class PremiumQBOClient:
                         original_entity.get("DocNumber") or
                         f"index_{req_index}"
                     )
-                    qbo_id = created_entity.get("Id")
-                    sync_token = created_entity.get("SyncToken", "0")
+                    qbo_id = str(created_entity.get("Id")) if created_entity.get("Id") else None
+                    # FIX #11: Ensure SyncToken is always a string
+                    sync_token = str(created_entity.get("SyncToken", "0"))
 
                     if qbo_id:
                         self.record_created(entity_type, qbd_id, qbo_id, migration_id, sync_token)

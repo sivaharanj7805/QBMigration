@@ -152,27 +152,62 @@ class QBDataTransformer:
     # $25M FIX: PARALLEL TRANSFORMATION (Phase-Based, Production-Grade)
     # ========================================================================
     
-    def transform_parallel(self, qb_data: Dict, max_workers: int = None) -> Dict:
+    def transform_parallel(self, qb_data: Dict, max_workers: int = None,
+                           timeout_seconds: int = 3600) -> Dict:
         """
         PRODUCTION-GRADE parallel transformation with shared state.
-        
+
         Strategy:
         - Phase 1 (Foundation): Sequential - fast anyway (~100 entities)
         - Phase 2 (Accounts): Sequential - MUST accumulate trial_balance
         - Phase 3 (Master Lists): PARALLEL with Manager() - 50-70% of entities
         - Phase 4 (Transactions): Sequential - safe, correct
-        
+
         Expected speedup: 2.5-3x on Phase 3, 1.3x overall
-        
+
         Uses multiprocessing.Manager() to share:
         - used_display_names (for uniqueness)
         - id_mapping (for foreign keys)
-        
+
         Trial balance accumulated sequentially (no race conditions).
+
+        Args:
+            qb_data: QuickBooks Desktop data dict
+            max_workers: Maximum parallel workers (default: CPU count - 1)
+            timeout_seconds: Maximum time allowed for transformation (default: 1 hour)
+
+        Raises:
+            TimeoutError: If transformation exceeds timeout_seconds
         """
+        import signal
+
+        # FIX #2: Add timeout protection to prevent infinite hangs
+        def _timeout_handler(signum, frame):
+            raise TimeoutError(
+                f"Transformation exceeded {timeout_seconds} second timeout. "
+                f"Data may be too large or contain circular references."
+            )
+
+        # Set up timeout (Unix only - Windows doesn't support SIGALRM)
+        old_handler = None
+        if hasattr(signal, 'SIGALRM'):
+            old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(timeout_seconds)
+
+        try:
+            return self._transform_parallel_impl(qb_data, max_workers)
+        finally:
+            # Always restore signal handler and cancel alarm
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)  # Cancel pending alarm
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+
+    def _transform_parallel_impl(self, qb_data: Dict, max_workers: int = None) -> Dict:
+        """Internal implementation of parallel transformation (called with timeout wrapper)."""
         if max_workers is None:
             max_workers = max(1, mp.cpu_count() - 1)
-        
+
         # FIX SVC-02: Use logger instead of print
         logger.info(f"Smart parallel transformation ({max_workers} workers)")
         
@@ -317,12 +352,14 @@ class QBDataTransformer:
         
         # Generate summary
         result['summary'] = self._generate_summary()
-        result['trial_balance'] = {
-            'debits': str(self.trial_balance['debits']),
-            'credits': str(self.trial_balance['credits']),
-            'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
-            'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
-        }
+        # CRITICAL FIX: Thread-safe read of trial balance
+        with self._trial_balance_lock:
+            result['trial_balance'] = {
+                'debits': str(self.trial_balance['debits']),
+                'credits': str(self.trial_balance['credits']),
+                'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
+                'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
+            }
         result['manual_review'] = self.manual_review
         
         logger.info("\n" + "="*60)
@@ -742,12 +779,14 @@ class QBDataTransformer:
         
         # Generate summary
         result['summary'] = self._generate_summary()
-        result['trial_balance'] = {
-            'debits': str(self.trial_balance['debits']),
-            'credits': str(self.trial_balance['credits']),
-            'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
-            'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
-        }
+        # CRITICAL FIX: Thread-safe read of trial balance
+        with self._trial_balance_lock:
+            result['trial_balance'] = {
+                'debits': str(self.trial_balance['debits']),
+                'credits': str(self.trial_balance['credits']),
+                'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
+                'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
+            }
         result['manual_review'] = self.manual_review
 
         logger.info("\n" + "="*60)

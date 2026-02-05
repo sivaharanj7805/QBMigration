@@ -11,11 +11,34 @@ import json
 import csv
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from io import StringIO
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def safe_decimal(value, default: str = "0") -> Decimal:
+    """
+    CRITICAL FIX: Safely convert value to Decimal, handling None and invalid inputs.
+
+    Args:
+        value: Value to convert (can be None, str, int, float, Decimal)
+        default: Default value if conversion fails
+
+    Returns:
+        Decimal representation preserving precision
+    """
+    if value is None or value == '':
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    try:
+        # Convert to string first to preserve precision
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as e:
+        logger.warning(f"Failed to convert '{value}' to Decimal: {e}, using default '{default}'")
+        return Decimal(default)
 
 
 
@@ -92,6 +115,17 @@ class IIFParser:
         if not os.path.isfile(real_path):
             raise ValueError(f"Invalid file path (not a file): {file_path}")
 
+        # FIX #10: Check file size before reading (prevent memory exhaustion)
+        MAX_IIF_SIZE = 100 * 1024 * 1024  # 100MB limit
+        file_size = os.path.getsize(real_path)
+        if file_size > MAX_IIF_SIZE:
+            raise ValueError(
+                f"IIF file too large: {file_size / (1024*1024):.1f}MB exceeds "
+                f"{MAX_IIF_SIZE / (1024*1024):.0f}MB limit. "
+                f"Please split the file into smaller chunks."
+            )
+        logger.info(f"Reading IIF file: {file_size / 1024:.1f}KB")
+
         try:
             with open(real_path, 'r', encoding='cp1252') as f:
                 content = f.read()
@@ -111,6 +145,15 @@ class IIFParser:
 
         lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
         self.stats['total_lines'] = len(lines)
+
+        # FIX #11: Limit line count to prevent pathological inputs from hanging
+        MAX_LINES = 1_000_000  # 1 million line limit
+        if len(lines) > MAX_LINES:
+            raise ValueError(
+                f"IIF file has too many lines: {len(lines):,} exceeds {MAX_LINES:,} limit. "
+                f"Please split the file into smaller chunks."
+            )
+        logger.info(f"Parsing IIF content: {len(lines):,} lines")
         
         # AUDIT FIX: Removed unused current_type variable
 
@@ -458,37 +501,72 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
         })
     
     # Transform accounts
+    # FIX #16: Complete account type mapping with logging for unmapped types
+    acct_type_map = {
+        'BANK': 'Bank',
+        'AR': 'AccountsReceivable',
+        'OCASSET': 'OtherCurrentAsset',
+        'FIXASSET': 'FixedAsset',
+        'OASSET': 'OtherAsset',
+        'AP': 'AccountsPayable',
+        'CCARD': 'CreditCard',
+        'OCURLIAB': 'OtherCurrentLiability',
+        'LTLIAB': 'LongTermLiability',
+        'EQUITY': 'Equity',
+        'INC': 'Income',
+        'OINC': 'OtherIncome',
+        'OTHERINC': 'OtherIncome',
+        'COGS': 'CostOfGoodsSold',
+        'EXP': 'Expense',
+        'OEXP': 'OtherExpense',
+        'OTHEREXP': 'OtherExpense',
+        'EXINC': 'OtherIncome',
+        'EXEXP': 'OtherExpense',
+        'NONPOSTING': 'NonPosting',
+        # Additional QB Desktop types
+        'ASSET': 'OtherAsset',
+        'LIABILITY': 'OtherCurrentLiability',
+        'INCOME': 'Income',
+        'EXPENSE': 'Expense',
+        'CURASS': 'OtherCurrentAsset',
+        'CURLIAB': 'OtherCurrentLiability',
+    }
+
+    unmapped_account_types = set()
     for acct in iif_data.get('data', {}).get('accounts', []):
-        acct_type_map = {
-            'BANK': 'Bank',
-            'AR': 'AccountsReceivable',
-            'OCASSET': 'OtherCurrentAsset',
-            'FIXASSET': 'FixedAsset',
-            'OASSET': 'OtherAsset',
-            'AP': 'AccountsPayable',
-            'CCARD': 'CreditCard',
-            'OCURLIAB': 'OtherCurrentLiability',
-            'LTLIAB': 'LongTermLiability',
-            'EQUITY': 'Equity',
-            'INC': 'Income',
-            'OINC': 'OtherIncome',
-            'OTHERINC': 'OtherIncome',
-            'COGS': 'CostOfGoodsSold',
-            'EXP': 'Expense',
-            'OEXP': 'OtherExpense',
-            'OTHEREXP': 'OtherExpense',
-            'EXINC': 'OtherIncome',
-            'EXEXP': 'OtherExpense',
-            'NONPOSTING': 'NonPosting',
-        }
-        
+        original_type = acct.get('ACCNTTYPE', '')
+        qbo_type = acct_type_map.get(original_type)
+
+        if qbo_type is None:
+            # FIX #16: Log unmapped types and use smarter default
+            unmapped_account_types.add(original_type)
+            # Default based on type name heuristics
+            if 'ASSET' in original_type.upper():
+                qbo_type = 'OtherAsset'
+            elif 'LIAB' in original_type.upper():
+                qbo_type = 'OtherCurrentLiability'
+            elif 'INC' in original_type.upper() or 'REV' in original_type.upper():
+                qbo_type = 'Income'
+            elif 'EQUITY' in original_type.upper():
+                qbo_type = 'Equity'
+            else:
+                qbo_type = 'Expense'  # Last resort default
+
         qbo_data['accounts'].append({
             'Name': acct.get('NAME', ''),
-            'AccountType': acct_type_map.get(acct.get('ACCNTTYPE', ''), 'Expense'),
+            'AccountType': qbo_type,
             'Description': acct.get('DESC', ''),
             '_source': 'iif_import',
-            '_original_id': acct.get('NAME', '')
+            '_original_id': acct.get('NAME', ''),
+            '_original_type': original_type  # Preserve original for debugging
         })
+
+    # Log warning for unmapped account types
+    if unmapped_account_types:
+        logger.warning(
+            f"FIX #16: {len(unmapped_account_types)} unmapped account types found: "
+            f"{sorted(unmapped_account_types)}. Please verify mappings are correct."
+        )
     
     # Transform items
     for item in iif_data.get('data', {}).get('items', []):
@@ -512,7 +590,7 @@ def transform_for_qbo(iif_data: Dict[str, Any]) -> Dict[str, Any]:
         qbo_data['items'].append({
             'Name': item.get('NAME', ''),
             'Description': item.get('DESC', ''),
-            'UnitPrice': Decimal(str(item.get('PRICE', 0) or 0)),
+            'UnitPrice': safe_decimal(item.get('PRICE')),
             'Type': qbo_type,
             '_source': 'iif_import',
             '_original_id': item.get('NAME', '')
