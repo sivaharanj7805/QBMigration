@@ -1,13 +1,11 @@
 import hashlib
 import hmac
 import logging
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, jsonify, request
 from models.database import db, is_postgresql
 from models.migration import Migration
-from utils.pii_redaction import hash_email
 
 webhooks_bp = Blueprint("webhooks", __name__)
 logger = logging.getLogger(__name__)
@@ -39,7 +37,7 @@ def verify_webhook_signature(migration_id, signature, timestamp):
         # Parse timestamp
         try:
             webhook_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except Exception as e:
+        except Exception:
             logger.error(f"Invalid timestamp format: {timestamp}")
             return False, "Invalid timestamp format"
 
@@ -119,7 +117,11 @@ def migration_started():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id",
+                        "error": (
+                            "Missing required headers: X-Migration-Id,"
+                            " X-Webhook-Signature, X-Webhook-Timestamp,"
+                            " X-Webhook-Id"
+                        ),
                     }
                 ),
                 400,
@@ -152,7 +154,7 @@ def migration_started():
                 migration = query.with_for_update(nowait=True).first()
             else:
                 migration = query.first()
-        except Exception as lock_error:
+        except Exception:
             # Row is locked by another process - this is expected under high concurrency
             logger.warning(
                 f"Migration {migration_id} is locked by another webhook handler, retrying..."
@@ -246,7 +248,11 @@ def migration_progress():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id",
+                        "error": (
+                            "Missing required headers: X-Migration-Id,"
+                            " X-Webhook-Signature, X-Webhook-Timestamp,"
+                            " X-Webhook-Id"
+                        ),
                     }
                 ),
                 400,
@@ -275,7 +281,7 @@ def migration_progress():
                 migration = query.with_for_update(nowait=True).first()
             else:
                 migration = query.first()
-        except Exception as lock_error:
+        except Exception:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()
             return (
@@ -359,7 +365,11 @@ def migration_completed():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id",
+                        "error": (
+                            "Missing required headers: X-Migration-Id,"
+                            " X-Webhook-Signature, X-Webhook-Timestamp,"
+                            " X-Webhook-Id"
+                        ),
                     }
                 ),
                 400,
@@ -386,7 +396,7 @@ def migration_completed():
                 migration = query.with_for_update(nowait=True).first()
             else:
                 migration = query.first()
-        except Exception as lock_error:
+        except Exception:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()
             return (
@@ -488,7 +498,11 @@ def migration_failed():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Missing required headers: X-Migration-Id, X-Webhook-Signature, X-Webhook-Timestamp, X-Webhook-Id",
+                        "error": (
+                            "Missing required headers: X-Migration-Id,"
+                            " X-Webhook-Signature, X-Webhook-Timestamp,"
+                            " X-Webhook-Id"
+                        ),
                     }
                 ),
                 400,
@@ -516,7 +530,7 @@ def migration_failed():
                 migration = query.with_for_update(nowait=True).first()
             else:
                 migration = query.first()
-        except Exception as lock_error:
+        except Exception:
             logger.warning(f"Migration {migration_id} is locked, retrying...")
             db.session.rollback()
             return (

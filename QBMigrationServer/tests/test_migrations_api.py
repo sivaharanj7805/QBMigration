@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from models.database import db
 from models.migration import Migration
 from models.user import User
 

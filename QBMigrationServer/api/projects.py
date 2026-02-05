@@ -281,7 +281,7 @@ def update_project(project_id):
 
     try:
         db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to update project"}), 500
 
@@ -311,7 +311,7 @@ def delete_project(project_id):
     try:
         db.session.delete(project)
         db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify({"error": "Failed to delete project"}), 500
 
@@ -345,6 +345,10 @@ def get_extractor_download(project_id):
                 "7. Follow the on-screen instructions to connect to QuickBooks\n"
                 "8. Return to this dashboard to monitor progress"
             ),
-            "security_note": 'Windows may show security warnings because the software is not yet code-signed. This is normal for new software. Click "More info" → "Run anyway" to proceed safely.',
+            "security_note": (
+                "Windows may show security warnings because the software"
+                " is not yet code-signed. This is normal for new software."
+                ' Click "More info" → "Run anyway" to proceed safely.'
+            ),
         }
     )

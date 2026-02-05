@@ -719,7 +719,7 @@ class Migration(db.Model):
                     ),
                 }
                 self.trial_balance_data = json.dumps(metadata)
-            except (json.JSONDecodeError, TypeError) as e:
+            except (json.JSONDecodeError, TypeError):
                 # If parsing fails, just clear the data
                 self.trial_balance_data = json.dumps(
                     {
@@ -746,7 +746,7 @@ class Migration(db.Model):
                     ),
                 }
                 self.live_status_data = json.dumps(metadata)
-            except (json.JSONDecodeError, TypeError) as e:
+            except (json.JSONDecodeError, TypeError):
                 # If parsing fails, just clear the data
                 self.live_status_data = json.dumps(
                     {

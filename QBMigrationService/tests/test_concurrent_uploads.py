@@ -19,8 +19,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -110,7 +109,7 @@ class TestConcurrentUploads:
 
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(update_synctoken, i) for i in range(100)]
-            results = [f.result() for f in as_completed(futures)]
+            [f.result() for f in as_completed(futures)]
 
         # Final value should be consistent
         final_value = mock_qbo_client.get_synctoken(entity_type, qbo_id)
@@ -167,7 +166,7 @@ class TestConcurrentUploads:
 
         with ThreadPoolExecutor(max_workers=50) as executor:
             futures = [executor.submit(increment_counter) for _ in range(1000)]
-            results = [f.result() for f in as_completed(futures)]
+            [f.result() for f in as_completed(futures)]
 
         # Counter should be incremented exactly 1000 times
         expected = initial_count + 1000
@@ -201,7 +200,7 @@ class TestConcurrentUploads:
         # Generate 50 names with the same base concurrently
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(generate_name, "John Smith") for _ in range(50)]
-            results = [f.result() for f in as_completed(futures)]
+            [f.result() for f in as_completed(futures)]
 
         # CRITICAL: All names must be unique
         assert len(generated_names) == len(
@@ -231,7 +230,7 @@ class TestConcurrentApiRequests:
 
         with ThreadPoolExecutor(max_workers=100) as executor:
             futures = [executor.submit(generate_correlation_id) for _ in range(1000)]
-            results = [f.result() for f in as_completed(futures)]
+            [f.result() for f in as_completed(futures)]
 
         # All correlation IDs should be unique
         assert len(correlation_ids) == len(

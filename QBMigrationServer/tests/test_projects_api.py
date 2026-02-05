@@ -18,11 +18,10 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.database import db
-from models.migration import Migration
-from models.migration_credit import MigrationCredit
-from models.project import Project
-from models.user import User
+from models.migration import Migration  # noqa: E402
+from models.migration_credit import MigrationCredit  # noqa: E402
+from models.project import Project  # noqa: E402
+from models.user import User  # noqa: E402
 
 # ============================================================================
 # Fixtures

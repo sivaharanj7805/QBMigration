@@ -17,10 +17,10 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import Dict, List, Optional
+from typing import List
 
 from flask import Blueprint, jsonify, request
-from flask_login import current_user, login_required
+from flask_login import current_user
 from models.database import db
 
 logger = logging.getLogger(__name__)

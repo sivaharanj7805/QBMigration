@@ -26,15 +26,15 @@ import os
 import sys
 from datetime import datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from caseware_exporter import CasewareExporter
-from leadsheet_mapper import AccountingStandard, LeadSheetMapper
+from caseware_exporter import CasewareExporter  # noqa: E402
+from leadsheet_mapper import LeadSheetMapper  # noqa: E402
 
 # =============================================================================
 # FIXTURES

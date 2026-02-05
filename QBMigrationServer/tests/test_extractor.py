@@ -7,10 +7,8 @@ These endpoints serve extractor download information, version details,
 security instructions, and health status.
 """
 
-import json
 import os
 import sys
-from unittest.mock import MagicMock, patch
 
 import pytest
 

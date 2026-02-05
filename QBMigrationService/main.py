@@ -31,10 +31,10 @@ from pathlib import Path
 # Initialize logger at module level
 logger = logging.getLogger(__name__)
 
-from audit_logger import AuditLogger
+from audit_logger import AuditLogger  # noqa: E402
 
 # Import all modules
-from config import (
+from config import (  # noqa: E402
     DATA_RETENTION_HOURS,
     INPUT_FILE,
     OUTPUT_DIR,
@@ -42,13 +42,13 @@ from config import (
     sanitize_migration_id,
     validate_production_access,
 )
-from data_retention import DataRetentionManager
-from data_transformer import QBDataTransformer
-from encryption import EncryptionManager
-from oauth_manager import OAuthManager
-from qbo_client import QBOClient
-from security import SecurityError, SecurityManager
-from verifier import PremiumMigrationVerifier
+from data_retention import DataRetentionManager  # noqa: E402
+from data_transformer import QBDataTransformer  # noqa: E402
+from encryption import EncryptionManager  # noqa: E402
+from oauth_manager import OAuthManager  # noqa: E402
+from qbo_client import QBOClient  # noqa: E402
+from security import SecurityError, SecurityManager  # noqa: E402
+from verifier import PremiumMigrationVerifier  # noqa: E402
 
 
 class MigrationOrchestrator:
@@ -92,7 +92,7 @@ class MigrationOrchestrator:
         migration_id = f"migration_{timestamp}"
         return sanitize_migration_id(migration_id)
 
-    def run_migration(self, encrypted_file_path: str = None) -> bool:
+    def run_migration(self, encrypted_file_path: str = None) -> bool:  # noqa: C901
         """
         Run complete migration workflow with $25M security fixes.
 
@@ -203,9 +203,12 @@ class MigrationOrchestrator:
             logger.info(
                 f"   Skipped: {transformed_data['summary']['skipped_entities']}"
             )
-            logger.info(
-                f"   Trial Balance: {'✅ Balanced' if transformed_data['trial_balance']['balanced'] else '❌ NOT Balanced'}"
+            tb_status = (
+                "✅ Balanced"
+                if transformed_data["trial_balance"]["balanced"]
+                else "❌ NOT Balanced"
             )
+            logger.info(f"   Trial Balance: {tb_status}")
 
             # $25M FIX: Automated trial balance handling (NO MANUAL OVERRIDE)
             if not transformed_data["trial_balance"]["balanced"]:
@@ -328,7 +331,7 @@ class MigrationOrchestrator:
                     f"QBO upload failed: {upload_error}"
                 ) from upload_error
 
-            logger.info(f"\n✅ Upload complete!")
+            logger.info("\n✅ Upload complete!")
             logger.info(f"   Successful: {upload_result['successful']}")
             logger.info(f"   Failed: {upload_result['failed']}")
 
@@ -344,7 +347,7 @@ class MigrationOrchestrator:
                     logger.info(
                         f"\n❌ MIGRATION FAILED: {failure_rate*100:.1f}% of entities failed to upload"
                     )
-                    logger.info(f"   This exceeds the 10% failure threshold.")
+                    logger.info("   This exceeds the 10% failure threshold.")
                     for error in upload_result.get("errors", [])[:10]:
                         logger.info(f"   • {error}")
                     success = False
@@ -443,10 +446,10 @@ class MigrationOrchestrator:
                 logger.info(
                     f"✅ Temporary files scheduled for secure deletion in {DATA_RETENTION_HOURS} hour(s)"
                 )
-                logger.info(f"   • Decrypted temporary data")
+                logger.info("   • Decrypted temporary data")
                 if delete_results:
                     logger.info(
-                        f"   • Migration results (per DELETE_MIGRATION_RESULTS setting)"
+                        "   • Migration results (per DELETE_MIGRATION_RESULTS setting)"
                     )
             else:
                 logger.info("   No temporary files to delete")
@@ -552,7 +555,7 @@ class MigrationOrchestrator:
 
         # Verify hash BEFORE writing to disk
         if source_hash:
-            logger.info(f"   Verifying data integrity (SHA-256)...")
+            logger.info("   Verifying data integrity (SHA-256)...")
             EncryptionManager.verify_data_integrity(plaintext, source_hash)
         else:
             logger.info("   ⚠️  No hash provided - cannot verify data integrity")
@@ -568,7 +571,7 @@ class MigrationOrchestrator:
 
         self.logger.log_encryption(self.migration_id, "DECRYPT", len(plaintext))
 
-        logger.info(f"   ✅ Decrypted to temporary file")
+        logger.info("   ✅ Decrypted to temporary file")
 
         return decrypted_file, source_hash
 

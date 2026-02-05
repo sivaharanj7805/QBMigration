@@ -12,9 +12,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-from app import create_app, db
-from models.migration import Migration
-from models.user import User
+from app import create_app, db  # noqa: E402
 
 
 def migrate_database():

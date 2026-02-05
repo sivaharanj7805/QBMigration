@@ -91,7 +91,10 @@ def cleanup_orphaned_instances():
                 # Check if instance is too old
                 if launch_time < cutoff_time:
                     logger.info(
-                        f"Terminating orphaned instance: {instance_id} (running for {(datetime.now(timezone.utc) - launch_time).total_seconds() / 3600:.1f} hours)"
+                        f"Terminating orphaned instance: {instance_id}"
+                        f" (running for"
+                        f" {(datetime.now(timezone.utc) - launch_time).total_seconds() / 3600:.1f}"
+                        f" hours)"
                     )
 
                     try:
@@ -136,7 +139,9 @@ def cleanup_old_s3_files():
                 # Check if file is too old
                 if last_modified < cutoff_time:
                     logger.info(
-                        f"Deleting old S3 file: {key} (age: {(datetime.now(timezone.utc) - last_modified).total_seconds() / 3600:.1f} hours)"
+                        f"Deleting old S3 file: {key}"
+                        f" (age: {(datetime.now(timezone.utc) - last_modified).total_seconds() / 3600:.1f}"
+                        f" hours)"
                     )
 
                     try:

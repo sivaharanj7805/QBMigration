@@ -33,10 +33,10 @@ if not os.getenv("FLASK_ENV"):
     )
 
 # Import the Flask application
-from app import app as application
+from app import app as application  # noqa: E402
 
 # Validate configuration at startup
-from config import validate_config
+from config import validate_config  # noqa: E402
 
 if os.getenv("FLASK_ENV") == "production":
     try:

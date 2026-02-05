@@ -10,11 +10,8 @@ Combines:
 """
 
 import base64
-import hashlib
-import hmac
 import json
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -186,7 +183,7 @@ class AWSMigrationManager:
             # NOTE: The broad prefix is kept as a fallback since the date-based path
             # makes it impossible to construct a precise prefix without knowing the upload date.
             # However, we limit page scanning to prevent runaway operations.
-            prefix = f"migrations/"
+            prefix = "migrations/"
             deleted_count = 0
             continuation_token = None
             page_count = 0

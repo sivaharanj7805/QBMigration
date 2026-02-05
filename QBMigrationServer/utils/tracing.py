@@ -158,7 +158,7 @@ def trace_function(
     return decorator
 
 
-def init_tracing(app):
+def init_tracing(app):  # noqa: C901
     """
     Initialize OpenTelemetry tracing for the Flask application.
 

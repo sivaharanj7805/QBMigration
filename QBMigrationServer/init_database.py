@@ -31,7 +31,6 @@ def init_database():
 
     with app.app_context():
         # Import all models so SQLAlchemy knows about them
-        from models.license import License
         from models.migration import Migration
         from models.user import User
 

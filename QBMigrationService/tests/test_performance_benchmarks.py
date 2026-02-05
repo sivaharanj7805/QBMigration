@@ -28,8 +28,7 @@ import tempfile
 import time
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List
-from unittest.mock import Mock, patch
+from typing import Any, Dict
 
 import pytest
 
@@ -513,7 +512,7 @@ class TestTrialBalancePerformance:
                         total_debits += abs(balance)
 
             # Verify balance
-            variance = abs(total_debits - total_credits)
+            abs(total_debits - total_credits)
 
         assert timer.elapsed_seconds < BenchmarkConfig.TRIAL_BALANCE_MAX_SECONDS, (
             f"Trial balance calculation took {timer.elapsed_seconds:.2f}s, "
@@ -692,7 +691,7 @@ class TestMemoryEfficiency:
         # Clean up
         os.unlink(ndjson_path)
 
-        print(f"\n✓ NDJSON streaming test passed")
+        print("\n✓ NDJSON streaming test passed")
         print(f"  Initial data size: {initial_size:,} bytes")
         print(f"  Output file size: {file_size:,} bytes")
 
@@ -731,10 +730,10 @@ class TestBenchmarkSummary:
         print("FORENSICBRIDGE PERFORMANCE BENCHMARK REPORT")
         print("=" * 80)
         print(f"\nBenchmark Date: {results['benchmark_date']}")
-        print(f"\nTest Data Sizes:")
+        print("\nTest Data Sizes:")
         print(f"  Small file: {results['test_data_sizes']['small']:,} records")
         print(f"  Mid-market: {results['test_data_sizes']['midmarket']:,} records")
-        print(f"\nPerformance Thresholds:")
+        print("\nPerformance Thresholds:")
         print(
             f"  Small file: <{BenchmarkConfig.SMALL_FILE_MAX_TIME_SECONDS/60:.0f} minutes"
         )

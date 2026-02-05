@@ -12,11 +12,9 @@ Tests cover:
 
 import json
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import requests
@@ -335,7 +333,6 @@ class TestMigrationFlow:
 
     def test_migration_phase_transitions(self):
         """Test that migration phases transition correctly"""
-        phases = ["EXTRACTION", "TRANSIT", "TRANSFORMATION", "VERIFICATION"]
         phase_ranges = [
             (0, 15, "EXTRACTION"),
             (15, 20, "TRANSIT"),

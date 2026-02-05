@@ -430,7 +430,7 @@ def get_migration_status(migration_id):
 @migrations_bp.route("/api/migrations/<migration_id>/start", methods=["POST"])
 @limiter.limit("5 per minute")
 @require_auth
-def start_migration(migration_id):
+def start_migration(migration_id):  # noqa: C901
     """
     Start migration on ephemeral AWS instance
 
@@ -552,7 +552,11 @@ def start_migration(migration_id):
                     jsonify(
                         {
                             "success": False,
-                            "error": "Plaintext credentials not allowed in production. Use encrypted_credentials field.",
+                            "error": (
+                                "Plaintext credentials not allowed"
+                                " in production. Use"
+                                " encrypted_credentials field."
+                            ),
                         }
                     ),
                     400,
@@ -1094,7 +1098,7 @@ def get_migration_stats():
     Returns real data (not mock) for the current user.
     """
     try:
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
 
         from sqlalchemy import func
 

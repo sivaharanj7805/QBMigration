@@ -157,7 +157,7 @@ def create_checkout(current_user):
         )
 
         # Create pending credit (will be activated by webhook)
-        credit = MigrationCredit.create_pending(
+        _ = MigrationCredit.create_pending(
             user_id=current_user.id,
             tier_type=tier_type,
             stripe_checkout_session_id=checkout_session.id,
@@ -261,7 +261,7 @@ def stripe_webhook():
         # CRIT-03 FIX: Return 400 for invalid payloads (malformed JSON)
         logger.error(f"Invalid payload: {str(e)}")
         return jsonify({"error": "Invalid payload"}), 400
-    except stripe.error.SignatureVerificationError as e:
+    except stripe.error.SignatureVerificationError:
         # CRIT-03 FIX: Return 400 for invalid signatures to reject forged webhooks
         # Stripe will NOT retry on 4xx errors, which is correct for security violations
         logger.error(f"SECURITY: Invalid Stripe signature from {request.remote_addr}")

@@ -26,7 +26,6 @@ import csv
 import hashlib
 import json
 import logging
-import os
 import threading
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -43,7 +42,7 @@ except ImportError:
     )
 
 # FIX #33: Import locale-aware lead sheet mapper
-from leadsheet_mapper import AccountingStandard, LeadSheetMapper
+from leadsheet_mapper import LeadSheetMapper
 
 logger = logging.getLogger(__name__)
 
@@ -1058,7 +1057,7 @@ For technical support: support@forensicbridge.com
         # Check first character
         if str_value[0] in DANGEROUS_CHARS:
             str_value = str_value[1:]  # Remove the dangerous leading character
-            logger.debug(f"Stripped CSV injection character from value")
+            logger.debug("Stripped CSV injection character from value")
 
         return str_value
 
@@ -1289,7 +1288,6 @@ For technical support: support@forensicbridge.com
         }
 
         # Neutral transactions (use amount sign)
-        neutral_types = {"journalentry", "transfer"}
 
         if txn_type_lower in debit_types:
             return (abs(amount), Decimal("0"))

@@ -11,12 +11,7 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import json
-import re
-from unittest.mock import MagicMock, patch
-
 import pytest
-from flask import Flask
 
 
 class TestSQLInjection:
@@ -68,7 +63,7 @@ class TestSQLInjection:
             # Should not return 500
             assert (
                 response.status_code != 500
-            ), f"SQL injection in search caused server error"
+            ), "SQL injection in search caused server error"
 
 
 class TestXSS:

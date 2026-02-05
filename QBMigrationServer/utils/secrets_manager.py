@@ -40,14 +40,11 @@ _secrets_cache_lock = threading.Lock()
 class SecretsManagerError(Exception):
     """Raised when secrets cannot be retrieved."""
 
-    pass
-
 
 def _get_boto3_client():
     """Get boto3 client with lazy import to avoid import errors when not using AWS."""
     try:
         import boto3
-        from botocore.exceptions import ClientError, NoCredentialsError
 
         return boto3.client(
             "secretsmanager", region_name=os.getenv("AWS_REGION", "ca-central-1")

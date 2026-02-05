@@ -84,12 +84,10 @@ class BaseAccountingConnector(ABC):
         Returns:
             True if connection successful
         """
-        pass
 
     @abstractmethod
     def disconnect(self) -> None:
         """Disconnect from the accounting platform."""
-        pass
 
     @abstractmethod
     def test_connection(self) -> bool:
@@ -99,7 +97,6 @@ class BaseAccountingConnector(ABC):
         Returns:
             True if connection is valid
         """
-        pass
 
     @abstractmethod
     def extract_all(self, config: BaseExtractionConfig) -> ExtractionResult:
@@ -112,44 +109,36 @@ class BaseAccountingConnector(ABC):
         Returns:
             ExtractionResult with all extracted data
         """
-        pass
 
     @abstractmethod
     def extract_accounts(self) -> List[Dict]:
         """Extract chart of accounts."""
-        pass
 
     @abstractmethod
     def extract_customers(self) -> List[Dict]:
         """Extract customer/client list."""
-        pass
 
     @abstractmethod
     def extract_vendors(self) -> List[Dict]:
         """Extract vendor/supplier list."""
-        pass
 
     @abstractmethod
     def extract_invoices(self, date_from: Optional[datetime] = None) -> List[Dict]:
         """Extract sales invoices."""
-        pass
 
     @abstractmethod
     def extract_bills(self, date_from: Optional[datetime] = None) -> List[Dict]:
         """Extract bills/expenses."""
-        pass
 
     @abstractmethod
     def extract_payments(self, date_from: Optional[datetime] = None) -> List[Dict]:
         """Extract payment records."""
-        pass
 
     @abstractmethod
     def extract_journal_entries(
         self, date_from: Optional[datetime] = None
     ) -> List[Dict]:
         """Extract journal entries."""
-        pass
 
     @abstractmethod
     def get_trial_balance(self, as_of_date: Optional[datetime] = None) -> Dict:
@@ -162,7 +151,6 @@ class BaseAccountingConnector(ABC):
         Returns:
             Trial balance data
         """
-        pass
 
     @abstractmethod
     def compute_record_hash(self, record: Dict, record_type: str) -> str:
@@ -178,7 +166,6 @@ class BaseAccountingConnector(ABC):
         Returns:
             SHA-256 hash string
         """
-        pass
 
     def get_supported_entity_types(self) -> List[str]:
         """

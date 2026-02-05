@@ -8,8 +8,6 @@ import os
 import sys
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.orm import scoped_session, sessionmaker
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -18,10 +16,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 # module-level create_app() from running with production config
 os.environ["FLASK_ENV"] = "testing"
 
-from app import create_app
-from models.database import db
-from models.migration import Migration
-from models.user import User
+from app import create_app  # noqa: E402
+from models.database import db  # noqa: E402
+from models.migration import Migration  # noqa: E402
+from models.user import User  # noqa: E402
 
 # Configure logging for tests
 logging.basicConfig(level=logging.WARNING)

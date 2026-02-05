@@ -243,7 +243,7 @@ def search_transactions(archive_id):
         ]
 
     total = len(results)
-    results = results[offset : offset + limit]
+    results = results[offset : offset + limit]  # noqa: E203
 
     log_access(
         archive_id,
@@ -348,11 +348,15 @@ PORTAL_HTML = """
         .header { background: linear-gradient(135deg, #2CA01C, #1a6b12); color: white; padding: 20px 40px; }
         .header h1 { font-size: 24px; }
         .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
-        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card { background: white; border-radius: 8px; padding: 20px;
+            margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
-        .search-box input, .search-box select { padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .search-box input, .search-box select {
+            padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
         .search-box input[type="text"] { flex: 1; }
-        .search-box button { background: #2CA01C; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        .search-box button { background: #2CA01C; color: white;
+            border: none; padding: 10px 20px;
+            border-radius: 4px; cursor: pointer; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
         th { background: #f8f8f8; }
@@ -402,7 +406,8 @@ PORTAL_HTML = """
                     </tr>
                 </thead>
                 <tbody id="resultsBody">
-                    <tr><td colspan="6" style="text-align:center;color:#888;">Select an archive and search to see results</td></tr>
+                    <tr><td colspan="6" style="text-align:center;color:#888;">
+                    Select an archive and search to see results</td></tr>
                 </tbody>
             </table>
         </div>
@@ -435,31 +440,35 @@ PORTAL_HTML = """
                 select.appendChild(opt);
             });
         }
-        
+
         async function search() {
             const archiveId = document.getElementById('archiveSelect').value;
             if (!archiveId) { alert('Please select an archive'); return; }
-            
+
             const q = document.getElementById('searchInput').value;
             const type = document.getElementById('typeSelect').value;
-            
+
             let url = `/api/archives/${archiveId}/transactions?limit=100`;
             if (q) url += `&q=${encodeURIComponent(q)}`;
             if (type) url += `&type=${encodeURIComponent(type)}`;
-            
+
             const res = await fetch(url, { headers: { 'X-API-Key': API_KEY } });
             const data = await res.json();
-            
+
             const tbody = document.getElementById('resultsBody');
             if (data.transactions.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;">No results found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6"' +
+                    ' style="text-align:center;color:#888;">' +
+                    'No results found</td></tr>';
                 return;
             }
-            
+
             // FIX CRIT-03: Use escapeHtml to prevent XSS from user-controlled data
             tbody.innerHTML = data.transactions.map(t => `
                 <tr>
-                    <td><span class="badge badge-${escapeHtml((t.type || '').toLowerCase())}">${escapeHtml(t.type)}</span></td>
+                    <td><span class="badge badge-${
+                    escapeHtml((t.type || '').toLowerCase())
+                    }">${escapeHtml(t.type)}</span></td>
                     <td>${escapeHtml(t.number) || '-'}</td>
                     <td>${t.date ? new Date(t.date).toLocaleDateString() : '-'}</td>
                     <td>${escapeHtml(t.entity) || '-'}</td>
@@ -468,7 +477,7 @@ PORTAL_HTML = """
                 </tr>
             `).join('');
         }
-        
+
         loadArchives();
     </script>
 </body>

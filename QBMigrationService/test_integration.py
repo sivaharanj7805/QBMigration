@@ -3,7 +3,6 @@ Integration Test Suite for QBMigration Backend
 Rigorous testing of all components
 """
 
-import json
 import os
 import sys
 import tempfile
@@ -81,7 +80,7 @@ def test_caseware_exporter():
     exporter = CasewareExporter(output_dir, "Test Corp")
     result = exporter.generate_audit_bundle(test_data)
 
-    print(f"  [PASS] Bundle generated")
+    print("  [PASS] Bundle generated")
     print(f"  Files: {list(result['files'].keys())}")
     print(f"  Accounts: {result['statistics']['accounts_exported']}")
     print(f"  Transactions: {result['statistics']['transactions_exported']}")
@@ -94,13 +93,13 @@ def test_caseware_exporter():
             f"  [PASS] Global File Hash: {exporter.stats['global_file_hash'][:16]}..."
         )
     else:
-        print(f"  [WARN] Global File Hash not found")
+        print("  [WARN] Global File Hash not found")
 
     # Check Lead Sheet codes for Agriculture/Manufacturing
     if "Livestock" in CasewareExporter.LEAD_SHEET_CODES:
-        print(f"  [PASS] Agricultural codes present: A6.1 Livestock")
+        print("  [PASS] Agricultural codes present: A6.1 Livestock")
     if "Work in Process" in CasewareExporter.LEAD_SHEET_CODES:
-        print(f"  [PASS] Manufacturing codes present: A7.2 WIP")
+        print("  [PASS] Manufacturing codes present: A7.2 WIP")
 
     # Verify files exist
     for name, path in result["files"].items():

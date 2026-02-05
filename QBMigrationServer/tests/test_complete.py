@@ -5,9 +5,7 @@ Enterprise-grade test quality with comprehensive validation
 """
 
 import json
-import re
-from datetime import datetime, timedelta, timezone
-from http import client
+from datetime import datetime, timezone
 
 import pytest
 from flask import current_app
@@ -48,7 +46,7 @@ class TestAuthentication:
         data = json.loads(response.data)
 
         # CRITICAL: Verify success response
-        assert data.get("success", True) == True, "Registration did not return success"
+        assert data.get("success", True) is True, "Registration did not return success"
         assert "user" in data, "User object not in response"
 
         # CRITICAL: Verify user in database
@@ -96,7 +94,7 @@ class TestAuthentication:
             response.status_code == 409
         ), f"Expected 409 Conflict, got {response.status_code}"
         data = json.loads(response.data)
-        assert data["success"] == False, "Success should be False for duplicate"
+        assert data["success"] is False, "Success should be False for duplicate"
         assert (
             "already" in data["error"].lower() or "exist" in data["error"].lower()
         ), "Error message unclear"
@@ -184,7 +182,7 @@ class TestAuthentication:
 
         assert response.status_code == 200, f"Login failed: {response.data}"
         data = json.loads(response.data)
-        assert data["success"] == True, "Login did not return success"
+        assert data["success"] is True, "Login did not return success"
         assert "user" in data, "User object not in response"
 
         # VERIFY: Session was created (can access protected endpoint)
@@ -212,7 +210,7 @@ class TestAuthentication:
 
         assert response.status_code == 401, "Wrong password was accepted!"
         data = json.loads(response.data)
-        assert data["success"] == False, "Success should be False"
+        assert data["success"] is False, "Success should be False"
 
         # VERIFY: Failed attempt was tracked
         user = User.query.filter_by(email="test@example.com").first()
@@ -805,7 +803,7 @@ class TestSecurity:
             assert len(code) >= 8, f"Backup code too short: {code}"
 
         # VERIFY: 2FA enabled
-        assert test_user.mfa_enabled == True, "2FA flag not set"
+        assert test_user.mfa_enabled is True, "2FA flag not set"
 
         # CRITICAL: Secret stored securely
         db_session.refresh(test_user)
@@ -902,7 +900,7 @@ class TestSecurity:
 
             # Either rejected or sanitized
             if response.status_code == 201:
-                data = json.loads(response.data)
+                json.loads(response.data)
                 # Verify payload was sanitized
                 assert "<script>" not in str(
                     response.data

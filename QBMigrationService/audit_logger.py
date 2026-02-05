@@ -183,7 +183,9 @@ class AuditLogger:
         # $25M FIX: Physical addresses
         # Match patterns like "123 Main Street" or "456 Oak Ave"
         text = re.sub(
-            r"\b\d+\s+[\w\s]+\s+(Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Court|Ct\.?|Circle|Cir\.?|Way|Place|Pl\.?)",
+            r"\b\d+\s+[\w\s]+\s+(Street|St\.?|Avenue|Ave\.?|Road|Rd\.?"
+            r"|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?"
+            r"|Court|Ct\.?|Circle|Cir\.?|Way|Place|Pl\.?)",
             "[ADDRESS-REDACTED]",
             text,
             flags=re.IGNORECASE,

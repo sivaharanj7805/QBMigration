@@ -11,20 +11,18 @@ Tests all core methods with mocked HTTP calls. Validates critical bug fixes:
 - Exponential backoff on 500/503 server errors
 """
 
-import json
 import os
 import sqlite3
 import sys
 import threading
-import time
-from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Add parent directory to path so we can import qbo_client
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from qbo_client import PremiumQBOClient
+from qbo_client import PremiumQBOClient  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -677,8 +675,7 @@ class TestWasEntityCreated:
     def test_uses_db_lock(self, tmp_path):
         """Ensure was_entity_created acquires db_lock for thread safety."""
         client = _make_client(tmp_path)
-        locked = []
-        original_enter = client.db_lock.__class__.__enter__
+        client.db_lock.__class__.__enter__
 
         # We can verify by checking that the lock works -- concurrent
         # access without the lock would be unsafe. Just verify it calls correctly.
@@ -823,7 +820,7 @@ class TestBatchUpload:
         client = _make_client(tmp_path)
         processing_order = []
 
-        original_batch_create = client.batch_create_parallel
+        client.batch_create_parallel
 
         def mock_batch_create(entities, entity_type, **kwargs):
             processing_order.append(entity_type)

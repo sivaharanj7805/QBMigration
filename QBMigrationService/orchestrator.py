@@ -21,7 +21,6 @@ Usage:
 
 import json
 import logging
-import os
 import sys
 import time
 import uuid
@@ -247,7 +246,7 @@ class MigrationOrchestrator:
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
 
-    def _run_migration_impl(
+    def _run_migration_impl(  # noqa: C901
         self,
         encrypted_data: bytes,
         encryption_metadata: Dict[str, Any],
@@ -1030,7 +1029,7 @@ class MigrationOrchestrator:
 
         return None
 
-    def _batch_create_layer(
+    def _batch_create_layer(  # noqa: C901
         self,
         qbo_client: "PremiumQBOClient",
         transformer: "QBDataTransformer",
@@ -1167,7 +1166,7 @@ class MigrationOrchestrator:
         # Build batches of up to batch_size items
         batches = []
         for i in range(0, len(transformed_pairs), batch_size):
-            batches.append(transformed_pairs[i : i + batch_size])
+            batches.append(transformed_pairs[i : i + batch_size])  # noqa: E203
 
         # Determine worker count for parallel batch submission
         max_workers = min(qbo_client.max_workers, len(batches))
@@ -1655,7 +1654,6 @@ if __name__ == "__main__":
     # Report result to server via webhook
     import hashlib
     import hmac
-    from datetime import datetime
 
     import requests
 

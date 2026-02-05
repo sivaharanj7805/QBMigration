@@ -506,7 +506,7 @@ def log_error_safely(error: Exception, context: str, user_id: Optional[int] = No
 
     # Hash user ID in production
     if is_production() and user_id:
-        from utils.pii_redaction import hash_email
+        pass
 
         user_identifier = f"user_id_{user_id}"
     else:

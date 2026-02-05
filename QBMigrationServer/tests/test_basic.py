@@ -12,10 +12,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 def test_imports():
     """Test that we can import our modules"""
     try:
-        from app import create_app
-        from models.database import db
-        from models.migration import Migration
-        from models.user import User
+        from app import create_app  # noqa: F401
+        from models.database import db  # noqa: F401
+        from models.migration import Migration  # noqa: F401
+        from models.user import User  # noqa: F401
 
         assert True
     except ImportError as e:
@@ -28,7 +28,7 @@ def test_config():
 
     app = create_app("testing")
     assert app is not None
-    assert app.config["TESTING"] == True
+    assert app.config["TESTING"] is True
 
 
 def test_app_creation():

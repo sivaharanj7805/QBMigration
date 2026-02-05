@@ -139,12 +139,10 @@ worker_tmp_dir = "/dev/shm"  # nosec B108
 
 def on_starting(server):
     """Called just before the master process is initialized."""
-    pass
 
 
 def on_reload(server):
     """Called before the master process reloads."""
-    pass
 
 
 def when_ready(server):
@@ -170,7 +168,6 @@ def worker_abort(worker):
 
 def pre_fork(server, worker):
     """Called just before a worker is forked."""
-    pass
 
 
 def post_fork(server, worker):
@@ -182,7 +179,6 @@ def post_fork(server, worker):
 
 def post_worker_init(worker):
     """Called just after a worker has initialized the application."""
-    pass
 
 
 def worker_exit(server, worker):

@@ -12,18 +12,15 @@ Tests the batch migration methods added to MigrationOrchestrator:
 
 import json
 import os
-import sqlite3
 import sys
-import tempfile
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, PropertyMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from orchestrator import MigrationOrchestrator
+from orchestrator import MigrationOrchestrator  # noqa: E402
 
 # ============================================================================
 # FIXTURES

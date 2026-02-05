@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # STEP 3: Now import app (config.py will find SECRET_KEY)
-from app import app
+from app import app  # noqa: E402
 
 if __name__ == "__main__":
     logger.info("=" * 80)

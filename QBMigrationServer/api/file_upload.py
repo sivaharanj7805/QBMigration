@@ -3,10 +3,8 @@ File Upload API for QuickBooks Desktop exports
 Handles IIF, CSV, and Excel file uploads for migration
 """
 
-import json
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 from api.auth import require_auth
@@ -66,8 +64,6 @@ def upload_qb_export():
 
     file = request.files["file"]
     session_id = request.form.get("session_id")
-    file_type = request.form.get("file_type", "unknown")  # customers, vendors, etc.
-
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
 

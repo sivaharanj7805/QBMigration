@@ -1,7 +1,6 @@
 """Fix indentation in data_transformer.py"""
 
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 

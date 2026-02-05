@@ -14,16 +14,12 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import hashlib
 import logging
-import os
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
-from flask import request
 from models.database import db
-from sqlalchemy import func, text
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +113,9 @@ def detect_rapid_login_attempts(
             if last_login and last_login >= window_start:
                 return (
                     True,
-                    f"Rapid login attempts: {failed_attempts} failed in {window_hours}h (threshold: {ANOMALY_THRESHOLDS['max_logins_per_hour']})",
+                    f"Rapid login attempts: {failed_attempts} failed"
+                    f" in {window_hours}h (threshold:"
+                    f" {ANOMALY_THRESHOLDS['max_logins_per_hour']})",
                 )
 
         return False, ""
@@ -182,7 +180,9 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
                 if time_diff < timedelta(hours=1):
                     return (
                         True,
-                        f"Impossible travel: IP changed from {prev_ip} to {current_ip} in {time_diff.seconds // 60} minutes",
+                        f"Impossible travel: IP changed from"
+                        f" {prev_ip} to {current_ip}"
+                        f" in {time_diff.seconds // 60} minutes",
                     )
 
         return False, ""
@@ -254,7 +254,9 @@ def detect_large_file_upload(file_size_bytes: int, user_id: int) -> Tuple[bool, 
         if total_size_gb > ANOMALY_THRESHOLDS["max_upload_size_per_day_gb"]:
             return (
                 True,
-                f"Daily upload limit exceeded: {total_size_gb:.2f} GB (threshold: {ANOMALY_THRESHOLDS['max_upload_size_per_day_gb']} GB)",
+                f"Daily upload limit exceeded:"
+                f" {total_size_gb:.2f} GB (threshold:"
+                f" {ANOMALY_THRESHOLDS['max_upload_size_per_day_gb']} GB)",
             )
 
         return False, ""
@@ -296,7 +298,9 @@ def detect_rapid_migrations(user_id: int) -> Tuple[bool, str]:
         if migration_count >= ANOMALY_THRESHOLDS["rapid_migrations_count"]:
             return (
                 True,
-                f"Rapid migrations: {migration_count} started in {ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']} minutes",
+                f"Rapid migrations: {migration_count} started in"
+                f" {ANOMALY_THRESHOLDS['rapid_migrations_window_minutes']}"
+                f" minutes",
             )
 
         return False, ""

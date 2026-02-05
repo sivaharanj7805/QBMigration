@@ -20,7 +20,6 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from flask import Flask
 from models import db
 from models.migration import Migration
 
@@ -90,7 +89,9 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
                     migration.strip_sensitive_data()
                     db.session.add(migration)
                     logger.info(
-                        f"Stripped sensitive data from migration {migration.migration_id} (created: {migration.created_at})"
+                        f"Stripped sensitive data from migration"
+                        f" {migration.migration_id}"
+                        f" (created: {migration.created_at})"
                     )
 
                 cleaned_count += 1
@@ -270,7 +271,6 @@ if __name__ == "__main__":
         DATA_RETENTION_HOURS: Number of hours to retain full data (default: 24)
         DRY_RUN: Set to '1' or 'true' for dry run mode (default: false)
     """
-    import json
     import os
     import sys
 
@@ -295,7 +295,7 @@ if __name__ == "__main__":
 
     with app.app_context():
         logger.info("=" * 80)
-        logger.info(f"Zero-Persistence Cleanup Job Starting")
+        logger.info("Zero-Persistence Cleanup Job Starting")
         logger.info(f"Retention: {retention_hours} hours | Dry Run: {dry_run}")
         logger.info("=" * 80)
 

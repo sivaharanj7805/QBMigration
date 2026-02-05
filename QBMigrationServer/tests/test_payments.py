@@ -14,13 +14,10 @@ is made to the app.
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
-from models.database import db
-from models.migration import Migration
 from models.migration_credit import MigrationCredit
-from models.user import User
 
 
 class TestGetTiers:

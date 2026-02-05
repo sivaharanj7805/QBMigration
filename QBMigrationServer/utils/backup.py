@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import boto3
-from botocore.exceptions import ClientError
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -144,7 +143,13 @@ class BackupManager:
                 pgpass_file = pgpass_path
                 try:
                     # .pgpass format: hostname:port:database:username:password
-                    pgpass_entry = f"{parsed.hostname or 'localhost'}:{parsed.port or 5432}:{parsed.path.lstrip('/')}:{parsed.username or 'postgres'}:{parsed.password}\n"
+                    pgpass_entry = (
+                        f"{parsed.hostname or 'localhost'}"
+                        f":{parsed.port or 5432}"
+                        f":{parsed.path.lstrip('/')}"
+                        f":{parsed.username or 'postgres'}"
+                        f":{parsed.password}\n"
+                    )
                     os.write(pgpass_fd, pgpass_entry.encode())
                     os.close(pgpass_fd)
 
@@ -322,7 +327,7 @@ class BackupManager:
             logger.exception(f"Backup decryption failed: {str(e)}")
             return False
 
-    def _verify_backup(self, backup_path):
+    def _verify_backup(self, backup_path):  # noqa: C901
         """
         Verify backup integrity with cryptographic hash verification
 

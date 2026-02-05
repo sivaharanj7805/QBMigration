@@ -109,7 +109,8 @@ def health_check():
             health_status["status"] = "degraded"
             health_status["canadian_residency"] = False
             health_status["data_residency_warning"] = (
-                f"Region '{aws_region}' does not meet Canadian data residency requirements. Must use '{REQUIRED_REGION}'."
+                f"Region '{aws_region}' does not meet Canadian data"
+                f" residency requirements. Must use '{REQUIRED_REGION}'."
             )
 
     # Add timestamp
@@ -126,7 +127,7 @@ def health_check():
 @health_bp.route("/api/health/detailed", methods=["GET"])
 @limiter.limit(DETAILED_RATE_LIMIT)
 @require_admin_auth
-def detailed_health_check():
+def detailed_health_check():  # noqa: C901
     """
     Detailed health check with full compliance verification.
     Used for enterprise deployment validation.
@@ -452,7 +453,7 @@ def detailed_health_check():
 
     # FIX: Database Pool Status (SQLAlchemy connection pool)
     try:
-        from sqlalchemy import pool as sa_pool
+        pass
 
         engine = db.engine
 

@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy.exc import OperationalError, ProgrammingError  # noqa: E402
 
 
 def get_database_url():
@@ -65,7 +65,7 @@ def main():
 
     # Connect to database
     database_url = get_database_url()
-    logger.info(f"Connecting to database...")
+    logger.info("Connecting to database...")
 
     try:
         engine = create_engine(database_url)

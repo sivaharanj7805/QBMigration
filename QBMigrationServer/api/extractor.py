@@ -41,7 +41,6 @@ def _sanitize_url_for_logging(url: str) -> str:
 
     This prevents internal URLs, tokens, and paths from being exposed in logs.
     """
-    import re
     from urllib.parse import urlparse
 
     if not url:
@@ -134,7 +133,10 @@ MINIMUM_FILE_SIZE = 50000  # 50KB minimum for valid executable
 # Windows security bypass instructions for unsigned executables
 WINDOWS_SECURITY_INSTRUCTIONS = {
     "title": "Windows Security Notice",
-    "summary": "Windows may show a security warning because this software is not yet code-signed. This is normal for new software.",
+    "summary": (
+        "Windows may show a security warning because this software"
+        " is not yet code-signed. This is normal for new software."
+    ),
     "browser_warning": {
         "title": "Browser Download Warning",
         "description": 'Your browser may show "This file is not commonly downloaded" or similar.',
@@ -162,7 +164,12 @@ WINDOWS_SECURITY_INSTRUCTIONS = {
             "After extraction, navigate to the folder and run QBExtractor.exe",
         ],
     },
-    "why_warning": "Windows shows these warnings for any software that is not signed with an Extended Validation (EV) code signing certificate. Our software is safe and verified - we are working on obtaining an EV certificate.",
+    "why_warning": (
+        "Windows shows these warnings for any software that is not signed"
+        " with an Extended Validation (EV) code signing certificate."
+        " Our software is safe and verified - we are working on"
+        " obtaining an EV certificate."
+    ),
     "support_url": "https://forensicbridge.ca/support",
 }
 

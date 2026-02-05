@@ -13,7 +13,7 @@ Version: 1.0
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -153,7 +153,7 @@ class S3ObjectLocking:
             days: Retention period in days (default 7 years = 2555 days)
         """
         try:
-            response = self.s3.put_object_lock_configuration(
+            self.s3.put_object_lock_configuration(
                 Bucket=bucket_name,
                 ObjectLockConfiguration={
                     "ObjectLockEnabled": "Enabled",
