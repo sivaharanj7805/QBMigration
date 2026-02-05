@@ -1,0 +1,97 @@
+# =============================================================================
+# Coverage.py Configuration for QBMigration Server
+# =============================================================================
+# Generate report: coverage report
+# HTML report: coverage html
+# =============================================================================
+
+[run]
+# Source directories to measure
+source = .
+branch = True
+parallel = True
+
+# Files/directories to exclude from coverage
+omit =
+    */tests/*
+    */migrations/*
+    */__pycache__/*
+    */venv/*
+    */env/*
+    */.env
+    */conftest.py
+    */setup.py
+    */wsgi.py
+    */gunicorn.conf.py
+
+# Context for coverage (useful for parallel runs)
+dynamic_context = test_function
+
+[report]
+# Minimum coverage percentage
+fail_under = 70
+
+# Exclude lines from coverage
+exclude_lines =
+    # Skip debug-only code
+    pragma: no cover
+    def __repr__
+    def __str__
+
+    # Skip defensive assertions
+    raise AssertionError
+    raise NotImplementedError
+
+    # Skip abstract methods
+    @abstractmethod
+
+    # Skip type checking blocks
+    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
+
+    # Skip platform-specific code
+    if sys.platform
+
+    # Skip main block
+    if __name__ == .__main__.:
+
+    # Skip optional imports
+    except ImportError:
+
+    # Skip logging setup
+    logger = logging.getLogger
+
+# Show missing lines
+show_missing = True
+
+# Precision for percentages
+precision = 2
+
+# Sort by coverage percentage
+sort = Cover
+
+[html]
+# HTML report directory
+directory = coverage_html
+
+# Title for HTML report
+title = QBMigration Server Coverage Report
+
+# Show contexts in HTML report
+show_contexts = True
+
+[xml]
+# XML report file
+output = coverage.xml
+
+[json]
+# JSON report file
+output = coverage.json
+pretty_print = True
+
+[paths]
+# Source path mappings (for CI/CD)
+source =
+    .
+    /app/QBMigrationServer
+    /home/*/QBMigration/QBMigrationServer
