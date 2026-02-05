@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { authFetch } from "@/lib/auth";
 import {
     Database,
     Search,
@@ -62,7 +63,8 @@ export default function VaultPage() {
     const fetchVaultData = async () => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/vault`, { credentials: 'include' });
+            // SECURITY FIX: Use authFetch for proper auth headers and timeout
+            const response = await authFetch(`${API_URL}/api/vault`);
             if (response.ok) {
                 const data = await response.json();
                 setArchivedCompanies(data.companies || []);
@@ -293,9 +295,9 @@ export default function VaultPage() {
                                                 setRestoreError(null);
                                                 setRestoringId(archive.id);
                                                 try {
-                                                    const response = await fetch(`${API_URL}/api/vault/${archive.id}/restore`, {
+                                                    // SECURITY FIX: Use authFetch for CSRF protection
+                                                    const response = await authFetch(`${API_URL}/api/vault/${archive.id}/restore`, {
                                                         method: 'POST',
-                                                        credentials: 'include',
                                                     });
                                                     if (response.ok) {
                                                         fetchVaultData();

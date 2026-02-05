@@ -30,10 +30,11 @@ services:
     environment:
       - FLASK_APP=QBMigrationServer/app.py
       - FLASK_ENV=development
-      - FLASK_DEBUG=1
+      # SECURITY FIX: Debug disabled by default; override in docker-compose.dev.yml
+      - FLASK_DEBUG=${FLASK_DEBUG:-0}
       # SECURITY FIX: Use environment variables for all secrets - fail if not set
       - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - AWS_REGION=${AWS_REGION:-ca-central-1}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
@@ -94,8 +95,9 @@ services:
     image: redis:7-alpine
     container_name: qbmigration-redis
     restart: unless-stopped
+    # SECURITY FIX: Bind Redis to localhost only to prevent external access
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     # SECURITY FIX: Add password authentication to Redis
@@ -131,7 +133,7 @@ services:
     environment:
       # SECURITY FIX: Use environment variables - never hardcode credentials
       - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379/0
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
       - AWS_REGION=${AWS_REGION:-ca-central-1}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
@@ -159,7 +161,7 @@ services:
     environment:
       # SECURITY FIX: Use environment variables - never hardcode credentials
       - DATABASE_URL=postgresql://${POSTGRES_USER:-qbmigration}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-qbmigration}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379/0
     depends_on:
       - postgres
       - redis

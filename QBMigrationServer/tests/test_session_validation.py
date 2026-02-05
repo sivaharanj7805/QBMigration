@@ -306,20 +306,35 @@ class TestCompleteExtraction:
 
 
 class TestSessionStatus:
-    """Tests for GET /api/session/status/<session_id>"""
+    """Tests for GET /api/session/status/<session_id>
 
-    def test_status_nonexistent_session_returns_404(self, client, db_session):
-        """Requesting status for a non-existent session should return 404."""
+    NOTE: The session status endpoint requires authentication via flask_login.
+    Tests use authenticated_client which sets both JWT header and session cookie.
+    """
+
+    def test_status_requires_auth(self, client, db_session):
+        """Requesting status without authentication should return 401."""
         response = client.get("/api/session/status/FB-99990101000000-NOTEXIST")
+        assert response.status_code == 401
+
+    def test_status_nonexistent_session_returns_404(
+        self, authenticated_client, db_session
+    ):
+        """Requesting status for a non-existent session should return 404."""
+        response = authenticated_client.get(
+            "/api/session/status/FB-99990101000000-NOTEXIST"
+        )
         assert response.status_code == 404
         data = response.get_json()
         assert data["found"] is False
 
     def test_status_valid_session_returns_project_info(
-        self, client, db_session, test_project
+        self, authenticated_client, db_session, test_project
     ):
         """Requesting status for a valid session should return project details."""
-        response = client.get(f"/api/session/status/{test_project.session_id}")
+        response = authenticated_client.get(
+            f"/api/session/status/{test_project.session_id}"
+        )
         assert response.status_code == 200
         data = response.get_json()
         assert data["found"] is True
@@ -328,33 +343,49 @@ class TestSessionStatus:
         assert data["status"] == "active"
         assert data["tier"] == "starter"
 
-    def test_status_includes_transaction_info(self, client, db_session, test_project):
+    def test_status_includes_transaction_info(
+        self, authenticated_client, db_session, test_project
+    ):
         """Status response should include transaction limit details."""
-        response = client.get(f"/api/session/status/{test_project.session_id}")
+        response = authenticated_client.get(
+            f"/api/session/status/{test_project.session_id}"
+        )
         data = response.get_json()
         assert "transaction_limit" in data
         assert data["transaction_limit"] == 5000
         assert "transactions_used" in data
         assert "transactions_remaining" in data
 
-    def test_status_includes_device_info(self, client, db_session, test_project):
+    def test_status_includes_device_info(
+        self, authenticated_client, db_session, test_project
+    ):
         """Status response should include device activation counts."""
-        response = client.get(f"/api/session/status/{test_project.session_id}")
+        response = authenticated_client.get(
+            f"/api/session/status/{test_project.session_id}"
+        )
         data = response.get_json()
         assert "devices_active" in data
         assert "max_devices" in data
         assert "extractions_used" in data
         assert "max_extractions" in data
 
-    def test_status_includes_tier_name(self, client, db_session, test_project):
+    def test_status_includes_tier_name(
+        self, authenticated_client, db_session, test_project
+    ):
         """Status response should include the human-readable tier name."""
-        response = client.get(f"/api/session/status/{test_project.session_id}")
+        response = authenticated_client.get(
+            f"/api/session/status/{test_project.session_id}"
+        )
         data = response.get_json()
         assert data["tier_name"] == "Starter"
 
-    def test_status_includes_created_at(self, client, db_session, test_project):
+    def test_status_includes_created_at(
+        self, authenticated_client, db_session, test_project
+    ):
         """Status response should include creation timestamp."""
-        response = client.get(f"/api/session/status/{test_project.session_id}")
+        response = authenticated_client.get(
+            f"/api/session/status/{test_project.session_id}"
+        )
         data = response.get_json()
         assert "created_at" in data
         assert data["created_at"] is not None

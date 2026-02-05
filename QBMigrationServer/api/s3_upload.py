@@ -67,9 +67,24 @@ def get_presigned_url():
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
 
-    # Generate S3 key
+    # SECURITY FIX: Sanitize session_id and file_name to prevent path traversal
+    import re as _re
+
+    if not _re.match(r"^[a-zA-Z0-9\-]{1,100}$", session_id):
+        return jsonify({"error": "Invalid session_id format"}), 400
+
+    safe_file_name = _re.sub(r"[^a-zA-Z0-9._\-]", "_", file_name)[:255]
+    if ".." in safe_file_name or safe_file_name.startswith("/"):
+        return jsonify({"error": "Invalid file_name"}), 400
+
+    # SECURITY FIX: Validate file_size to prevent abuse (max 10 GB)
+    max_file_size = 10 * 1024 * 1024 * 1024
+    if file_size and int(file_size) > max_file_size:
+        return jsonify({"error": "File too large"}), 400
+
+    # Generate S3 key with sanitized inputs
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
+    s3_key = f"migrations/{session_id}/{timestamp}_{safe_file_name}"
 
     bucket = os.getenv("AWS_S3_BUCKET", "forensicbridge-migrations")
 

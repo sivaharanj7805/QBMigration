@@ -440,7 +440,7 @@ export function WhitelabelPreview({
   --brand-primary: ${config.primary_color};
   --brand-secondary: ${config.secondary_color};
   --brand-accent: ${config.accent_color};
-  --brand-name: "${config.company_name}";
+  --brand-name: "${(config.company_name || '').replace(/["\\;<>]/g, '')}";
 }`}
                 </pre>
             </div>

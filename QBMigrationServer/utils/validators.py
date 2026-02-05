@@ -60,12 +60,17 @@ def validate_email(email: str) -> Tuple[bool, str]:
 
 
 def validate_password(password: str) -> Tuple[bool, str]:
-    """Validate password strength"""
+    """Validate password strength.
+
+    SECURITY FIX: Aligned with User._validate_password_strength() requirements:
+    - 12+ characters (PCI DSS v4.0.1 compliant)
+    - Uppercase, lowercase, digit, and special character required
+    """
     if not password:
         return False, "Password is required"
 
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters"
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters"
 
     if len(password) > 128:
         return False, "Password too long (max 128 characters)"
@@ -74,9 +79,18 @@ def validate_password(password: str) -> Tuple[bool, str]:
     has_upper = any(c.isupper() for c in password)
     has_lower = any(c.islower() for c in password)
     has_digit = any(c.isdigit() for c in password)
+    has_special = bool(
+        re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/\\`~]', password)
+    )
 
-    if not (has_upper and has_lower and has_digit):
-        return False, "Password must contain uppercase, lowercase, and number"
+    if not has_upper:
+        return False, "Password must contain at least one uppercase letter"
+    if not has_lower:
+        return False, "Password must contain at least one lowercase letter"
+    if not has_digit:
+        return False, "Password must contain at least one digit"
+    if not has_special:
+        return False, "Password must contain at least one special character"
 
     return True, ""
 

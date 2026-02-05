@@ -34,7 +34,7 @@ class TestAuthentication:
             "/api/auth/register",
             json={
                 "email": "newuser@example.com",
-                "password": "SecurePassword1234",
+                "password": "SecurePassword1234!",
                 "first_name": "New",
                 "last_name": "User",
             },
@@ -55,7 +55,7 @@ class TestAuthentication:
 
         # SECURITY: Verify password is hashed, not plaintext
         assert (
-            user.password_hash != "SecurePassword1234"
+            user.password_hash != "SecurePassword1234!"
         ), "CRITICAL: Password stored in plaintext!"
         assert user.password_hash.startswith("$argon2"), "Password not using Argon2"
 
@@ -67,7 +67,7 @@ class TestAuthentication:
         # VERIFY: User can login with password
         login_response = client.post(
             "/api/auth/login",
-            json={"email": "newuser@example.com", "password": "SecurePassword1234"},
+            json={"email": "newuser@example.com", "password": "SecurePassword1234!"},
         )
         assert (
             login_response.status_code == 200
@@ -87,17 +87,16 @@ class TestAuthentication:
 
         response = client.post(
             "/api/auth/register",
-            json={"email": "test@example.com", "password": "DifferentPassword1234"},
+            json={"email": "test@example.com", "password": "DifferentPassword1234!"},
         )
 
         assert (
-            response.status_code == 409
-        ), f"Expected 409 Conflict, got {response.status_code}"
+            response.status_code == 400
+        ), f"Expected 400 (anti-enumeration), got {response.status_code}"
         data = json.loads(response.data)
         assert data["success"] is False, "Success should be False for duplicate"
-        assert (
-            "already" in data["error"].lower() or "exist" in data["error"].lower()
-        ), "Error message unclear"
+        # API returns generic error to prevent email enumeration
+        assert "error" in data, "Error field missing from response"
 
         # CRITICAL: Verify user count unchanged
         final_count = User.query.count()
@@ -158,7 +157,7 @@ class TestAuthentication:
         for invalid_email in invalid_emails:
             response = client.post(
                 "/api/auth/register",
-                json={"email": invalid_email, "password": "SecurePassword1234"},
+                json={"email": invalid_email, "password": "SecurePassword1234!"},
             )
 
             assert (
@@ -177,7 +176,7 @@ class TestAuthentication:
         """
         response = client.post(
             "/api/auth/login",
-            json={"email": "test@example.com", "password": "TestPassword1234"},
+            json={"email": "test@example.com", "password": "TestPassword1234!"},
         )
 
         assert response.status_code == 200, f"Login failed: {response.data}"
@@ -263,7 +262,7 @@ class TestAuthentication:
             "/api/auth/login",
             json={
                 "email": "test@example.com",
-                "password": "TestPassword1234",  # Correct password!
+                "password": "TestPassword1234!",  # Correct password!
             },
         )
 
@@ -296,7 +295,7 @@ class TestAuthentication:
         """
         # CRITICAL: Try to set same password - should raise ValueError
         with pytest.raises(ValueError) as exc_info:
-            test_user.set_password("TestPassword1234")
+            test_user.set_password("TestPassword1234!")
 
         assert (
             "recently" in str(exc_info.value).lower()
@@ -305,7 +304,7 @@ class TestAuthentication:
 
         # VERIFY: Password unchanged
         assert test_user.check_password(
-            "TestPassword1234"
+            "TestPassword1234!"
         ), "Password was changed when it shouldn't be"
 
     def test_logout(self, authenticated_client, client):
@@ -744,7 +743,7 @@ class TestSecurity:
         ), f"CRITICAL: Not using Argon2! Hash: {test_user.password_hash[:20]}"
 
         # VERIFY: Correct password validates
-        assert test_user.check_password("TestPassword1234"), "Correct password rejected"
+        assert test_user.check_password("TestPassword1234!"), "Correct password rejected"
 
         # VERIFY: Wrong password rejects
         assert not test_user.check_password(
@@ -752,7 +751,7 @@ class TestSecurity:
         ), "Wrong password accepted"
         assert not test_user.check_password(""), "Empty password accepted"
         assert not test_user.check_password(
-            "TestPassword12345"
+            "TestPassword12345!"
         ), "Similar password accepted"
 
     def test_password_hash_uniqueness(self, db_session):
@@ -764,10 +763,10 @@ class TestSecurity:
         - Prevents rainbow table attacks
         """
         user1 = User(email="user1@test.com")
-        user1.set_password("SamePassword123")
+        user1.set_password("SamePassword123!!")
 
         user2 = User(email="user2@test.com")
-        user2.set_password("SamePassword123")
+        user2.set_password("SamePassword123!!")
 
         # CRITICAL: Same password should produce different hashes
         assert (
@@ -784,6 +783,12 @@ class TestSecurity:
         - Backup codes generated
         - 2FA flag set
         """
+        from cryptography.fernet import Fernet
+
+        # Ensure encryption key is set for backup codes storage
+        key = Fernet.generate_key()
+        current_app.config["BACKUP_ENCRYPTION_KEY"] = key.decode()
+
         secret, qr_url, backup_codes = test_user.enable_2fa()
         db_session.commit()
 
@@ -805,9 +810,11 @@ class TestSecurity:
         # VERIFY: 2FA enabled
         assert test_user.mfa_enabled is True, "2FA flag not set"
 
-        # CRITICAL: Secret stored securely
+        # CRITICAL: Secret stored securely (encrypted column, not legacy plaintext)
         db_session.refresh(test_user)
-        assert test_user.mfa_secret is not None, "TOTP secret not persisted"
+        assert test_user._mfa_secret_encrypted is not None, "TOTP secret not persisted"
+        # Legacy plaintext column should be cleared
+        assert test_user.mfa_secret is None, "Legacy mfa_secret should be None"
 
     def test_2fa_verify(self, test_user, db_session):
         """
@@ -859,7 +866,7 @@ class TestSecurity:
         # Login
         client.post(
             "/api/auth/login",
-            json={"email": "test@example.com", "password": "TestPassword1234"},
+            json={"email": "test@example.com", "password": "TestPassword1234!"},
         )
 
         # Get session after login
@@ -893,7 +900,7 @@ class TestSecurity:
                 "/api/auth/register",
                 json={
                     "email": "xss@test.com",
-                    "password": "SecurePassword1234",
+                    "password": "SecurePassword1234!",
                     "first_name": payload,
                 },
             )

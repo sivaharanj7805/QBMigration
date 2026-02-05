@@ -32,9 +32,9 @@ import os
 # SERVER SOCKET
 # =============================================================================
 
-# Bind to all interfaces for EC2 (load balancer will connect)
-# In production, this should be behind an ALB/NLB or nginx
-bind = os.getenv("GUNICORN_BIND", "0.0.0.0:5000")
+# SECURITY FIX: Default to localhost only; override via GUNICORN_BIND env var
+# In production behind ALB/NLB/nginx, set GUNICORN_BIND=0.0.0.0:5000
+bind = os.getenv("GUNICORN_BIND", "127.0.0.1:5000")
 
 # Backlog - number of pending connections
 backlog = 2048

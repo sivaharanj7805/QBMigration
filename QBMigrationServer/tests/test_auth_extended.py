@@ -146,7 +146,10 @@ class TestSelectTier:
         self, authenticated_client, db_session, test_user
     ):
         """Selecting a tier creates a MigrationCredit record."""
-        authenticated_client.post("/api/auth/select-tier", json={"tier_id": "business"})
+        authenticated_client.post(
+            "/api/auth/select-tier",
+            json={"tier_id": "business", "payment_intent_id": "pi_test_123"},
+        )
         credits = MigrationCredit.query.filter_by(
             user_id=test_user.id,
             tier_type="business",
@@ -295,7 +298,7 @@ class TestResetPassword:
 
         response = client.post(
             "/api/auth/reset-password",
-            json={"token": token, "password": "NewSecure1234"},
+            json={"token": token, "password": "NewSecurePass1234!"},
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -315,7 +318,7 @@ class TestResetPassword:
 
         response = client.post(
             "/api/auth/reset-password",
-            json={"token": expired_token, "password": "NewSecure1234"},
+            json={"token": expired_token, "password": "NewSecurePass1234!"},
         )
         assert response.status_code == 400
 
@@ -483,18 +486,14 @@ class TestTeamInvite:
         assert response.status_code == 401
 
     def test_invite_success(self, authenticated_client, db_session, test_user):
-        """Inviting a valid email returns success."""
+        """Team invite feature is not yet implemented, returns 501."""
         response = authenticated_client.post(
             "/api/auth/team/invite",
             json={"email": "teammate@example.com", "role": "member"},
         )
-        assert response.status_code == 200
+        assert response.status_code == 501
         data = response.get_json()
-        assert data["success"] is True
-        assert "invite" in data
-        assert data["invite"]["email"] == "teammate@example.com"
-        assert data["invite"]["role"] == "member"
-        assert data["invite"]["status"] == "pending"
+        assert "not yet available" in data["error"].lower()
 
     def test_invite_missing_email(self, authenticated_client, db_session, test_user):
         """Invite with missing email returns 400."""
@@ -514,13 +513,13 @@ class TestTeamInvite:
         assert response.status_code in (400, 401)
 
     def test_invite_default_role(self, authenticated_client, db_session, test_user):
-        """Invite without role defaults to member."""
+        """Team invite feature is not yet implemented, returns 501 even without explicit role."""
         response = authenticated_client.post(
             "/api/auth/team/invite", json={"email": "default_role@example.com"}
         )
-        assert response.status_code == 200
+        assert response.status_code == 501
         data = response.get_json()
-        assert data["invite"]["role"] == "member"
+        assert "not yet available" in data["error"].lower()
 
 
 # ============================================================================

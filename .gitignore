@@ -104,6 +104,8 @@ desktop.ini
 
 # Test coverage
 .coverage
+coverage.xml
+coverage_html/
 htmlcov/
 .pytest_cache/
 

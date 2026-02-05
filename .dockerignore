@@ -1,0 +1,61 @@
+# Security: Prevent secrets and sensitive files from being copied into Docker images
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.coverage
+coverage_html
+htmlcov
+*.egg-info
+.mypy_cache
+.tox
+
+# Node
+node_modules
+.next
+.turbo
+
+# Test data and logs
+data/
+logs/
+*.log
+test_*.py
+tests/
+
+# Documentation (not needed in runtime image)
+*.md
+docs/
+AcquisitionDocuments/
+
+# Build artifacts
+*.zip
+*.tar.gz
+dist/
+build/
+
+# C# desktop components (not needed in server image)
+QBDesktopReader/bin/
+QBDesktopReader/obj/
+QBMigrationLauncher/bin/
+QBMigrationLauncher/obj/
+ForensicBridgeInstaller/bin/
+ForensicBridgeInstaller/obj/

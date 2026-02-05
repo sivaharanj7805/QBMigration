@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from api.auth import require_auth
 from extensions import limiter
@@ -139,14 +139,18 @@ def create_migration():
         user_id = _get_current_user_id()
         migration_id = str(uuid.uuid4())
 
-        # Use first file name as company name hint
-        company_name = files[0].rsplit(".", 1)[0] if files else "Unknown Company"
+        # SECURITY FIX: Sanitize user-supplied file names before storage
+        from utils.validators import sanitize_string
+
+        raw_file_name = files[0] if files else ""
+        safe_file_name = sanitize_string(raw_file_name, max_length=255)
+        company_name = safe_file_name.rsplit(".", 1)[0] if safe_file_name else "Unknown Company"
 
         migration = Migration(
             migration_id=migration_id,
             user_id=user_id,
-            company_name=company_name,
-            qb_file_name=files[0] if files else "",
+            company_name=sanitize_string(company_name, max_length=255),
+            qb_file_name=safe_file_name,
             status="pending",
             destination=destination,
         )
@@ -673,14 +677,17 @@ def start_migration(migration_id):  # noqa: C901
             db.session.commit()
 
         # Consume one migration credit
+        # SECURITY FIX: Only consume credits that are actually paid
         available_credit = (
-            MigrationCredit.query.filter_by(user_id=user_id, status="available")
+            MigrationCredit.query.filter_by(
+                user_id=user_id, status="available", payment_status="paid"
+            )
             .with_for_update()
             .first()
         )
         if available_credit:
             available_credit.status = "used"
-            available_credit.used_at = datetime.utcnow()
+            available_credit.used_at = datetime.now(timezone.utc)
             available_credit.migration_id = migration.id
             db.session.commit()
 
@@ -1034,9 +1041,10 @@ def execute_migration_celery(migration_id):
         oauth_tokens = None
         user = User.query.get(_get_current_user_id())
         if user and user.qbo_access_token:
+            # SECURITY FIX: Use decryption methods instead of raw encrypted columns
             oauth_tokens = {
-                "access_token": user.qbo_access_token,
-                "refresh_token": user.qbo_refresh_token,
+                "access_token": user.get_qbo_access_token(),
+                "refresh_token": user.get_qbo_refresh_token(),
                 "realm_id": user.qbo_realm_id,
             }
 
