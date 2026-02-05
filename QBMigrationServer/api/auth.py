@@ -407,12 +407,14 @@ def constant_time_compare(a: str, b: str) -> bool:
 
 
 def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
-    """Create a JWT token for a user"""
+    """Create a JWT token for a user with unique JTI for revocation support"""
+    import secrets as _secrets
     payload = {
         'user_id': user_id,
         'email': email,
         'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=expires_hours),
-        'iat': datetime.datetime.now(timezone.utc)
+        'iat': datetime.datetime.now(timezone.utc),
+        'jti': _secrets.token_hex(16)  # Unique token ID for revocation tracking
     }
     return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
 
@@ -460,6 +462,16 @@ def validate_email(email: str) -> bool:
         return bool(re.match(pattern, email))
 
 
+_COMMON_PASSWORDS = frozenset([
+    'password1234', 'qwerty123456', 'letmein12345', 'welcome12345',
+    'password123!', 'admin1234567', 'changeme1234', 'password!234',
+    '123456789abc', 'abcdefgh1234', 'iloveyou1234', 'trustno1pass',
+    'master123456', 'dragon123456', 'monkey1234567', 'shadow123456',
+    'sunshine12345', 'princess12345', 'football12345', 'baseball12345',
+    'abc123456789', 'password12345', 'qwerty1234567', '1234567890ab',
+])
+
+
 def validate_password(password: str) -> Tuple[bool, str]:
     """Validate password strength (PCI DSS v4.0.1 compliant)"""
     if len(password) < 12:
@@ -470,6 +482,8 @@ def validate_password(password: str) -> Tuple[bool, str]:
         return False, 'Password must contain at least one lowercase letter'
     if not re.search(r'\d', password):
         return False, 'Password must contain at least one digit'
+    if password.lower() in _COMMON_PASSWORDS:
+        return False, 'This password is too common. Please choose a more unique password.'
     return True, ''
 
 

@@ -591,8 +591,16 @@ class PremiumMigrationVerifier:
     
     @staticmethod
     def _sanitize_query_value(value: str) -> str:
-        """Strip characters that could break QBO query syntax (defense-in-depth)."""
-        return str(value).replace("'", "").replace('"', '').replace(';', '').replace('\\', '')
+        """Sanitize values for QBO query syntax (defense-in-depth).
+
+        Strips injection-dangerous characters and validates that the result
+        looks like a legitimate QBO entity ID (numeric or alphanumeric).
+        """
+        sanitized = str(value).replace("'", "").replace('"', '').replace(';', '').replace('\\', '').replace('--', '').replace('/*', '').replace('*/', '').strip()
+        # QBO entity IDs are numeric - reject anything that doesn't match
+        if sanitized and not sanitized.replace('-', '').replace('_', '').isalnum():
+            raise ValueError(f"Invalid QBO entity ID format: {sanitized[:20]}")
+        return sanitized
 
     def _get_account_transactions(self, account_id: str, oauth_manager: Optional[Any] = None) -> List[Dict]:
         """

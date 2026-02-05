@@ -135,10 +135,14 @@ class User(UserMixin, db.Model):
         if not self.qbo_access_token:
             return None
         from cryptography.fernet import Fernet
+        import logging
         try:
             f = Fernet(self._get_encryption_key())
             return f.decrypt(self.qbo_access_token.encode()).decode()
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"Failed to decrypt QBO access token for user {self.id}: {type(e).__name__}"
+            )
             return None
 
     def get_qbo_refresh_token(self):
@@ -146,10 +150,14 @@ class User(UserMixin, db.Model):
         if not self.qbo_refresh_token:
             return None
         from cryptography.fernet import Fernet
+        import logging
         try:
             f = Fernet(self._get_encryption_key())
             return f.decrypt(self.qbo_refresh_token.encode()).decode()
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"Failed to decrypt QBO refresh token for user {self.id}: {type(e).__name__}"
+            )
             return None
 
     def clear_qbo_tokens(self):
