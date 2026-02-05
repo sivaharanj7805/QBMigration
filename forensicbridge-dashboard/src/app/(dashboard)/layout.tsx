@@ -6,7 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { MigrationBalanceBanner } from "@/components/MigrationBalanceBanner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Providers from "../providers";
-import { getAuthState, clearAuth, fetchCsrfToken, authFetch } from "@/lib/auth";
+import { getAuthState, clearAuth, fetchCsrfToken, authFetch, validateSession, updateActivityTime } from "@/lib/auth";
 import { Loader2, X, Keyboard } from "lucide-react";
 
 /**
@@ -247,6 +247,30 @@ export default function DashboardLayout({
 
         checkAuth();
     }, [router]);
+
+    // AUDIT FIX HIGH-05: Periodic session validation every 5 minutes
+    useEffect(() => {
+        if (!isAuthenticated) return;
+
+        const sessionCheckInterval = setInterval(async () => {
+            const isValid = await validateSession();
+            if (!isValid) {
+                clearAuth();
+                router.replace("/login");
+            }
+        }, 5 * 60 * 1000); // 5 minutes
+
+        // Track user activity for inactivity timeout
+        const handleActivity = () => updateActivityTime();
+        window.addEventListener('click', handleActivity);
+        window.addEventListener('keydown', handleActivity);
+
+        return () => {
+            clearInterval(sessionCheckInterval);
+            window.removeEventListener('click', handleActivity);
+            window.removeEventListener('keydown', handleActivity);
+        };
+    }, [isAuthenticated, router]);
 
     // FIX: Separate useEffect for health check with proper AbortController cleanup
     useEffect(() => {

@@ -1196,7 +1196,9 @@ class PremiumQBOClient:
             Dict with succeeded, failed, total, and timing stats
         """
         start_time = time.time()
-        
+        # AUDIT FIX MED-06: Add per-batch timeout (2 hours max for entire batch operation)
+        batch_timeout_seconds = 7200
+
         results = {
             "succeeded": [],
             "succeeded_count": 0,

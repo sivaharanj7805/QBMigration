@@ -394,9 +394,19 @@ def get_qbo_plan_recommendation(class_count: int, item_count: int, user_count: i
 def validate_realm_id(token_realm_id: Optional[str] = None) -> bool:
     """
     Validate that REALM_ID matches the OAuth token's realm
-    
+
     SECURITY: Prevents posting data to wrong company
+    AUDIT FIX MED-03: Also validate REALM_ID is numeric format
     """
+    # Validate format - QBO Realm IDs are numeric
+    if REALM_ID and not REALM_ID.isdigit():
+        raise ValueError(
+            f"Invalid REALM_ID format: '{REALM_ID}'. QBO Realm IDs must be numeric."
+        )
+    if token_realm_id and not token_realm_id.isdigit():
+        raise ValueError(
+            f"Invalid token realm_id format: '{token_realm_id}'. QBO Realm IDs must be numeric."
+        )
     if token_realm_id and token_realm_id != REALM_ID:
         raise ValueError(
             f"REALM_ID mismatch! Config: {REALM_ID}, Token: {token_realm_id}\n"

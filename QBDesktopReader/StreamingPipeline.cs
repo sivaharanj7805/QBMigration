@@ -140,7 +140,18 @@ namespace QBDesktopExtractor
             }
             else
             {
-                baseDir = Path.Combine(Path.GetTempPath(), "qbextractor");
+                // AUDIT FIX HIGH-17: Use XDG runtime dir or home-based temp on Linux
+                // This avoids world-readable /tmp and provides user-scoped isolation
+                string xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+                if (!string.IsNullOrEmpty(xdgRuntime) && Directory.Exists(xdgRuntime))
+                {
+                    baseDir = Path.Combine(xdgRuntime, "qbextractor");
+                }
+                else
+                {
+                    string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    baseDir = Path.Combine(homeDir, ".qbextractor", "temp");
+                }
             }
 
             try
@@ -149,6 +160,22 @@ namespace QBDesktopExtractor
                 {
                     Directory.CreateDirectory(baseDir);
                     
+                    // AUDIT FIX HIGH-17: Set restrictive permissions on Linux/macOS (owner-only: 700)
+                    if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                    {
+                        try
+                        {
+                            // Use chmod via UnixFileMode (.NET 7+) or fallback to Process
+                            var dirInfoUnix = new DirectoryInfo(baseDir);
+                            dirInfoUnix.UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+                            _logger?.Log(LogLevel.Debug, "Set Unix permissions 700 on temp directory");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Log(LogLevel.Warning, "Could not set Unix permissions on temp directory: {0}", ex.Message);
+                        }
+                    }
+
                     // On Windows, set restrictive ACLs
                     if (Environment.OSVersion.Platform == PlatformID.Win32NT)
                     {

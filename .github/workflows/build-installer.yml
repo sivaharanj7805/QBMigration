@@ -229,6 +229,18 @@ jobs:
           echo "WARNING: QBExtractor.exe not available (QBFC16 SDK may not be on build machine)"
         fi
 
+    # AUDIT FIX HIGH-13: Generate SHA256 checksums for cryptographic verification
+    - name: Generate SHA256 Checksums
+      run: |
+        echo "=== Generating SHA256 checksums ==="
+        sha256sum *.exe > SHA256SUMS.txt 2>/dev/null || true
+        if [ -s SHA256SUMS.txt ]; then
+          echo "Checksums generated:"
+          cat SHA256SUMS.txt
+        else
+          echo "No artifacts to checksum"
+        fi
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
@@ -264,6 +276,7 @@ jobs:
           QBExtractor.exe
           ForensicBridge_Setup.exe
           ForensicBridge_Launcher.exe
+          SHA256SUMS.txt
         fail-on-unmatched-files: false
         draft: false
         prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}

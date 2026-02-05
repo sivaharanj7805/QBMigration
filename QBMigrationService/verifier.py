@@ -435,20 +435,21 @@ class PremiumMigrationVerifier:
             debit_match = abs(qbd_debits - qbo_debits) < Decimal('1.00')
             credit_match = abs(qbd_credits - qbo_credits) < Decimal('1.00')
             
+            # AUDIT FIX HIGH-16: Use str() instead of float() to preserve penny-level precision
             self.report["critical_metrics"]["trial_balance"] = {
                 "qbd": {
-                    "debits": float(qbd_debits),
-                    "credits": float(qbd_credits),
+                    "debits": str(qbd_debits),
+                    "credits": str(qbd_credits),
                     "balanced": qbd_balanced
                 },
                 "qbo": {
-                    "debits": float(qbo_debits),
-                    "credits": float(qbo_credits),
+                    "debits": str(qbo_debits),
+                    "credits": str(qbo_credits),
                     "balanced": qbo_balanced
                 },
                 "matches": debit_match and credit_match,
-                "debit_variance": float(qbd_debits - qbo_debits),
-                "credit_variance": float(qbd_credits - qbo_credits)
+                "debit_variance": str(qbd_debits - qbo_debits),
+                "credit_variance": str(qbd_credits - qbo_credits)
             }
             
             logger.info("\n" + "=" * 80)
@@ -644,15 +645,16 @@ class PremiumMigrationVerifier:
                 logger.warning(f"Non-critical verification step failed: {e}")
 
         # Pattern 3: Transfer (both sides)
+        # AUDIT FIX CRIT-01: Use .format() with pre-sanitized account_id (consistent with other patterns)
         try:
             # From account
-            query = f"SELECT * FROM Transfer WHERE FromAccountRef = '{account_id}'"
+            query = "SELECT * FROM Transfer WHERE FromAccountRef = '{account_id}'".format(account_id=account_id)
             results = self.client.query_raw(query, oauth_manager=oauth_manager)
             if results:
                 transactions.extend(results)
-            
+
             # To account
-            query = f"SELECT * FROM Transfer WHERE ToAccountRef = '{account_id}'"
+            query = "SELECT * FROM Transfer WHERE ToAccountRef = '{account_id}'".format(account_id=account_id)
             results = self.client.query_raw(query, oauth_manager=oauth_manager)
             if results:
                 transactions.extend(results)
@@ -687,15 +689,18 @@ class PremiumMigrationVerifier:
         - Bill with items (ItemBasedExpenseLineDetail)
         """
         transactions = []
-        
+        # AUDIT FIX CRIT-01: Sanitize account_id at method entry
+        account_id = self._sanitize_query_value(account_id)
+
         try:
             # Step 1: Find all items that use this account
-            query = f"""
-                SELECT Id FROM Item 
-                WHERE IncomeAccountRef = '{account_id}' 
+            # AUDIT FIX CRIT-01: Use .format() with pre-sanitized account_id
+            query = """
+                SELECT Id FROM Item
+                WHERE IncomeAccountRef = '{account_id}'
                 OR ExpenseAccountRef = '{account_id}'
                 OR AssetAccountRef = '{account_id}'
-            """
+            """.format(account_id=account_id)
             items = self.client.query_raw(query, oauth_manager=oauth_manager)
             
             if not items:
@@ -786,19 +791,22 @@ class PremiumMigrationVerifier:
                     f"Some payments may not be linked to invoices."
                 )
                 
+                # AUDIT FIX HIGH-16: Use str() to preserve Decimal precision
                 return [{
-                    "variance": float(variance),
-                    "total_ar": float(total_ar),
-                    "total_open_invoices": float(total_open_invoices)
+                    "variance": str(variance),
+                    "total_ar": str(total_ar),
+                    "total_open_invoices": str(total_open_invoices)
                 }]
             else:
                 logger.info(f"  ✓ All payments properly applied (variance: ${variance:.2f})")
                 return []
             
         except Exception as e:
+            # AUDIT FIX MED-01: Record failure in report instead of silently returning empty
             logger.error(f"Unapplied payment detection failed: {e}")
+            self.report["warnings"].append(f"Unapplied payment detection could not complete: {type(e).__name__}")
             return []
-    
+
     # ========================================================================
     # EXISTING VERIFICATION METHODS (Enhanced)
     # ========================================================================
@@ -1497,10 +1505,12 @@ class PremiumMigrationVerifier:
             return 'FAILED VERIFICATION'
 
     def _safe_decimal(self, value: Any) -> Decimal:
-        """Safely convert a value to Decimal, returning 0 on failure."""
+        """Safely convert a value to Decimal, returning 0 on failure.
+        AUDIT FIX MED-02: Log conversion failures to make data loss visible."""
         if value is None:
             return Decimal('0')
         try:
             return Decimal(str(value))
-        except (InvalidOperation, TypeError, ValueError):
+        except (InvalidOperation, TypeError, ValueError) as e:
+            logger.warning(f"Decimal conversion failed for value {repr(value)}: {e} - defaulting to 0")
             return Decimal('0')

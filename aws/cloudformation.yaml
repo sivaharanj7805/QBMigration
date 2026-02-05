@@ -6,13 +6,11 @@ Parameters:
     Type: String
     Default: production
     AllowedValues: [production, staging]
-  
-  DBPassword:
-    Type: String
-    NoEcho: true
-    MinLength: 16
-    Description: PostgreSQL master password (min 16 chars)
-  
+
+  # AUDIT FIX CRIT-03: Use Secrets Manager dynamic reference instead of plain parameter
+  # DBPassword removed - retrieved from Secrets Manager at runtime
+  # Create secret first: aws secretsmanager create-secret --name forensicbridge/production/db --secret-string '{"password":"YOUR_SECURE_PASSWORD"}'
+
   DomainName:
     Type: String
     Default: api.forensicbridge.io
@@ -349,9 +347,10 @@ Resources:
         Status: Enabled
       LifecycleConfiguration:
         Rules:
+          # AUDIT FIX MED-15: Align lifecycle with LogBucket (365 days) for compliance
           - Id: DeleteOldMigrations
             Status: Enabled
-            ExpirationInDays: 90
+            ExpirationInDays: 365
           - Id: TransitionToGlacier
             Status: Enabled
             Transitions:
@@ -407,7 +406,8 @@ Resources:
       Engine: postgres
       EngineVersion: '15'
       MasterUsername: forensicbridge
-      MasterUserPassword: !Ref DBPassword
+      # AUDIT FIX CRIT-03: Retrieve password from Secrets Manager instead of stack parameter
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:forensicbridge/${Environment}/db:SecretString:password}}'
       AllocatedStorage: 50
       MaxAllocatedStorage: 200
       StorageType: gp3
@@ -415,6 +415,8 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref RDSSecurityGroup
+      # AUDIT FIX HIGH-01: Enable Multi-AZ for high availability
+      MultiAZ: true
       BackupRetentionPeriod: 7
       PreferredBackupWindow: '03:00-04:00'
       PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
@@ -806,6 +808,180 @@ Resources:
           Value: !GetAtt ALB.LoadBalancerFullName
         - Name: TargetGroup
           Value: !GetAtt ALBTargetGroup.TargetGroupFullName
+
+  # ============================================================================
+  # AUDIT FIX HIGH-02: VPC FLOW LOGS
+  # ============================================================================
+  VPCFlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: VPCFlowLogPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: '*'
+
+  VPCFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vpc/forensicbridge-${Environment}
+      RetentionInDays: 365
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogRole.Arn
+      LogGroupName: !Ref VPCFlowLogGroup
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+
+  # ============================================================================
+  # AUDIT FIX HIGH-02: CLOUDTRAIL
+  # ============================================================================
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub forensicbridge-cloudtrail-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldTrailLogs
+            Status: Enabled
+            ExpirationInDays: 365
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${CloudTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: !Sub forensicbridge-${Environment}-trail
+      IsLogging: true
+      S3BucketName: !Ref CloudTrailBucket
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      IsMultiRegionTrail: false
+
+  # ============================================================================
+  # AUDIT FIX: SNS TOPIC FOR ALARM NOTIFICATIONS
+  # ============================================================================
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub forensicbridge-${Environment}-alarms
+      DisplayName: ForensicBridge Alarms
+
+  # ============================================================================
+  # AUDIT FIX HIGH-01: AUTO SCALING GROUP
+  # ============================================================================
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub forensicbridge-${Environment}-lt
+      LaunchTemplateData:
+        InstanceType: t3.small
+        ImageId: !Ref LatestUbuntuAmi
+        SecurityGroupIds:
+          - !Ref EC2SecurityGroup
+        IamInstanceProfile:
+          Arn: !GetAtt EC2InstanceProfile.Arn
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: 30
+              VolumeType: gp3
+              Encrypted: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            apt-get update
+            apt-get install -y python3.11 python3-pip redis-tools postgresql-client nginx awscli jq
+            pip3 install flask celery gunicorn redis psycopg2-binary boto3
+            mkdir -p /opt/forensicbridge
+            cat > /opt/forensicbridge/load_secrets.sh <<'SCRIPT'
+            #!/bin/bash
+            SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id forensicbridge/production --query SecretString --output text --region ${AWS::Region})
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to retrieve secrets from Secrets Manager"
+              exit 1
+            fi
+            DB_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.database_password')
+            export FLASK_ENV=production
+            export DATABASE_URL="postgresql://forensicbridge:$DB_PASSWORD@${Database.Endpoint.Address}:5432/forensicbridge"
+            export REDIS_URL="redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
+            export AWS_S3_BUCKET="${MigrationBucket}"
+            export SECRETS_MANAGER_NAME="forensicbridge/production"
+            exec "$@"
+            SCRIPT
+            chmod +x /opt/forensicbridge/load_secrets.sh
+            echo "ForensicBridge server ready"
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub forensicbridge-${Environment}-asg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      TargetGroupARNs:
+        - !Ref ALBTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub forensicbridge-${Environment}-server
+          PropagateAtLaunch: true
 
 # ============================================================================
 # OUTPUTS

@@ -78,16 +78,23 @@ class ApiClient {
     private maxRetries: number;
     private retryDelayMs: number;
 
+    // AUDIT FIX HIGH-10: Request deduplication to prevent rapid duplicate API calls
+    private inflightRequests: Map<string, Promise<ApiResponse<unknown>>> = new Map();
+    // Minimum interval between identical requests (milliseconds)
+    private requestThrottleMs: number;
+
     constructor(
         baseUrl: string,
         timeout: number = DEFAULT_TIMEOUT_MS,
         maxRetries: number = DEFAULT_MAX_RETRIES,
-        retryDelayMs: number = DEFAULT_RETRY_DELAY_MS
+        retryDelayMs: number = DEFAULT_RETRY_DELAY_MS,
+        requestThrottleMs: number = 200
     ) {
         this.baseUrl = baseUrl;
         this.timeout = timeout;
         this.maxRetries = maxRetries;
         this.retryDelayMs = retryDelayMs;
+        this.requestThrottleMs = requestThrottleMs;
     }
 
     /**
@@ -113,6 +120,45 @@ class ApiClient {
      */
     private generateRequestId(): string {
         return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    }
+
+    /**
+     * AUDIT FIX HIGH-10: Deduplicate identical GET requests that are in-flight
+     * Prevents rapid simultaneous API calls to the same endpoint
+     */
+    private async deduplicatedRequest<T>(
+        endpoint: string,
+        options: RequestInit = {},
+        schema?: z.ZodSchema<T>,
+        customTimeout?: number,
+        signal?: AbortSignal
+    ): Promise<ApiResponse<T>> {
+        const method = (options.method || 'GET').toUpperCase();
+
+        // Only deduplicate GET requests (mutations should always execute)
+        if (method !== 'GET') {
+            return this.request<T>(endpoint, options, schema, customTimeout, signal);
+        }
+
+        const dedupeKey = `${method}:${endpoint}`;
+        const existing = this.inflightRequests.get(dedupeKey);
+        if (existing) {
+            return existing as Promise<ApiResponse<T>>;
+        }
+
+        const requestPromise = this.request<T>(endpoint, options, schema, customTimeout, signal);
+
+        this.inflightRequests.set(dedupeKey, requestPromise as Promise<ApiResponse<unknown>>);
+
+        try {
+            const result = await requestPromise;
+            return result;
+        } finally {
+            // Remove after a short throttle window to prevent rapid re-requests
+            setTimeout(() => {
+                this.inflightRequests.delete(dedupeKey);
+            }, this.requestThrottleMs);
+        }
     }
 
     /**
@@ -324,7 +370,7 @@ class ApiClient {
     // ==========================================
 
     async getDashboardOverview(signal?: AbortSignal) {
-        return this.request(
+        return this.deduplicatedRequest(
             "/api/dashboard/overview",
             {},
             DashboardOverviewSchema,
@@ -334,7 +380,7 @@ class ApiClient {
     }
 
     async getRecentActivity(signal?: AbortSignal) {
-        return this.request<{
+        return this.deduplicatedRequest<{
             activities: Array<{
                 timestamp: string;
                 type: string;
@@ -350,7 +396,7 @@ class ApiClient {
     // ==========================================
 
     async getMigrationStats(signal?: AbortSignal) {
-        return this.request<{
+        return this.deduplicatedRequest<{
             stats: {
                 migrations_this_month: number;
                 total_records: string;
@@ -361,7 +407,7 @@ class ApiClient {
     }
 
     async getMigrations(page: number = 1, perPage: number = 20, signal?: AbortSignal) {
-        return this.request<{
+        return this.deduplicatedRequest<{
             migrations: Array<{
                 id: number;
                 migration_id: string;
@@ -381,7 +427,7 @@ class ApiClient {
     }
 
     async getMigration(migrationId: string, signal?: AbortSignal) {
-        return this.request<{
+        return this.deduplicatedRequest<{
             migration: {
                 id: number;
                 migration_id: string;
@@ -396,7 +442,7 @@ class ApiClient {
     }
 
     async getLiveStatus(migrationId: string, signal?: AbortSignal) {
-        return this.request<{
+        return this.deduplicatedRequest<{
             migration_id: string;
             phase: string;
             phase_number: number;
