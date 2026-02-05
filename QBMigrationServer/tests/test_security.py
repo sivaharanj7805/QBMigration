@@ -290,7 +290,7 @@ class TestInputValidation:
         for email in invalid_emails:
             response = client.post('/api/auth/register', json={
                 'email': email,
-                'password': 'ValidPass123!',
+                'password': 'ValidPassword123!',
                 'first_name': 'Test',
                 'last_name': 'User'
             })

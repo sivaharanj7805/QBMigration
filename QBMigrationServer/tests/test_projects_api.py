@@ -124,7 +124,7 @@ class TestListProjects:
             last_name='User',
             company_name='Other Co'
         )
-        other_user.set_password('OtherPass1')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
 
@@ -334,7 +334,7 @@ class TestGetProject:
             last_name='Person',
             company_name='Other Co'
         )
-        other_user.set_password('OtherPass1')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
 
@@ -457,7 +457,7 @@ class TestUpdateProject:
             last_name='Three',
             company_name='Other Co'
         )
-        other_user.set_password('OtherPass1')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
 
@@ -528,7 +528,7 @@ class TestDeleteProject:
             last_name='Four',
             company_name='Other Co'
         )
-        other_user.set_password('OtherPass1')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
 

@@ -346,7 +346,10 @@ def verify_mfa():
     # Verify TOTP code
     try:
         import pyotp
-        totp_secret = getattr(user, 'mfa_secret', None)
+        # CRITICAL FIX: Use encrypted getter instead of legacy unencrypted column.
+        # user.mfa_secret is the DEPRECATED legacy column (may be empty after migration).
+        # user._get_mfa_secret() decrypts from _mfa_secret_encrypted with Fernet fallback.
+        totp_secret = user._get_mfa_secret() if hasattr(user, '_get_mfa_secret') else getattr(user, 'mfa_secret', None)
         if not totp_secret:
             return jsonify({'success': False, 'error': 'MFA not configured properly'}), 500
 
@@ -458,9 +461,9 @@ def validate_email(email: str) -> bool:
 
 
 def validate_password(password: str) -> Tuple[bool, str]:
-    """Validate password strength"""
-    if len(password) < 8:
-        return False, 'Password must be at least 8 characters'
+    """Validate password strength (PCI DSS v4.0.1 compliant)"""
+    if len(password) < 12:
+        return False, 'Password must be at least 12 characters'
     if not re.search(r'[A-Z]', password):
         return False, 'Password must contain at least one uppercase letter'
     if not re.search(r'[a-z]', password):

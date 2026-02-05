@@ -121,7 +121,7 @@ class TestListMigrations:
             last_name='User',
             company_name='Other Co'
         )
-        other_user.set_password('Other1234')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
         db_session.refresh(other_user)
@@ -198,7 +198,7 @@ class TestGetMigration:
             last_name='User',
             company_name='Other Co'
         )
-        other_user.set_password('Other1234')
+        other_user.set_password('OtherPassword1234')
         db_session.add(other_user)
         db_session.commit()
         db_session.refresh(other_user)

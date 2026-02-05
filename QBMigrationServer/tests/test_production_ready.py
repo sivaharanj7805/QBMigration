@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 # Configuration
 API_BASE_URL = os.getenv('TEST_API_URL', 'http://localhost:5000')
 TEST_EMAIL = f"test_prod_{int(time.time())}@forensicbridge.ca"
-TEST_PASSWORD = "TestPass123!"
+TEST_PASSWORD = "TestPassword123!"
 
 
 def _server_is_running():
