@@ -184,12 +184,13 @@ class OAuthManager:
             )
 
         # Fallback: Derive from client_secret (development only)
-        logger.info("⚠️  Using fallback key derivation (DEVELOPMENT ONLY)")
+        logger.info("Using fallback key derivation (DEVELOPMENT ONLY)")
         logger.info("   Set AWS_KMS_KEY_ID or AZURE_KEYVAULT_URL for production-grade encryption")
 
+        # AUDIT FIX CRIT-06: Increase iterations from 100k to 600k per OWASP 2024 recommendations
         return self.encryption_manager.derive_key_from_password(
             self.client_secret,
-            iterations=100000
+            iterations=600000
         )
     
     # ========================================================================
@@ -372,9 +373,33 @@ class OAuthManager:
                     )
                     
             except requests.exceptions.Timeout:
-                raise Exception("Token refresh timed out. Please try again.")
-            except requests.exceptions.RequestException:
-                raise Exception("Token refresh failed: network error")
+                # AUDIT FIX HIGH-03: Retry with exponential backoff on transient failures
+                if not hasattr(self, '_refresh_retries'):
+                    self._refresh_retries = 0
+                self._refresh_retries += 1
+                if self._refresh_retries <= 3:
+                    import time
+                    import random
+                    delay = (2 ** self._refresh_retries) + random.uniform(0, 1)
+                    logger.warning(f"Token refresh timed out, retry {self._refresh_retries}/3 after {delay:.1f}s")
+                    time.sleep(delay)
+                    return self.refresh_access_token()
+                self._refresh_retries = 0
+                raise Exception("Token refresh timed out after 3 retries.")
+            except requests.exceptions.RequestException as e:
+                # AUDIT FIX HIGH-03: Retry on transient network errors
+                if not hasattr(self, '_refresh_retries'):
+                    self._refresh_retries = 0
+                self._refresh_retries += 1
+                if self._refresh_retries <= 3:
+                    import time
+                    import random
+                    delay = (2 ** self._refresh_retries) + random.uniform(0, 1)
+                    logger.warning(f"Token refresh network error, retry {self._refresh_retries}/3 after {delay:.1f}s")
+                    time.sleep(delay)
+                    return self.refresh_access_token()
+                self._refresh_retries = 0
+                raise Exception("Token refresh failed after 3 retries: network error")
     
     def get_access_token(self) -> str:
         """Get valid access token (refresh if needed)"""

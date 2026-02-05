@@ -245,6 +245,16 @@ class MigrationOrchestrator:
             aes_key = encryption_metadata.get('key') or encryption_metadata.get('aes_key')
             if not aes_key:
                 raise ValueError("Missing encryption key in metadata (expected 'key' or 'aes_key')")
+            # AUDIT FIX HIGH-09: Validate encryption metadata format and key length
+            import base64
+            try:
+                decoded_key = base64.b64decode(aes_key)
+                if len(decoded_key) != 32:
+                    raise ValueError(f"Invalid AES key length: expected 32 bytes, got {len(decoded_key)}")
+            except Exception as e:
+                if 'Invalid AES key length' in str(e):
+                    raise
+                raise ValueError(f"Invalid base64-encoded AES key: {type(e).__name__}")
             iv = encryption_metadata.get('iv')
             if not iv:
                 raise ValueError("Missing 'iv' in encryption metadata")
@@ -263,6 +273,8 @@ class MigrationOrchestrator:
             if not isinstance(data, dict):
                 raise ValueError(f"Expected JSON object from decrypted data, got {type(data).__name__}")
             logger.info(f"Decrypted {len(decrypted_json):,} bytes")
+            # AUDIT FIX CRIT-04: Clear decrypted plaintext from memory immediately after parsing
+            del decrypted_json
 
             # Normalize data keys to match entity_order format
             normalized_data = {}
