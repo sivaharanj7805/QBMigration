@@ -125,6 +125,7 @@ jobs:
         FLASK_ENV: testing
         WEBHOOK_SECRET: ${{ secrets.TEST_WEBHOOK_SECRET }}
         BACKUP_ENCRYPTION_KEY: ${{ secrets.TEST_BACKUP_ENCRYPTION_KEY }}
+        PYTHONPATH: ${{ github.workspace }}/QBMigrationServer
       run: |
         cd QBMigrationServer
         pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
@@ -158,6 +159,8 @@ jobs:
         pip install pytest pytest-cov
 
     - name: Run Service Tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}/QBMigrationService
       run: |
         cd QBMigrationService
         pytest tests/ -v --cov=. --cov-report=xml --cov-report=term-missing
