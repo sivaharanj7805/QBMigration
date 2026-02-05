@@ -41,7 +41,7 @@ def init_observability(app) -> bool:
         OTEL_TRACES_ENABLED: Enable tracing (default: true in production)
         OTEL_METRICS_ENABLED: Enable metrics (default: true)
     """
-    global _tracer_provider, _meter_provider
+    global _tracer_provider
 
     # Check if observability is enabled
     flask_env = os.getenv("FLASK_ENV", "development")
@@ -259,8 +259,6 @@ def shutdown_observability() -> None:
 
     Call this during application shutdown to flush pending traces/metrics.
     """
-    global _tracer_provider, _meter_provider
-
     if _tracer_provider:
         try:
             _tracer_provider.shutdown()

@@ -68,7 +68,6 @@ _tracer: Optional[Any] = None
 
 def get_tracer():
     """Get the global tracer instance."""
-    global _tracer
     return _tracer
 
 

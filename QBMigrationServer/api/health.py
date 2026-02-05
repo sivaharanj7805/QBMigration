@@ -15,6 +15,7 @@ FIX HIGH-03: Added rate limiting to health endpoints
 import hmac
 import logging
 import os
+from datetime import timezone
 from functools import wraps
 
 from extensions import limiter
