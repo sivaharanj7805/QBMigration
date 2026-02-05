@@ -84,9 +84,12 @@ class User(UserMixin, db.Model):
     # SECURITY FIX: MFA secrets encrypted at rest to prevent exposure on DB breach
     _mfa_secret_encrypted = db.Column('mfa_secret_encrypted', db.Text, nullable=True)
     _backup_codes_encrypted = db.Column('backup_codes_encrypted', db.Text, nullable=True)
-    # Legacy columns for migration (will be dropped after data migration)
-    mfa_secret = db.Column(db.String(32), nullable=True)  # DEPRECATED: Use _mfa_secret_encrypted
-    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: Use _backup_codes_encrypted
+    # DEPRECATED LEGACY COLUMNS - Retained only for data migration compatibility.
+    # These columns store UNENCRYPTED MFA data and MUST be dropped after all rows
+    # have been migrated to encrypted columns. See migrate_legacy_mfa_data() below.
+    # SECURITY: Never write new data to these columns - always use encrypted variants.
+    mfa_secret = db.Column(db.String(32), nullable=True)  # DEPRECATED: DROP after migration
+    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: DROP after migration
     
     # Security - Device Fingerprinting
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
@@ -106,11 +109,15 @@ class User(UserMixin, db.Model):
     qbo_connected_at = db.Column(db.DateTime, nullable=True)
 
     def _get_encryption_key(self):
-        """Get encryption key for QBO tokens"""
+        """Get encryption key for QBO tokens.
+
+        MED-02 FIX: Prefers dedicated QBO_ENCRYPTION_KEY over BACKUP_ENCRYPTION_KEY
+        to prevent key reuse across different encryption domains.
+        """
         from flask import current_app
-        key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+        key = current_app.config.get('QBO_ENCRYPTION_KEY') or current_app.config.get('BACKUP_ENCRYPTION_KEY')
         if not key:
-            raise ValueError("BACKUP_ENCRYPTION_KEY not configured - cannot encrypt QBO tokens")
+            raise ValueError("QBO_ENCRYPTION_KEY (or BACKUP_ENCRYPTION_KEY) not configured - cannot encrypt QBO tokens")
         return key.encode() if isinstance(key, str) else key
 
     def set_qbo_tokens(self, access_token, refresh_token, realm_id, expires_at):
@@ -135,10 +142,14 @@ class User(UserMixin, db.Model):
         if not self.qbo_access_token:
             return None
         from cryptography.fernet import Fernet
+        import logging
         try:
             f = Fernet(self._get_encryption_key())
             return f.decrypt(self.qbo_access_token.encode()).decode()
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"Failed to decrypt QBO access token for user {self.id}: {type(e).__name__}"
+            )
             return None
 
     def get_qbo_refresh_token(self):
@@ -146,10 +157,14 @@ class User(UserMixin, db.Model):
         if not self.qbo_refresh_token:
             return None
         from cryptography.fernet import Fernet
+        import logging
         try:
             f = Fernet(self._get_encryption_key())
             return f.decrypt(self.qbo_refresh_token.encode()).decode()
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                f"Failed to decrypt QBO refresh token for user {self.id}: {type(e).__name__}"
+            )
             return None
 
     def clear_qbo_tokens(self):
@@ -292,31 +307,34 @@ class User(UserMixin, db.Model):
     def _validate_password_strength(self, password):
         """
         Validate password meets strength requirements
-        
-        Requirements:
-        - At least 8 characters
+
+        Requirements (PCI DSS v4.0.1 compliant):
+        - At least 12 characters
         - Contains uppercase letter
         - Contains lowercase letter
         - Contains digit
-        
+        - Contains special character (LOW-01 FIX)
+
         Args:
             password: Password to validate
-            
+
         Raises:
             ValueError: If password doesn't meet requirements
         """
-        # PCI DSS v4.0.1 (mandatory since March 2025) requires minimum 12 characters
         if len(password) < 12:
             raise ValueError("Password must be at least 12 characters long")
-        
+
         if not re.search(r'[A-Z]', password):
             raise ValueError("Password must contain at least one uppercase letter")
-        
+
         if not re.search(r'[a-z]', password):
             raise ValueError("Password must contain at least one lowercase letter")
-        
+
         if not re.search(r'\d', password):
             raise ValueError("Password must contain at least one digit")
+
+        if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/\\`~]', password):
+            raise ValueError("Password must contain at least one special character (!@#$%^&*...)")
     
     def check_password_reuse(self, password):
         """
@@ -510,56 +528,74 @@ class User(UserMixin, db.Model):
     # ========================================================================
 
     def _get_mfa_secret(self) -> str:
-        """Get decrypted MFA secret (prefers encrypted, falls back to legacy)."""
+        """Get decrypted MFA secret (prefers encrypted, falls back to legacy).
+
+        MED-01 FIX: Logs deprecation warning when falling back to legacy column
+        to track migration progress. Legacy columns should be dropped once all
+        rows are migrated.
+        """
         # Try encrypted first
         if self._mfa_secret_encrypted:
             try:
                 from cryptography.fernet import Fernet
                 from flask import current_app
-                key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+                key = current_app.config.get('QBO_ENCRYPTION_KEY') or current_app.config.get('BACKUP_ENCRYPTION_KEY')
                 if key:
                     f = Fernet(key.encode() if isinstance(key, str) else key)
                     return f.decrypt(self._mfa_secret_encrypted.encode()).decode()
             except Exception:
                 pass
-        # Fall back to legacy unencrypted column
+        # Fall back to legacy unencrypted column (DEPRECATED)
+        if self.mfa_secret:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"User {self.id} still using legacy unencrypted mfa_secret column. "
+                "Run migrate_legacy_mfa_data() to encrypt."
+            )
         return self.mfa_secret
 
     def _set_mfa_secret(self, value: str):
-        """Set encrypted MFA secret."""
+        """Set encrypted MFA secret.
+
+        MED-01 FIX: Never falls back to plaintext storage. Raises on encryption
+        failure to prevent unencrypted secrets from being persisted.
+        """
         if value is None:
             self._mfa_secret_encrypted = None
-            self.mfa_secret = None
+            self.mfa_secret = None  # Clear legacy column
             return
-        try:
-            from cryptography.fernet import Fernet
-            from flask import current_app
-            key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
-            if key:
-                f = Fernet(key.encode() if isinstance(key, str) else key)
-                self._mfa_secret_encrypted = f.encrypt(value.encode()).decode()
-                self.mfa_secret = None  # Clear legacy column
-                return
-        except Exception:
-            pass
-        # Fall back to legacy if encryption fails
-        self.mfa_secret = value
+        from cryptography.fernet import Fernet
+        from flask import current_app
+        key = current_app.config.get('QBO_ENCRYPTION_KEY') or current_app.config.get('BACKUP_ENCRYPTION_KEY')
+        if not key:
+            raise ValueError("Encryption key not configured - cannot store MFA secret in plaintext")
+        f = Fernet(key.encode() if isinstance(key, str) else key)
+        self._mfa_secret_encrypted = f.encrypt(value.encode()).decode()
+        self.mfa_secret = None  # Clear legacy column
 
     def _get_backup_codes(self) -> list:
-        """Get decrypted backup codes (prefers encrypted, falls back to legacy)."""
+        """Get decrypted backup codes (prefers encrypted, falls back to legacy).
+
+        MED-01 FIX: Logs deprecation warning when falling back to legacy column.
+        """
         # Try encrypted first
         if self._backup_codes_encrypted:
             try:
                 from cryptography.fernet import Fernet
                 from flask import current_app
-                key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
+                key = current_app.config.get('QBO_ENCRYPTION_KEY') or current_app.config.get('BACKUP_ENCRYPTION_KEY')
                 if key:
                     f = Fernet(key.encode() if isinstance(key, str) else key)
                     return json.loads(f.decrypt(self._backup_codes_encrypted.encode()).decode())
             except Exception:
                 pass
-        # Fall back to legacy unencrypted column
+        # Fall back to legacy unencrypted column (DEPRECATED)
         if self.backup_codes:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"User {self.id} still using legacy unencrypted backup_codes column. "
+                "Run migrate_legacy_mfa_data() to encrypt."
+            )
             try:
                 return json.loads(self.backup_codes)
             except (json.JSONDecodeError, TypeError):
@@ -567,24 +603,23 @@ class User(UserMixin, db.Model):
         return None
 
     def _set_backup_codes(self, value: list):
-        """Set encrypted backup codes."""
+        """Set encrypted backup codes.
+
+        MED-01 FIX: Never falls back to plaintext storage. Raises on encryption
+        failure to prevent unencrypted codes from being persisted.
+        """
         if value is None:
             self._backup_codes_encrypted = None
-            self.backup_codes = None
+            self.backup_codes = None  # Clear legacy column
             return
-        try:
-            from cryptography.fernet import Fernet
-            from flask import current_app
-            key = current_app.config.get('BACKUP_ENCRYPTION_KEY')
-            if key:
-                f = Fernet(key.encode() if isinstance(key, str) else key)
-                self._backup_codes_encrypted = f.encrypt(json.dumps(value).encode()).decode()
-                self.backup_codes = None  # Clear legacy column
-                return
-        except Exception:
-            pass
-        # Fall back to legacy if encryption fails
-        self.backup_codes = json.dumps(value)
+        from cryptography.fernet import Fernet
+        from flask import current_app
+        key = current_app.config.get('QBO_ENCRYPTION_KEY') or current_app.config.get('BACKUP_ENCRYPTION_KEY')
+        if not key:
+            raise ValueError("Encryption key not configured - cannot store backup codes in plaintext")
+        f = Fernet(key.encode() if isinstance(key, str) else key)
+        self._backup_codes_encrypted = f.encrypt(json.dumps(value).encode()).decode()
+        self.backup_codes = None  # Clear legacy column
 
     def enable_2fa(self):
         """
@@ -840,3 +875,61 @@ class User(UserMixin, db.Model):
     def is_anonymous(self):
         """Required by Flask-Login"""
         return False
+
+    # ========================================================================
+    # MED-01 FIX: Legacy MFA Data Migration
+    # ========================================================================
+
+    def migrate_legacy_mfa_data(self) -> bool:
+        """Migrate unencrypted legacy MFA columns to encrypted columns.
+
+        Reads plaintext mfa_secret and backup_codes, encrypts them into
+        _mfa_secret_encrypted and _backup_codes_encrypted, then NULLs out
+        the legacy columns. Safe to call multiple times (idempotent).
+
+        Returns:
+            True if data was migrated, False if no legacy data found.
+        """
+        migrated = False
+        if self.mfa_secret and not self._mfa_secret_encrypted:
+            self._set_mfa_secret(self.mfa_secret)
+            migrated = True
+        if self.backup_codes and not self._backup_codes_encrypted:
+            try:
+                codes = json.loads(self.backup_codes)
+                self._set_backup_codes(codes)
+            except (json.JSONDecodeError, TypeError):
+                pass
+            migrated = True
+        return migrated
+
+    @classmethod
+    def migrate_all_legacy_mfa(cls) -> int:
+        """Batch-migrate all users with legacy unencrypted MFA data.
+
+        Usage (in Flask shell or migration script):
+            with app.app_context():
+                count = User.migrate_all_legacy_mfa()
+                db.session.commit()
+                print(f"Migrated {count} users")
+
+        Returns:
+            Number of users migrated.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        users = cls.query.filter(
+            db.or_(
+                db.and_(cls.mfa_secret.isnot(None), cls._mfa_secret_encrypted.is_(None)),
+                db.and_(cls.backup_codes.isnot(None), cls._backup_codes_encrypted.is_(None)),
+            )
+        ).all()
+        count = 0
+        for user in users:
+            try:
+                if user.migrate_legacy_mfa_data():
+                    count += 1
+            except Exception as e:
+                logger.error(f"Failed to migrate MFA data for user {user.id}: {e}")
+        logger.info(f"Legacy MFA migration complete: {count}/{len(users)} users migrated")
+        return count

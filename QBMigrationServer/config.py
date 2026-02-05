@@ -179,7 +179,16 @@ class Config:
     PASSWORD_REQUIRE_LOWERCASE = True
     PASSWORD_REQUIRE_DIGIT = True
     PASSWORD_HISTORY_COUNT = 5  # Remember last 5 passwords
-    
+    PASSWORD_REQUIRE_SPECIAL = True  # LOW-01 FIX: Require special character
+
+    # MED-03 FIX: Configurable JWT algorithm for RS256 readiness
+    # HS256 (symmetric) is default; set to RS256 for distributed/microservice deployments
+    # When using RS256, set JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH
+    JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
+    JWT_ALLOWED_ALGORITHMS = os.getenv('JWT_ALLOWED_ALGORITHMS', 'HS256').split(',')
+    JWT_PRIVATE_KEY_PATH = os.getenv('JWT_PRIVATE_KEY_PATH')  # For RS256: path to PEM private key
+    JWT_PUBLIC_KEY_PATH = os.getenv('JWT_PUBLIC_KEY_PATH')    # For RS256: path to PEM public key
+
     # CAPTCHA
     CAPTCHA_THRESHOLD = int(os.getenv('CAPTCHA_THRESHOLD', '3'))
     RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY')
@@ -187,6 +196,10 @@ class Config:
     
     # Encryption
     BACKUP_ENCRYPTION_KEY = os.getenv('BACKUP_ENCRYPTION_KEY')
+    # MED-02 FIX: Separate encryption key for QBO tokens and MFA secrets.
+    # Falls back to BACKUP_ENCRYPTION_KEY for backwards compatibility, but
+    # production deployments should set a dedicated QBO_ENCRYPTION_KEY.
+    QBO_ENCRYPTION_KEY = os.getenv('QBO_ENCRYPTION_KEY') or os.getenv('BACKUP_ENCRYPTION_KEY')
     ENCRYPTION_KEY_VERSION = os.getenv('ENCRYPTION_KEY_VERSION', 'v1')
     
     # ============================================================================
@@ -606,6 +619,23 @@ def validate_config():
                 f"BACKUP_ENCRYPTION_KEY is invalid: {e}. "
                 "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
             )
+
+    # MED-02 FIX: Validate QBO_ENCRYPTION_KEY if set (separate from backup key)
+    qbo_key = os.getenv('QBO_ENCRYPTION_KEY')
+    if qbo_key:
+        try:
+            from cryptography.fernet import Fernet
+            Fernet(qbo_key.encode() if isinstance(qbo_key, str) else qbo_key)
+        except Exception as e:
+            raise RuntimeError(
+                f"QBO_ENCRYPTION_KEY is invalid: {e}. "
+                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+    elif env == 'production' and backup_key:
+        logger.warning(
+            "QBO_ENCRYPTION_KEY not set - falling back to BACKUP_ENCRYPTION_KEY. "
+            "Set a dedicated QBO_ENCRYPTION_KEY for key separation best practice."
+        )
 
     # Validate DATABASE_URL format
     db_url = os.getenv('DATABASE_URL', '')

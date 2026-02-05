@@ -113,7 +113,7 @@ class TestRunner:
         
         cmd = ["npm", "test", "--", "--run"]
         
-        result = subprocess.run(cmd, cwd=str(frontend_dir), shell=True)
+        result = subprocess.run(cmd, cwd=str(frontend_dir))
         self.results.append(("Frontend Tests", result.returncode == 0))
         return result.returncode == 0
     
@@ -127,7 +127,7 @@ class TestRunner:
         
         cmd = ["dotnet", "test", "--verbosity", "normal"]
         
-        result = subprocess.run(cmd, cwd=str(csharp_dir), shell=True)
+        result = subprocess.run(cmd, cwd=str(csharp_dir))
         self.results.append(("C# Tests", result.returncode == 0))
         return result.returncode == 0
     

@@ -30,6 +30,6 @@
     "jsdom": "^22.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^2.0.0"
+    "vitest": "^2.1.9"
   }
 }

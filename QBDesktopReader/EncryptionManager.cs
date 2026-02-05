@@ -312,10 +312,38 @@ namespace QBDesktopExtractor
                 string kmsEndpoint = Environment.GetEnvironmentVariable("KMS_ENCRYPTION_ENDPOINT");
                 if (!string.IsNullOrEmpty(kmsEndpoint))
                 {
-                    // TODO: Implement KMS encryption when endpoint is configured
-                    throw new CryptographicException(
-                        "KMS encryption is configured but not yet implemented. " +
-                        "This application currently requires Windows DPAPI for key protection.");
+                    // LOW-03 FIX: KMS key wrapping via HTTPS endpoint.
+                    // Sends the raw key to a KMS envelope encryption endpoint that
+                    // wraps it with a master key (e.g. AWS KMS, Azure Key Vault).
+                    // The endpoint must accept POST with raw key bytes and return
+                    // the wrapped (encrypted) key bytes.
+                    try
+                    {
+                        using (var client = new System.Net.Http.HttpClient())
+                        {
+                            client.Timeout = TimeSpan.FromSeconds(10);
+                            var content = new System.Net.Http.ByteArrayContent(key);
+                            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+                            // Add authorization if KMS auth token is configured
+                            string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
+                            if (!string.IsNullOrEmpty(kmsAuthToken))
+                            {
+                                client.DefaultRequestHeaders.Authorization =
+                                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
+                            }
+
+                            var response = client.PostAsync(kmsEndpoint + "/encrypt", content).Result;
+                            response.EnsureSuccessStatusCode();
+                            return response.Content.ReadAsByteArrayAsync().Result;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new CryptographicException(
+                            $"KMS key wrapping failed via {kmsEndpoint}: {ex.Message}. " +
+                            "Ensure the KMS endpoint is reachable and properly configured.", ex);
+                    }
                 }
 
                 // Non-Windows without KMS: SECURITY FIX - throw exception instead of returning plaintext
@@ -380,9 +408,40 @@ namespace QBDesktopExtractor
             // Standard Windows DPAPI protection
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
+                // LOW-03 FIX: Try KMS decryption on non-Windows platforms
+                string kmsEndpoint = Environment.GetEnvironmentVariable("KMS_ENCRYPTION_ENDPOINT");
+                if (!string.IsNullOrEmpty(kmsEndpoint))
+                {
+                    try
+                    {
+                        using (var client = new System.Net.Http.HttpClient())
+                        {
+                            client.Timeout = TimeSpan.FromSeconds(10);
+                            var content = new System.Net.Http.ByteArrayContent(protectedKey);
+                            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+                            string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
+                            if (!string.IsNullOrEmpty(kmsAuthToken))
+                            {
+                                client.DefaultRequestHeaders.Authorization =
+                                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
+                            }
+
+                            var response = client.PostAsync(kmsEndpoint + "/decrypt", content).Result;
+                            response.EnsureSuccessStatusCode();
+                            return response.Content.ReadAsByteArrayAsync().Result;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new CryptographicException(
+                            $"KMS key unwrapping failed via {kmsEndpoint}: {ex.Message}", ex);
+                    }
+                }
+
                 throw new CryptographicException(
                     "DPAPI decryption is only available on Windows. " +
-                    "The protected key appears to be DPAPI-encrypted but this is not a Windows system.");
+                    "Configure KMS_ENCRYPTION_ENDPOINT for non-Windows key protection.");
             }
 
             try
