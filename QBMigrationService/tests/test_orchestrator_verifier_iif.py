@@ -15,21 +15,22 @@ Covers:
 10. End-to-end orchestrator → transformer → verifier flow
 """
 
-import pytest
-import sys
-import os
 import json
-import tempfile
+import os
 import sqlite3
-from unittest.mock import MagicMock, patch, PropertyMock
-from decimal import Decimal
+import sys
+import tempfile
 from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from iif_parser import IIFParser, QuickBooksExportParser
 from data_transformer import QBDataTransformer
+from iif_parser import IIFParser, QuickBooksExportParser
 
 # ============================================================================
 # IIF PARSER TESTS

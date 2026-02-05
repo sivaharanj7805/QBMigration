@@ -14,23 +14,24 @@ Tests the COMPLETE pipeline including:
 All external dependencies (QBO API, S3, OAuth) are mocked.
 """
 
-import os
-import sys
 import json
-import pytest
+import os
 import sqlite3
+import sys
 import tempfile
 import time
-from unittest.mock import patch, MagicMock, call
-from decimal import Decimal
 from collections import defaultdict
 from copy import deepcopy
+from decimal import Decimal
+from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_transformer import QBDataTransformer
-from qbo_client import PremiumQBOClient
 from orchestrator import MigrationOrchestrator
+from qbo_client import PremiumQBOClient
 
 # ============================================================================
 # FIXTURES

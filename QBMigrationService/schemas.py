@@ -21,7 +21,7 @@ Author: QB Service
 Version: 3.2.0 (Enterprise Security Edition)
 """
 
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ============================================================================
 # QB DESKTOP INPUT SCHEMAS

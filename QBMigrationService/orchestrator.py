@@ -19,23 +19,23 @@ Usage:
     result = orchestrator.run_migration(encrypted_data, encryption_metadata)
 """
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
 import time
 import uuid
-from typing import Dict, Any, Callable, Optional, List, Tuple, TYPE_CHECKING
-from datetime import datetime, timezone
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 # FIX #35: TYPE_CHECKING for forward references without circular imports
 if TYPE_CHECKING:
+    from data_transformer import QBDataTransformer
     from encryption import EncryptionManager
     from oauth_manager import OAuthManager
     from qbo_client import PremiumQBOClient
-    from data_transformer import QBDataTransformer
     from verifier import PremiumMigrationVerifier
 
 # Configure logging
@@ -125,9 +125,10 @@ class MigrationOrchestrator:
     def _init_oauth(self) -> "OAuthManager":
         """Initialize OAuth manager"""
         if self._oauth_manager is None:
-            from oauth_manager import OAuthManager
             from pathlib import Path
+
             import config as svc_config
+            from oauth_manager import OAuthManager
 
             # Get OAuth URLs from config module
             self._oauth_manager = OAuthManager(
@@ -144,8 +145,8 @@ class MigrationOrchestrator:
     def _init_qbo_client(self, access_token: str) -> "PremiumQBOClient":
         """Initialize or update QBO client with current access token."""
         if self._qbo_client is None:
-            from qbo_client import PremiumQBOClient
             import config as svc_config
+            from qbo_client import PremiumQBOClient
 
             self._qbo_client = PremiumQBOClient(
                 access_token=access_token,
@@ -1652,10 +1653,11 @@ if __name__ == "__main__":
     result = orchestrator.run_migration(encrypted_data, metadata)
 
     # Report result to server via webhook
-    import requests
-    import hmac
     import hashlib
+    import hmac
     from datetime import datetime
+
+    import requests
 
     # SECURITY FIX: Align signature algorithm with server expectations
     # Server expects: HMAC-SHA256(migration_id:timestamp)

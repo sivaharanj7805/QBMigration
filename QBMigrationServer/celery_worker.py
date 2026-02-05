@@ -9,8 +9,9 @@ Usage:
     celery -A QBMigrationServer.celery_worker beat --loglevel=info
 """
 
-import os
 import logging
+import os
+
 from celery import Celery
 from flask import Flask
 
@@ -77,7 +78,7 @@ def make_celery(app: Flask = None) -> Celery:
         celery.conf.update(app.config)
 
         # Create a task base class that runs within Flask app context
-        class ContextTask(celery.Task):
+        class ContextTask(celery.Task):  # type: ignore[name-defined]
             def __call__(self, *args, **kwargs):
                 with app.app_context():
                     return self.run(*args, **kwargs)

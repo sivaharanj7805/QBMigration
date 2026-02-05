@@ -12,6 +12,7 @@ For EC2 deployment:
 """
 
 import os
+
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)

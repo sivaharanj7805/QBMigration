@@ -54,15 +54,15 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import os
+import hashlib
 import json
 import logging
-import hashlib
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+import os
 import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 # Configure audit logger
 AUDIT_LOG_FILE = os.path.join(
@@ -245,7 +245,7 @@ class AuditLogger:
         # Also log to standard logger for aggregation
         self.app_logger = logging.getLogger(__name__)
 
-    def _hash_pii(self, value: str) -> str:
+    def _hash_pii(self, value: str) -> Optional[str]:
         """Hash PII for privacy compliance."""
         if not value:
             return None
@@ -254,7 +254,7 @@ class AuditLogger:
     def _get_request_context(self) -> Dict[str, Any]:
         """Extract context from current Flask request."""
         try:
-            from flask import request, g
+            from flask import g, request
 
             return {
                 "ip": request.remote_addr,
@@ -566,7 +566,7 @@ def init_audit_logging(app):
     # Add correlation ID to each request
     @app.before_request
     def add_correlation_id():
-        from flask import request, g
+        from flask import g, request
 
         g.correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
 

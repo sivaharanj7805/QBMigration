@@ -14,8 +14,8 @@ Usage:
     init_observability(app)
 """
 
-import os
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -60,17 +60,17 @@ def init_observability(app) -> bool:
     try:
         # Import OpenTelemetry components
         from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter,
         )
 
         # Import auto-instrumentation
         from opentelemetry.instrumentation.flask import FlaskInstrumentor
-        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
         from opentelemetry.instrumentation.requests import RequestsInstrumentor
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+        from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         # Service resource
         service_name = os.getenv("OTEL_SERVICE_NAME", "forensicbridge-server")
@@ -137,11 +137,11 @@ def _init_metrics(app, resource) -> None:
 
     try:
         from opentelemetry import metrics
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
             OTLPMetricExporter,
         )
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
         # Check for OTLP metrics endpoint
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")

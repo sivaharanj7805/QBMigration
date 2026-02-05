@@ -4,9 +4,9 @@ Rigorous testing of all components
 """
 
 import json
-import tempfile
 import os
 import sys
+import tempfile
 
 
 def test_caseware_exporter():

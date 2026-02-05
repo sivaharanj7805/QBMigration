@@ -1,7 +1,8 @@
 import os
+from datetime import datetime
+
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 db = SQLAlchemy()
 

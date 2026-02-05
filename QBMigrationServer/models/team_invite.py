@@ -2,9 +2,10 @@
 TeamInvite model - tracks team member invitations and team membership.
 """
 
-from datetime import datetime, timedelta, timezone
-from models.database import db
 import secrets
+from datetime import datetime, timedelta, timezone
+
+from models.database import db
 
 
 class TeamInvite(db.Model):

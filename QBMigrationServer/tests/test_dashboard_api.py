@@ -13,14 +13,15 @@ Tests cover:
 FIXED: Uses authenticated_client fixture properly for all authenticated endpoints
 """
 
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, patch, MagicMock
+import os
 
 # Import Flask app
 import sys
-import os
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

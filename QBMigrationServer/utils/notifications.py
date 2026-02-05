@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime, timezone
+
 from flask import current_app
 from flask_mail import Mail, Message
-from datetime import datetime, timezone
 from markupsafe import escape as html_escape
 
 logger = logging.getLogger(__name__)

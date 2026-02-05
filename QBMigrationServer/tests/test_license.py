@@ -3,9 +3,10 @@ License API Unit Tests
 Tests for license validation, activation, usage tracking endpoints
 """
 
-import pytest
 import json
 from datetime import datetime, timedelta
+
+import pytest
 
 
 class TestLicenseAPI:

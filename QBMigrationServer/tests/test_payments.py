@@ -12,15 +12,15 @@ We register it via a conftest-level fixture that runs before any request
 is made to the app.
 """
 
-import pytest
-import uuid
 import json
-from datetime import datetime, timezone, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from models.database import db
-from models.user import User
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
+from models.user import User
 
 
 class TestGetTiers:

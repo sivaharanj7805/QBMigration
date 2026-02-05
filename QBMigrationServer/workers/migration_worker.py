@@ -1,11 +1,12 @@
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timedelta, timezone
+
 from celery import Celery
 from models.database import db
 from models.migration import Migration
-from datetime import datetime, timedelta, timezone
-import os
-import sys
-import json
-import logging
 
 # SECURITY FIX: Initialize logger to prevent NameError
 logger = logging.getLogger(__name__)
@@ -15,9 +16,9 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "..", "QBMigrationService")
 )
 
-from encryption import EncryptionManager
-from data_retention import DataRetentionManager
 from audit_logger import AuditLogger
+from data_retention import DataRetentionManager
+from encryption import EncryptionManager
 
 # Initialize Celery
 celery = Celery("migration_worker")

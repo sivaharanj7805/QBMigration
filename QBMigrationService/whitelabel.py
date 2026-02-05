@@ -8,14 +8,14 @@ Allows CPA firms to rebrand the migration tool with:
 - License key management
 """
 
-import json
+import base64
 import hashlib
+import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
-import base64
-import logging
 
 logger = logging.getLogger(__name__)
 

@@ -10,12 +10,13 @@ Advanced AWS features for enterprise compliance:
 Version: 1.0
 """
 
-import boto3
+import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+
+import boto3
 from botocore.exceptions import ClientError
-from typing import Optional, Dict, List, Tuple
-import json
 
 logger = logging.getLogger(__name__)
 

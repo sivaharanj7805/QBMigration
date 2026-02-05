@@ -26,11 +26,11 @@ Author: ForensicBridge Team
 Version: 1.0.0
 """
 
+import logging
 import os
 import time
-import logging
 from functools import wraps
-from typing import Optional, Callable, Any
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +40,15 @@ METRICS_ENABLED = os.getenv("ENABLE_PROMETHEUS_METRICS", "true").lower() == "tru
 # Try to import prometheus_client, gracefully degrade if not available
 try:
     from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        REGISTRY,
+        CollectorRegistry,
         Counter,
-        Histogram,
         Gauge,
+        Histogram,
         Info,
         generate_latest,
-        CONTENT_TYPE_LATEST,
-        CollectorRegistry,
         multiprocess,
-        REGISTRY,
     )
 
     PROMETHEUS_AVAILABLE = True
@@ -164,13 +164,13 @@ def track_request_metrics():
         return lambda: None, lambda r: r
 
     def before_request():
-        from flask import request, g
+        from flask import g, request
 
         g.start_time = time.time()
         ACTIVE_REQUESTS.inc()
 
     def after_request(response):
-        from flask import request, g
+        from flask import g, request
 
         # Skip metrics endpoint to avoid recursion
         if request.path == "/metrics":
@@ -369,7 +369,7 @@ def setup_celery_metrics():
         return
 
     try:
-        from celery.signals import task_prerun, task_postrun, task_failure
+        from celery.signals import task_failure, task_postrun, task_prerun
 
         @task_prerun.connect
         def task_prerun_handler(task_id, task, *args, **kwargs):

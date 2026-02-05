@@ -11,10 +11,10 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import re
-import os
 import logging
-from typing import Optional, Dict, Any, Tuple
+import os
+import re
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ SENSITIVE_PATTERNS = [
     (r'/home/[^/]+/.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),
     (r'/var/[^/]+/.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),
     (r'/usr/[^/]+/.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),
-    (r'/tmp/.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),
+    (r'/tmp/.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),  # nosec B108
     (r'C:\\.*?(?=[\s\'"\\]|$)', "[REDACTED_PATH]"),
     # IMPROVED: Database errors (PostgreSQL, MySQL, SQLite) - More comprehensive patterns
     # PostgreSQL-specific errors
@@ -389,7 +389,7 @@ def sanitize_error_message(error: Exception, context: Optional[str] = None) -> s
         "/home/",
         "/var/",
         "/usr/",
-        "/tmp/",
+        "/tmp/",  # nosec B108
         "C:\\",
         "SQLSTATE",
         "psycopg2",

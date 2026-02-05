@@ -3,13 +3,14 @@ Encryption Manager for ForensicBridge Server
 Provides RSA key management for hybrid encryption with QBDesktopReader v3.1+
 """
 
-import os
-import logging
-import threading
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.backends import default_backend
 import base64
+import logging
+import os
+import threading
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 logger = logging.getLogger(__name__)
 

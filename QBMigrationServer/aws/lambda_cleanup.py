@@ -4,10 +4,11 @@ Triggered by CloudWatch Events every 15 minutes
 Cleans up orphaned EC2 instances and S3 files
 """
 
-import boto3
 import logging
-from datetime import datetime, timedelta, timezone
 import os
+from datetime import datetime, timedelta, timezone
+
+import boto3
 
 # Initialize AWS clients
 ec2 = boto3.client("ec2")

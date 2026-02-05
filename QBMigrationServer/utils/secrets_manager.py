@@ -12,12 +12,12 @@ Usage:
     secrets = get_all_secrets()
 """
 
-import os
 import json
 import logging
-import time
+import os
 import threading
-from typing import Dict, Any, Optional
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

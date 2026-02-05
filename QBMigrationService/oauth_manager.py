@@ -15,15 +15,16 @@ Version: 2.0 (Production)
 Grade: A+
 """
 
-import requests
-import time
-import json
 import base64
+import json
+import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict
 from threading import Lock
-import logging
+from typing import Dict, List, Optional
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -384,8 +385,8 @@ class OAuthManager:
                     self._refresh_retries = 0
                 self._refresh_retries += 1
                 if self._refresh_retries <= 3:
-                    import time
                     import random
+                    import time
 
                     delay = (2**self._refresh_retries) + random.uniform(0, 1)
                     logger.warning(
@@ -401,8 +402,8 @@ class OAuthManager:
                     self._refresh_retries = 0
                 self._refresh_retries += 1
                 if self._refresh_retries <= 3:
-                    import time
                     import random
+                    import time
 
                     delay = (2**self._refresh_retries) + random.uniform(0, 1)
                     logger.warning(

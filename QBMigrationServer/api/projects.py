@@ -6,14 +6,14 @@ Projects are created when a user has a paid migration credit.
 Each project is tied to a specific tier that determines transaction limits.
 """
 
-from flask import Blueprint, request, jsonify
 from datetime import datetime, timezone
 
-from models import db, Project, Migration
-from models.database import is_postgresql
-from models.project import generate_session_id
-from models.migration_credit import MigrationCredit
 from api.auth import require_auth
+from flask import Blueprint, jsonify, request
+from models import Migration, Project, db
+from models.database import is_postgresql
+from models.migration_credit import MigrationCredit
+from models.project import generate_session_id
 
 projects_bp = Blueprint("projects", __name__, url_prefix="/api/projects")
 

@@ -15,8 +15,9 @@ These tests verify the Python transformer handles these conditions correctly:
 3. Minimal data (only required fields) still transforms correctly
 """
 
-import sys
 import os
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

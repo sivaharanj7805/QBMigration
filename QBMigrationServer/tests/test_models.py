@@ -5,12 +5,13 @@ Tests cover all public methods, edge cases, and state transitions
 for the three core domain models.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
 from models.database import db
-from models.user import User
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
+from models.user import User
 
 # ============================================================================
 # USER MODEL TESTS

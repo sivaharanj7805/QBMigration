@@ -10,9 +10,9 @@ Usage:
     python scripts/migrate_database.py
 """
 
+import logging
 import os
 import sys
-import logging
 
 logger = logging.getLogger(__name__)
 

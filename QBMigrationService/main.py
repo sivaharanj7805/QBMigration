@@ -21,33 +21,34 @@ Author: QB Service
 Version: 3.2.0 (Enterprise Security Edition)
 """
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
 # Initialize logger at module level
 logger = logging.getLogger(__name__)
 
+from audit_logger import AuditLogger
+
 # Import all modules
 from config import (
-    initialize_directories,
-    validate_production_access,
+    DATA_RETENTION_HOURS,
     INPUT_FILE,
     OUTPUT_DIR,
-    DATA_RETENTION_HOURS,
+    initialize_directories,
     sanitize_migration_id,
+    validate_production_access,
 )
-from encryption import EncryptionManager
-from data_transformer import QBDataTransformer
-from qbo_client import QBOClient
-from oauth_manager import OAuthManager
-from verifier import PremiumMigrationVerifier
-from audit_logger import AuditLogger
-from security import SecurityManager, SecurityError
 from data_retention import DataRetentionManager
+from data_transformer import QBDataTransformer
+from encryption import EncryptionManager
+from oauth_manager import OAuthManager
+from qbo_client import QBOClient
+from security import SecurityError, SecurityManager
+from verifier import PremiumMigrationVerifier
 
 
 class MigrationOrchestrator:
@@ -280,10 +281,10 @@ class MigrationOrchestrator:
             if client_id and client_secret and refresh_token:
                 try:
                     from config import (
-                        OAUTH_TOKEN_URL,
+                        DATA_DIR,
                         OAUTH_INTROSPECT_URL,
                         OAUTH_REVOKE_URL,
-                        DATA_DIR,
+                        OAUTH_TOKEN_URL,
                         TOKEN_REFRESH_BUFFER_SECONDS,
                     )
 

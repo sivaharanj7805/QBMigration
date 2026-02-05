@@ -3,10 +3,11 @@ Comprehensive End-to-End Tests for Core Features
 Tests: Report Generation, Reconciliation Shield, Caseware Bundle, Discrepancy Doctor
 """
 
-import pytest
 import json
 import os
 import sys
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

@@ -3,12 +3,13 @@ Pytest configuration and fixtures for QB Migration Server tests
 Ensures isolated, repeatable tests with proper database management
 """
 
-import pytest
-import sys
-import os
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy import text
 import logging
+import os
+import sys
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.orm import scoped_session, sessionmaker
 
 # Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -19,8 +20,8 @@ os.environ["FLASK_ENV"] = "testing"
 
 from app import create_app
 from models.database import db
-from models.user import User
 from models.migration import Migration
+from models.user import User
 
 # Configure logging for tests
 logging.basicConfig(level=logging.WARNING)

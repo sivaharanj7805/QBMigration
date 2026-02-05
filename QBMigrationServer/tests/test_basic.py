@@ -2,8 +2,8 @@
 Basic tests to verify setup
 """
 
-import sys
 import os
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -13,9 +13,9 @@ def test_imports():
     """Test that we can import our modules"""
     try:
         from app import create_app
-        from models.user import User
-        from models.migration import Migration
         from models.database import db
+        from models.migration import Migration
+        from models.user import User
 
         assert True
     except ImportError as e:

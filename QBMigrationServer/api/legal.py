@@ -5,8 +5,9 @@ Required for Intuit App Registration and compliance (GDPR, PIPEDA, PCI-DSS)
 100/100 FIX: Added comprehensive legal documentation
 """
 
-from flask import Blueprint, render_template, redirect, url_for, jsonify
 from datetime import datetime
+
+from flask import Blueprint, jsonify, redirect, render_template, url_for
 
 legal_bp = Blueprint("legal", __name__, url_prefix="/legal")
 

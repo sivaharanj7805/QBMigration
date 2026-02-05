@@ -16,7 +16,7 @@ Version: 1.0.0
 
 import logging
 import threading
-from typing import Dict, Optional, Literal
+from typing import Dict, Literal, Optional
 
 logger = logging.getLogger(__name__)
 

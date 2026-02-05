@@ -13,13 +13,13 @@ Use VPC, security groups, or API Gateway with IAM auth in production.
 FIX 100/100: Added rate limiting and minimized health endpoint response.
 """
 
-from datetime import datetime, timezone
-from functools import wraps
 import hmac
 import logging
 import os
+from datetime import datetime, timezone
+from functools import wraps
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, current_app, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -132,9 +132,10 @@ def trigger_processing():
 
     try:
         # Find the migration by session_id
-        from models.migration import Migration
-        from models.database import db
         import re
+
+        from models.database import db
+        from models.migration import Migration
 
         # SECURITY FIX: Validate session_id format (UUID) to prevent injection
         uuid_pattern = r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
@@ -243,8 +244,8 @@ def cleanup_expired():
     Called by scheduled Lambda or CloudWatch Events.
     """
     try:
-        from models.team_invite import TeamInvite
         from models.migration_credit import MigrationCredit
+        from models.team_invite import TeamInvite
 
         results = {}
 

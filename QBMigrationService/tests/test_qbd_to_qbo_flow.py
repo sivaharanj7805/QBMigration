@@ -9,26 +9,27 @@ All external dependencies (QBO API, S3, OAuth) are mocked.
 Author: QBMigration Test Suite
 """
 
-import os
-import sys
-import json
 import hashlib
-import pytest
+import json
+import os
 import sqlite3
+import sys
 import tempfile
 import time
-from unittest.mock import patch, MagicMock, PropertyMock, call
-from decimal import Decimal
-from datetime import datetime
 from collections import defaultdict
 from copy import deepcopy
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import MagicMock, PropertyMock, call, patch
+
+import pytest
 
 # Ensure the project root is on sys.path so imports resolve correctly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data_transformer import QBDataTransformer
-from qbo_client import PremiumQBOClient
 from orchestrator import MigrationOrchestrator
+from qbo_client import PremiumQBOClient
 from verifier import PremiumMigrationVerifier
 
 # ============================================================================

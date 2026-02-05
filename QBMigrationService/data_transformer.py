@@ -33,23 +33,26 @@ USAGE:
     logger.info(f"Trial Balance: {result['trial_balance']}")
 """
 
-import re
 import html
 import logging
-from typing import Dict, List, Set, Optional, Tuple, Any
+import multiprocessing as mp
+import re
+import threading
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
 from decimal import (
-    Decimal,
     ROUND_HALF_UP,
+    Context,
+    Decimal,
     InvalidOperation,
     getcontext,
     localcontext,
-    Context,
 )
-from datetime import datetime
-from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing as mp
-import threading
+from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
+
+# Type alias for QBO entity payloads
+QBOEntity = Dict[str, Any]
 
 # MEDIUM FIX: Set proper decimal context for QB rounding
 # QuickBooks uses specific rounding rules that we must match exactly
@@ -107,7 +110,7 @@ class QBDataTransformer:
         self.enable_multi_currency = enable_multi_currency
 
         # ID mappings (QBD → QBO)
-        self.id_mapping = defaultdict(dict)
+        self.id_mapping: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
 
         # TaxRate cache: QBD rate ID → {Name, Rate, AgencyRef, ApplicableOn}
         # Populated by transform_taxrate(), consumed by transform_taxcode()
@@ -166,7 +169,10 @@ class QBDataTransformer:
     # ========================================================================
 
     def transform_parallel(
-        self, qb_data: Dict, max_workers: int = None, timeout_seconds: int = 3600
+        self,
+        qb_data: Dict,
+        max_workers: Optional[int] = None,
+        timeout_seconds: int = 3600,
     ) -> Dict:
         """
         PRODUCTION-GRADE parallel transformation with shared state.
@@ -217,7 +223,9 @@ class QBDataTransformer:
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
 
-    def _transform_parallel_impl(self, qb_data: Dict, max_workers: int = None) -> Dict:
+    def _transform_parallel_impl(
+        self, qb_data: Dict, max_workers: Optional[int] = None
+    ) -> Dict:
         """Internal implementation of parallel transformation (called with timeout wrapper)."""
         if max_workers is None:
             max_workers = max(1, mp.cpu_count() - 1)
@@ -468,10 +476,9 @@ class QBDataTransformer:
                     stats["processed"] += 1
 
                     # Sync display name back to shared state
-                    if "DisplayName" in result:
-                        shared_names[result["DisplayName"].lower()] = True
-                    elif "Name" in result:
-                        shared_names[result["Name"].lower()] = True
+                    name_to_sync = result.get("DisplayName") or result.get("Name")
+                    if name_to_sync and isinstance(name_to_sync, str):
+                        shared_names[name_to_sync.lower()] = True
                 else:
                     stats["skipped"] += 1
             except Exception as e:
@@ -485,8 +492,7 @@ class QBDataTransformer:
             key = et.lower()
             if key not in shared_id_mapping:
                 shared_id_mapping[key] = {}
-            for qbd_id, qbo_id in mappings.items():
-                shared_id_mapping[key][qbd_id] = qbo_id
+            shared_id_mapping[key].update(mappings)
 
         return transformed, stats
 
@@ -931,7 +937,7 @@ class QBDataTransformer:
         base = name
         key = name.lower()
         if key in self.used_display_names:
-            counter = self._display_name_counters.get(key, 1) + 1
+            counter = (self._display_name_counters.get(key) or 1) + 1
             name = f"{base} ({counter})"
             while name.lower() in self.used_display_names:
                 counter += 1
@@ -1857,8 +1863,13 @@ class QBDataTransformer:
                 if item_lines and "ItemLines" not in normalized:
                     normalized["ItemLines"] = item_lines
             else:
-                if line_key not in normalized:
-                    normalized[line_key] = norm_lines
+                existing = normalized.get(line_key)
+                if existing is None:
+                    normalized[line_key] = list(norm_lines)
+                elif isinstance(existing, list):
+                    existing.extend(norm_lines)
+                else:
+                    normalized[line_key] = [existing] + list(norm_lines)
 
         return normalized
 
@@ -2125,15 +2136,17 @@ class QBDataTransformer:
 
     def transform_billpayment(self, qbd: Dict) -> Optional[Dict]:
         """Transform BillPayment."""
-        txn_date = qbd.get("TxnDate", "Unknown")
+        unique_id = (
+            qbd.get("TxnID") or qbd.get("ListID") or qbd.get("TxnDate", "Unknown")
+        )
 
         # CRITICAL FIX: Validate required VendorRef
         vendor_id, vendor_valid = self.map_id_required(
             entity_type="vendors",
             qbd_id=qbd.get("VendorRef"),
-            entity_name=f"Vendor for BillPayment",
+            entity_name=f"Vendor for BillPayment {unique_id}",
             parent_entity_type="BillPayment",
-            parent_entity_name=f"BillPayment {txn_date}",
+            parent_entity_name=f"BillPayment {unique_id}",
         )
 
         if not vendor_valid:
@@ -3932,10 +3945,10 @@ class QBDataTransformer:
         self,
         qb_data: Dict,
         output_dir: str,
-        as_of_date: str = None,
-        start_date: str = None,
-        end_date: str = None,
-    ) -> Dict:
+        as_of_date: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Transform QB data for Caseware Audit Bundle output.
 

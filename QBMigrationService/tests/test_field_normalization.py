@@ -13,8 +13,9 @@ Python transformer (expects PascalCase), enabling seamless end-to-end migration.
 TEST-FN: Field Normalization Tests
 """
 
-import sys
 import os
+import sys
+
 import pytest
 
 # Add parent directory to path

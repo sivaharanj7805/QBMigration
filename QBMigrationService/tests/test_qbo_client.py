@@ -12,16 +12,17 @@ Tests cover:
 7. OAuth Token Management
 """
 
-import pytest
 import json
-import time
-import sqlite3
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
-from concurrent.futures import ThreadPoolExecutor
-import threading
 import os
+import sqlite3
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

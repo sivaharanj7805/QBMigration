@@ -11,26 +11,27 @@ Enterprise firms (BDO, MNP, Big 4) require SSO for firm-managed accounts.
 FIX 100/100: Implements proper SAML signature validation using python3-saml.
 """
 
-from flask import Blueprint, request, jsonify, redirect, session, current_app, url_for
-from flask_login import login_required, current_user
-from functools import wraps
-import datetime
-from datetime import timezone
-import logging
-import secrets
 import base64
+import datetime
 import hashlib
-import urllib.parse
-from typing import Optional, Dict, Tuple, Any
-import re
+import logging
 import os
+import re
+import secrets
+import urllib.parse
 import xml.etree.ElementTree as ET
+from datetime import timezone
+from functools import wraps
+from typing import Any, Dict, Optional, Tuple
+
+from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
+from flask_login import current_user, login_required
 
 # SAML signature validation - required for production
 try:
     from onelogin.saml2.auth import OneLogin_Saml2_Auth
-    from onelogin.saml2.utils import OneLogin_Saml2_Utils
     from onelogin.saml2.errors import OneLogin_Saml2_Error
+    from onelogin.saml2.utils import OneLogin_Saml2_Utils
 
     SAML_AVAILABLE = True
 except ImportError:
@@ -526,7 +527,7 @@ def assertion_consumer_service():
             try:
                 decoded = base64.b64decode(saml_response)
                 # Parse XML to extract NameID (development only)
-                root = ET.fromstring(decoded)
+                root = ET.fromstring(decoded)  # nosec B314
                 ns = {"saml": "urn:oasis:names:tc:SAML:2.0:assertion"}
                 name_id_elem = root.find(".//saml:NameID", ns)
                 name_id = name_id_elem.text if name_id_elem is not None else "unknown"

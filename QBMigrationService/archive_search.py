@@ -21,14 +21,14 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import re
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
-from decimal import Decimal, InvalidOperation
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

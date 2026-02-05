@@ -17,20 +17,20 @@ Endpoints tested:
 - POST /api/auth/sync-credits
 """
 
-import pytest
-import jwt
 import datetime
-from datetime import timezone
-from unittest.mock import patch, MagicMock
-
-import sys
 import os
+import sys
+from datetime import timezone
+from unittest.mock import MagicMock, patch
+
+import jwt
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.database import db
-from models.user import User
 from models.migration_credit import MigrationCredit
+from models.user import User
 
 # ============================================================================
 # CSRF Token Endpoint

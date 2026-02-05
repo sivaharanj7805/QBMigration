@@ -7,23 +7,24 @@ File Upload API Endpoints
 - v3.1 QB Extractor compatibility (NEW)
 """
 
-from flask import Blueprint, request, jsonify, current_app
+import base64
+import hashlib
+import json
+import logging
+import os
+import re
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from io import BytesIO
+
 from api.auth import require_auth
+from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request
 from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
-from extensions import limiter
-import hashlib
-import logging
-import os
-import uuid
-import base64
-import re
-import json
-import threading
-import time
-from datetime import datetime, timezone
-from io import BytesIO
 
 
 def sanitize_input(value, max_length=255):

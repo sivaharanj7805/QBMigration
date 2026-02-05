@@ -1,6 +1,7 @@
-from sqlalchemy import create_engine, text
-import os
 import logging
+import os
+
+from sqlalchemy import create_engine, text
 
 logger = logging.getLogger(__name__)
 

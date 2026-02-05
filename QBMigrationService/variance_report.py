@@ -6,11 +6,11 @@ for QBD source vs QBO destination to enable CPA sign-off.
 """
 
 import json
+import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional
 from pathlib import Path
-import logging
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

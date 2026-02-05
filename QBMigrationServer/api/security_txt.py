@@ -9,9 +9,10 @@ vulnerabilities according to the security.txt standard.
 Reference: https://securitytxt.org/
 """
 
-from flask import Blueprint, Response
-from datetime import datetime, timezone
 import os
+from datetime import datetime, timezone
+
+from flask import Blueprint, Response
 
 security_txt_bp = Blueprint("security_txt", __name__)
 

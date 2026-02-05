@@ -11,10 +11,11 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import pytest
 import json
 import re
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 from flask import Flask
 
 

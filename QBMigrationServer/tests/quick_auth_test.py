@@ -3,8 +3,8 @@ Quick standalone auth test - bypasses pytest fixture issues
 Run with: python tests/quick_auth_test.py
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

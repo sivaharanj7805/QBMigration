@@ -6,9 +6,9 @@ Usage:
     python init_database.py
 """
 
+import logging
 import os
 import sys
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +31,9 @@ def init_database():
 
     with app.app_context():
         # Import all models so SQLAlchemy knows about them
-        from models.user import User
-        from models.migration import Migration
         from models.license import License
+        from models.migration import Migration
+        from models.user import User
 
         logger.info("\n1. Creating all database tables...")
         db.create_all()
@@ -41,7 +41,7 @@ def init_database():
 
         # Add any missing columns
         logger.info("\n2. Checking for missing columns...")
-        from sqlalchemy import text, inspect
+        from sqlalchemy import inspect, text
 
         inspector = inspect(db.engine)
         existing_columns = [col["name"] for col in inspector.get_columns("users")]

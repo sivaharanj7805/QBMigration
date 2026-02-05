@@ -15,16 +15,17 @@ Run with: python -m pytest tests/test_master_e2e.py -v
 This is the ONE test that validates the entire pipeline.
 """
 
-import pytest
-import json
 import hashlib
-import tempfile
+import json
 import os
 import sys
+import tempfile
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

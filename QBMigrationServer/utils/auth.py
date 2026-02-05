@@ -1,4 +1,5 @@
 from functools import wraps
+
 from flask import jsonify
 from flask_login import current_user
 

@@ -1,11 +1,12 @@
-from models.database import db
-from datetime import datetime, timedelta, timezone
-from flask import current_app
-import uuid
-import json
-from cryptography.fernet import Fernet, InvalidToken
 import hashlib
+import json
 import logging
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from cryptography.fernet import Fernet, InvalidToken
+from flask import current_app
+from models.database import db
 
 # Configuration constants (CQ-05: Extracted from magic numbers)
 MIGRATION_EXPIRY_HOURS = 48
@@ -502,8 +503,8 @@ class Migration(db.Model):
         two concurrent webhooks could both pass the is_webhook_processed check
         and both get processed.
         """
-        from sqlalchemy import text
         from models.database import is_postgresql
+        from sqlalchemy import text
 
         try:
             # RACE CONDITION FIX: Use database-level locking (PostgreSQL only)

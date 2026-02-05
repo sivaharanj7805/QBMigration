@@ -1,11 +1,12 @@
-from flask import Blueprint, request, jsonify, current_app
+import hashlib
+import hmac
+import logging
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from flask import Blueprint, current_app, jsonify, request
 from models.database import db, is_postgresql
 from models.migration import Migration
-from datetime import datetime, timedelta, timezone
-import logging
-import hmac
-import hashlib
-import uuid
 from utils.pii_redaction import hash_email
 
 webhooks_bp = Blueprint("webhooks", __name__)

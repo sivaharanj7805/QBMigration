@@ -3,13 +3,13 @@ Health Check API
 Pre-migration file scan and PDF report generation
 """
 
-from flask import Blueprint, request, jsonify, send_file
-from datetime import datetime, timezone
-import tempfile
 import os
+import tempfile
+from datetime import datetime, timezone
 from io import BytesIO
 
 from api.auth import require_auth
+from flask import Blueprint, jsonify, request, send_file
 from models import db
 
 health_check_bp = Blueprint("health_check", __name__, url_prefix="/api/health-check")
@@ -113,9 +113,9 @@ def generate_report(session_id):
     # For now, generate a basic PDF
 
     try:
+        from reportlab.lib.colors import HexColor
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
-        from reportlab.lib.colors import HexColor
 
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=letter)

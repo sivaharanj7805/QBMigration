@@ -15,12 +15,14 @@ PRODUCTION NOTES:
 - Updates migration status in real-time via webhooks
 """
 
-import os
-import sys
 import json
 import logging
-from datetime import datetime
-from celery.signals import task_prerun, task_postrun, task_failure
+import os
+import sys
+from datetime import datetime, timezone
+from typing import Optional
+
+from celery.signals import task_failure, task_postrun, task_prerun
 
 # Add QBMigrationService to path
 SERVICE_PATH = os.path.join(
@@ -42,9 +44,9 @@ from QBMigrationServer.celery_worker import celery
 def update_migration_status(
     migration_id: str,
     status: str,
-    progress: int = None,
-    message: str = None,
-    error: str = None,
+    progress: Optional[int] = None,
+    message: Optional[str] = None,
+    error: Optional[str] = None,
 ):
     """
     Update migration status in database and notify via webhook.
@@ -113,8 +115,8 @@ def run_migration_task(
     self,
     migration_id: str,
     encrypted_file_path: str,
-    user_id: int = None,
-    oauth_tokens: dict = None,
+    user_id: Optional[int] = None,
+    oauth_tokens: Optional[dict] = None,
 ):
     """
     Execute QBO migration as background task.
@@ -137,8 +139,8 @@ def run_migration_task(
 
     try:
         # Import QBMigrationService components
-        from main import MigrationOrchestrator
         from config import initialize_directories
+        from main import MigrationOrchestrator
 
         # Setup environment for OAuth if provided
         if oauth_tokens:
@@ -192,7 +194,9 @@ def run_migration_task(
 
 
 @celery.task(bind=True, name="tasks.generate_caseware_export")
-def generate_caseware_export_task(self, migration_id: str, output_path: str = None):
+def generate_caseware_export_task(
+    self, migration_id: str, output_path: Optional[str] = None
+):
     """
     Generate Caseware export bundle as background task.
 
@@ -257,7 +261,7 @@ def cleanup_expired_files_task():
     max_retries=3,
     default_retry_delay=60,
 )
-def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
+def cleanup_migration_async(self, migration_id: str, instance_id: Optional[str] = None):
     """
     Async cleanup of AWS resources after migration completion.
 
@@ -268,10 +272,11 @@ def cleanup_migration_async(self, migration_id: str, instance_id: str = None):
         migration_id: Migration UUID
         instance_id: Optional EC2 instance ID to terminate
     """
+    from datetime import datetime, timezone
+
     from app import create_app
     from models.database import db
     from models.migration import Migration
-    from datetime import datetime, timezone
 
     logger.info(f"Starting async cleanup for migration {migration_id}")
 
@@ -325,10 +330,11 @@ def cleanup_orphaned_resources():
     PRODUCTION FIX: Also cleans up migrations stuck in intermediate states
     (e.g., 'processing') for too long, which would otherwise leak EC2 instances.
     """
+    from datetime import datetime, timedelta, timezone
+
     from app import create_app
     from models.database import db
     from models.migration import Migration
-    from datetime import datetime, timezone, timedelta
     from sqlalchemy import or_
 
     logger.info("Starting orphaned resource cleanup")

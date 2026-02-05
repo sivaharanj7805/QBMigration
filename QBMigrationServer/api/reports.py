@@ -10,17 +10,18 @@ Provides API endpoints for:
 FIX: Added rate limiting and path traversal protection
 """
 
-from flask import Blueprint, request, jsonify, current_app, send_file
-from api.auth import require_auth
-from models.database import db
-from models.migration import Migration
-from extensions import limiter
-import logging
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
 from io import BytesIO
+
+from api.auth import require_auth
+from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request, send_file
+from models.database import db
+from models.migration import Migration
 
 logger = logging.getLogger(__name__)
 
@@ -493,17 +494,17 @@ def get_record_count(migration_id):
 def _generate_variance_report(migration, output_path):
     """Generate a variance analysis report PDF."""
     try:
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
         from reportlab.platypus import (
-            SimpleDocTemplate,
             Paragraph,
+            SimpleDocTemplate,
             Spacer,
             Table,
             TableStyle,
         )
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib import colors
-        from reportlab.lib.units import inch
 
         doc = SimpleDocTemplate(output_path, pagesize=letter)
         styles = getSampleStyleSheet()
@@ -593,8 +594,8 @@ def _generate_health_report(migration, output_path):
     """Generate a health check report PDF."""
     try:
         from reportlab.lib.pagesizes import letter
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
         doc = SimpleDocTemplate(output_path, pagesize=letter)
         styles = getSampleStyleSheet()
@@ -635,17 +636,17 @@ def _generate_health_report(migration, output_path):
 def _generate_discrepancy_report(migration, output_path):
     """Generate a discrepancy analysis report PDF."""
     try:
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
         from reportlab.platypus import (
-            SimpleDocTemplate,
             Paragraph,
+            SimpleDocTemplate,
             Spacer,
             Table,
             TableStyle,
         )
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib import colors
-        from reportlab.lib.units import inch
 
         doc = SimpleDocTemplate(output_path, pagesize=letter)
         styles = getSampleStyleSheet()

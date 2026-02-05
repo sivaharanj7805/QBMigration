@@ -14,11 +14,11 @@ Author: QB Service
 Version: 3.1.0
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any, Tuple
-from decimal import Decimal
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 # ============================================================================
 # ENUMS
