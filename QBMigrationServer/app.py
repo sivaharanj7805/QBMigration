@@ -38,6 +38,7 @@ from api.reports import reports_bp
 from api.internal import internal_bp  # CRIT-09 FIX: Internal API for Lambda
 from api.settings import settings_bp
 from api.vault import vault_bp
+from api.security_txt import security_txt_bp  # FIX 100/100: RFC 9116 security.txt
 import sys
 
 
@@ -873,7 +874,8 @@ def create_app(config_name='development'):
     app.register_blueprint(internal_bp)  # CRIT-09 FIX: Internal API for Lambda/service calls
     app.register_blueprint(settings_bp)
     app.register_blueprint(vault_bp)
-    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor, session_validation, reports, internal, settings, vault')
+    app.register_blueprint(security_txt_bp)  # FIX 100/100: RFC 9116 security.txt
+    app.logger.info('Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor, session_validation, reports, internal, settings, vault, security_txt')
     
     # Initialize backup scheduler
     if app.config.get('BACKUP_ENABLED', False):

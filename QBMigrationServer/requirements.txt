@@ -22,6 +22,9 @@ bcrypt==4.1.2
 pyotp==2.9.0
 qrcode==7.4.2
 
+# Security - SAML SSO
+python3-saml==1.16.0  # FIX: SAML signature validation (100/100 audit)
+
 # Security - Rate Limiting
 limits==5.6.0
 redis==5.0.1
@@ -46,6 +49,7 @@ email-validator==2.1.0
 
 # HTTP Requests
 requests==2.32.5
+requests-oauthlib==1.3.1  # FIX: Required for OAuth2 flows (Snyk dependency)
 urllib3==2.6.3  # Pinned to fix SNYK-PYTHON-URLLIB3-14896210
 
 # JWT (if needed)

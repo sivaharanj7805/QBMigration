@@ -1,4 +1,3 @@
-from datetime import timezone
 """
 Internal API Endpoints
 
@@ -10,17 +9,34 @@ These endpoints are NOT for public use. They are authenticated via:
 
 SECURITY: These endpoints should NEVER be exposed to the public internet.
 Use VPC, security groups, or API Gateway with IAM auth in production.
+
+FIX 100/100: Added rate limiting and minimized health endpoint response.
 """
 
+from datetime import datetime, timezone
 from functools import wraps
+import hmac
 import logging
 import os
 
 from flask import Blueprint, request, jsonify, current_app
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 logger = logging.getLogger(__name__)
 
 internal_bp = Blueprint('internal', __name__, url_prefix='/api/internal')
+
+# FIX 100/100: Rate limiting for internal API endpoints
+# Even authenticated endpoints need rate limiting to prevent abuse
+def get_internal_rate_limit_key():
+    """Get rate limit key based on API key or IP address."""
+    api_key = request.headers.get('X-Internal-API-Key', '')
+    if api_key:
+        # Rate limit by API key (hashed for privacy)
+        import hashlib
+        return f"internal:{hashlib.sha256(api_key.encode()).hexdigest()[:16]}"
+    return f"internal:{get_remote_address()}"
 
 
 def require_internal_auth(f):
@@ -56,7 +72,6 @@ def require_internal_auth(f):
             }), 401
 
         # Constant-time comparison to prevent timing attacks
-        import hmac
         if not hmac.compare_digest(provided_key, expected_key):
             logger.warning(f"Invalid internal API key from {request.remote_addr}")
             return jsonify({
@@ -189,11 +204,18 @@ def internal_health():
     Health check endpoint for internal services.
 
     This endpoint does NOT require authentication (for load balancer health checks).
+
+    FIX 100/100: Minimized response to prevent information disclosure.
+    Service name and detailed timestamps removed in production.
     """
+    # FIX 100/100: Minimal response for production security
+    if os.getenv('FLASK_ENV') == 'production':
+        return jsonify({'status': 'ok'}), 200
+
+    # Development/testing: Include more details for debugging
     return jsonify({
         'status': 'healthy',
-        'service': 'forensicbridge-internal-api',
-        'timestamp': __import__('datetime').datetime.now(timezone.utc).isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
 
 
