@@ -18,7 +18,6 @@ Grade: A+
 import base64
 import json
 import logging
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -396,7 +395,7 @@ class OAuthManager:
                     return self.refresh_access_token()
                 self._refresh_retries = 0
                 raise Exception("Token refresh timed out after 3 retries.")
-            except requests.exceptions.RequestException as e:
+            except requests.exceptions.RequestException:
                 # AUDIT FIX HIGH-03: Retry on transient network errors
                 if not hasattr(self, "_refresh_retries"):
                     self._refresh_retries = 0

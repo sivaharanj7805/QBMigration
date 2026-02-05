@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -39,7 +38,7 @@ def sanitize_input(value, max_length=255):
     - Underscores (_)
     - Periods (.)
 
-    Blocks dangerous characters: {}[]()&|*$<>"'/\;`~!@#%^+=
+    Blocks dangerous characters: {}[]()&|*$<>"'/\\;`~!@#%^+=
     """
     if not value or not isinstance(value, str):
         return value
@@ -129,7 +128,7 @@ def get_public_key():
 @upload_bp.route("/validate", methods=["POST"])
 @limiter.limit("20 per minute")
 @require_auth
-def validate_upload():
+def validate_upload():  # noqa: C901
     """
     Validate an uploaded file before migration.
     Checks file format, size, and returns record count.
@@ -168,7 +167,10 @@ def validate_upload():
                 jsonify(
                     {
                         "success": False,
-                        "error": f'Unsupported file type: .{ext}. Allowed: {", ".join("." + e for e in sorted(allowed_extensions))}',
+                        "error": (
+                            f"Unsupported file type: .{ext}."
+                            f' Allowed: {", ".join("." + e for e in sorted(allowed_extensions))}'
+                        ),
                     }
                 ),
                 400,
@@ -489,7 +491,7 @@ def _handle_original_upload(data, user):
         )
 
 
-def _handle_v31_upload(data, user):
+def _handle_v31_upload(data, user):  # noqa: C901
     """
     Handle v3.1 format upload (NEW)
     """
@@ -857,7 +859,7 @@ def upload_ndjson_bundle():
 
                 if content_b64:
                     content_bytes = base64.b64decode(content_b64)
-                    s3_key = f"migrations/{migration_id}/{file_name}"
+                    f"migrations/{migration_id}/{file_name}"
 
                     # Upload to S3
                     result = aws.upload_to_s3(

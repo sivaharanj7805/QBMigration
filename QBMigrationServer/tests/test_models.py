@@ -8,7 +8,6 @@ for the three core domain models.
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from models.database import db
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
 from models.user import User
@@ -157,9 +156,9 @@ class TestUserModel:
         self, app, db_session, test_user
     ):
         """Successful login should update last_login and last_login_at."""
-        before = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
         test_user.record_successful_login()
-        after = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
 
         assert test_user.last_login is not None
         assert test_user.last_login_at is not None

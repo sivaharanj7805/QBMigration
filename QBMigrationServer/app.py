@@ -5,46 +5,51 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import sys
-from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
+import sys  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from logging.handlers import RotatingFileHandler  # noqa: E402
 
-from api.auth import auth_bp
-from api.dashboard_api import dashboard_bp
-from api.extractor import extractor_bp
-from api.health import health_bp
-from api.health_check import health_check_bp
-from api.internal import internal_bp  # CRIT-09 FIX: Internal API for Lambda
-from api.legal import legal_bp
-from api.license_api import license_bp
-from api.migrations import migrations_bp
-from api.projects import projects_bp
-from api.qbo import qbo_bp
-from api.reports import reports_bp
-from api.s3_upload import s3_upload_bp
-from api.security_txt import security_txt_bp  # FIX 100/100: RFC 9116 security.txt
-from api.session_validation import session_validation_bp
-from api.settings import settings_bp
-from api.sso_provider import sso_bp
-from api.upload import upload_bp
-from api.vault import vault_bp
-from api.webhook_delivery_log import webhook_logs_bp
-from api.webhooks import webhooks_bp
-from api.websocket import init_socketio, websocket_bp
-from config import config  # Import config BEFORE dashboard_api to avoid path conflict
-from extensions import limiter
-from flask import Flask, jsonify, redirect, request
-from flask_cors import CORS
-from flask_login import LoginManager
-from flask_wtf.csrf import CSRFError, CSRFProtect
-from models.database import db, init_db
-from models.user import User
-from sqlalchemy import text
-from utils.backup import init_backup_scheduler
-from utils.cleanup_scheduler import init_cleanup_scheduler
-from utils.error_sanitizer import (
+from api.auth import auth_bp  # noqa: E402
+from api.dashboard_api import dashboard_bp  # noqa: E402
+from api.extractor import extractor_bp  # noqa: E402
+from api.health import health_bp  # noqa: E402
+from api.health_check import health_check_bp  # noqa: E402
+from api.internal import (  # noqa: E402  # CRIT-09 FIX: Internal API for Lambda
+    internal_bp,
+)
+from api.legal import legal_bp  # noqa: E402
+from api.license_api import license_bp  # noqa: E402
+from api.migrations import migrations_bp  # noqa: E402
+from api.projects import projects_bp  # noqa: E402
+from api.qbo import qbo_bp  # noqa: E402
+from api.reports import reports_bp  # noqa: E402
+from api.s3_upload import s3_upload_bp  # noqa: E402
+from api.security_txt import (  # noqa: E402  # FIX 100/100: RFC 9116 security.txt
+    security_txt_bp,
+)
+from api.session_validation import session_validation_bp  # noqa: E402
+from api.settings import settings_bp  # noqa: E402
+from api.sso_provider import sso_bp  # noqa: E402
+from api.upload import upload_bp  # noqa: E402
+from api.vault import vault_bp  # noqa: E402
+from api.webhook_delivery_log import webhook_logs_bp  # noqa: E402
+from api.webhooks import webhooks_bp  # noqa: E402
+from api.websocket import init_socketio, websocket_bp  # noqa: E402
+from config import (  # noqa: E402  # Import config BEFORE dashboard_api to avoid path conflict
+    config,
+)
+from extensions import limiter  # noqa: E402
+from flask import Flask, jsonify, redirect, request  # noqa: E402
+from flask_cors import CORS  # noqa: E402
+from flask_login import LoginManager  # noqa: E402
+from flask_wtf.csrf import CSRFError, CSRFProtect  # noqa: E402
+from models.database import db, init_db  # noqa: E402
+from models.user import User  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from utils.backup import init_backup_scheduler  # noqa: E402
+from utils.cleanup_scheduler import init_cleanup_scheduler  # noqa: E402
+from utils.error_sanitizer import (  # noqa: E402
     create_error_response,
-    is_production,
     sanitize_error_message,
 )
 
@@ -440,14 +445,16 @@ def auto_migrate_database(app):
 
             conn.commit()
             app.logger.info(
-                "Database schema verified/updated successfully (including migrations, whitelabel_settings, migration_credit tables)"
+                "Database schema verified/updated successfully"
+                " (including migrations, whitelabel_settings,"
+                " migration_credit tables)"
             )
     except Exception as e:
         # Log but don't crash - columns might already exist or other non-fatal issue
         app.logger.warning(f"Schema migration note: {str(e)}")
 
 
-def create_app(config_name="development"):
+def create_app(config_name="development"):  # noqa: C901
     """Application factory pattern - creates and configures Flask app"""
 
     app = Flask(__name__)
@@ -486,9 +493,8 @@ def create_app(config_name="development"):
 
     # SECURITY: Validate critical encryption keys at startup
     # FIX #43: Validate BACKUP_ENCRYPTION_KEY is a valid Fernet key
-    import base64
 
-    from cryptography.fernet import Fernet, InvalidToken
+    from cryptography.fernet import Fernet
 
     backup_key = app.config.get("BACKUP_ENCRYPTION_KEY")
     if not backup_key:
@@ -496,7 +502,9 @@ def create_app(config_name="development"):
             raise ValueError(
                 "CRITICAL: BACKUP_ENCRYPTION_KEY must be set in production. "
                 "This key is required for encrypting QBO OAuth tokens. "
-                "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                "Generate a key with: python -c "
+                "'from cryptography.fernet import Fernet;"
+                " print(Fernet.generate_key().decode())'"
             )
         else:
             # Generate a key for development/testing
@@ -520,8 +528,11 @@ def create_app(config_name="development"):
     except Exception as e:
         raise ValueError(
             f"CRITICAL: BACKUP_ENCRYPTION_KEY is invalid: {str(e)}. "
-            "The key must be a valid Fernet key (32 bytes, base64-encoded, 44 characters). "
-            "Generate a new key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            "The key must be a valid Fernet key"
+            " (32 bytes, base64-encoded, 44 characters). "
+            "Generate a new key with: python -c "
+            "'from cryptography.fernet import Fernet;"
+            " print(Fernet.generate_key().decode())'"
         )
 
     # Validate JWT secret
@@ -775,11 +786,15 @@ def create_app(config_name="development"):
             "CSP_POLICY",
             (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' https://js.stripe.com https://www.google.com https://www.gstatic.com; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "script-src 'self' 'unsafe-inline' https://js.stripe.com"
+                " https://www.google.com https://www.gstatic.com; "
+                "style-src 'self' 'unsafe-inline'"
+                " https://fonts.googleapis.com; "
                 "font-src 'self' https://fonts.gstatic.com; "
                 "img-src 'self' data: https:; "
-                "connect-src 'self' https://api.stripe.com https://oauth.platform.intuit.com https://appcenter.intuit.com; "
+                "connect-src 'self' https://api.stripe.com"
+                " https://oauth.platform.intuit.com"
+                " https://appcenter.intuit.com; "
                 "frame-src 'self' https://js.stripe.com https://www.google.com; "
                 "frame-ancestors 'none'; "
                 "base-uri 'self'; "
@@ -944,7 +959,11 @@ def create_app(config_name="development"):
     app.register_blueprint(vault_bp)
     app.register_blueprint(security_txt_bp)  # FIX 100/100: RFC 9116 security.txt
     app.logger.info(
-        "Blueprints registered: auth, upload, migrations, webhooks, dashboard, projects, health_check, websocket, s3_upload, sso, webhook_logs, license, qbo, legal, extractor, session_validation, reports, internal, settings, vault, security_txt"
+        "Blueprints registered: auth, upload, migrations,"
+        " webhooks, dashboard, projects, health_check, websocket,"
+        " s3_upload, sso, webhook_logs, license, qbo, legal,"
+        " extractor, session_validation, reports, internal,"
+        " settings, vault, security_txt"
     )
 
     # Initialize backup scheduler

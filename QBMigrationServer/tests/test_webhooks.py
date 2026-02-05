@@ -18,14 +18,11 @@ so we use the bare ``client`` fixture rather than ``authenticated_client``.
 
 import hashlib
 import hmac
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from models.database import db
 from models.migration import Migration
-from models.user import User
 
 # ---------------------------------------------------------------------------
 # Helper

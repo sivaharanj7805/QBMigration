@@ -12,10 +12,8 @@ Run with: pytest tests/test_production_ready.py -v
 """
 
 import hashlib
-import json
 import os
 import time
-from datetime import datetime, timedelta
 
 import pytest
 import requests
@@ -76,7 +74,7 @@ class TestProductionAuthentication:
 
         if response.status_code == 201:
             data = response.json()
-            assert data.get("success") == True
+            assert data.get("success") is True
             assert "token" in data
             assert len(data["token"]) > 50  # JWT tokens are long
 
@@ -98,7 +96,7 @@ class TestProductionAuthentication:
 
         assert response.status_code == 200
         data = response.json()
-        assert data.get("success") == True
+        assert data.get("success") is True
         assert "token" in data
 
         TestProductionAuthentication.auth_token = data["token"]
@@ -153,7 +151,7 @@ class TestProductionAuthentication:
 
         assert response.status_code == 200
         data = response.json()
-        assert data.get("success") == True
+        assert data.get("success") is True
         assert "email" in data
 
     def test_invalid_token_rejected(self):
@@ -179,7 +177,7 @@ class TestProductionLicenseAPI:
 
         assert response.status_code == 400
         data = response.json()
-        assert data.get("valid") == False
+        assert data.get("valid") is False
 
     def test_license_validation_requires_fingerprint(self):
         """Test that license validation requires hardware fingerprint"""
@@ -206,7 +204,7 @@ class TestProductionLicenseAPI:
 
         assert response.status_code == 404
         data = response.json()
-        assert data.get("valid") == False
+        assert data.get("valid") is False
 
     def test_rate_limiting_on_license_endpoint(self):
         """Test that rate limiting is working on license endpoints"""
@@ -421,7 +419,7 @@ class TestProductionSecurity:
             # Should not cause server error (500)
             assert (
                 response.status_code != 500
-            ), f"SQL injection attempt caused server error"
+            ), "SQL injection attempt caused server error"
             # Should return auth error
             assert response.status_code in [400, 401]
 
@@ -500,7 +498,7 @@ class TestProductionConfiguration:
         importlib.reload(cfg_module)
         ProductionConfig = cfg_module.ProductionConfig
 
-        assert ProductionConfig.SESSION_COOKIE_SECURE == True
+        assert ProductionConfig.SESSION_COOKIE_SECURE is True
 
 
 if __name__ == "__main__":

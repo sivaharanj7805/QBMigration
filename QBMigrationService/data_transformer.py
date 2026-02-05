@@ -39,7 +39,7 @@ import multiprocessing as mp
 import re
 import threading
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from datetime import datetime
 from decimal import (
     ROUND_HALF_UP,
@@ -223,7 +223,7 @@ class QBDataTransformer:
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
 
-    def _transform_parallel_impl(
+    def _transform_parallel_impl(  # noqa: C901
         self, qb_data: Dict, max_workers: Optional[int] = None
     ) -> Dict:
         """Internal implementation of parallel transformation (called with timeout wrapper)."""
@@ -958,7 +958,7 @@ class QBDataTransformer:
             logger.debug(f"Truncated name from {len(name)} to {max_len} chars")
         return name[:max_len]
 
-    def format_date(self, date_value: Any) -> Optional[str]:
+    def format_date(self, date_value: Any) -> Optional[str]:  # noqa: C901
         """
         TESTING REPORT: Enhanced date formatting with auto-detection
 
@@ -1339,7 +1339,7 @@ class QBDataTransformer:
         self.add_manual_review(
             entity_type,
             str(name),
-            reason=f"No line items - QBO requires at least one Line entry",
+            reason="No line items - QBO requires at least one Line entry",
         )
         self.stats["total_skipped"] += 1
         return False
@@ -1354,7 +1354,7 @@ class QBDataTransformer:
             temp_qbo_id = f"temp_{entity_type}_{self._next_temp_id}"
             self.store_mapping(entity_type, qbd_id, temp_qbo_id)
 
-    def _sort_parent_child(
+    def _sort_parent_child(  # noqa: C901
         self, entities: List[Dict], parent_key: str = "ParentRef"
     ) -> List[Dict]:
         """Topological sort to ensure parents are processed before children."""
@@ -1776,7 +1776,9 @@ class QBDataTransformer:
     }
 
     @staticmethod
-    def normalize_extractor_fields(entity: Dict, entity_type: str = "") -> Dict:
+    def normalize_extractor_fields(  # noqa: C901
+        entity: Dict, entity_type: str = ""
+    ) -> Dict:
         """
         Normalize C# QBDataExtractor camelCase JSON output to PascalCase format.
 
@@ -1995,7 +1997,7 @@ class QBDataTransformer:
         self._store_entity_mapping("accounts", qbd)
         return qbo
 
-    def transform_customer(self, qbd: Dict) -> Dict:
+    def transform_customer(self, qbd: Dict) -> Dict:  # noqa: C901
         """Transform Customer."""
         qbo = {
             "DisplayName": self.ensure_unique_display_name(
@@ -2201,7 +2203,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for CreditMemo",
+            entity_name="Customer for CreditMemo",
             parent_entity_type="CreditMemo",
             parent_entity_name=f"CreditMemo {txn_date}",
         )
@@ -2365,7 +2367,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for Estimate",
+            entity_name="Customer for Estimate",
             parent_entity_type="Estimate",
             parent_entity_name=doc_number,
         )
@@ -2411,7 +2413,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for Invoice",
+            entity_name="Customer for Invoice",
             parent_entity_type="Invoice",
             parent_entity_name=doc_number,
         )
@@ -2730,7 +2732,7 @@ class QBDataTransformer:
             if not acct_id and not linked_txn_id:
                 self.stats["dropped_lines"] += 1
                 logger.debug(
-                    f"Deposit: dropping line — no AccountRef or LinkedTxn mapped"
+                    "Deposit: dropping line — no AccountRef or LinkedTxn mapped"
                 )
                 continue
 
@@ -2782,7 +2784,7 @@ class QBDataTransformer:
                 # Invalid SSN format - mask completely
                 qbo["SSN"] = "XXX-XX-XXXX"
             # Log for audit trail (without actual SSN)
-            logger.debug(f"Masked SSN for employee record")
+            logger.debug("Masked SSN for employee record")
 
         self._store_entity_mapping("employees", qbd)
         return qbo
@@ -2894,7 +2896,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for Payment",
+            entity_name="Customer for Payment",
             parent_entity_type="Payment",
             parent_entity_name=ref_number,
         )
@@ -2992,7 +2994,7 @@ class QBDataTransformer:
         vendor_id, vendor_valid = self.map_id_required(
             entity_type="vendors",
             qbd_id=qbd.get("VendorRef"),
-            entity_name=f"Vendor for PurchaseOrder",
+            entity_name="Vendor for PurchaseOrder",
             parent_entity_type="PurchaseOrder",
             parent_entity_name=f"PO {txn_date}",
         )
@@ -3070,7 +3072,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for RefundReceipt",
+            entity_name="Customer for RefundReceipt",
             parent_entity_type="RefundReceipt",
             parent_entity_name=f"Refund {txn_date}",
         )
@@ -3122,7 +3124,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for SalesReceipt",
+            entity_name="Customer for SalesReceipt",
             parent_entity_type="SalesReceipt",
             parent_entity_name=f"Receipt {txn_date}",
         )
@@ -3459,7 +3461,7 @@ class QBDataTransformer:
         vendor_id, vendor_valid = self.map_id_required(
             entity_type="vendors",
             qbd_id=qbd.get("VendorRef"),
-            entity_name=f"Vendor for VendorCredit",
+            entity_name="Vendor for VendorCredit",
             parent_entity_type="VendorCredit",
             parent_entity_name=f"Credit {txn_date}",
         )
@@ -3512,7 +3514,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef"),
-            entity_name=f"Customer for SalesOrder",
+            entity_name="Customer for SalesOrder",
             parent_entity_type="SalesOrder",
             parent_entity_name=doc_number,
         )
@@ -3575,7 +3577,7 @@ class QBDataTransformer:
         vendor_id, vendor_valid = self.map_id_required(
             entity_type="vendors",
             qbd_id=qbd.get("VendorRef"),
-            entity_name=f"Vendor for ItemReceipt",
+            entity_name="Vendor for ItemReceipt",
             parent_entity_type="ItemReceipt",
             parent_entity_name=doc_number,
         )
@@ -3652,7 +3654,7 @@ class QBDataTransformer:
         customer_id, customer_valid = self.map_id_required(
             entity_type="customers",
             qbd_id=qbd.get("CustomerRef") or qbd.get("CustomerRefListID"),
-            entity_name=f"Customer for Charge",
+            entity_name="Customer for Charge",
             parent_entity_type="Charge",
             parent_entity_name=doc_number,
         )

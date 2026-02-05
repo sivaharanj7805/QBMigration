@@ -552,10 +552,10 @@ def validate_hash_integrity(
     hash_pattern = r"^[a-fA-F0-9]{64}$"
 
     if not re.match(hash_pattern, source_hash):
-        errors.append(f"Invalid source hash format")
+        errors.append("Invalid source hash format")
 
     if not re.match(hash_pattern, destination_hash):
-        errors.append(f"Invalid destination hash format")
+        errors.append("Invalid destination hash format")
 
     if source_hash != destination_hash:
         errors.append(

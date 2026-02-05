@@ -405,7 +405,9 @@ class User(UserMixin, db.Model):
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    f"Invalid password_history structure for user {self.id}: expected list, got {type(history).__name__}"
+                    f"Invalid password_history structure for user"
+                    f" {self.id}: expected list,"
+                    f" got {type(history).__name__}"
                 )
                 return False
 

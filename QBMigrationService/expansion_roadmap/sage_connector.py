@@ -18,7 +18,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .base_connector import (
     BaseAccountingConnector,

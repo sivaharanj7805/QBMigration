@@ -14,24 +14,18 @@ Tests the COMPLETE pipeline including:
 All external dependencies (QBO API, S3, OAuth) are mocked.
 """
 
-import json
 import os
-import sqlite3
 import sys
 import tempfile
-import time
-from collections import defaultdict
-from copy import deepcopy
-from decimal import Decimal
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data_transformer import QBDataTransformer
-from orchestrator import MigrationOrchestrator
-from qbo_client import PremiumQBOClient
+from data_transformer import QBDataTransformer  # noqa: E402
+from orchestrator import MigrationOrchestrator  # noqa: E402
+from qbo_client import PremiumQBOClient  # noqa: E402
 
 # ============================================================================
 # FIXTURES
@@ -1232,7 +1226,7 @@ class TestErrorCategorization:
         """Exception during transform increments transform_errors counter."""
         t = QBDataTransformer(region="US")
         # Patch a transform method to raise
-        original = t.transform_customer
+        t.transform_customer
 
         def bad_transform(qbd):
             raise ValueError("Intentional test error")
@@ -1720,7 +1714,7 @@ class TestOrchestratorEntityOrder:
         """All new entity types appear in the orchestrator's entity_order."""
         from orchestrator import MigrationOrchestrator
 
-        orch = MigrationOrchestrator.__new__(MigrationOrchestrator)
+        MigrationOrchestrator.__new__(MigrationOrchestrator)
         # We can't call run_migration, but we can verify the entity_order
         # is defined correctly by checking the code structure.
         # Instead, just verify the type_mapping and key_map are consistent.

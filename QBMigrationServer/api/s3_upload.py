@@ -3,7 +3,6 @@ S3 Upload API with Pre-signed URLs
 Enables direct uploads from C# client to S3
 """
 
-import hashlib
 import logging
 import os
 from datetime import datetime, timezone

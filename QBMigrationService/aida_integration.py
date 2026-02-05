@@ -24,7 +24,7 @@ Version: 1.0.0
 import hashlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -163,7 +163,13 @@ class AiDAIntegrationService:
         logger.info(f"Preparing AiDA data package for {company_name}")
 
         package = AiDADataPackage(
-            package_id=f"AIDA-{hashlib.sha256(f'{company_name}{datetime.now(timezone.utc).isoformat()}'.encode()).hexdigest()[:16]}",
+            package_id=(
+                "AIDA-"
+                + hashlib.sha256(
+                    f"{company_name}"
+                    f"{datetime.now(timezone.utc).isoformat()}".encode()
+                ).hexdigest()[:16]
+            ),
             created_at=datetime.now(timezone.utc).isoformat(),
             company_name=company_name,
             fiscal_year_end=fiscal_year_end,

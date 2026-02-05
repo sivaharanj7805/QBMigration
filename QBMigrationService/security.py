@@ -6,7 +6,7 @@ import secrets
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pyotp
 
@@ -105,7 +105,7 @@ class SecurityManager:
         # Try Redis first (production)
         if redis_client is not None:
             try:
-                import redis
+                pass
 
                 window_key = (
                     f"ratelimit:{user_id}:{int(time.time() / (window_minutes * 60))}"
@@ -529,5 +529,3 @@ class SecurityError(Exception):
 
     Used to enforce FAIL-CLOSED policy
     """
-
-    pass

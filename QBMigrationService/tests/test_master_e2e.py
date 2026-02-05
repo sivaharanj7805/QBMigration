@@ -19,11 +19,9 @@ import hashlib
 import json
 import os
 import sys
-import tempfile
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -225,7 +223,9 @@ class TestMasterEndToEnd:
 
         print(f"   ✓ Transformed {result['summary']['total_entities']} entities")
         print(
-            f"   ✓ Trial Balance: Debits={result['trial_balance']['debits']}, Credits={result['trial_balance']['credits']}"
+            f"   ✓ Trial Balance:"
+            f" Debits={result['trial_balance']['debits']},"
+            f" Credits={result['trial_balance']['credits']}"
         )
 
         # Verify linked transaction preservation
@@ -328,7 +328,7 @@ class TestMasterEndToEnd:
         print(f"   Entity Types Processed: {len(result['entities'])}")
         print(f"   Total Entities Migrated: {total_created}")
         print(f"   Trial Balance Match: {'YES ✓' if is_balanced else 'NO ✗'}")
-        print(f"   Audit Certificate: Generated")
+        print("   Audit Certificate: Generated")
         print("=" * 60 + "\n")
 
         # Final assertions (Account and Customer are guaranteed to work)

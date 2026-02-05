@@ -84,7 +84,9 @@ QB Migration Team
     <h2 style="color: #2563eb;">Welcome to QB Migration!</h2>
     <p>Please verify your email address by clicking the button below:</p>
     <p style="margin: 30px 0;">
-        <a href="{verify_url}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+        <a href="{verify_url}" style="background-color: #2563eb; color: white;
+ padding: 12px 24px; text-decoration: none; border-radius: 4px;
+ display: inline-block;">
             Verify Email Address
         </a>
     </p>
@@ -148,7 +150,8 @@ QB Migration Security Team
     <p>We detected a login to your QB Migration account from a new device.</p>
     <div style="background-color: #f3f4f6; padding: 15px; border-radius: 4px; margin: 20px 0;">
         <p style="margin: 5px 0;"><strong>IP Address:</strong> {safe_ip}</p>
-        <p style="margin: 5px 0;"><strong>Time:</strong> {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+        <p style="margin: 5px 0;"><strong>Time:</strong>\
+ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
     </div>
     <p><strong>If this was you,</strong> you can safely ignore this email.</p>
     <p><strong>If this wasn't you,</strong> please take immediate action:</p>

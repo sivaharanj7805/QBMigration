@@ -1,8 +1,7 @@
-import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from celery import Celery
 from models.database import db
@@ -16,9 +15,6 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "..", "QBMigrationService")
 )
 
-from audit_logger import AuditLogger
-from data_retention import DataRetentionManager
-from encryption import EncryptionManager
 
 # Initialize Celery
 celery = Celery("migration_worker")

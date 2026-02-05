@@ -161,7 +161,7 @@ class MigrationCredit(db.Model):
 
             if auto_commit:
                 db.session.commit()
-        except Exception as e:
+        except Exception:
             db.session.rollback()
             raise
 
@@ -177,7 +177,7 @@ class MigrationCredit(db.Model):
 
             if auto_commit:
                 db.session.commit()
-        except Exception as e:
+        except Exception:
             db.session.rollback()
             raise
 

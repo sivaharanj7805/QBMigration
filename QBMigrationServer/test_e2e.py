@@ -3,7 +3,6 @@ End-to-end test for the enhanced migration tracking system.
 Tests: registration, tier endpoints, credits API, and /me endpoint.
 """
 
-import json
 import time
 
 import requests

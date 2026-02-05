@@ -83,7 +83,7 @@ class TeamInvite(db.Model):
         if auto_commit:
             try:
                 db.session.commit()
-            except Exception as e:
+            except Exception:
                 db.session.rollback()
                 raise
 
@@ -101,7 +101,6 @@ class TeamInvite(db.Model):
     @classmethod
     def get_team_members(cls, owner_user_id):
         """Get all accepted team members for an owner"""
-        from models.user import User
 
         # Get accepted invites
         accepted_invites = cls.query.filter_by(
@@ -115,7 +114,10 @@ class TeamInvite(db.Model):
                     {
                         "id": invite.accepted_user.id,
                         "email": invite.accepted_user.email,
-                        "name": f"{invite.accepted_user.first_name or ''} {invite.accepted_user.last_name or ''}".strip()
+                        "name": (
+                            f"{invite.accepted_user.first_name or ''}"
+                            f" {invite.accepted_user.last_name or ''}"
+                        ).strip()
                         or invite.accepted_user.email.split("@")[0],
                         "role": invite.role,
                         "joined_at": (

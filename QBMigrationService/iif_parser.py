@@ -12,8 +12,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +141,7 @@ class IIFParser:
                 content = f.read()
         return self.parse_content(content)
 
-    def parse_content(self, content: str) -> Dict[str, Any]:
+    def parse_content(self, content: str) -> Dict[str, Any]:  # noqa: C901
         """Parse IIF content string"""
         # Reset state for fresh parse
         self.data = {key: [] for key in self.RECORD_TYPES.values()}

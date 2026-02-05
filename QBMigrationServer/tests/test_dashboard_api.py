@@ -13,21 +13,18 @@ Tests cover:
 FIXED: Uses authenticated_client fixture properly for all authenticated endpoints
 """
 
-import json
 import os
 
 # Import Flask app
 import sys
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app
-from models.database import db
-from models.migration import Migration
+from models.database import db  # noqa: E402
+from models.migration import Migration  # noqa: E402
 
 
 class TestDashboardAPI:
@@ -76,7 +73,7 @@ class TestLiveStatusAPI(TestDashboardAPI):
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert data["phase"] == "EXTRACTION"
         assert data["phase_number"] == 1
 
@@ -176,7 +173,7 @@ class TestBulkStatusAPI(TestDashboardAPI):
 
         assert response.status_code == 200
         data = response.get_json()
-        assert data["success"] == True
+        assert data["success"] is True
         assert "migrations" in data
 
     def test_bulk_status_filters_by_ids(

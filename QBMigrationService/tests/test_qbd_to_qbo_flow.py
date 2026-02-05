@@ -12,25 +12,20 @@ Author: QBMigration Test Suite
 import hashlib
 import json
 import os
-import sqlite3
 import sys
 import tempfile
-import time
-from collections import defaultdict
-from copy import deepcopy
-from datetime import datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, PropertyMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Ensure the project root is on sys.path so imports resolve correctly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data_transformer import QBDataTransformer
-from orchestrator import MigrationOrchestrator
-from qbo_client import PremiumQBOClient
-from verifier import PremiumMigrationVerifier
+from data_transformer import QBDataTransformer  # noqa: E402
+from orchestrator import MigrationOrchestrator  # noqa: E402
+from qbo_client import PremiumQBOClient  # noqa: E402
+from verifier import PremiumMigrationVerifier  # noqa: E402
 
 # ============================================================================
 # FIXTURES -- Realistic QBD data, mock clients, etc.
@@ -358,7 +353,7 @@ class TestEntityDependencyOrdering:
 
     def test_orchestrator_entity_order(self):
         """Entity order must have Accounts before Invoices, Customers before Payments."""
-        orch = MigrationOrchestrator(
+        _ = MigrationOrchestrator(
             qbo_client_id="id",
             qbo_client_secret="secret",
             qbo_refresh_token="token",
@@ -404,7 +399,7 @@ class TestEntityDependencyOrdering:
             "Payment": [{"TotalAmt": 100}],
         }
         call_order = []
-        original_process = mock_qbo_client._process_single_batch
+        mock_qbo_client._process_single_batch
 
         def tracking_process(batch, entity_type, *args, **kwargs):
             call_order.append(entity_type)
@@ -1693,7 +1688,10 @@ class TestParallelBatchProcessing:
         def mock_process(batch, entity_type, batch_id, oauth_mgr, mig_id):
             # Every other entity fails
             succeeded = [{"Id": str(i)} for i in range(len(batch) // 2)]
-            failed = [{"entity": e, "error": "test"} for e in batch[len(batch) // 2 :]]
+            failed = [
+                {"entity": e, "error": "test"}
+                for e in batch[len(batch) // 2 :]  # noqa: E203
+            ]
             return succeeded, failed
 
         with patch.object(
@@ -1773,7 +1771,7 @@ class TestOrchestratorDataNormalization:
 
     def test_key_normalization_lowercase_to_plural(self):
         """'customers' key in data should be normalized to 'Customers'."""
-        orch = MigrationOrchestrator(
+        _ = MigrationOrchestrator(
             qbo_client_id="id",
             qbo_client_secret="secret",
             qbo_refresh_token="token",

@@ -5,12 +5,10 @@ Generates side-by-side P&L and Balance Sheet comparison reports
 for QBD source vs QBO destination to enable CPA sign-off.
 """
 
-import json
 import logging
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -369,16 +367,20 @@ class VarianceReportGenerator:
     <title>Variance Report - {report['company_name']}</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; }}
+        body {{ font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f8fafc; color: #1e293b; line-height: 1.6; }}
         .container {{ max-width: 900px; margin: 0 auto; padding: 40px; }}
-        .header {{ background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); color: white; padding: 30px; border-radius: 12px 12px 0 0; }}
+        .header {{ background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+            color: white; padding: 30px; border-radius: 12px 12px 0 0; }}
         .header h1 {{ font-size: 24px; margin-bottom: 5px; }}
         .content {{ background: white; padding: 30px; border-radius: 0 0 12px 12px; }}
         .summary-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }}
         .summary-card {{ background: #f1f5f9; padding: 20px; border-radius: 8px; text-align: center; }}
         .summary-value {{ font-size: 28px; font-weight: bold; }}
         .summary-label {{ font-size: 12px; color: #64748b; text-transform: uppercase; }}
-        .status-badge {{ display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: bold; color: white; background: {status_color}; }}
+        .status-badge {{ display: inline-block; padding: 8px 16px;
+            border-radius: 20px; font-weight: bold;
+            color: white; background: {status_color}; }}
         h2 {{ margin: 30px 0 15px 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
         table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
         th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
@@ -398,12 +400,12 @@ class VarianceReportGenerator:
             <h1>📊 Migration Variance Report</h1>
             <p>{report['company_name']} | Generated: {report['generated_at'][:10]}</p>
         </div>
-        
+
         <div class="content">
             <div style="text-align: center; margin-bottom: 30px;">
                 <span class="status-badge">{report['overall_status']}</span>
             </div>
-            
+
             <div class="summary-grid">
                 <div class="summary-card">
                     <div class="summary-value">{report['summary']['total_variances']}</div>
@@ -418,7 +420,7 @@ class VarianceReportGenerator:
                     <div class="summary-label">Total Variance Amount</div>
                 </div>
             </div>
-            
+
             <h2>Trial Balance Comparison</h2>
             <table>
                 <tr>
@@ -441,7 +443,7 @@ class VarianceReportGenerator:
                 </tr>
             </table>
             <p><strong>Status:</strong> {report['trial_balance']['status']}</p>
-            
+
             <h2>Profit & Loss Comparison ({report['years_compared']} Years)</h2>
             <table>
                 <thead>
@@ -457,7 +459,7 @@ class VarianceReportGenerator:
                     {pl_rows or '<tr><td colspan="5">No P&L data available</td></tr>'}
                 </tbody>
             </table>
-            
+
             <h2>Account-Level Detail</h2>
             <table>
                 <thead>
@@ -474,7 +476,7 @@ class VarianceReportGenerator:
                 </tbody>
             </table>
         </div>
-        
+
         <div class="footer">
             <p>ForensicBridge Variance Report | CPA Sign-Off Document</p>
             <p>This report compares source QuickBooks Desktop data with destination QuickBooks Online data.</p>

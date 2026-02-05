@@ -62,7 +62,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 # Configure audit logger
 AUDIT_LOG_FILE = os.path.join(
@@ -257,7 +257,7 @@ class AuditLogger:
             from flask import g, request
 
             return {
-                "ip": request.remote_addr,
+                "ip": self._hash_pii(request.remote_addr or ""),
                 "user_agent": request.headers.get("User-Agent", ""),
                 "correlation_id": getattr(g, "correlation_id", None)
                 or request.headers.get("X-Correlation-ID"),

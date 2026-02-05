@@ -9,7 +9,6 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Image as RLImage
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -363,7 +362,7 @@ class PremiumMigrationVerifier:
     # PREMIUM FEATURE #1: TRIAL BALANCE VERIFICATION
     # ========================================================================
 
-    def verify_trial_balance(
+    def verify_trial_balance(  # noqa: C901
         self, qbd_accounts: List[Dict], oauth_manager: Optional[Any] = None
     ) -> bool:
         """
@@ -597,7 +596,7 @@ class PremiumMigrationVerifier:
             return reconciliation_results
 
         # Verify each bank account
-        logger.info(f"[3/3] Verifying reconciliation states...")
+        logger.info("[3/3] Verifying reconciliation states...")
 
         for qbd_account in bank_accounts:
             account_name = qbd_account.get("Name", "Unknown")
@@ -701,11 +700,30 @@ class PremiumMigrationVerifier:
 
         # Pattern 1: Direct account reference in line details
         direct_ref_queries = {
-            "Deposit": "SELECT * FROM Deposit WHERE Line.DepositLineDetail.AccountRef = '{account_id}'",
-            "Purchase_Account": "SELECT * FROM Purchase WHERE Line.AccountBasedExpenseLineDetail.AccountRef = '{account_id}'",
-            "Bill_Account": "SELECT * FROM Bill WHERE Line.AccountBasedExpenseLineDetail.AccountRef = '{account_id}'",
-            "JournalEntry": "SELECT * FROM JournalEntry WHERE Line.JournalEntryLineDetail.AccountRef = '{account_id}'",
-            "VendorCredit": "SELECT * FROM VendorCredit WHERE Line.AccountBasedExpenseLineDetail.AccountRef = '{account_id}'",
+            "Deposit": (
+                "SELECT * FROM Deposit WHERE"
+                " Line.DepositLineDetail.AccountRef = '{account_id}'"
+            ),
+            "Purchase_Account": (
+                "SELECT * FROM Purchase WHERE"
+                " Line.AccountBasedExpenseLineDetail.AccountRef"
+                " = '{account_id}'"
+            ),
+            "Bill_Account": (
+                "SELECT * FROM Bill WHERE"
+                " Line.AccountBasedExpenseLineDetail.AccountRef"
+                " = '{account_id}'"
+            ),
+            "JournalEntry": (
+                "SELECT * FROM JournalEntry WHERE"
+                " Line.JournalEntryLineDetail.AccountRef"
+                " = '{account_id}'"
+            ),
+            "VendorCredit": (
+                "SELECT * FROM VendorCredit WHERE"
+                " Line.AccountBasedExpenseLineDetail.AccountRef"
+                " = '{account_id}'"
+            ),
         }
 
         for query_name, query_template in direct_ref_queries.items():
@@ -804,16 +822,36 @@ class PremiumMigrationVerifier:
             # Step 2: Query transactions using these items
             # QBO allows IN clause with up to 30 items at a time
             for i in range(0, len(item_ids), 30):
-                batch = item_ids[i : i + 30]
+                batch = item_ids[i : i + 30]  # noqa: E203
                 item_list = ",".join(f"'{item_id}'" for item_id in batch)
 
                 # Query each transaction type that uses items
                 item_txn_queries = {
-                    "Invoice": f"SELECT * FROM Invoice WHERE Line.SalesItemLineDetail.ItemRef IN ({item_list})",
-                    "SalesReceipt": f"SELECT * FROM SalesReceipt WHERE Line.SalesItemLineDetail.ItemRef IN ({item_list})",
-                    "CreditMemo": f"SELECT * FROM CreditMemo WHERE Line.SalesItemLineDetail.ItemRef IN ({item_list})",
-                    "Purchase_Item": f"SELECT * FROM Purchase WHERE Line.ItemBasedExpenseLineDetail.ItemRef IN ({item_list})",
-                    "Bill_Item": f"SELECT * FROM Bill WHERE Line.ItemBasedExpenseLineDetail.ItemRef IN ({item_list})",
+                    "Invoice": (
+                        "SELECT * FROM Invoice WHERE"
+                        f" Line.SalesItemLineDetail.ItemRef"
+                        f" IN ({item_list})"
+                    ),
+                    "SalesReceipt": (
+                        "SELECT * FROM SalesReceipt WHERE"
+                        f" Line.SalesItemLineDetail.ItemRef"
+                        f" IN ({item_list})"
+                    ),
+                    "CreditMemo": (
+                        "SELECT * FROM CreditMemo WHERE"
+                        f" Line.SalesItemLineDetail.ItemRef"
+                        f" IN ({item_list})"
+                    ),
+                    "Purchase_Item": (
+                        "SELECT * FROM Purchase WHERE"
+                        f" Line.ItemBasedExpenseLineDetail"
+                        f".ItemRef IN ({item_list})"
+                    ),
+                    "Bill_Item": (
+                        "SELECT * FROM Bill WHERE"
+                        f" Line.ItemBasedExpenseLineDetail"
+                        f".ItemRef IN ({item_list})"
+                    ),
                 }
 
                 for txn_type, query in item_txn_queries.items():
@@ -972,7 +1010,7 @@ class PremiumMigrationVerifier:
             logger.error(f"Invoice verification failed: {e}")
             return False
 
-    def verify_migration(
+    def verify_migration(  # noqa: C901
         self,
         entities: Dict[str, List[Dict]],
         upload_result: Dict,
@@ -1108,7 +1146,7 @@ class PremiumMigrationVerifier:
                     "Data integrity hash mismatch - source data may have been modified"
                 )
         else:
-            logger.info(f"  Data Integrity: ⚠️ No hash available")
+            logger.info("  Data Integrity: ⚠️ No hash available")
 
         logger.info("=" * 80)
         if passed:
@@ -1219,8 +1257,8 @@ class PremiumMigrationVerifier:
         story.append(Paragraph("EXECUTIVE SUMMARY", heading_style))
 
         summary_text = f"""
-        This document certifies that the QuickBooks Desktop company file for <b>{company_name}</b> 
-        was successfully migrated to QuickBooks Online using enterprise-grade migration software 
+        This document certifies that the QuickBooks Desktop company file for <b>{company_name}</b>
+        was successfully migrated to QuickBooks Online using enterprise-grade migration software
         with AES-256 encryption and comprehensive data verification.
         """
 
@@ -1490,8 +1528,8 @@ class PremiumMigrationVerifier:
         story.append(Spacer(1, 0.2 * inch))
 
         cert_text = f"""
-        This is to certify that the migration of {company_name}'s QuickBooks Desktop data to 
-        QuickBooks Online was performed on {datetime.now(timezone.utc).strftime('%B %d, %Y')} using 
+        This is to certify that the migration of {company_name}'s QuickBooks Desktop data to
+        QuickBooks Online was performed on {datetime.now(timezone.utc).strftime('%B %d, %Y')} using
         professional-grade migration software with the following security and accuracy standards:
         """
 
@@ -1535,7 +1573,7 @@ class PremiumMigrationVerifier:
         story.append(Paragraph("<b>Authorized Signature</b>", styles["Normal"]))
         story.append(
             Paragraph(
-                f"Migration Software: QuickBooks Premium Migration Tool v2.0",
+                "Migration Software: QuickBooks Premium Migration Tool v2.0",
                 styles["Normal"],
             )
         )
@@ -1550,8 +1588,8 @@ class PremiumMigrationVerifier:
 
         # Footer
         footer_text = """
-        <i>This certificate is provided as documentation of the migration process. 
-        It is recommended that this document be retained with your company's accounting records 
+        <i>This certificate is provided as documentation of the migration process.
+        It is recommended that this document be retained with your company's accounting records
         and provided to your CPA or tax advisor as needed.</i>
         """
 
@@ -1561,7 +1599,7 @@ class PremiumMigrationVerifier:
         doc.build(story)
 
         logger.info(f"  ✓ PDF certificate generated: {filepath}")
-        logger.info(f"    This document can be provided to your CPA for tax audits")
+        logger.info("    This document can be provided to your CPA for tax audits")
 
     def save_report(self, filepath: str):
         """Save JSON verification report
@@ -1577,7 +1615,7 @@ class PremiumMigrationVerifier:
             json.dump(self.report, f, indent=2, default=decimal_default)
 
         logger.info(f"\n✓ Verification report saved: {filepath}")
-        logger.info(f"\n  Summary:")
+        logger.info("\n  Summary:")
         logger.info(f"    Errors: {len(self.report['errors'])}")
         logger.info(f"    Warnings: {len(self.report['warnings'])}")
 

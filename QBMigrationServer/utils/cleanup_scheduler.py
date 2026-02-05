@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from models.database import db
 from models.migration import Migration
 from utils.aws_manager import AWSMigrationManager
 
@@ -70,7 +69,7 @@ class CleanupScheduler:
             # Migrations that are completed/failed but not cleaned up
             completed_not_cleaned = Migration.query.filter(
                 Migration.status.in_(["completed", "failed"]),
-                Migration.cleanup_completed == False,
+                Migration.cleanup_completed.is_(False),
             ).all()
 
             # Migrations that are stuck (processing > 6 hours)
@@ -80,13 +79,13 @@ class CleanupScheduler:
             stuck_migrations = Migration.query.filter(
                 Migration.status == "processing",
                 Migration.started_at < stuck_cutoff,
-                Migration.cleanup_completed == False,
+                Migration.cleanup_completed.is_(False),
             ).all()
 
             # Expired migrations
             expired_migrations = Migration.query.filter(
                 Migration.expires_at < datetime.now(timezone.utc),
-                Migration.cleanup_completed == False,
+                Migration.cleanup_completed.is_(False),
             ).all()
 
             # Combine and deduplicate

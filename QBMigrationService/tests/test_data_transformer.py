@@ -16,7 +16,6 @@ TEST-01: Unit tests for QBDataTransformer
 
 import os
 import sys
-from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -24,7 +23,7 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data_transformer import QBDataTransformer
+from data_transformer import QBDataTransformer  # noqa: E402
 
 
 class TestQBDataTransformerInit:

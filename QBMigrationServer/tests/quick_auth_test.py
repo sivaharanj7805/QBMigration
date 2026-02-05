@@ -8,9 +8,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app
-from models.database import db
-from models.user import User
+from app import create_app  # noqa: E402
+from models.database import db  # noqa: E402
+from models.user import User  # noqa: E402
 
 
 def test_auth():
@@ -68,7 +68,7 @@ def test_auth():
             assert response.status_code == 200, "Expected 200, got {}".format(
                 response.status_code
             )
-            assert data["success"] == True, "Login should return success=True"
+            assert data["success"] is True, "Login should return success=True"
             print("[OK] Login PASSED")
 
             # TEST 3: Get current user

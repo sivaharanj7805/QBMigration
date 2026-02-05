@@ -14,20 +14,17 @@ Tests cover:
 
 import json
 import os
-import sqlite3
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from qbo_client import PremiumQBOClient
+from qbo_client import PremiumQBOClient  # noqa: E402
 
 
 class TestPremiumQBOClientInit:
@@ -45,7 +42,7 @@ class TestPremiumQBOClientInit:
     def test_client_creates_database(self, tmp_path):
         """Test client creates SQLite database on init"""
         db_path = str(tmp_path / "test_migration.db")
-        client = PremiumQBOClient(access_token="test_token", db_path=db_path)
+        _ = PremiumQBOClient(access_token="test_token", db_path=db_path)
 
         assert os.path.exists(db_path)
 
@@ -164,7 +161,7 @@ class TestRateLimiting:
             client.batch_create_parallel(entities, "Customer")
 
         # Should take at least some time due to rate limiting
-        duration = time.time() - start_time
+        time.time() - start_time
         # Note: In mock mode this will be fast, but structure is tested
 
 

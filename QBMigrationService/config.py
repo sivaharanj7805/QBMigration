@@ -375,7 +375,7 @@ def validate_production_access():
         logger.info("WARNING: Running against PRODUCTION environment")
         logger.info(f"   Region: {REGION}")
         logger.info(f"   Realm ID: {REALM_ID}")
-        logger.info(f"   Confirm this is correct before proceeding.\n")
+        logger.info("   Confirm this is correct before proceeding.\n")
     else:
         logger.info(f"✓ Running in {ENVIRONMENT.upper()} mode (Region: {REGION})")
 

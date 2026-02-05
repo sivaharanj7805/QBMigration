@@ -291,10 +291,10 @@ class EncryptionManager:
                     "HASH REQUIRED: Legacy data without hash rejected (allow_legacy=False)"
                 )
                 raise ValueError(
-                    f"HASH VERIFICATION REQUIRED\n"
-                    f"   Data does not include SHA-256 hash for integrity verification.\n"
-                    f"   For forensic migrations, hash verification is mandatory.\n"
-                    f"   Re-extract data using the latest extractor that includes hash.\n"
+                    "HASH VERIFICATION REQUIRED\n"
+                    "   Data does not include SHA-256 hash for integrity verification.\n"
+                    "   For forensic migrations, hash verification is mandatory.\n"
+                    "   Re-extract data using the latest extractor that includes hash.\n"
                 )
 
             # Allow legacy data but warn loudly
@@ -451,7 +451,7 @@ class EncryptionManager:
             raise ValueError("Decryption failed: invalid format or corrupted data")
 
     @staticmethod
-    def secure_zero_memory(data):
+    def secure_zero_memory(data):  # noqa: C901
         """
         CRITICAL: Securely zero out memory containing sensitive data
 
@@ -505,7 +505,7 @@ class EncryptionManager:
                 if isinstance(data, bytes):
                     del mutable_data
 
-            except Exception as e:
+            except Exception:
                 # If all else fails, at least overwrite with zeros
                 try:
                     if isinstance(data, bytearray):
@@ -639,7 +639,7 @@ class EncryptionManager:
             # Decode ciphertext in memory (still needed for GCM)
             # Note: We can't stream GCM decryption due to authentication tag verification
             ciphertext = base64.b64decode(ciphertext_b64)
-            total_size = len(ciphertext)
+            len(ciphertext)
 
             # Decrypt
             plaintext_bytes = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)

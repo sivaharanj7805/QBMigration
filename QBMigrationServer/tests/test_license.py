@@ -4,9 +4,6 @@ Tests for license validation, activation, usage tracking endpoints
 """
 
 import json
-from datetime import datetime, timedelta
-
-import pytest
 
 
 class TestLicenseAPI:
@@ -58,7 +55,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 404
         data = json.loads(response.data)
-        assert data["valid"] == False
+        assert data["valid"] is False
         assert "Invalid license key" in data["error"]
 
     def test_license_validate_missing_fingerprint(self, client, db_session):
@@ -69,7 +66,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 400
         data = json.loads(response.data)
-        assert data["valid"] == False
+        assert data["valid"] is False
 
     def test_license_activation_success(self, client, db_session):
         """Test successful license activation"""
@@ -92,12 +89,12 @@ class TestLicenseAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["success"] == True
+        assert data["success"] is True
         assert "token" in data
 
         # Verify license is now activated
         db_session.refresh(license)
-        assert license.is_activated == True
+        assert license.is_activated is True
         assert license.hardware_fingerprint == fingerprint
 
     def test_license_activation_different_hardware(self, client, db_session):
@@ -121,7 +118,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 409
         data = json.loads(response.data)
-        assert data["success"] == False
+        assert data["success"] is False
         assert "already activated" in data["error"].lower()
 
     def test_license_validate_activated(self, client, db_session):
@@ -145,7 +142,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["valid"] == True
+        assert data["valid"] is True
         assert data["tier"] == "professional"
         assert data["migrations_remaining"] == 50
         assert "token" in data
@@ -170,7 +167,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 403
         data = json.loads(response.data)
-        assert data["valid"] == False
+        assert data["valid"] is False
         assert "different machine" in data["error"].lower()
 
     def test_license_use_migration(self, client, db_session):
@@ -197,7 +194,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["success"] == True
+        assert data["success"] is True
         assert data["migrations_remaining"] == initial_remaining - 1
 
     def test_license_exhausted(self, client, db_session):
@@ -222,7 +219,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 403
         data = json.loads(response.data)
-        assert data["valid"] == False
+        assert data["valid"] is False
         assert "no migrations remaining" in data["error"].lower()
 
     def test_license_revoked(self, client, db_session):
@@ -270,7 +267,7 @@ class TestLicenseAPI:
 
         assert response.status_code == 403
         data = json.loads(response.data)
-        assert data["valid"] == False
+        assert data["valid"] is False
         assert "expired" in data["error"].lower()
 
     def test_enterprise_unlimited_migrations(self, client, db_session):
@@ -290,7 +287,7 @@ class TestLicenseAPI:
         db_session.commit()
 
         # Should still have migrations remaining
-        assert license.has_migrations_remaining() == True
+        assert license.has_migrations_remaining() is True
         assert license.get_migrations_remaining() == -1  # Unlimited indicator
 
         response = client.post(
@@ -303,8 +300,8 @@ class TestLicenseAPI:
 
         assert response.status_code == 200
         data = json.loads(response.data)
-        assert data["valid"] == True
-        assert data["is_unlimited"] == True
+        assert data["valid"] is True
+        assert data["is_unlimited"] is True
 
     def test_license_usage_endpoint(self, client, db_session):
         """Test usage endpoint returns correct counts"""
@@ -415,7 +412,7 @@ class TestLicenseActivation:
         activations = LicenseActivation.query.filter_by(license_id=license.id).all()
         assert len(activations) == 1
         assert activations[0].action == "activate"
-        assert activations[0].success == True
+        assert activations[0].success is True
 
     def test_deactivation_logged(self, db_session):
         """Test that deactivation creates audit log"""

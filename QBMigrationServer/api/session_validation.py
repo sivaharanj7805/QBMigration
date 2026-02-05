@@ -15,11 +15,9 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-from functools import wraps
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, jsonify, request
 from models.database import db
-from models.migration_credit import MigrationCredit
 from models.project import Project
 
 logger = logging.getLogger(__name__)
@@ -164,7 +162,7 @@ def validate_session():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    device_name = data.get("device_name", "").strip()
+    data.get("device_name", "").strip()
     ip_address = request.remote_addr
 
     if not session_id:
@@ -314,7 +312,7 @@ def validate_session():
 
 
 @session_validation_bp.route("/activate", methods=["POST"])
-def activate_session():
+def activate_session():  # noqa: C901
     """
     Activate a session on a new device.
     Must be called after validate() confirms the session is valid.
@@ -547,7 +545,7 @@ def start_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    company_name = data.get("company_name", "")
+    data.get("company_name", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:
@@ -714,10 +712,10 @@ def complete_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    extraction_token = data.get("extraction_token", "").strip()
+    data.get("extraction_token", "").strip()
     transaction_count = data.get("transaction_count", 0)
-    company_name = data.get("company_name", "")
-    qb_version = data.get("qb_version", "")
+    data.get("company_name", "")
+    data.get("qb_version", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:

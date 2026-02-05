@@ -134,7 +134,8 @@ class LeadSheetMapper:
         "Software Development": "SD",
         "Oil & Gas Equipment": "OG",
         "Mining Assets": "MIN",
-        "Real Estate Held for Sale": "REHFS",  # CRITICAL FIX: Changed from 'RE' to avoid collision with Retained Earnings
+        # CRITICAL FIX: Changed from 'RE' to avoid collision with Retained Earnings
+        "Real Estate Held for Sale": "REHFS",
         # Liabilities (Canadian notation: CL, LTL)
         "Accounts Payable": "AP",
         "Credit Card": "CC",

@@ -7,7 +7,6 @@ FIX CRIT-03: Configured proper CORS origins instead of wildcard
 FIX LOW-04: Replaced print statements with logging
 """
 
-import hashlib
 import hmac
 import logging
 import os
@@ -15,7 +14,7 @@ from datetime import datetime, timezone
 from functools import wraps
 
 import jwt
-from flask import Blueprint, current_app, request
+from flask import Blueprint, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 logger = logging.getLogger(__name__)
@@ -122,7 +121,7 @@ def init_socketio(app, secret_key):
     else:
         # Try eventlet first, fall back to threading
         try:
-            import eventlet
+            pass
 
             async_mode = "eventlet"
         except ImportError:

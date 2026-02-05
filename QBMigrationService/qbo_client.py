@@ -4,14 +4,12 @@ import os
 import random
 import signal
 import sqlite3
-import sys
 import threading
 import time
 import uuid
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
@@ -197,7 +195,7 @@ class PremiumQBOClient:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # CRIT-07 FIX: Set restrictive permissions on database file
-        db_exists = self.db_path.exists()
+        self.db_path.exists()
 
         with self.db_lock:
             # FIX #81: check_same_thread=False for multi-threading
@@ -273,22 +271,22 @@ class PremiumQBOClient:
 
             # FIX #50, #149: Create indexes for fast lookups
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_entity_lookup 
+                CREATE INDEX IF NOT EXISTS idx_entity_lookup
                 ON migrated_entities(entity_type, qbd_id)
             """)
 
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_migration_id 
+                CREATE INDEX IF NOT EXISTS idx_migration_id
                 ON migrated_entities(migration_id)
             """)
 
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_status 
+                CREATE INDEX IF NOT EXISTS idx_status
                 ON migrated_entities(status)
             """)
 
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_qbo_id 
+                CREATE INDEX IF NOT EXISTS idx_qbo_id
                 ON migrated_entities(entity_type, qbo_id)
             """)
 
@@ -464,7 +462,7 @@ class PremiumQBOClient:
             if migration_id:
                 cursor.execute(
                     """
-                    SELECT entity_type, COUNT(*) 
+                    SELECT entity_type, COUNT(*)
                     FROM migrated_entities
                     WHERE migration_id = ? AND status = 'created'
                     GROUP BY entity_type
@@ -473,7 +471,7 @@ class PremiumQBOClient:
                 )
             else:
                 cursor.execute("""
-                    SELECT entity_type, COUNT(*) 
+                    SELECT entity_type, COUNT(*)
                     FROM migrated_entities
                     WHERE status = 'created'
                     GROUP BY entity_type
@@ -591,7 +589,7 @@ class PremiumQBOClient:
 
         time.sleep(sleep_time)
 
-    def _make_request(
+    def _make_request(  # noqa: C901
         self,
         method: str,
         endpoint: str,
@@ -757,7 +755,11 @@ class PremiumQBOClient:
                 if retries < max_retries:
                     wait_time = self._calculate_backoff(retries)
                     logger.warning(
-                        f"[{correlation_id}] Server error ({response.status_code}). Retry {retries+1}/{max_retries} in {wait_time}s... (TID: {intuit_tid})"
+                        f"[{correlation_id}] Server error"
+                        f" ({response.status_code})."
+                        f" Retry {retries+1}/{max_retries}"
+                        f" in {wait_time}s..."
+                        f" (TID: {intuit_tid})"
                     )
                     time.sleep(wait_time)
                     return self._make_request(
@@ -817,7 +819,7 @@ class PremiumQBOClient:
                     f"[{correlation_id}] Request timed out after {max_retries} retries"
                 )
                 raise
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             if retries < max_retries:
                 wait_time = self._calculate_backoff(retries)
                 logger.warning(
@@ -887,7 +889,7 @@ class PremiumQBOClient:
                         cursor = conn.cursor()
                         cursor.execute(
                             """
-                            UPDATE migrated_entities 
+                            UPDATE migrated_entities
                             SET status = 'deleted'
                             WHERE entity_type = ? AND qbo_id = ?
                         """,
@@ -1081,7 +1083,7 @@ class PremiumQBOClient:
 
         for j, entity_data in enumerate(batch):
             # Dedup check: skip already-migrated entities
-            qbd_id = original_entity_id = (
+            qbd_id = (
                 entity_data.get("ListID")
                 or entity_data.get("TxnID")
                 or entity_data.get("Id")
@@ -1226,7 +1228,7 @@ class PremiumQBOClient:
         batches = []
 
         for i in range(0, len(entities), batch_size):
-            batch = entities[i : i + batch_size]
+            batch = entities[i : i + batch_size]  # noqa: E203
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id))
 
@@ -1313,7 +1315,6 @@ class PremiumQBOClient:
         """
         start_time = time.time()
         # AUDIT FIX MED-06: Add per-batch timeout (2 hours max for entire batch operation)
-        batch_timeout_seconds = 7200
 
         results = {
             "succeeded": [],
@@ -1348,7 +1349,7 @@ class PremiumQBOClient:
         # Split into batches
         batches = []
         for i in range(0, len(entities), batch_size):
-            batch = entities[i : i + batch_size]
+            batch = entities[i : i + batch_size]  # noqa: E203
             batch_id = self._get_next_batch_id()
             batches.append((batch, batch_id, i))  # Include offset for progress
 
@@ -1356,7 +1357,9 @@ class PremiumQBOClient:
         processed_entities = 0
 
         logger.info(
-            f"$25M BATCH: Processing {len(entities)} {entity_type} in {total_batches} batches with {optimal_workers} workers"
+            f"$25M BATCH: Processing {len(entities)}"
+            f" {entity_type} in {total_batches} batches"
+            f" with {optimal_workers} workers"
         )
 
         # Process with controlled parallelism

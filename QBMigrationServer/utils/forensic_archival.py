@@ -15,7 +15,7 @@ This satisfies legal retention requirements without storing sensitive data.
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import List
 
 import boto3
 from botocore.exceptions import ClientError

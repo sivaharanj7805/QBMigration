@@ -14,8 +14,8 @@ import logging
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 
 from api.auth import require_auth
 from flask import Blueprint, current_app, jsonify, request, send_file
@@ -73,7 +73,7 @@ def _get_user_id():
 
 @dashboard_bp.route("/api/migrations/<migration_id>/live-status", methods=["GET"])
 @require_auth
-def get_live_status(migration_id):
+def get_live_status(migration_id):  # noqa: C901
     """
     Enhanced status endpoint for Pizza Tracker polling.
     Returns detailed phase information for real-time UI updates.
@@ -511,7 +511,7 @@ def get_recent_activity():
                             else m.created_at.isoformat()
                         ),
                         "type": "info",
-                        "message": f"SHA-256 Integrity Hash Verified",
+                        "message": "SHA-256 Integrity Hash Verified",
                         "migration_id": m.migration_id,
                         "icon": "shield-check",
                     }
@@ -750,14 +750,18 @@ def download_audit_certificate(migration_id):
                 styles = getSampleStyleSheet()
                 story = [
                     Paragraph(
-                        f"<b>ForensicBridge Migration Certificate</b>", styles["Title"]
+                        "<b>ForensicBridge Migration Certificate</b>", styles["Title"]
                     ),
-                    Paragraph(f"<br/><br/>", styles["Normal"]),
+                    Paragraph("<br/><br/>", styles["Normal"]),
                     Paragraph(f"Migration ID: {migration_id}", styles["Normal"]),
                     Paragraph(f"Company: {migration.company_name}", styles["Normal"]),
-                    Paragraph(f"Status: COMPLETED", styles["Normal"]),
+                    Paragraph("Status: COMPLETED", styles["Normal"]),
                     Paragraph(
-                        f"Date: {migration.completed_at.strftime('%Y-%m-%d %H:%M:%S') if migration.completed_at else 'N/A'}",
+                        "Date: {}".format(
+                            migration.completed_at.strftime("%Y-%m-%d %H:%M:%S")
+                            if migration.completed_at
+                            else "N/A"
+                        ),
                         styles["Normal"],
                     ),
                 ]
@@ -846,7 +850,7 @@ def preview_audit_certificate(migration_id):
 
 @dashboard_bp.route("/api/migrations/<migration_id>/export-caseware", methods=["POST"])
 @require_auth
-def export_caseware_bundle(migration_id):
+def export_caseware_bundle(migration_id):  # noqa: C901
     """
     Generate Caseware Audit Bundle for a completed migration.
     This is the 'Caseware Mode' alternative to QBO migration.
@@ -912,7 +916,6 @@ def export_caseware_bundle(migration_id):
                         qb_data["accounts"] = stored_data["accounts"]
                 except (json.JSONDecodeError, TypeError, KeyError) as e:
                     logger.warning(f"Failed to parse trial_balance_data: {e}")
-                    pass
 
             # If no stored data, generate sample structure for demo
             if not qb_data.get("accounts"):
@@ -1181,7 +1184,7 @@ def export_caseware_bundle(migration_id):
 
 @dashboard_bp.route("/api/migrations/<migration_id>/caseware-bundle", methods=["GET"])
 @require_auth
-def download_caseware_bundle(migration_id):
+def download_caseware_bundle(migration_id):  # noqa: C901
     """
     Download the generated Caseware Audit Bundle (.zip).
 
@@ -1229,7 +1232,9 @@ def download_caseware_bundle(migration_id):
         bundle_path = os.path.realpath(migration.caseware_bundle_path)
         allowed_dirs = [
             os.path.realpath(current_app.root_path),
-            os.path.realpath("/tmp"),  # nosec B108
+            os.path.realpath(
+                os.environ.get("CASEWARE_TEMP_DIR", tempfile.gettempdir())
+            ),  # nosec B108
         ]
         path_is_valid = False
         for allowed_dir in allowed_dirs:
@@ -1323,7 +1328,11 @@ def download_caseware_bundle(migration_id):
                             jsonify(
                                 {
                                     "success": False,
-                                    "error": "Bundle was encrypted with a random salt that was not stored. Please regenerate the bundle.",
+                                    "error": (
+                                        "Bundle was encrypted with a random salt"
+                                        " that was not stored."
+                                        " Please regenerate the bundle."
+                                    ),
                                 }
                             ),
                             500,

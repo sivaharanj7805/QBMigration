@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 from functools import wraps
 
 from flask import Blueprint, current_app, jsonify, request
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 logger = logging.getLogger(__name__)

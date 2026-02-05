@@ -15,7 +15,6 @@ PRODUCTION NOTES:
 - Updates migration status in real-time via webhooks
 """
 
-import json
 import logging
 import os
 import sys
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # with consistent settings for serialization, timeouts, retry behavior, etc.
 # Previously, this file created a duplicate Celery instance with different
 # name ('forensicbridge_tasks' vs 'qbmigration') and minimal configuration.
-from QBMigrationServer.celery_worker import celery
+from QBMigrationServer.celery_worker import celery  # noqa: E402
 
 
 def update_migration_status(
@@ -359,7 +358,7 @@ def cleanup_orphaned_resources():
             # 2. Processing migrations older than 2 hours (likely stuck/orphaned)
             stale_migrations = (
                 Migration.query.filter(
-                    Migration.cleanup_completed == False,
+                    Migration.cleanup_completed.is_(False),
                     Migration.aws_instance_id.isnot(None),
                     or_(
                         # Case 1: Completed/failed but not cleaned up
@@ -405,7 +404,9 @@ def cleanup_orphaned_resources():
                     db.session.commit()
                     cleaned_count += 1
                     logger.info(
-                        f"Cleaned orphaned resources for migration {migration.migration_id} (status: {migration.status})"
+                        f"Cleaned orphaned resources for migration"
+                        f" {migration.migration_id}"
+                        f" (status: {migration.status})"
                     )
                 except Exception as e:
                     logger.warning(

@@ -21,7 +21,6 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -240,7 +239,9 @@ class ArchiveSearchService:
 
         # Apply pagination
         total = len(all_results)
-        paginated = all_results[filters.offset : filters.offset + filters.max_results]
+        paginated = all_results[
+            filters.offset : filters.offset + filters.max_results  # noqa: E203
+        ]
 
         # Build facets
         facets = self._build_facets(all_results)

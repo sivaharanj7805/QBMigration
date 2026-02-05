@@ -654,7 +654,7 @@ def list_licenses():
         return jsonify(
             {
                 "licenses": [
-                    l.to_dict(include_sensitive=True) for l in pagination.items
+                    lic.to_dict(include_sensitive=True) for lic in pagination.items
                 ],
                 "total": pagination.total,
                 "page": page,

@@ -47,7 +47,12 @@ def validate_email(email: str) -> Tuple[bool, str]:
     # RFC 5322 compliant pattern - stricter validation
     # Local: alphanumeric, dots (not consecutive), plus, hyphen, underscore, percent
     # Domain: alphanumeric labels separated by dots, TLD at least 2 chars
-    pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9._%+-]*[a-zA-Z0-9])?@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$"
+    pattern = (
+        r"^[a-zA-Z0-9]([a-zA-Z0-9._%+-]*[a-zA-Z0-9])?"
+        r"@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?"
+        r"(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*"
+        r"\.[a-zA-Z]{2,}$"
+    )
     if not re.match(pattern, email):
         return False, "Invalid email format"
 

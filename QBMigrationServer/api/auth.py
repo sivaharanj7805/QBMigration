@@ -26,8 +26,8 @@ from utils.captcha_verifier import (
     is_captcha_required,
     verify_captcha_token,
 )
-from utils.error_sanitizer import create_error_response, sanitize_error_message
-from utils.pii_redaction import hash_email, redact_all_pii
+from utils.error_sanitizer import sanitize_error_message
+from utils.pii_redaction import hash_email
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                     )
 
                 # Add user info to request
-                request.current_user = payload
+                request.current_user = payload  # type: ignore[attr-defined]
                 return f(*args, **kwargs)
 
             except Exception as e:
@@ -164,7 +164,7 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                     401,
                 )
 
-            request.current_user = {
+            request.current_user = {  # type: ignore[attr-defined]
                 "user_id": session["user_id"],
                 "email": session.get("email", ""),
             }
@@ -177,7 +177,7 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
             try:
                 payload = decode_token(auth_cookie)
                 if payload:
-                    request.current_user = payload
+                    request.current_user = payload  # type: ignore[attr-defined]
                     return f(*args, **kwargs)
             except Exception as e:
                 logger.warning(f"Cookie auth failed with {type(e).__name__}: {str(e)}")
@@ -585,7 +585,7 @@ def validate_email(email: str) -> bool:
             # 3. CI/CD environments may have restricted network access
             # In production, DNS check is always enabled to reject undeliverable addresses.
             check_deliverability = os.getenv("FLASK_ENV") != "testing"
-            valid = ev_validate(email, check_deliverability=check_deliverability)
+            ev_validate(email, check_deliverability=check_deliverability)
             return True
         except EmailNotValidError:
             return False
@@ -1017,7 +1017,10 @@ def get_current_user():
                         tier_type=tier,
                         transaction_limit=credit_config.get("transaction_limit", 5000),
                         price_cents=0,
-                        stripe_checkout_session_id=f"auto-sync-{user_id}-{i}-{datetime.datetime.now(timezone.utc).timestamp()}",
+                        stripe_checkout_session_id=(
+                            f"auto-sync-{user_id}-{i}-"
+                            f"{datetime.datetime.now(timezone.utc).timestamp()}"
+                        ),
                         payment_status="paid",
                         status="available",
                     )
@@ -1549,7 +1552,7 @@ def invite_team_member():
         return jsonify({"success": False, "error": "No data provided"}), 400
 
     email = data.get("email", "").strip().lower()
-    role = data.get("role", "member")
+    data.get("role", "member")
 
     if not email:
         return jsonify({"success": False, "error": "Email is required"}), 400
@@ -1678,7 +1681,9 @@ If you didn't request this, please ignore this email or contact support.
 <h2 style="color: #1a365d;">Reset Your Password</h2>
 <p>You requested a password reset for your ForensicBridge account.</p>
 <p style="margin: 30px 0;">
-    <a href="{reset_url}" style="background-color: #3182ce; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+    <a href="{reset_url}" style="background-color: #3182ce; color: white;
+ padding: 12px 24px; text-decoration: none; border-radius: 6px;
+ display: inline-block;">
         Reset Password
     </a>
 </p>
@@ -1992,7 +1997,9 @@ If you didn't create an account, please ignore this email.
 <h2 style="color: #1a365d;">Welcome to ForensicBridge!</h2>
 <p>Please verify your email address to complete your registration.</p>
 <p style="margin: 30px 0;">
-    <a href="{verify_url}" style="background-color: #38a169; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+    <a href="{verify_url}" style="background-color: #38a169; color: white;
+ padding: 12px 24px; text-decoration: none; border-radius: 6px;
+ display: inline-block;">
         Verify Email
     </a>
 </p>
@@ -2337,7 +2344,10 @@ def sync_credits():
             tier_type=tier,
             transaction_limit=credit_config.get("transaction_limit", 5000),
             price_cents=0,
-            stripe_checkout_session_id=f"sync-available-{user_id}-{i}-{datetime.datetime.now(timezone.utc).timestamp()}",
+            stripe_checkout_session_id=(
+                f"sync-available-{user_id}-{i}-"
+                f"{datetime.datetime.now(timezone.utc).timestamp()}"
+            ),
             payment_status="paid",
             status="available",
         )

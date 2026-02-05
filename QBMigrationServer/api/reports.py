@@ -15,12 +15,10 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from io import BytesIO
 
 from api.auth import require_auth
 from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request, send_file
-from models.database import db
 from models.migration import Migration
 
 logger = logging.getLogger(__name__)

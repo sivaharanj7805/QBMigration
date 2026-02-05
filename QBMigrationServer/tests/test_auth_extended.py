@@ -21,16 +21,13 @@ import datetime
 import os
 import sys
 from datetime import timezone
-from unittest.mock import MagicMock, patch
 
 import jwt
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.database import db
-from models.migration_credit import MigrationCredit
-from models.user import User
+from models.migration_credit import MigrationCredit  # noqa: E402
 
 # ============================================================================
 # CSRF Token Endpoint

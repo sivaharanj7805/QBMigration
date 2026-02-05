@@ -459,7 +459,6 @@ class Config:
     @staticmethod
     def init_app(app):
         """Initialize app - override in subclasses for specific setup"""
-        pass
 
 
 class DevelopmentConfig(Config):
@@ -695,7 +694,9 @@ def validate_config():
         except Exception as e:
             raise RuntimeError(
                 f"BACKUP_ENCRYPTION_KEY is invalid: {e}. "
-                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                "Generate with: python -c "
+                "'from cryptography.fernet import Fernet;"
+                " print(Fernet.generate_key().decode())'"
             )
 
     # MED-02 FIX: Validate QBO_ENCRYPTION_KEY if set (separate from backup key)
@@ -708,7 +709,9 @@ def validate_config():
         except Exception as e:
             raise RuntimeError(
                 f"QBO_ENCRYPTION_KEY is invalid: {e}. "
-                "Generate with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+                "Generate with: python -c "
+                "'from cryptography.fernet import Fernet;"
+                " print(Fernet.generate_key().decode())'"
             )
     elif env == "production" and backup_key:
         logger.warning(

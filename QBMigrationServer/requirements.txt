@@ -24,6 +24,7 @@ qrcode==7.4.2
 
 # Security - SAML SSO
 python3-saml==1.16.0  # FIX: SAML signature validation (100/100 audit)
+defusedxml==0.7.1  # FIX: Safe XML parsing to prevent XXE attacks
 
 # Security - Rate Limiting
 limits==5.6.0

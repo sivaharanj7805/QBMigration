@@ -3,14 +3,11 @@ Health Check API
 Pre-migration file scan and PDF report generation
 """
 
-import os
-import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
 
 from api.auth import require_auth
 from flask import Blueprint, jsonify, request, send_file
-from models import db
 
 health_check_bp = Blueprint("health_check", __name__, url_prefix="/api/health-check")
 

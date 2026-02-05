@@ -13,25 +13,22 @@ FIX 100/100: Implements proper SAML signature validation using python3-saml.
 
 import base64
 import datetime
-import hashlib
 import logging
 import os
-import re
 import secrets
 import urllib.parse
-import xml.etree.ElementTree as ET
 from datetime import timezone
 from functools import wraps
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
-from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
-from flask_login import current_user, login_required
+import defusedxml.ElementTree as SafeET
+from flask import Blueprint, current_app, jsonify, redirect, request, session
+from flask_login import login_required
 
 # SAML signature validation - required for production
 try:
     from onelogin.saml2.auth import OneLogin_Saml2_Auth
     from onelogin.saml2.errors import OneLogin_Saml2_Error
-    from onelogin.saml2.utils import OneLogin_Saml2_Utils
 
     SAML_AVAILABLE = True
 except ImportError:
@@ -47,7 +44,7 @@ sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
 # =============================================================================
 
 
-def validate_relay_state(relay_state: str) -> str:
+def validate_relay_state(relay_state: str) -> str:  # noqa: C901
     """
     CRITICAL SECURITY FIX: Validate relay_state to prevent open redirect attacks.
 
@@ -445,7 +442,7 @@ def assertion_consumer_service():
     """
     saml_response = request.form.get("SAMLResponse")
     # SECURITY FIX: Validate relay_state to prevent open redirect attacks
-    relay_state = validate_relay_state(request.form.get("RelayState", "/"))
+    validate_relay_state(request.form.get("RelayState", "/"))
 
     if not saml_response:
         logger.warning("ACS received without SAML response")
@@ -527,7 +524,7 @@ def assertion_consumer_service():
             try:
                 decoded = base64.b64decode(saml_response)
                 # Parse XML to extract NameID (development only)
-                root = ET.fromstring(decoded)  # nosec B314
+                root = SafeET.fromstring(decoded)  # nosec B314
                 ns = {"saml": "urn:oasis:names:tc:SAML:2.0:assertion"}
                 name_id_elem = root.find(".//saml:NameID", ns)
                 name_id = name_id_elem.text if name_id_elem is not None else "unknown"

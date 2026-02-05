@@ -11,13 +11,10 @@ Run with: python -m pytest tests/test_e2e_flow.py -v
 """
 
 import hashlib
-import json
 import os
 import sys
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -63,7 +60,7 @@ class TestCompleteFlowSimulation:
             "message": "Migration started successfully",
         }
 
-        assert expected_response["success"] == True
+        assert expected_response["success"] is True
         assert expected_response["status"] == "processing"
 
     def test_flow_step_2_qbd_data_extraction(self):
@@ -186,9 +183,9 @@ class TestCompleteFlowSimulation:
             "hash_match": True,
         }
 
-        assert decryption_result["success"] == True
-        assert decryption_result["integrity_verified"] == True
-        assert decryption_result["hash_match"] == True
+        assert decryption_result["success"] is True
+        assert decryption_result["integrity_verified"] is True
+        assert decryption_result["hash_match"] is True
 
     def test_flow_step_8_oauth_token_refresh(self):
         """TEST: OAuth token refresh before QBO API calls"""
@@ -315,8 +312,8 @@ class TestCompleteFlowSimulation:
             "pdf_size_bytes": 245000,
         }
 
-        assert certificate_data["hash_match"] == True
-        assert certificate_data["trial_balance_verified"] == True
+        assert certificate_data["hash_match"] is True
+        assert certificate_data["trial_balance_verified"] is True
         assert certificate_data["data_quality_score"] > 95.0
         assert certificate_data["pdf_size_bytes"] > 0
 
@@ -336,7 +333,7 @@ class TestCompleteFlowSimulation:
         assert final_status["status"] == "completed"
         assert final_status["progress_percent"] == 100
         assert final_status["forensic_status"] == "VERIFIED"
-        assert final_status["is_balanced"] == True
+        assert final_status["is_balanced"] is True
 
 
 # ============================================================================
@@ -522,7 +519,7 @@ class TestErrorHandling:
             "suggested_action": "Re-authenticate with QuickBooks Online",
         }
 
-        assert error_response["success"] == False
+        assert error_response["success"] is False
         assert "Refresh token" in error_response["error_description"]
 
     def test_partial_migration_recovery(self):
@@ -535,7 +532,7 @@ class TestErrorHandling:
             "can_resume": True,
         }
 
-        assert checkpoint["can_resume"] == True
+        assert checkpoint["can_resume"] is True
         assert len(checkpoint["completed_entities"]) > 0
 
 

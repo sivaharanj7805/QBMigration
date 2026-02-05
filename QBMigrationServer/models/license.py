@@ -8,7 +8,6 @@ Features:
 """
 
 import hashlib
-import json
 import secrets
 from datetime import datetime, timedelta, timezone
 

@@ -29,8 +29,6 @@ Version: 1.0.0
 import logging
 import os
 import time
-from functools import wraps
-from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +162,7 @@ def track_request_metrics():
         return lambda: None, lambda r: r
 
     def before_request():
-        from flask import g, request
+        from flask import g
 
         g.start_time = time.time()
         ACTIVE_REQUESTS.inc()
