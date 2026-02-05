@@ -214,6 +214,15 @@ class MigrationOrchestrator:
 
         try:
             return self._run_migration_impl(encrypted_data, encryption_metadata, company_name)
+        except Exception:
+            # AUDIT FIX MED-21: Ensure QBO client session is closed on exception
+            if hasattr(self, 'qbo_client') and self.qbo_client:
+                try:
+                    if hasattr(self.qbo_client, 'session') and self.qbo_client.session:
+                        self.qbo_client.session.close()
+                except Exception:
+                    pass
+            raise
         finally:
             # Always restore signal handler and cancel alarm
             if hasattr(signal, 'SIGALRM'):

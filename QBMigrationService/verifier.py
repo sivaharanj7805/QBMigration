@@ -791,19 +791,22 @@ class PremiumMigrationVerifier:
                     f"Some payments may not be linked to invoices."
                 )
                 
+                # AUDIT FIX HIGH-16: Use str() to preserve Decimal precision
                 return [{
-                    "variance": float(variance),
-                    "total_ar": float(total_ar),
-                    "total_open_invoices": float(total_open_invoices)
+                    "variance": str(variance),
+                    "total_ar": str(total_ar),
+                    "total_open_invoices": str(total_open_invoices)
                 }]
             else:
                 logger.info(f"  ✓ All payments properly applied (variance: ${variance:.2f})")
                 return []
             
         except Exception as e:
+            # AUDIT FIX MED-01: Record failure in report instead of silently returning empty
             logger.error(f"Unapplied payment detection failed: {e}")
+            self.report["warnings"].append(f"Unapplied payment detection could not complete: {type(e).__name__}")
             return []
-    
+
     # ========================================================================
     # EXISTING VERIFICATION METHODS (Enhanced)
     # ========================================================================
@@ -1502,10 +1505,12 @@ class PremiumMigrationVerifier:
             return 'FAILED VERIFICATION'
 
     def _safe_decimal(self, value: Any) -> Decimal:
-        """Safely convert a value to Decimal, returning 0 on failure."""
+        """Safely convert a value to Decimal, returning 0 on failure.
+        AUDIT FIX MED-02: Log conversion failures to make data loss visible."""
         if value is None:
             return Decimal('0')
         try:
             return Decimal(str(value))
-        except (InvalidOperation, TypeError, ValueError):
+        except (InvalidOperation, TypeError, ValueError) as e:
+            logger.warning(f"Decimal conversion failed for value {repr(value)}: {e} - defaulting to 0")
             return Decimal('0')

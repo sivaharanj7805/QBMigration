@@ -35,6 +35,12 @@ const CSRF_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 // Track if a refresh is in progress to prevent concurrent refreshes
 let csrfRefreshInProgress = false;
 
+// AUDIT FIX HIGH-11: Session duration enforcement
+const SESSION_MAX_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours absolute max
+const SESSION_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes inactivity
+let sessionStartTime: number | null = null;
+let lastActivityTime: number | null = null;
+
 /**
  * SECURITY: Check if CSRF token is expired or expiring soon
  */
@@ -153,6 +159,9 @@ export function setAuthState(user: User, csrfTokenValue?: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('isLoggedIn', 'true');
+    // AUDIT FIX HIGH-11: Track session start time for max duration enforcement
+    sessionStartTime = Date.now();
+    lastActivityTime = Date.now();
     if (csrfTokenValue) {
         setCsrfToken(csrfTokenValue);
     }
@@ -167,6 +176,9 @@ export function clearAuth(): void {
     localStorage.removeItem('isLoggedIn');
     csrfToken = null;
     csrfTokenExpiry = null;
+    // AUDIT FIX HIGH-11: Clear session timers
+    sessionStartTime = null;
+    lastActivityTime = null;
 }
 
 /**
@@ -276,13 +288,42 @@ export async function authFetch(
  * Returns true if session is valid, false otherwise
  */
 export async function validateSession(): Promise<boolean> {
+    // AUDIT FIX HIGH-11: Check client-side session expiry first
+    if (isSessionExpired()) {
+        clearAuth();
+        return false;
+    }
+
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
     try {
         const response = await authFetch(`${API_URL}/api/auth/validate`, {
             method: 'GET',
         });
+        if (response.ok) {
+            updateActivityTime();
+        }
         return response.ok;
     } catch {
         return false;
     }
+}
+
+/**
+ * AUDIT FIX HIGH-11: Update last activity timestamp for inactivity tracking
+ */
+export function updateActivityTime(): void {
+    lastActivityTime = Date.now();
+}
+
+/**
+ * AUDIT FIX HIGH-11: Check if session is expired due to absolute duration or inactivity
+ */
+export function isSessionExpired(): boolean {
+    if (!sessionStartTime || !lastActivityTime) return false; // No session yet
+    const now = Date.now();
+    // Check absolute session duration (8 hours)
+    if (now - sessionStartTime > SESSION_MAX_DURATION_MS) return true;
+    // Check inactivity timeout (30 minutes)
+    if (now - lastActivityTime > SESSION_INACTIVITY_TIMEOUT_MS) return true;
+    return false;
 }

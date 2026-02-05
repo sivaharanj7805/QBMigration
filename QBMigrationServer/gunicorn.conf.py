@@ -119,8 +119,8 @@ proc_name = 'qbmigration-server'
 # Daemon mode (set to False for systemd/supervisor management)
 daemon = False
 
-# PID file
-pidfile = os.getenv('GUNICORN_PID_FILE', '/tmp/gunicorn.pid')
+# AUDIT FIX HIGH-12: PID file in /run instead of /tmp for security
+pidfile = os.getenv('GUNICORN_PID_FILE', '/run/gunicorn/qbmigration.pid')
 
 # User/Group (uncomment for production with dedicated user)
 # user = 'ubuntu'

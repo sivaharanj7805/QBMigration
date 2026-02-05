@@ -65,8 +65,8 @@ jobs:
       run: |
         # Generate JSON report for artifact upload
         bandit -r QBMigrationServer/ QBMigrationService/ -f json -o bandit-report.json || true
-        # Fail on medium+ severity issues (blocks CI on security vulnerabilities)
-        bandit -r QBMigrationServer/ QBMigrationService/ -ll -ii
+        # AUDIT FIX HIGH-19: Fail on ALL severity levels (was -ll medium+, now -l low+)
+        bandit -r QBMigrationServer/ QBMigrationService/ -l -ii
 
     - name: Upload Bandit Report
       uses: actions/upload-artifact@v4

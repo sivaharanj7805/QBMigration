@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { setAuthState, setCsrfToken } from '@/lib/auth';
+import { setAuthState, setCsrfToken, fetchCsrfToken } from '@/lib/auth';
 import { sanitize } from '@/lib/sanitize';
 
 // API configuration - must be set in environment
@@ -48,6 +48,13 @@ export default function LoginPage() {
             // If server sends CSRF token, store it
             if (data.csrf_token) {
                 setCsrfToken(data.csrf_token);
+            }
+
+            // AUDIT FIX HIGH-06: Guarantee CSRF token is available after login
+            // If server didn't provide a CSRF token in the response, fetch one
+            // from the dedicated endpoint to ensure subsequent mutations are protected
+            if (!data.csrf_token) {
+                await fetchCsrfToken(true);
             }
 
             // Redirect to dashboard
