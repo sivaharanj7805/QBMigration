@@ -743,7 +743,9 @@ class TestSecurity:
         ), f"CRITICAL: Not using Argon2! Hash: {test_user.password_hash[:20]}"
 
         # VERIFY: Correct password validates
-        assert test_user.check_password("TestPassword1234!"), "Correct password rejected"
+        assert test_user.check_password(
+            "TestPassword1234!"
+        ), "Correct password rejected"
 
         # VERIFY: Wrong password rejects
         assert not test_user.check_password(
