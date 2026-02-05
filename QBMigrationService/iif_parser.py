@@ -92,6 +92,17 @@ class IIFParser:
         if not os.path.isfile(real_path):
             raise ValueError(f"Invalid file path (not a file): {file_path}")
 
+        # FIX #10: Check file size before reading (prevent memory exhaustion)
+        MAX_IIF_SIZE = 100 * 1024 * 1024  # 100MB limit
+        file_size = os.path.getsize(real_path)
+        if file_size > MAX_IIF_SIZE:
+            raise ValueError(
+                f"IIF file too large: {file_size / (1024*1024):.1f}MB exceeds "
+                f"{MAX_IIF_SIZE / (1024*1024):.0f}MB limit. "
+                f"Please split the file into smaller chunks."
+            )
+        logger.info(f"Reading IIF file: {file_size / 1024:.1f}KB")
+
         try:
             with open(real_path, 'r', encoding='cp1252') as f:
                 content = f.read()
@@ -111,6 +122,15 @@ class IIFParser:
 
         lines = content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
         self.stats['total_lines'] = len(lines)
+
+        # FIX #11: Limit line count to prevent pathological inputs from hanging
+        MAX_LINES = 1_000_000  # 1 million line limit
+        if len(lines) > MAX_LINES:
+            raise ValueError(
+                f"IIF file has too many lines: {len(lines):,} exceeds {MAX_LINES:,} limit. "
+                f"Please split the file into smaller chunks."
+            )
+        logger.info(f"Parsing IIF content: {len(lines):,} lines")
         
         # AUDIT FIX: Removed unused current_type variable
 
