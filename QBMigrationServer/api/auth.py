@@ -406,8 +406,42 @@ def constant_time_compare(a: str, b: str) -> bool:
     return hmac.compare_digest(a_bytes, b_bytes)
 
 
+def _get_jwt_signing_key():
+    """Get the JWT signing key based on configured algorithm.
+
+    MED-03 FIX: Supports both HS256 (symmetric) and RS256 (asymmetric) algorithms.
+    For RS256, reads the PEM private key from the configured file path.
+    """
+    algorithm = current_app.config.get('JWT_ALGORITHM', 'HS256')
+    if algorithm == 'RS256':
+        key_path = current_app.config.get('JWT_PRIVATE_KEY_PATH')
+        if not key_path:
+            raise ValueError("JWT_PRIVATE_KEY_PATH required when JWT_ALGORITHM=RS256")
+        with open(key_path, 'r') as f:
+            return f.read()
+    return current_app.config['SECRET_KEY']
+
+
+def _get_jwt_verification_key():
+    """Get the JWT verification key based on configured algorithm.
+
+    For RS256, reads the PEM public key. For HS256, uses SECRET_KEY.
+    """
+    algorithm = current_app.config.get('JWT_ALGORITHM', 'HS256')
+    if algorithm == 'RS256':
+        key_path = current_app.config.get('JWT_PUBLIC_KEY_PATH')
+        if not key_path:
+            raise ValueError("JWT_PUBLIC_KEY_PATH required when JWT_ALGORITHM=RS256")
+        with open(key_path, 'r') as f:
+            return f.read()
+    return current_app.config['SECRET_KEY']
+
+
 def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
-    """Create a JWT token for a user with unique JTI for revocation support"""
+    """Create a JWT token for a user with unique JTI for revocation support.
+
+    MED-03 FIX: Uses configurable algorithm (HS256 default, RS256 ready).
+    """
     import secrets as _secrets
     payload = {
         'user_id': user_id,
@@ -416,13 +450,18 @@ def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
         'iat': datetime.datetime.now(timezone.utc),
         'jti': _secrets.token_hex(16)  # Unique token ID for revocation tracking
     }
-    return jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
+    algorithm = current_app.config.get('JWT_ALGORITHM', 'HS256')
+    return jwt.encode(payload, _get_jwt_signing_key(), algorithm=algorithm)
 
 
 def decode_token(token: str) -> Optional[dict]:
-    """Decode and validate a JWT token"""
+    """Decode and validate a JWT token.
+
+    MED-03 FIX: Uses configurable allowed algorithms from config.
+    """
     try:
-        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
+        allowed = current_app.config.get('JWT_ALLOWED_ALGORITHMS', ['HS256'])
+        payload = jwt.decode(token, _get_jwt_verification_key(), algorithms=allowed)
         return payload
     except jwt.ExpiredSignatureError:
         return None
@@ -449,7 +488,11 @@ def validate_email(email: str) -> bool:
         from email_validator import validate_email as ev_validate, EmailNotValidError
         try:
             # Validate email format
-            # Skip DNS deliverability check in testing environment
+            # LOW-05 FIX: DNS deliverability check is skipped in testing because:
+            # 1. Test email domains (e.g. @example.com) have no real MX records
+            # 2. DNS lookups add ~2s latency per validation, slowing test suites
+            # 3. CI/CD environments may have restricted network access
+            # In production, DNS check is always enabled to reject undeliverable addresses.
             check_deliverability = os.getenv('FLASK_ENV') != 'testing'
             valid = ev_validate(email, check_deliverability=check_deliverability)
             return True
@@ -473,7 +516,10 @@ _COMMON_PASSWORDS = frozenset([
 
 
 def validate_password(password: str) -> Tuple[bool, str]:
-    """Validate password strength (PCI DSS v4.0.1 compliant)"""
+    """Validate password strength (PCI DSS v4.0.1 compliant).
+
+    LOW-01 FIX: Added special character requirement for stronger entropy.
+    """
     if len(password) < 12:
         return False, 'Password must be at least 12 characters'
     if not re.search(r'[A-Z]', password):
@@ -482,6 +528,8 @@ def validate_password(password: str) -> Tuple[bool, str]:
         return False, 'Password must contain at least one lowercase letter'
     if not re.search(r'\d', password):
         return False, 'Password must contain at least one digit'
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/\\`~]', password):
+        return False, 'Password must contain at least one special character (!@#$%^&*...)'
     if password.lower() in _COMMON_PASSWORDS:
         return False, 'This password is too common. Please choose a more unique password.'
     return True, ''
