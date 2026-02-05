@@ -189,8 +189,12 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
     tokens_revoked = 0
     errors = []
 
+    # CRITICAL FIX: Use decrypted token getters, NOT raw encrypted column values.
+    # user.qbo_access_token contains Fernet ciphertext - Intuit needs the plaintext.
+    # Previously sent encrypted garbage to Intuit, causing silent revocation failure.
+
     # Revoke access token first (if present)
-    access_token = getattr(user, 'qbo_access_token', None)
+    access_token = user.get_qbo_access_token() if hasattr(user, 'get_qbo_access_token') else None
     if access_token:
         try:
             response = requests.post(
@@ -210,7 +214,7 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
             logger.warning(f"Failed to revoke QBO access token: {e}")
 
     # Revoke refresh token (if present)
-    refresh_token = getattr(user, 'qbo_refresh_token', None)
+    refresh_token = user.get_qbo_refresh_token() if hasattr(user, 'get_qbo_refresh_token') else None
     if refresh_token:
         try:
             response = requests.post(
@@ -285,7 +289,9 @@ def qbo_status():
     Returns connection state and token validity
     """
     try:
-        is_connected = bool(current_user.qbo_refresh_token)
+        # Use realm_id for connection check (qbo_refresh_token is Fernet ciphertext,
+        # but checking it as truthy is fine for boolean presence - realm_id is more explicit)
+        is_connected = bool(current_user.qbo_realm_id and current_user.qbo_refresh_token)
         is_expired = False
         
         if current_user.qbo_token_expires_at:
@@ -322,16 +328,26 @@ def refresh_qbo_token():
                 'success': False,
                 'error': 'Not connected to QuickBooks'
             }), 400
-        
+
         client_id = current_app.config.get('QBO_CLIENT_ID')
         client_secret = current_app.config.get('QBO_CLIENT_SECRET')
-        
+
+        # CRITICAL FIX: Decrypt refresh token before sending to Intuit.
+        # current_user.qbo_refresh_token is Fernet ciphertext - Intuit needs plaintext.
+        decrypted_refresh_token = current_user.get_qbo_refresh_token()
+        if not decrypted_refresh_token:
+            logger.error("Failed to decrypt QBO refresh token - token may be corrupted")
+            return jsonify({
+                'success': False,
+                'error': 'Token decryption failed - please reconnect to QuickBooks'
+            }), 400
+
         # MED-08 FIX: Add timeout to external HTTP calls
         response = requests.post(
             INTUIT_TOKEN_URL,
             data={
                 'grant_type': 'refresh_token',
-                'refresh_token': current_user.qbo_refresh_token
+                'refresh_token': decrypted_refresh_token
             },
             auth=(client_id, client_secret),
             headers={'Accept': 'application/json'},

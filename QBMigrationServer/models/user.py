@@ -305,8 +305,9 @@ class User(UserMixin, db.Model):
         Raises:
             ValueError: If password doesn't meet requirements
         """
-        if len(password) < 8:
-            raise ValueError("Password must be at least 8 characters long")
+        # PCI DSS v4.0.1 (mandatory since March 2025) requires minimum 12 characters
+        if len(password) < 12:
+            raise ValueError("Password must be at least 12 characters long")
         
         if not re.search(r'[A-Z]', password):
             raise ValueError("Password must contain at least one uppercase letter")

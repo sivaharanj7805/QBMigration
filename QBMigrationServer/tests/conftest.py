@@ -182,7 +182,7 @@ def test_user(db_session):
     
     try:
         # This will raise ValueError if password is weak
-        user.set_password('Test1234')
+        user.set_password('TestPassword1234')
     except ValueError as e:
         raise RuntimeError(f"Test user password failed validation: {str(e)}")
     
@@ -256,7 +256,7 @@ def authenticated_client(client, test_user):
     # Login the test user
     response = client.post('/api/auth/login', json={
         'email': 'test@example.com',
-        'password': 'Test1234'
+        'password': 'TestPassword1234'
     })
 
     # SAFETY CHECK: Verify login succeeded

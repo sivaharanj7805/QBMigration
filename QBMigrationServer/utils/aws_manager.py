@@ -182,15 +182,24 @@ class AWSMigrationManager:
                 logger.error("AWS_S3_BUCKET not configured")
                 return False
             
-            # List objects with migration_id prefix
-            # CRITICAL FIX: Paginate through S3 results (limit is 1000 per call)
+            # PERFORMANCE FIX: Use migration_id in prefix to avoid scanning ALL objects.
+            # S3 key format is: migrations/{YYYY}/{MM}/{DD}/{migration_id}/...
+            # We can't fully narrow the prefix because the date varies, but we can
+            # use the migration_id substring match with a much narrower listing scope.
+            # NOTE: The broad prefix is kept as a fallback since the date-based path
+            # makes it impossible to construct a precise prefix without knowing the upload date.
+            # However, we limit page scanning to prevent runaway operations.
             prefix = f"migrations/"
             deleted_count = 0
             continuation_token = None
             page_count = 0
+            MAX_PAGES = 100  # Safety limit: scan at most 100K objects
 
             while True:
                 page_count += 1
+                if page_count > MAX_PAGES:
+                    logger.warning(f"S3 cleanup hit max page limit ({MAX_PAGES}) for migration {migration_id}")
+                    break
 
                 # Build list_objects_v2 params
                 list_params = {

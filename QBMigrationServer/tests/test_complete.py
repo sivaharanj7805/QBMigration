@@ -33,7 +33,7 @@ class TestAuthentication:
         """
         response = client.post('/api/auth/register', json={
             'email': 'newuser@example.com',
-            'password': 'Secure123',
+            'password': 'SecurePassword1234',
             'first_name': 'New',
             'last_name': 'User'
         })
@@ -50,7 +50,7 @@ class TestAuthentication:
         assert user is not None, "User was not created in database"
         
         # SECURITY: Verify password is hashed, not plaintext
-        assert user.password_hash != 'Secure123', "CRITICAL: Password stored in plaintext!"
+        assert user.password_hash != 'SecurePassword1234', "CRITICAL: Password stored in plaintext!"
         assert user.password_hash.startswith('$argon2'), "Password not using Argon2"
         
         # SECURITY: Verify no password in API response
@@ -59,7 +59,7 @@ class TestAuthentication:
         # VERIFY: User can login with password
         login_response = client.post('/api/auth/login', json={
             'email': 'newuser@example.com',
-            'password': 'Secure123'
+            'password': 'SecurePassword1234'
         })
         assert login_response.status_code == 200, "Cannot login with registered password"
     
@@ -77,7 +77,7 @@ class TestAuthentication:
         
         response = client.post('/api/auth/register', json={
             'email': 'test@example.com',
-            'password': 'Different123'
+            'password': 'DifferentPassword1234'
         })
         
         assert response.status_code == 409, f"Expected 409 Conflict, got {response.status_code}"
@@ -143,7 +143,7 @@ class TestAuthentication:
         for invalid_email in invalid_emails:
             response = client.post('/api/auth/register', json={
                 'email': invalid_email,
-                'password': 'Secure123'
+                'password': 'SecurePassword1234'
             })
             
             assert response.status_code == 400, \
@@ -161,7 +161,7 @@ class TestAuthentication:
         """
         response = client.post('/api/auth/login', json={
             'email': 'test@example.com',
-            'password': 'Test1234'
+            'password': 'TestPassword1234'
         })
         
         assert response.status_code == 200, f"Login failed: {response.data}"
@@ -236,13 +236,13 @@ class TestAuthentication:
         for i in range(5):
             client.post('/api/auth/login', json={
                 'email': 'test@example.com',
-                'password': 'Wrong123'
+                'password': 'WrongPassword1234'
             })
         
         # 6th attempt should be locked or require CAPTCHA
         response = client.post('/api/auth/login', json={
             'email': 'test@example.com',
-            'password': 'Test1234'  # Correct password!
+            'password': 'TestPassword1234'  # Correct password!
         })
         
         # Accept either locked (401) or CAPTCHA required (400)
@@ -270,13 +270,13 @@ class TestAuthentication:
         """
         # CRITICAL: Try to set same password - should raise ValueError
         with pytest.raises(ValueError) as exc_info:
-            test_user.set_password('Test1234')
+            test_user.set_password('TestPassword1234')
         
         assert 'recently' in str(exc_info.value).lower() or 'reuse' in str(exc_info.value).lower(), \
             f"Error message unclear: {exc_info.value}"
         
         # VERIFY: Password unchanged
-        assert test_user.check_password('Test1234'), "Password was changed when it shouldn't be"
+        assert test_user.check_password('TestPassword1234'), "Password was changed when it shouldn't be"
     
     def test_logout(self, authenticated_client, client):
         """
@@ -684,12 +684,12 @@ class TestSecurity:
             f"CRITICAL: Not using Argon2! Hash: {test_user.password_hash[:20]}"
         
         # VERIFY: Correct password validates
-        assert test_user.check_password('Test1234'), "Correct password rejected"
+        assert test_user.check_password('TestPassword1234'), "Correct password rejected"
         
         # VERIFY: Wrong password rejects
-        assert not test_user.check_password('Wrong123'), "Wrong password accepted"
+        assert not test_user.check_password('WrongPassword1234'), "Wrong password accepted"
         assert not test_user.check_password(''), "Empty password accepted"
-        assert not test_user.check_password('Test12345'), "Similar password accepted"
+        assert not test_user.check_password('TestPassword12345'), "Similar password accepted"
     
     def test_password_hash_uniqueness(self, db_session):
         """
@@ -791,7 +791,7 @@ class TestSecurity:
         # Login
         client.post('/api/auth/login', json={
             'email': 'test@example.com',
-            'password': 'Test1234'
+            'password': 'TestPassword1234'
         })
         
         # Get session after login
@@ -822,7 +822,7 @@ class TestSecurity:
         for payload in xss_payloads:
             response = client.post('/api/auth/register', json={
                 'email': 'xss@test.com',
-                'password': 'Secure123',
+                'password': 'SecurePassword1234',
                 'first_name': payload
             })
             

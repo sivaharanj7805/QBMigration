@@ -17,7 +17,7 @@ def auth_headers(client, test_user):
     """Get JWT auth headers for authenticated requests."""
     response = client.post('/api/auth/login', json={
         'email': 'test@example.com',
-        'password': 'Test1234'
+        'password': 'TestPassword1234'
     })
     assert response.status_code == 200
     data = response.get_json()

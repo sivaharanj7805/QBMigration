@@ -240,7 +240,7 @@ class TestResetPassword:
         """Reset with invalid token returns 400."""
         response = client.post('/api/auth/reset-password', json={
             'token': 'invalid-token-value',
-            'password': 'NewPass123!'
+            'password': 'NewPassword1234!'
         })
         assert response.status_code == 400
         data = response.get_json()
@@ -249,7 +249,7 @@ class TestResetPassword:
     def test_reset_password_missing_token(self, client, db_session):
         """Reset with missing token returns 400."""
         response = client.post('/api/auth/reset-password', json={
-            'password': 'NewPass123!'
+            'password': 'NewPassword1234!'
         })
         assert response.status_code == 400
 

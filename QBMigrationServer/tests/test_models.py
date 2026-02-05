@@ -1480,7 +1480,7 @@ class TestMigrationCreditModel:
         """Should not return credits belonging to other users."""
         # Create another user
         other_user = User(email='other@example.com', first_name='Other', last_name='User')
-        other_user.set_password('Test1234')
+        other_user.set_password('TestPassword1234')
         db_session.add(other_user)
         db_session.commit()
 

@@ -174,7 +174,7 @@ class Config:
     # Account Protection
     MAX_LOGIN_ATTEMPTS = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
     ACCOUNT_LOCKOUT_DURATION = timedelta(minutes=int(os.getenv('ACCOUNT_LOCKOUT_MINUTES', '15')))
-    PASSWORD_MIN_LENGTH = 8
+    PASSWORD_MIN_LENGTH = 12  # PCI DSS v4.0.1 requires minimum 12 characters
     PASSWORD_REQUIRE_UPPERCASE = True
     PASSWORD_REQUIRE_LOWERCASE = True
     PASSWORD_REQUIRE_DIGIT = True
