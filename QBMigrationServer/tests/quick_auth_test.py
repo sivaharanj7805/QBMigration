@@ -32,7 +32,7 @@ def test_auth():
 
         # Create test user
         user = User(email="test@example.com", first_name="Test", last_name="User")
-        user.set_password("TestPassword1234")
+        user.set_password("TestPassword1234!")
         db.session.add(user)
         db.session.commit()
         print("[OK] User created: {} (ID: {})".format(user.email, user.id))
@@ -43,7 +43,7 @@ def test_auth():
             print("\n--- Test 1: Register ---")
             response = client.post(
                 "/api/auth/register",
-                json={"email": "new@example.com", "password": "NewPassword1234"},
+                json={"email": "new@example.com", "password": "NewPassword1234!"},
             )
             print("Register status: {}".format(response.status_code))
             print("Register response: {}".format(response.get_json()))
@@ -56,7 +56,7 @@ def test_auth():
             print("\n--- Test 2: Login ---")
             response = client.post(
                 "/api/auth/login",
-                json={"email": "test@example.com", "password": "TestPassword1234"},
+                json={"email": "test@example.com", "password": "TestPassword1234!"},
             )
             print("Login status: {}".format(response.status_code))
             data = response.get_json()
@@ -97,7 +97,7 @@ def test_auth():
             # First login
             client.post(
                 "/api/auth/login",
-                json={"email": "test@example.com", "password": "TestPassword1234"},
+                json={"email": "test@example.com", "password": "TestPassword1234!"},
             )
             response = client.post("/api/auth/logout")
             print("Logout status: {}".format(response.status_code))

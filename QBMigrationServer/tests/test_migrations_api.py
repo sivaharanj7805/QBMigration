@@ -130,7 +130,7 @@ class TestListMigrations:
             last_name="User",
             company_name="Other Co",
         )
-        other_user.set_password("OtherPassword1234")
+        other_user.set_password("OtherPassword1234!")
         db_session.add(other_user)
         db_session.commit()
         db_session.refresh(other_user)
@@ -211,7 +211,7 @@ class TestGetMigration:
             last_name="User",
             company_name="Other Co",
         )
-        other_user.set_password("OtherPassword1234")
+        other_user.set_password("OtherPassword1234!")
         db_session.add(other_user)
         db_session.commit()
         db_session.refresh(other_user)
@@ -508,7 +508,7 @@ class TestMigrationStats:
         stats = data["stats"]
         assert stats["migrations_this_month"] == 0
         assert stats["total_records"] == "0"
-        assert stats["success_rate"] == "100.0%"
+        assert stats["success_rate"] == "--"
 
     def test_stats_with_migrations(self, authenticated_client, db_session, test_user):
         """Stats reflect actual migration data."""

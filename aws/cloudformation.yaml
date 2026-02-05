@@ -361,8 +361,8 @@ Resources:
           - AllowedHeaders: ['Content-Type', 'Authorization', 'x-amz-date']
             AllowedMethods: [GET, PUT, POST]
             AllowedOrigins:
+              # SECURITY FIX: Removed localhost origin from production S3 CORS
               - !Sub 'https://${DomainName}'
-              - 'https://localhost:3000'
             MaxAge: 3000
       LoggingConfiguration:
         DestinationBucketName: !Ref LogBucket

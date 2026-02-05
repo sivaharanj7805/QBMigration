@@ -155,12 +155,10 @@ class TestUserModel:
     def test_record_successful_login_updates_timestamps(
         self, app, db_session, test_user
     ):
-        """Successful login should update last_login and last_login_at."""
-        datetime.now(timezone.utc)
+        """Successful login should update last_login_at (last_login is legacy and not updated)."""
         test_user.record_successful_login()
-        datetime.now(timezone.utc)
 
-        assert test_user.last_login is not None
+        # last_login is a legacy field not updated by record_successful_login
         assert test_user.last_login_at is not None
 
     def test_record_successful_login_records_ip(self, app, db_session, test_user):
@@ -719,15 +717,15 @@ class TestMigrationModel:
         assert test_migration.error_code == "TRIAL_BALANCE_MISSING"
 
     def test_mark_as_completed_no_results(self, app, db_session, test_migration):
-        """Should complete with None results (no trial balance check needed)."""
+        """Should return False with None results (trial balance verification is mandatory)."""
         test_migration.status = "processing"
         test_migration.started_at = datetime.now(timezone.utc)
         db_session.commit()
 
         result = test_migration.mark_as_completed(results=None)
 
-        assert result is True
-        assert test_migration.status == "completed"
+        assert result is False
+        assert test_migration.status == "processing"
 
     # ------------------------------------------------------------------------
     # mark_as_failed()
@@ -1535,7 +1533,7 @@ class TestMigrationCreditModel:
         other_user = User(
             email="other@example.com", first_name="Other", last_name="User"
         )
-        other_user.set_password("TestPassword1234")
+        other_user.set_password("TestPassword1234!")
         db_session.add(other_user)
         db_session.commit()
 
