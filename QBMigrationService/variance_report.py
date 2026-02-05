@@ -98,28 +98,62 @@ class VarianceReportGenerator:
         
         return report
     
+    def _safe_decimal(self, value, default: str = "0") -> Decimal:
+        """
+        CRITICAL FIX: Safely convert value to Decimal, handling None and invalid inputs.
+
+        Args:
+            value: Value to convert (can be None, str, int, float, Decimal)
+            default: Default value if conversion fails
+
+        Returns:
+            Decimal representation preserving precision
+        """
+        if value is None:
+            return Decimal(default)
+        if isinstance(value, Decimal):
+            return value
+        try:
+            # Convert to string first to preserve precision (avoid float intermediary)
+            return Decimal(str(value))
+        except Exception:
+            logger.warning(f"Failed to convert '{value}' to Decimal, using default '{default}'")
+            return Decimal(default)
+
+    def _decimal_to_str(self, value: Decimal) -> str:
+        """
+        CRITICAL FIX: Convert Decimal to string to preserve precision in JSON output.
+
+        Using str() instead of float() prevents precision loss for financial values.
+        Float cannot accurately represent values like 123.45 (becomes 123.45000000000001).
+        """
+        return str(value)
+
     def _compare_trial_balance(self, source: Dict, dest: Dict) -> Dict:
         """Compare trial balance totals."""
-        source_debits = Decimal(str(source.get("debits", 0)))
-        source_credits = Decimal(str(source.get("credits", 0)))
-        dest_debits = Decimal(str(dest.get("debits", 0)))
-        dest_credits = Decimal(str(dest.get("credits", 0)))
-        
+        # CRITICAL FIX: Use safe Decimal conversion to handle None values
+        source_debits = self._safe_decimal(source.get("debits"))
+        source_credits = self._safe_decimal(source.get("credits"))
+        dest_debits = self._safe_decimal(dest.get("debits"))
+        dest_credits = self._safe_decimal(dest.get("credits"))
+
         debit_variance = dest_debits - source_debits
         credit_variance = dest_credits - source_credits
-        
+
         is_balanced = (
-            abs(debit_variance) <= self.tolerance and 
+            abs(debit_variance) <= self.tolerance and
             abs(credit_variance) <= self.tolerance
         )
-        
+
+        # CRITICAL FIX: Use string representation to preserve Decimal precision
+        # Float loses precision: float(Decimal("123.45")) may become 123.45000000000001
         return {
-            "source_debits": float(source_debits),
-            "source_credits": float(source_credits),
-            "destination_debits": float(dest_debits),
-            "destination_credits": float(dest_credits),
-            "debit_variance": float(debit_variance),
-            "credit_variance": float(credit_variance),
+            "source_debits": self._decimal_to_str(source_debits),
+            "source_credits": self._decimal_to_str(source_credits),
+            "destination_debits": self._decimal_to_str(dest_debits),
+            "destination_credits": self._decimal_to_str(dest_credits),
+            "debit_variance": self._decimal_to_str(debit_variance),
+            "credit_variance": self._decimal_to_str(credit_variance),
             "is_balanced": is_balanced,
             "status": "VERIFIED" if is_balanced else "VARIANCE DETECTED"
         }
@@ -127,55 +161,56 @@ class VarianceReportGenerator:
     def _compare_pl(self, source: Dict, dest: Dict, year: int) -> Dict:
         """Compare P&L for a specific year."""
         variances = []
-        
-        # Compare revenue
-        source_revenue = Decimal(str(source.get("total_revenue", 0)))
-        dest_revenue = Decimal(str(dest.get("total_revenue", 0)))
+
+        # CRITICAL FIX: Use safe Decimal conversion to handle None values
+        source_revenue = self._safe_decimal(source.get("total_revenue"))
+        dest_revenue = self._safe_decimal(dest.get("total_revenue"))
         revenue_var = dest_revenue - source_revenue
-        
+
         if abs(revenue_var) > self.tolerance:
             variances.append({
                 "category": "Total Revenue",
-                "source": float(source_revenue),
-                "destination": float(dest_revenue),
-                "variance": float(revenue_var),
+                "source": self._decimal_to_str(source_revenue),
+                "destination": self._decimal_to_str(dest_revenue),
+                "variance": self._decimal_to_str(revenue_var),
                 "severity": "CRITICAL" if abs(revenue_var) > 1000 else "WARNING"
             })
-        
+
         # Compare expenses
-        source_expenses = Decimal(str(source.get("total_expenses", 0)))
-        dest_expenses = Decimal(str(dest.get("total_expenses", 0)))
+        source_expenses = self._safe_decimal(source.get("total_expenses"))
+        dest_expenses = self._safe_decimal(dest.get("total_expenses"))
         expense_var = dest_expenses - source_expenses
-        
+
         if abs(expense_var) > self.tolerance:
             variances.append({
                 "category": "Total Expenses",
-                "source": float(source_expenses),
-                "destination": float(dest_expenses),
-                "variance": float(expense_var),
+                "source": self._decimal_to_str(source_expenses),
+                "destination": self._decimal_to_str(dest_expenses),
+                "variance": self._decimal_to_str(expense_var),
                 "severity": "CRITICAL" if abs(expense_var) > 1000 else "WARNING"
             })
-        
+
         # Compare net income
         source_net = source_revenue - source_expenses
         dest_net = dest_revenue - dest_expenses
         net_var = dest_net - source_net
-        
+
         if abs(net_var) > self.tolerance:
             variances.append({
                 "category": "Net Income",
-                "source": float(source_net),
-                "destination": float(dest_net),
-                "variance": float(net_var),
+                "source": self._decimal_to_str(source_net),
+                "destination": self._decimal_to_str(dest_net),
+                "variance": self._decimal_to_str(net_var),
                 "severity": "CRITICAL" if abs(net_var) > 1000 else "WARNING"
             })
-        
+
+        # CRITICAL FIX: Use string representation for all financial values
         return {
             "year_offset": year,
             "fiscal_year": datetime.now().year - year,
-            "source_net_income": float(source_net),
-            "destination_net_income": float(dest_net),
-            "variance": float(net_var),
+            "source_net_income": self._decimal_to_str(source_net),
+            "destination_net_income": self._decimal_to_str(dest_net),
+            "variance": self._decimal_to_str(net_var),
             "has_variance": len(variances) > 0,
             "variances": variances
         }
@@ -183,80 +218,82 @@ class VarianceReportGenerator:
     def _compare_balance_sheet(self, source: Dict, dest: Dict) -> Dict:
         """Compare balance sheet."""
         variances = []
-        
+
         categories = [
             ("total_assets", "Total Assets"),
             ("total_liabilities", "Total Liabilities"),
             ("total_equity", "Total Equity")
         ]
-        
+
+        # CRITICAL FIX: Use safe Decimal conversion
         for key, label in categories:
-            source_val = Decimal(str(source.get(key, 0)))
-            dest_val = Decimal(str(dest.get(key, 0)))
+            source_val = self._safe_decimal(source.get(key))
+            dest_val = self._safe_decimal(dest.get(key))
             variance = dest_val - source_val
-            
+
             if abs(variance) > self.tolerance:
                 variances.append({
                     "category": label,
-                    "source": float(source_val),
-                    "destination": float(dest_val),
-                    "variance": float(variance),
+                    "source": self._decimal_to_str(source_val),
+                    "destination": self._decimal_to_str(dest_val),
+                    "variance": self._decimal_to_str(variance),
                     "severity": "CRITICAL" if abs(variance) > 1000 else "WARNING"
                 })
-        
+
         # Check accounting equation: Assets = Liabilities + Equity
-        source_balanced = abs(
-            Decimal(str(source.get("total_assets", 0))) -
-            Decimal(str(source.get("total_liabilities", 0))) -
-            Decimal(str(source.get("total_equity", 0)))
-        ) <= self.tolerance
-        
-        dest_balanced = abs(
-            Decimal(str(dest.get("total_assets", 0))) -
-            Decimal(str(dest.get("total_liabilities", 0))) -
-            Decimal(str(dest.get("total_equity", 0)))
-        ) <= self.tolerance
-        
+        source_assets = self._safe_decimal(source.get("total_assets"))
+        source_liabilities = self._safe_decimal(source.get("total_liabilities"))
+        source_equity = self._safe_decimal(source.get("total_equity"))
+        source_balanced = abs(source_assets - source_liabilities - source_equity) <= self.tolerance
+
+        dest_assets = self._safe_decimal(dest.get("total_assets"))
+        dest_liabilities = self._safe_decimal(dest.get("total_liabilities"))
+        dest_equity = self._safe_decimal(dest.get("total_equity"))
+        dest_balanced = abs(dest_assets - dest_liabilities - dest_equity) <= self.tolerance
+
+        # CRITICAL FIX: Use string representation for all financial values
         return {
-            "source_assets": float(source.get("total_assets", 0)),
-            "destination_assets": float(dest.get("total_assets", 0)),
-            "source_liabilities": float(source.get("total_liabilities", 0)),
-            "destination_liabilities": float(dest.get("total_liabilities", 0)),
-            "source_equity": float(source.get("total_equity", 0)),
-            "destination_equity": float(dest.get("total_equity", 0)),
+            "source_assets": self._decimal_to_str(source_assets),
+            "destination_assets": self._decimal_to_str(dest_assets),
+            "source_liabilities": self._decimal_to_str(source_liabilities),
+            "destination_liabilities": self._decimal_to_str(dest_liabilities),
+            "source_equity": self._decimal_to_str(source_equity),
+            "destination_equity": self._decimal_to_str(dest_equity),
             "source_balanced": source_balanced,
             "destination_balanced": dest_balanced,
             "has_variance": len(variances) > 0,
             "variances": variances
         }
-    
+
     def _compare_accounts(self, source: List, dest: List) -> List:
         """Compare individual accounts."""
         results = []
-        
+
         # Create lookup by account name
         dest_lookup = {a.get("name", "").lower(): a for a in dest}
-        
+
         for source_acct in source:
             name = source_acct.get("name", "")
-            source_balance = Decimal(str(source_acct.get("balance", 0)))
-            
+            # CRITICAL FIX: Use safe Decimal conversion
+            source_balance = self._safe_decimal(source_acct.get("balance"))
+
             dest_acct = dest_lookup.get(name.lower(), {})
-            dest_balance = Decimal(str(dest_acct.get("balance", 0)))
-            
+            dest_balance = self._safe_decimal(dest_acct.get("balance"))
+
             variance = dest_balance - source_balance
-            
+
+            # CRITICAL FIX: Use string representation for financial values
             results.append({
                 "account_name": name,
                 "account_type": source_acct.get("type", ""),
-                "source_balance": float(source_balance),
-                "destination_balance": float(dest_balance),
-                "variance": float(variance),
+                "source_balance": self._decimal_to_str(source_balance),
+                "destination_balance": self._decimal_to_str(dest_balance),
+                "variance": self._decimal_to_str(variance),
                 "has_variance": abs(variance) > self.tolerance,
                 "severity": self._get_severity(variance),
                 "matched_in_destination": name.lower() in dest_lookup
             })
-        
+
         return results
     
     def _get_severity(self, variance: Decimal) -> str:

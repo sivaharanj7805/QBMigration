@@ -134,17 +134,53 @@ def from_timestamp(ts: float, tz: Optional[timezone] = None) -> datetime:
     return datetime.fromtimestamp(ts, tz=tz or timezone.utc)
 
 
-def from_iso(iso_str: str) -> datetime:
+def from_iso(iso_str: str, ensure_aware: bool = True) -> datetime:
     """
     Parse ISO 8601 datetime string.
 
+    FIX #12: Enhanced to always return timezone-aware datetime by default,
+    preventing TypeError when comparing naive and aware datetimes.
+
     Args:
         iso_str: ISO format datetime string
+        ensure_aware: If True (default), ensure result is timezone-aware (UTC assumed for naive)
 
     Returns:
-        Datetime (timezone-aware if the string included timezone info)
+        Datetime (always timezone-aware if ensure_aware=True)
     """
-    return datetime.fromisoformat(iso_str)
+    if not iso_str:
+        raise ValueError("Empty or None ISO string provided")
+
+    dt = datetime.fromisoformat(iso_str)
+
+    if ensure_aware and dt.tzinfo is None:
+        # FIX #12: Assume UTC for naive datetimes to prevent comparison errors
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt
+
+
+def from_iso_safe(iso_str: str, default: Optional[datetime] = None) -> Optional[datetime]:
+    """
+    Safely parse ISO 8601 datetime string with error handling.
+
+    FIX #12: Always returns timezone-aware datetime or default.
+
+    Args:
+        iso_str: ISO format datetime string
+        default: Default value if parsing fails (default: None)
+
+    Returns:
+        Timezone-aware datetime or default
+    """
+    if not iso_str:
+        return default
+
+    try:
+        return from_iso(iso_str, ensure_aware=True)
+    except (ValueError, TypeError) as e:
+        warnings.warn(f"Failed to parse ISO datetime '{iso_str}': {e}")
+        return default
 
 
 def time_ago(dt: datetime) -> str:

@@ -352,12 +352,14 @@ class QBDataTransformer:
         
         # Generate summary
         result['summary'] = self._generate_summary()
-        result['trial_balance'] = {
-            'debits': str(self.trial_balance['debits']),
-            'credits': str(self.trial_balance['credits']),
-            'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
-            'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
-        }
+        # CRITICAL FIX: Thread-safe read of trial balance
+        with self._trial_balance_lock:
+            result['trial_balance'] = {
+                'debits': str(self.trial_balance['debits']),
+                'credits': str(self.trial_balance['credits']),
+                'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
+                'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
+            }
         result['manual_review'] = self.manual_review
         
         logger.info("\n" + "="*60)
@@ -777,12 +779,14 @@ class QBDataTransformer:
         
         # Generate summary
         result['summary'] = self._generate_summary()
-        result['trial_balance'] = {
-            'debits': str(self.trial_balance['debits']),
-            'credits': str(self.trial_balance['credits']),
-            'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
-            'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
-        }
+        # CRITICAL FIX: Thread-safe read of trial balance
+        with self._trial_balance_lock:
+            result['trial_balance'] = {
+                'debits': str(self.trial_balance['debits']),
+                'credits': str(self.trial_balance['credits']),
+                'balanced': abs(self.trial_balance['debits'] - self.trial_balance['credits']) <= Decimal('0.01'),
+                'difference': str(abs(self.trial_balance['debits'] - self.trial_balance['credits']))
+            }
         result['manual_review'] = self.manual_review
 
         logger.info("\n" + "="*60)
