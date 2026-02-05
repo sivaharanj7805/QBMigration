@@ -442,7 +442,11 @@ def assertion_consumer_service():
     """
     saml_response = request.form.get("SAMLResponse")
     # SECURITY FIX: Validate relay_state to prevent open redirect attacks
-    validate_relay_state(request.form.get("RelayState", "/"))
+    # Note: Actual redirect uses session-stored sso_relay_state (line 548), not this value.
+    # This validation guards against malicious RelayState in the POST form data.
+    relay_state = validate_relay_state(  # noqa: F841
+        request.form.get("RelayState", "/")
+    )
 
     if not saml_response:
         logger.warning("ACS received without SAML response")

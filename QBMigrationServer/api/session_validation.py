@@ -545,7 +545,6 @@ def start_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    data.get("company_name", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:
@@ -712,10 +711,7 @@ def complete_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    data.get("extraction_token", "").strip()
     transaction_count = data.get("transaction_count", 0)
-    data.get("company_name", "")
-    data.get("qb_version", "")
     ip_address = request.remote_addr
 
     if not session_id or not device_fingerprint:

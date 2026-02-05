@@ -12,7 +12,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 def test_imports():
     """Test that we can import our modules"""
     try:
-        pass
+        from app import create_app  # noqa: F401
+        from models.database import db  # noqa: F401
+        from models.migration import Migration  # noqa: F401
+        from models.user import User  # noqa: F401
 
         assert True
     except ImportError as e:

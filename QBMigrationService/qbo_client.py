@@ -195,7 +195,11 @@ class PremiumQBOClient:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # CRIT-07 FIX: Set restrictive permissions on database file
-        self.db_path.exists()
+        db_exists = self.db_path.exists()
+        if not db_exists:
+            self.db_path.touch(mode=0o600)
+        else:
+            self.db_path.chmod(0o600)
 
         with self.db_lock:
             # FIX #81: check_same_thread=False for multi-threading

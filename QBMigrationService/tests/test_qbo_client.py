@@ -161,7 +161,7 @@ class TestRateLimiting:
             client.batch_create_parallel(entities, "Customer")
 
         # Should take at least some time due to rate limiting
-        time.time() - start_time
+        duration = time.time() - start_time  # noqa: F841
         # Note: In mock mode this will be fast, but structure is tested
 
 

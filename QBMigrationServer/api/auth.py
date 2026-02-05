@@ -1552,7 +1552,7 @@ def invite_team_member():
         return jsonify({"success": False, "error": "No data provided"}), 400
 
     email = data.get("email", "").strip().lower()
-    data.get("role", "member")
+    role = data.get("role", "member")  # noqa: F841 - reserved for future use
 
     if not email:
         return jsonify({"success": False, "error": "Email is required"}), 400
