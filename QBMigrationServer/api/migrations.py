@@ -146,7 +146,7 @@ def create_migration():
         raw_file_name = files[0] if files else ""
         safe_file_name = sanitize_string(raw_file_name, max_length=255)
         company_name = (
-              os.path.splitext(safe_file_name)[0] if safe_file_name else "Unknown Company"
+            os.path.splitext(safe_file_name)[0] if safe_file_name else "Unknown Company"
         )
 
         migration = Migration(

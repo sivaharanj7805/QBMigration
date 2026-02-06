@@ -126,7 +126,6 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
     ErrorCode.AUTH_ACCOUNT_LOCKED: "Account is locked due to too many failed attempts",
     ErrorCode.AUTH_MFA_REQUIRED: "Multi-factor authentication is required",
     ErrorCode.AUTH_SESSION_EXPIRED: "Session has expired, please log in again",
-
     # Upload errors
     ErrorCode.UPLOAD_FILE_TOO_LARGE: "File exceeds maximum allowed size",
     ErrorCode.UPLOAD_INVALID_FORMAT: "File format is not supported",
@@ -137,7 +136,6 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
     ErrorCode.UPLOAD_ENCRYPTION_ERROR: "Failed to encrypt file data",
     ErrorCode.UPLOAD_DECRYPTION_ERROR: "Failed to decrypt file data",
     ErrorCode.UPLOAD_DUPLICATE_DETECTED: "This file has already been uploaded",
-
     # Migration errors
     ErrorCode.MIGRATION_NOT_FOUND: "Migration not found",
     ErrorCode.MIGRATION_ALREADY_PROCESSING: "Migration is already being processed",
@@ -147,7 +145,6 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
     ErrorCode.MIGRATION_TIMEOUT: "Migration processing timed out",
     ErrorCode.MIGRATION_DATA_CORRUPT: "Migration data appears to be corrupted",
     ErrorCode.MIGRATION_TRIAL_BALANCE_MISMATCH: "Trial balance does not match between source and destination",
-
     # QBO errors
     ErrorCode.QBO_AUTH_FAILED: "Failed to authenticate with QuickBooks Online",
     ErrorCode.QBO_TOKEN_EXPIRED: "QuickBooks Online access token has expired",
@@ -157,7 +154,6 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
     ErrorCode.QBO_VALIDATION_ERROR: "QuickBooks Online validation error",
     ErrorCode.QBO_SYNC_CONFLICT: "Sync conflict detected with QuickBooks Online",
     ErrorCode.QBO_COMPANY_MISMATCH: "QuickBooks company does not match expected company",
-
     # Transform errors
     ErrorCode.TRANSFORM_INVALID_SCHEMA: "Data schema is invalid or unsupported",
     ErrorCode.TRANSFORM_MAPPING_ERROR: "Failed to map data between formats",
@@ -166,21 +162,18 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
     ErrorCode.TRANSFORM_DATE_PARSE_ERROR: "Failed to parse date value",
     ErrorCode.TRANSFORM_AMOUNT_OVERFLOW: "Amount exceeds maximum supported value",
     ErrorCode.TRANSFORM_REFERENCE_NOT_FOUND: "Referenced entity was not found",
-
     # Validation errors
     ErrorCode.VALIDATION_MISSING_FIELD: "Required field is missing",
     ErrorCode.VALIDATION_INVALID_FORMAT: "Field format is invalid",
     ErrorCode.VALIDATION_OUT_OF_RANGE: "Value is outside allowed range",
     ErrorCode.VALIDATION_CONSTRAINT_VIOLATION: "Value violates constraint",
     ErrorCode.VALIDATION_DUPLICATE_VALUE: "Value already exists",
-
     # System errors
     ErrorCode.SYSTEM_DATABASE_ERROR: "Database operation failed",
     ErrorCode.SYSTEM_REDIS_ERROR: "Cache operation failed",
     ErrorCode.SYSTEM_S3_ERROR: "Cloud storage operation failed",
     ErrorCode.SYSTEM_WORKER_UNAVAILABLE: "Background worker is unavailable",
     ErrorCode.SYSTEM_INTERNAL_ERROR: "An internal error occurred",
-
     # License errors
     ErrorCode.LICENSE_INVALID: "License is invalid",
     ErrorCode.LICENSE_EXPIRED: "License has expired",
@@ -210,7 +203,7 @@ def create_error_response(code: ErrorCode, details: str = None) -> dict:
     response = {
         "error_code": int(code),
         "error": code.name,
-        "message": get_error_message(code)
+        "message": get_error_message(code),
     }
     if details:
         response["details"] = details

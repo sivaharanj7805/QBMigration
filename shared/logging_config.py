@@ -21,22 +21,23 @@ import os
 import sys
 from typing import Optional
 
-
 # ============================================================================
 # LOGGING LEVELS BY ENVIRONMENT
 # ============================================================================
 LOGGING_LEVELS = {
-    'production': logging.WARNING,
-    'staging': logging.INFO,
-    'development': logging.DEBUG,
-    'test': logging.DEBUG,
+    "production": logging.WARNING,
+    "staging": logging.INFO,
+    "development": logging.DEBUG,
+    "test": logging.DEBUG,
 }
 
 # ============================================================================
 # LOG FORMAT TEMPLATES
 # ============================================================================
-CONSOLE_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-FILE_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+CONSOLE_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+FILE_FORMAT = (
+    "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
+)
 JSON_FORMAT = '{"timestamp": "%(asctime)s", "logger": "%(name)s", "level": "%(levelname)s", "message": "%(message)s", "function": "%(funcName)s", "line": %(lineno)d}'
 
 
@@ -45,7 +46,7 @@ def configure_logging(
     log_file: Optional[str] = None,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
-    json_format: bool = False
+    json_format: bool = False,
 ) -> None:
     """
     Configure logging for the application.
@@ -57,11 +58,11 @@ def configure_logging(
         backup_count: Number of backup files to keep
         json_format: Use JSON format for logs (for log aggregation)
     """
-    env = environment or os.getenv('FLASK_ENV', os.getenv('ENVIRONMENT', 'development'))
+    env = environment or os.getenv("FLASK_ENV", os.getenv("ENVIRONMENT", "development"))
     level = LOGGING_LEVELS.get(env, logging.INFO)
 
     # Choose format based on environment
-    if json_format or env == 'production':
+    if json_format or env == "production":
         log_format = JSON_FORMAT
     else:
         log_format = CONSOLE_FORMAT
@@ -82,16 +83,14 @@ def configure_logging(
     # File handler (if log file specified)
     if log_file:
         file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count
+            log_file, maxBytes=max_bytes, backupCount=backup_count
         )
         file_handler.setLevel(level)
         file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
         root_logger.addHandler(file_handler)
 
     # Suppress noisy loggers
-    for noisy_logger in ['urllib3', 'botocore', 'boto3', 'werkzeug']:
+    for noisy_logger in ["urllib3", "botocore", "boto3", "werkzeug"]:
         logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 

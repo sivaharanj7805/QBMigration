@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def generate_aes_key() -> tuple:
     """Generate a new AES-256 key."""
     key = secrets.token_bytes(32)  # 256 bits
-    key_b64 = base64.b64encode(key).decode('utf-8')
+    key_b64 = base64.b64encode(key).decode("utf-8")
     key_hash = hashlib.sha256(key).hexdigest()[:16]
     return key, key_b64, key_hash
 
@@ -40,7 +40,7 @@ def generate_fernet_key() -> str:
     # Fernet key is 32 bytes URL-safe base64 encoded
     # This matches the format from cryptography.fernet.Fernet.generate_key()
     key = secrets.token_bytes(32)
-    return base64.urlsafe_b64encode(key).decode('utf-8')
+    return base64.urlsafe_b64encode(key).decode("utf-8")
 
 
 def generate_secret_key() -> str:
@@ -56,7 +56,7 @@ def generate_api_key() -> str:
 def generate_kdf_salt() -> str:
     """Generate a new KDF salt."""
     salt = secrets.token_bytes(32)
-    return base64.b64encode(salt).decode('utf-8')
+    return base64.b64encode(salt).decode("utf-8")
 
 
 def main():
@@ -122,13 +122,19 @@ def main():
     print("=" * 70)
     print()
     print("# Store encryption key in AWS Secrets Manager:")
-    print(f'aws secretsmanager update-secret --secret-id forensicbridge/encryption-key --secret-string "{aes_key_b64}"')
+    print(
+        f'aws secretsmanager update-secret --secret-id forensicbridge/encryption-key --secret-string "{aes_key_b64}"'
+    )
     print()
     print("# Store Fernet key:")
-    print(f'aws secretsmanager update-secret --secret-id forensicbridge/fernet-key --secret-string "{fernet_key}"')
+    print(
+        f'aws secretsmanager update-secret --secret-id forensicbridge/fernet-key --secret-string "{fernet_key}"'
+    )
     print()
     print("# Store Flask secret key:")
-    print(f'aws secretsmanager update-secret --secret-id forensicbridge/secret-key --secret-string "{secret_key}"')
+    print(
+        f'aws secretsmanager update-secret --secret-id forensicbridge/secret-key --secret-string "{secret_key}"'
+    )
     print()
 
     print("=" * 70)
@@ -157,9 +163,11 @@ def main():
     print()
 
     # Write to a temporary secure file
-    output_file = Path(__file__).parent.parent / '.keys_rotation_temp'
-    with open(output_file, 'w') as f:
-        f.write(f"# ForensicBridge Key Rotation - {datetime.now(timezone.utc).isoformat()}\n")
+    output_file = Path(__file__).parent.parent / ".keys_rotation_temp"
+    with open(output_file, "w") as f:
+        f.write(
+            f"# ForensicBridge Key Rotation - {datetime.now(timezone.utc).isoformat()}\n"
+        )
         f.write(f"# DELETE THIS FILE AFTER COPYING KEYS\n\n")
         f.write(f"ENCRYPTION_KEY_B64={aes_key_b64}\n")
         f.write(f"FERNET_KEY={fernet_key}\n")
@@ -179,5 +187,5 @@ def main():
     print()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

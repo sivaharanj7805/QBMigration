@@ -53,9 +53,7 @@ def parse_version(version: str) -> Tuple[int, int, int]:
 
 
 def check_version_compatibility(
-    server_version: str,
-    client_version: str,
-    component: str = "desktop_reader"
+    server_version: str, client_version: str, component: str = "desktop_reader"
 ) -> bool:
     """
     Check if client version is compatible with server.
