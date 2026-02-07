@@ -149,17 +149,20 @@ def trigger_processing():
 
         # SECURITY FIX P1-06: Comprehensive path traversal validation
         # Check for encoded traversal sequences, null bytes, and invalid characters
+        # FIX: Apply ALL checks to decoded_key to prevent encoded bypass attacks
+        # (e.g., %00 encoded null bytes, %2e%2e encoded traversal, encoded slashes)
         import urllib.parse
 
-        decoded_key = urllib.parse.unquote(urllib.parse.unquote(s3_key))  # Double-decode
+        decoded_key = urllib.parse.unquote(
+            urllib.parse.unquote(s3_key)
+        )  # Double-decode
         if (
-            ".." in s3_key
-            or ".." in decoded_key
-            or s3_key.startswith("/")
-            or "\x00" in s3_key
-            or not re.match(r"^[a-zA-Z0-9/_.\-]+$", s3_key)
+            ".." in decoded_key
+            or decoded_key.startswith("/")
+            or "\x00" in decoded_key
+            or not re.match(r"^[a-zA-Z0-9/_.\-]+$", decoded_key)
         ):
-            logger.warning(f"Invalid s3_key from internal API: {s3_key[:100]}")
+            logger.warning("Invalid s3_key from internal API (rejected by validation)")
             return jsonify({"success": False, "error": "Invalid s3_key format"}), 400
 
         migration = Migration.query.filter_by(migration_id=session_id).first()

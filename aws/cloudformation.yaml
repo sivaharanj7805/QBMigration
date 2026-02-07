@@ -26,8 +26,15 @@ Parameters:
     Default: '10.0.0.0/8'
     Description: CIDR block allowed for SSH access (restrict to VPN/office IP)
 
+  # ADV-04: Alert email for SNS alarm subscriptions
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: Email address for alarm notifications (leave empty to skip subscription)
+
 Conditions:
   HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
 
 Resources:
   # ============================================================================
@@ -684,6 +691,11 @@ Resources:
       Period: 300
       Statistic: Average
       Threshold: 80
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: InstanceId
           Value: !Ref EC2Instance
@@ -700,6 +712,11 @@ Resources:
       Period: 300
       Statistic: Average
       Threshold: 50
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: DBInstanceIdentifier
           Value: !Ref Database
@@ -716,6 +733,11 @@ Resources:
       Period: 300
       Statistic: Sum
       Threshold: 10
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: LoadBalancer
           Value: !GetAtt ALB.LoadBalancerFullName
@@ -733,6 +755,11 @@ Resources:
       Period: 300
       Statistic: Average
       Threshold: 5368709120  # 5GB in bytes
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: DBInstanceIdentifier
           Value: !Ref Database
@@ -749,6 +776,11 @@ Resources:
       Period: 300
       Statistic: Average
       Threshold: 80
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: DBInstanceIdentifier
           Value: !Ref Database
@@ -765,6 +797,11 @@ Resources:
       Period: 300
       Statistic: Sum
       Threshold: 1000
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: WebACL
           Value: !Sub forensicbridge-${Environment}-waf
@@ -785,6 +822,11 @@ Resources:
       Period: 60
       Statistic: Average
       Threshold: 2
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: LoadBalancer
           Value: !GetAtt ALB.LoadBalancerFullName
@@ -803,6 +845,11 @@ Resources:
       Period: 60
       Statistic: Maximum
       Threshold: 0
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
       Dimensions:
         - Name: LoadBalancer
           Value: !GetAtt ALB.LoadBalancerFullName
@@ -915,6 +962,15 @@ Resources:
     Properties:
       TopicName: !Sub forensicbridge-${Environment}-alarms
       DisplayName: ForensicBridge Alarms
+
+  # ADV-04: SNS email subscription for alarm notifications
+  AlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlarmNotificationTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   # ============================================================================
   # AUDIT FIX HIGH-01: AUTO SCALING GROUP

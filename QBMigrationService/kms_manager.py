@@ -50,15 +50,17 @@ class AWSKMSManager:
         key_alias: str = "alias/forensicbridge-master",
         access_key_id: str = None,
         secret_access_key: str = None,
+        tenant_id: str = None,
     ):
         """
         Initialize KMS manager.
 
         Args:
             region: AWS region (default: from environment)
-            key_alias: KMS key alias
+            key_alias: KMS key alias (overridden if tenant_id is provided)
             access_key_id: Optional AWS access key (default: from environment)
             secret_access_key: Optional AWS secret key (default: from environment)
+            tenant_id: Optional tenant ID for per-tenant key isolation (ADV-02)
         """
         if not AWS_AVAILABLE:
             raise ImportError(
@@ -67,7 +69,17 @@ class AWSKMSManager:
             )
 
         self.region = region or os.environ.get("AWS_REGION", "us-east-1")
-        self.key_alias = key_alias
+        self.tenant_id = tenant_id
+
+        # ADV-02: Per-tenant key isolation
+        # Each tenant gets their own KMS CMK for data isolation
+        if tenant_id and os.environ.get("ENABLE_TENANT_KEY_ISOLATION", "false").lower() == "true":
+            self.key_alias = f"alias/forensicbridge-tenant-{tenant_id}"
+        else:
+            self.key_alias = key_alias
+
+        # ADV-03: HSM-backed key configuration
+        self.hsm_enabled = os.environ.get("KMS_HSM_ENABLED", "false").lower() == "true"
 
         # Initialize KMS client
         session_kwargs = {"region_name": self.region}
@@ -96,20 +108,42 @@ class AWSKMSManager:
                 raise
 
     def _create_key(self):
-        """Create a new KMS customer master key."""
+        """Create a new KMS customer master key.
+
+        ADV-02: Supports per-tenant keys with TenantId tag.
+        ADV-03: Supports HSM-backed keys via CUSTOM_KEY_STORE_ID.
+        """
         try:
-            response = self.kms_client.create_key(
-                Description="ForensicBridge Migration Encryption Key",
-                KeyUsage="ENCRYPT_DECRYPT",
-                Origin="AWS_KMS",  # AWS-managed key material
-                Tags=[
-                    {"TagKey": "Application", "TagValue": "ForensicBridge"},
-                    {
-                        "TagKey": "Environment",
-                        "TagValue": os.environ.get("ENV", "production"),
-                    },
-                ],
-            )
+            tags = [
+                {"TagKey": "Application", "TagValue": "ForensicBridge"},
+                {
+                    "TagKey": "Environment",
+                    "TagValue": os.environ.get("ENV", "production"),
+                },
+            ]
+
+            # ADV-02: Tag tenant-specific keys for isolation tracking
+            if self.tenant_id:
+                tags.append({"TagKey": "TenantId", "TagValue": self.tenant_id})
+                description = f"ForensicBridge Encryption Key (Tenant: {self.tenant_id})"
+            else:
+                description = "ForensicBridge Migration Encryption Key"
+
+            create_params = {
+                "Description": description,
+                "KeyUsage": "ENCRYPT_DECRYPT",
+                "Origin": "AWS_KMS",
+                "Tags": tags,
+            }
+
+            # ADV-03: HSM-backed keys via CloudHSM custom key store
+            custom_key_store_id = os.environ.get("KMS_CUSTOM_KEY_STORE_ID")
+            if self.hsm_enabled and custom_key_store_id:
+                create_params["Origin"] = "AWS_CLOUDHSM"
+                create_params["CustomKeyStoreId"] = custom_key_store_id
+                logger.info("Creating HSM-backed KMS key via CloudHSM")
+
+            response = self.kms_client.create_key(**create_params)
 
             self.key_id = response["KeyMetadata"]["KeyId"]
 
@@ -136,7 +170,8 @@ class AWSKMSManager:
         - Encrypted key (store alongside encrypted data)
 
         Args:
-            context: Encryption context for additional security
+            context: Encryption context for additional security.
+                     ADV-02: Tenant ID is automatically injected if configured.
 
         Returns:
             Tuple of (plaintext_key, encrypted_key)
@@ -144,8 +179,13 @@ class AWSKMSManager:
         try:
             params = {"KeyId": self.key_id, "KeySpec": "AES_256"}  # 256-bit AES key
 
+            # ADV-02: Inject tenant_id into encryption context for key isolation
             if context:
+                if self.tenant_id and "tenant_id" not in context:
+                    context["tenant_id"] = self.tenant_id
                 params["EncryptionContext"] = context
+            elif self.tenant_id:
+                params["EncryptionContext"] = {"tenant_id": self.tenant_id}
 
             response = self.kms_client.generate_data_key(**params)
 
