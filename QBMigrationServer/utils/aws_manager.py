@@ -635,11 +635,11 @@ aws s3 cp s3://{code_bucket}/qbo_client.py qbo_client.py
 
 # Download encrypted data from S3
 echo "Downloading encrypted QB data from S3..."
-aws s3 cp {s3_uri} encrypted_data.bin
+aws s3 cp "{s3_uri}" encrypted_data.bin
 
 # Download encryption metadata
-METADATA_URI=$(echo {s3_uri} | sed 's/encrypted_data.bin/encryption_metadata.json/')
-aws s3 cp $METADATA_URI encryption_metadata.json
+METADATA_URI=$(echo "{s3_uri}" | sed 's/encrypted_data.bin/encryption_metadata.json/')
+aws s3 cp "$METADATA_URI" encryption_metadata.json
 
 # Get QBO credentials from Secrets Manager
 echo "Retrieving QBO credentials from Secrets Manager..."

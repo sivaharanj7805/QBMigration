@@ -9,6 +9,7 @@ Handles OAuth2 flow for connecting to QuickBooks Online:
 """
 
 import logging
+import re
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -120,6 +121,14 @@ def qbo_callback():
 
         if not code or not realm_id:
             return jsonify({"error": "Missing authorization code or realm ID"}), 400
+
+        # AUDIT FIX P2-08: Validate OAuth code and realm_id format/length
+        if len(code) > 512:
+            logger.warning("QBO OAuth code exceeds maximum length")
+            return jsonify({"error": "Invalid authorization code"}), 400
+        if not re.match(r"^\d{1,20}$", realm_id):
+            logger.warning(f"QBO realm_id invalid format: {realm_id[:20]}")
+            return jsonify({"error": "Invalid realm ID format"}), 400
 
         # Exchange code for tokens
         client_id = current_app.config.get("QBO_CLIENT_ID")

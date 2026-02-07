@@ -26,8 +26,9 @@ def hash_email(email: str) -> str:
     if not email:
         return "unknown"
 
-    # Create consistent hash
-    email_hash = hashlib.sha256(email.lower().encode()).hexdigest()[:12]
+    # AUDIT FIX P2-01: Increased hash length from 12 (48-bit) to 32 (128-bit)
+    # to prevent birthday-paradox collisions at scale
+    email_hash = hashlib.sha256(email.lower().encode()).hexdigest()[:32]
     return f"usr_{email_hash}"
 
 
@@ -208,6 +209,10 @@ def redact_credit_card(text: str) -> str:
     return re.sub(cc_pattern, redact_match, text)
 
 
+# AUDIT FIX P2-12: Maximum input length to prevent ReDoS attacks
+_MAX_PII_INPUT_LENGTH = 100_000
+
+
 def redact_all_pii(text: str, preserve_email_hash: bool = False) -> str:
     """
     Redact all common PII types from text.
@@ -225,6 +230,10 @@ def redact_all_pii(text: str, preserve_email_hash: bool = False) -> str:
     """
     if not text:
         return text
+
+    # AUDIT FIX P2-12: Truncate overly long inputs to prevent ReDoS
+    if len(text) > _MAX_PII_INPUT_LENGTH:
+        text = text[:_MAX_PII_INPUT_LENGTH] + "...[TRUNCATED]"
 
     result = text
 

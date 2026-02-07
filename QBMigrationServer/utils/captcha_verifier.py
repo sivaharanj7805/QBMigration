@@ -213,20 +213,27 @@ def get_client_ip() -> str:
     Returns:
         Client IP address
     """
-    # Check X-Forwarded-For header (used by proxies/load balancers)
-    x_forwarded_for = request.headers.get("X-Forwarded-For")
-    if x_forwarded_for:
-        # X-Forwarded-For can contain multiple IPs: "client, proxy1, proxy2"
-        # First IP is the original client
-        return x_forwarded_for.split(",")[0].strip()
+    # AUDIT FIX: Only trust proxy headers when behind a known reverse proxy
+    # In production, use TRUSTED_PROXY_IPS env var to whitelist proxy IPs
+    import os
 
-    # Check X-Real-IP header (used by some proxies)
-    x_real_ip = request.headers.get("X-Real-IP")
-    if x_real_ip:
-        return x_real_ip.strip()
+    trusted_proxies = os.environ.get("TRUSTED_PROXY_IPS", "").split(",")
+    trusted_proxies = [ip.strip() for ip in trusted_proxies if ip.strip()]
 
-    # Fallback to direct connection IP
-    return request.remote_addr or "unknown"
+    remote_addr = request.remote_addr or "unknown"
+
+    # Only trust X-Forwarded-For if request came from a trusted proxy
+    if trusted_proxies and remote_addr in trusted_proxies:
+        x_forwarded_for = request.headers.get("X-Forwarded-For")
+        if x_forwarded_for:
+            return x_forwarded_for.split(",")[0].strip()
+
+        x_real_ip = request.headers.get("X-Real-IP")
+        if x_real_ip:
+            return x_real_ip.strip()
+
+    # Direct connection IP
+    return remote_addr
 
 
 def get_captcha_config() -> Dict[str, Any]:

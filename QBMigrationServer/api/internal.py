@@ -147,8 +147,18 @@ def trigger_processing():
                 400,
             )
 
-        # SECURITY FIX: Validate s3_key doesn't contain path traversal
-        if ".." in s3_key or s3_key.startswith("/"):
+        # SECURITY FIX P1-06: Comprehensive path traversal validation
+        # Check for encoded traversal sequences, null bytes, and invalid characters
+        import urllib.parse
+
+        decoded_key = urllib.parse.unquote(urllib.parse.unquote(s3_key))  # Double-decode
+        if (
+            ".." in s3_key
+            or ".." in decoded_key
+            or s3_key.startswith("/")
+            or "\x00" in s3_key
+            or not re.match(r"^[a-zA-Z0-9/_.\-]+$", s3_key)
+        ):
             logger.warning(f"Invalid s3_key from internal API: {s3_key[:100]}")
             return jsonify({"success": False, "error": "Invalid s3_key format"}), 400
 

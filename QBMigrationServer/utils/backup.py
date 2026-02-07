@@ -150,11 +150,10 @@ class BackupManager:
                         f":{parsed.username or 'postgres'}"
                         f":{parsed.password}\n"
                     )
+                    # AUDIT FIX: Set permissions before writing to prevent race window
+                    os.fchmod(pgpass_fd, 0o600)
                     os.write(pgpass_fd, pgpass_entry.encode())
                     os.close(pgpass_fd)
-
-                    # Set restrictive permissions (required by PostgreSQL)
-                    os.chmod(pgpass_path, 0o600)
 
                     # Point pg_dump to use this .pgpass file
                     env["PGPASSFILE"] = pgpass_path

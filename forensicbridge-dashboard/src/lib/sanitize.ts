@@ -122,9 +122,9 @@ export function sanitizeHtml(html: string | null | undefined): string {
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
         .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
         .replace(/on\w+\s*=\s*[^\s>]*/gi, '')
-        .replace(/javascript:/gi, '')
+        .replace(/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi, '') // AUDIT FIX: Catch obfuscated javascript:
         .replace(/vbscript:/gi, '')
-        .replace(/data:/gi, '');
+        .replace(/data\s*:/gi, ''); // AUDIT FIX: Catch obfuscated data:
 
     // Remove dangerous tags
     const dangerousTags = ['iframe', 'object', 'embed', 'form', 'input', 'base', 'link', 'meta'];

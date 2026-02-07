@@ -465,10 +465,15 @@ def start_migration(migration_id):  # noqa: C901
         user_id = _get_current_user_id()
         user = db.session.get(User, user_id)
 
-        # Check credits
-        available_credits = MigrationCredit.query.filter_by(
-            user_id=user_id, status="available", payment_status="paid"
-        ).all()
+        # SECURITY FIX P0-02: Use SELECT FOR UPDATE on credit check to prevent
+        # race condition where concurrent requests both pass the check
+        available_credits = (
+            MigrationCredit.query.filter_by(
+                user_id=user_id, status="available", payment_status="paid"
+            )
+            .with_for_update()
+            .all()
+        )
         total_remaining = len(available_credits)
 
         if total_remaining <= 0:
@@ -546,35 +551,21 @@ def start_migration(migration_id):  # noqa: C901
                     400,
                 )
         else:
-            # PRIORITY 2: Plaintext credentials (development only)
-            import os
-
-            allow_plaintext = (
-                os.getenv("ALLOW_PLAINTEXT_CREDENTIALS", "false").lower() == "true"
+            # SECURITY FIX P0-01: Plaintext credentials removed entirely.
+            # All credentials MUST be encrypted. No environment variable override.
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            "Encrypted credentials required."
+                            " Use the encrypted_credentials field"
+                            " with client-side encryption."
+                        ),
+                    }
+                ),
+                400,
             )
-            is_production = os.getenv("FLASK_ENV", "development") == "production"
-
-            if is_production and not allow_plaintext:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": (
-                                "Plaintext credentials not allowed"
-                                " in production. Use"
-                                " encrypted_credentials field."
-                            ),
-                        }
-                    ),
-                    400,
-                )
-
-            qbo_credentials = data.get("qbo_credentials", {})
-
-            if allow_plaintext and qbo_credentials:
-                logger.warning(
-                    f"Migration {migration_id}: Using PLAINTEXT credentials (not recommended)"
-                )
 
         if not qbo_credentials or not all(
             k in qbo_credentials
