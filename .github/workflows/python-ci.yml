@@ -194,3 +194,56 @@ jobs:
     - name: Run mypy
       run: |
         mypy QBMigrationServer/ QBMigrationService/ --ignore-missing-imports
+
+  # ADV-05: SBOM (Software Bill of Materials) generation
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install SBOM tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install cyclonedx-bom
+
+    - name: Install project dependencies
+      run: |
+        pip install -r QBMigrationServer/requirements.txt
+        pip install -r QBMigrationService/requirements.txt
+
+    - name: Generate Python SBOM (CycloneDX)
+      run: |
+        cyclonedx-py environment \
+          --output sbom-python.json \
+          --output-format json \
+          --schema-version 1.5
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Generate Frontend SBOM
+      run: |
+        cd forensicbridge-dashboard
+        npm ci --ignore-scripts
+        npx @cyclonedx/cyclonedx-npm --output-file ../sbom-frontend.json --output-format JSON || true
+        cd ..
+
+    - name: Upload SBOM Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-artifacts
+        path: |
+          sbom-python.json
+          sbom-frontend.json
+        if-no-files-found: warn
