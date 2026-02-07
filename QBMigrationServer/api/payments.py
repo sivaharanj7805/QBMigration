@@ -267,18 +267,26 @@ def stripe_webhook():
         logger.error(f"SECURITY: Invalid Stripe signature from {request.remote_addr}")
         return jsonify({"error": "Invalid signature"}), 400
 
-    # Handle the event
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        handle_successful_payment(session)
+    # FIX B-05: Handle events with proper error propagation
+    # Return 500 on critical failures so Stripe retries the webhook
+    try:
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+            handle_successful_payment(session)
 
-    elif event["type"] == "checkout.session.expired":
-        session = event["data"]["object"]
-        handle_expired_session(session)
+        elif event["type"] == "checkout.session.expired":
+            session = event["data"]["object"]
+            handle_expired_session(session)
 
-    elif event["type"] == "payment_intent.payment_failed":
-        payment_intent = event["data"]["object"]
-        handle_failed_payment(payment_intent)
+        elif event["type"] == "payment_intent.payment_failed":
+            payment_intent = event["data"]["object"]
+            handle_failed_payment(payment_intent)
+
+    except Exception as handler_err:
+        logger.exception(
+            f"Failed to handle Stripe event {event['type']}: {str(handler_err)}"
+        )
+        return jsonify({"received": False, "error": "Handler failed"}), 500
 
     return jsonify({"received": True})
 

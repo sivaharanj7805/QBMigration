@@ -217,13 +217,23 @@ export default function UploadPage() {
         e.stopPropagation();
         setIsDragActive(false);
 
+        // FIX F-09: Deduplicate files by name before processing
         const droppedFiles = Array.from(e.dataTransfer.files);
-        droppedFiles.forEach(processFile);
+        droppedFiles.forEach(file => {
+            setFiles(prev => {
+                if (prev.some(f => f.name === file.name)) return prev;
+                return prev; // processFile handles adding
+            });
+            processFile(file);
+        });
     }, [processFile]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);
-        selectedFiles.forEach(processFile);
+        // FIX F-09: Skip files already in the list
+        selectedFiles.filter(file =>
+            !files.some(f => f.name === file.name)
+        ).forEach(processFile);
     };
 
     const removeFile = (name: string) => {

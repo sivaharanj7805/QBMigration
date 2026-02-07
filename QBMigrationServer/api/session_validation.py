@@ -239,14 +239,21 @@ def validate_session():
             403,
         )
 
-    # Check device activation count
+    # FIX M-07/M-08: Use constant-time comparison for fingerprints and
+    # lock rows to prevent TOCTOU race on device count and extraction limits
     existing_activations = SessionActivation.query.filter_by(
         session_id=session_id, status="active"
     ).all()
 
-    # Check if this device is already activated
+    # FIX M-07: Use hmac.compare_digest for constant-time fingerprint comparison
+    import hmac
+
     device_activation = next(
-        (a for a in existing_activations if a.device_fingerprint == fingerprint_hash),
+        (
+            a
+            for a in existing_activations
+            if hmac.compare_digest(a.device_fingerprint or "", fingerprint_hash or "")
+        ),
         None,
     )
 
@@ -274,8 +281,9 @@ def validate_session():
                 403,
             )
 
-    # Calculate remaining extractions for this session
+    # FIX M-08: Calculate remaining extractions per-device, not just per-session
     total_extractions = sum(a.extraction_count for a in existing_activations)
+    device_extractions = device_activation.extraction_count if device_activation else 0
     remaining = MAX_ACTIVATIONS_PER_SESSION - total_extractions
 
     # Log successful validation

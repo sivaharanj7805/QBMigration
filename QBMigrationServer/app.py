@@ -1316,7 +1316,7 @@ def create_app(config_name="development"):  # noqa: C901
         app.logger.info(f"{request.method} {sanitized_path} -> {response.status_code}")
         return response
 
-    # Database session management
+    # FIX B-08: Database session management with proper cleanup
     @app.teardown_appcontext
     def shutdown_session(exception=None):
         """Remove database sessions after each request"""
@@ -1324,9 +1324,16 @@ def create_app(config_name="development"):  # noqa: C901
             if exception:
                 app.logger.error(f"Exception during request: {str(exception)}")
                 db.session.rollback()
-            db.session.remove()
+            else:
+                # Commit any pending changes from successful requests
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
+        finally:
+            db.session.remove()
 
     # FIX #34: Sanitized error handlers for production security
     @app.errorhandler(400)

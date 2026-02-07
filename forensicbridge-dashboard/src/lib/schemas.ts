@@ -82,9 +82,11 @@ export const TrialBalanceSchema = z.object({
 // Auth Schemas
 // ==========================================
 
+// FIX F-03: Include csrf_token in login response schema
 export const LoginResponseSchema = z.object({
     success: z.boolean(),
     token: z.string(),
+    csrf_token: z.string().optional(),
     user: z.object({
         id: z.number().int().positive(),
         email: z.string().email(),

@@ -721,7 +721,13 @@ def _handle_v31_upload(data, user):  # noqa: C901
             )
 
         # Store encryption metadata separately (NEW - v3.1 feature)
-        aws.store_encryption_metadata(migration_id, encryption_metadata)
+        # FIX B-06: Check result and log failure without losing S3 upload result
+        meta_result = aws.store_encryption_metadata(migration_id, encryption_metadata)
+        if not meta_result:
+            logger.warning(
+                f"Migration {migration_id}: Failed to store encryption metadata. "
+                "Data uploaded but metadata may be incomplete."
+            )
 
         # Update migration status
         migration.status = "uploaded"
@@ -859,7 +865,7 @@ def upload_ndjson_bundle():
 
                 if content_b64:
                     content_bytes = base64.b64decode(content_b64)
-                    f"migrations/{migration_id}/{file_name}"
+                    s3_key = f"migrations/{migration_id}/{file_name}"
 
                     # Upload to S3
                     result = aws.upload_to_s3(
@@ -1077,6 +1083,39 @@ def _cleanup_expired_uploads():
                     )
     except Exception as e:
         logger.error(f"Failed to cleanup expired uploads: {e}")
+
+
+def init_upload_cleanup(app):
+    """FIX B-02: Register periodic cleanup of expired upload sessions.
+    Call this from app factory to schedule cleanup via APScheduler or Flask CLI."""
+    import atexit
+
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(
+            func=_cleanup_expired_uploads,
+            trigger="interval",
+            minutes=15,
+            id="cleanup_expired_uploads",
+            replace_existing=True,
+        )
+        scheduler.start()
+        atexit.register(lambda: scheduler.shutdown(wait=False))
+        logger.info("Upload cleanup scheduler started (every 15 minutes)")
+    except ImportError:
+        # APScheduler not available - register as Flask before_request periodic check
+        _cleanup_counter = {"count": 0}
+
+        @app.before_request
+        def _periodic_cleanup():
+            _cleanup_counter["count"] += 1
+            # Run cleanup every ~100 requests as fallback
+            if _cleanup_counter["count"] % 100 == 0:
+                _cleanup_expired_uploads()
+
+        logger.info("Upload cleanup registered via request-based fallback")
 
 
 @upload_bp.route("/initiate", methods=["POST"])

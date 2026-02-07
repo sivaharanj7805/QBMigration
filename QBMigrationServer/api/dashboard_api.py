@@ -1292,23 +1292,20 @@ def download_caseware_bundle(migration_id):  # noqa: C901
                 with open(bundle_path, "rb") as f:
                     encrypted_data = f.read()
 
-                # NOTE: The salt was randomly generated during encryption and NOT stored
-                # This is a critical bug in the original implementation - we can't decrypt
-                # without the original salt. For now, we'll return the file and log a warning.
-                # A proper fix would store the salt alongside the encrypted file.
+                # FIX B-01: Read salt from encrypted file (first 16 bytes = salt)
+                # Standard format: [16-byte salt][encrypted data]
+                # Falls back to migration_id salt for legacy files
+                SALT_LENGTH = 16
 
-                # WORKAROUND: Check if there's an unencrypted version
-                unencrypted_path = bundle_path.replace(".encrypted", "")
-                if os.path.exists(unencrypted_path):
-                    bundle_path = unencrypted_path
-                else:
-                    # Try to decrypt with a fixed salt (migration_id) as fallback
-                    # This matches an earlier version of the code before the random salt fix
-                    migration_salt = migration_id.encode("utf-8")
+                if len(encrypted_data) > SALT_LENGTH:
+                    # Try embedded salt first (new format)
+                    embedded_salt = encrypted_data[:SALT_LENGTH]
+                    payload = encrypted_data[SALT_LENGTH:]
+
                     kdf = PBKDF2HMAC(
                         algorithm=hashes.SHA256(),
                         length=32,
-                        salt=migration_salt,
+                        salt=embedded_salt,
                         iterations=100000,
                         backend=default_backend(),
                     )
@@ -1318,33 +1315,53 @@ def download_caseware_bundle(migration_id):  # noqa: C901
                     cipher = Fernet(encryption_key)
 
                     try:
-                        decrypted_data = cipher.decrypt(encrypted_data)
-
-                        # Return decrypted data as file download
+                        decrypted_data = cipher.decrypt(payload)
                         return send_file(
                             io.BytesIO(decrypted_data),
                             mimetype="application/zip",
                             as_attachment=True,
                             download_name=f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip",
                         )
-                    except Exception as decrypt_error:
-                        logger.error(
-                            f"Failed to decrypt Caseware bundle: {decrypt_error}"
+                    except Exception:
+                        logger.info(
+                            "Embedded salt decryption failed, trying legacy migration_id salt"
                         )
-                        # Fall through to return encrypted file with warning
-                        return (
-                            jsonify(
-                                {
-                                    "success": False,
-                                    "error": (
-                                        "Bundle was encrypted with a random salt"
-                                        " that was not stored."
-                                        " Please regenerate the bundle."
-                                    ),
-                                }
-                            ),
-                            500,
-                        )
+
+                # Legacy fallback: use migration_id as salt
+                migration_salt = migration_id.encode("utf-8")
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=migration_salt,
+                    iterations=100000,
+                    backend=default_backend(),
+                )
+                encryption_key = base64.urlsafe_b64encode(
+                    kdf.derive(app_secret.encode())
+                )
+                cipher = Fernet(encryption_key)
+
+                try:
+                    decrypted_data = cipher.decrypt(encrypted_data)
+                    return send_file(
+                        io.BytesIO(decrypted_data),
+                        mimetype="application/zip",
+                        as_attachment=True,
+                        download_name=f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip",
+                    )
+                except Exception as decrypt_error:
+                    logger.error(
+                        f"Failed to decrypt Caseware bundle: {decrypt_error}"
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Bundle decryption failed. Please regenerate the bundle.",
+                            }
+                        ),
+                        500,
+                    )
 
             except ImportError as ie:
                 logger.error(f"Cryptography library not available: {ie}")
