@@ -15,6 +15,7 @@ Author: ForensicBridge Security Team
 Version: 1.0.0
 """
 
+import ipaddress
 import logging
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -232,17 +233,26 @@ def get_client_ip() -> str:
             # FIX: Parse right-to-left to find the first untrusted IP
             # This prevents IP spoofing where an attacker prepends fake IPs
             ip_chain = [ip.strip() for ip in x_forwarded_for.split(",")]
-            for ip in reversed(ip_chain):
-                if ip not in trusted_proxies:
-                    return ip
+            for ip_str in reversed(ip_chain):
+                try:
+                    ipaddress.ip_address(ip_str)
+                except ValueError:
+                    continue
+                if ip_str not in trusted_proxies:
+                    return ip_str
             # All IPs in chain are trusted proxies - use remote_addr
             return remote_addr
 
         x_real_ip = request.headers.get("X-Real-IP")
         if x_real_ip:
-            # Only trust X-Real-IP if it's not itself a trusted proxy
-            if x_real_ip.strip() not in trusted_proxies:
-                return x_real_ip.strip()
+            x_real_ip_clean = x_real_ip.strip()
+            # Validate X-Real-IP is a well-formed IP address
+            try:
+                ipaddress.ip_address(x_real_ip_clean)
+            except ValueError:
+                return remote_addr
+            if x_real_ip_clean not in trusted_proxies:
+                return x_real_ip_clean
 
     # Direct connection IP
     return remote_addr
