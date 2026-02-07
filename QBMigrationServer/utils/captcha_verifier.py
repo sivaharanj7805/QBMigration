@@ -217,8 +217,11 @@ def get_client_ip() -> str:
     # In production, use TRUSTED_PROXY_IPS env var to whitelist proxy IPs
     import os
 
-    trusted_proxies = os.environ.get("TRUSTED_PROXY_IPS", "").split(",")
-    trusted_proxies = [ip.strip() for ip in trusted_proxies if ip.strip()]
+    trusted_proxies = set(
+        ip.strip()
+        for ip in os.environ.get("TRUSTED_PROXY_IPS", "").split(",")
+        if ip.strip()
+    )
 
     remote_addr = request.remote_addr or "unknown"
 
@@ -226,11 +229,20 @@ def get_client_ip() -> str:
     if trusted_proxies and remote_addr in trusted_proxies:
         x_forwarded_for = request.headers.get("X-Forwarded-For")
         if x_forwarded_for:
-            return x_forwarded_for.split(",")[0].strip()
+            # FIX: Parse right-to-left to find the first untrusted IP
+            # This prevents IP spoofing where an attacker prepends fake IPs
+            ip_chain = [ip.strip() for ip in x_forwarded_for.split(",")]
+            for ip in reversed(ip_chain):
+                if ip not in trusted_proxies:
+                    return ip
+            # All IPs in chain are trusted proxies - use remote_addr
+            return remote_addr
 
         x_real_ip = request.headers.get("X-Real-IP")
         if x_real_ip:
-            return x_real_ip.strip()
+            # Only trust X-Real-IP if it's not itself a trusted proxy
+            if x_real_ip.strip() not in trusted_proxies:
+                return x_real_ip.strip()
 
     # Direct connection IP
     return remote_addr
