@@ -65,14 +65,14 @@ jobs:
       run: |
         # Generate JSON report for artifact upload (exclude test dirs)
         bandit -r QBMigrationServer/ QBMigrationService/ --exclude QBMigrationServer/tests,QBMigrationService/tests -f json -o bandit-report.json || true
-        # AUDIT FIX HIGH-19: Fail on medium+ severity with medium+ confidence
-        # Skip rules that produce excessive false positives in this codebase:
-        #   B101: assert_used (valid in production guard clauses)
-        #   B105/B107: hardcoded password strings (OAuth URLs, algorithm names, env defaults)
-        #   B110: try_except_pass (intentional timing-equalization and graceful-degradation)
+        # AUDIT FIX P1-08: Re-enabled B105/B107 (hardcoded passwords).
+        # False positives should use inline # nosec B105 comments instead.
+        # Only B101 (assert in guard clauses) and B110 (graceful degradation) skipped.
+        #   B101: assert_used - used in production guard clauses for fail-fast
+        #   B110: try_except_pass - used for graceful degradation in optional features
         bandit -r QBMigrationServer/ QBMigrationService/ \
           --exclude QBMigrationServer/tests,QBMigrationService/tests \
-          --skip B101,B105,B107,B110 \
+          --skip B101,B110 \
           -ll -ii
 
     - name: Upload Bandit Report

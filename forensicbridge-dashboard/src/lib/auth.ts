@@ -32,8 +32,9 @@ const CSRF_TOKEN_VALIDITY_MS = 15 * 60 * 1000;
 // Refresh token 2 minutes before expiry
 const CSRF_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
-// Track if a refresh is in progress to prevent concurrent refreshes
-let csrfRefreshInProgress = false;
+// AUDIT FIX P2-02: Promise-based queue instead of sleep polling
+// Prevents race condition where concurrent requests skip CSRF
+let csrfRefreshPromise: Promise<string | null> | null = null;
 
 // AUDIT FIX HIGH-11: Session duration enforcement
 const SESSION_MAX_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours absolute max
@@ -61,38 +62,38 @@ export async function fetchCsrfToken(forceRefresh: boolean = false): Promise<str
         return csrfToken;
     }
 
-    // Prevent concurrent refresh requests
-    if (csrfRefreshInProgress) {
-        // Wait for ongoing refresh to complete
-        await new Promise(resolve => setTimeout(resolve, 100));
-        return csrfToken;
+    // AUDIT FIX P2-02: Use promise-based deduplication instead of sleep polling
+    // All concurrent callers await the same in-flight request
+    if (csrfRefreshPromise) {
+        return csrfRefreshPromise;
     }
 
-    csrfRefreshInProgress = true;
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-    try {
-        const response = await fetch(`${API_URL}/api/auth/csrf-token`, {
-            method: 'GET',
-            credentials: 'include',
-        });
-        if (response.ok) {
-            const data = await response.json();
-            csrfToken = data.csrf_token || data.csrfToken || null;
-            // Set expiry time - use server-provided expiry or default
-            const serverExpiry = data.expires_in ? Date.now() + (data.expires_in * 1000) : null;
-            csrfTokenExpiry = serverExpiry || (Date.now() + CSRF_TOKEN_VALIDITY_MS);
-            return csrfToken;
+    csrfRefreshPromise = (async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/auth/csrf-token`, {
+                method: 'GET',
+                credentials: 'include',
+            });
+            if (response.ok) {
+                const data = await response.json();
+                csrfToken = data.csrf_token || data.csrfToken || null;
+                const serverExpiry = data.expires_in ? Date.now() + (data.expires_in * 1000) : null;
+                csrfTokenExpiry = serverExpiry || (Date.now() + CSRF_TOKEN_VALIDITY_MS);
+                return csrfToken;
+            }
+        } catch {
+            if (process.env.NODE_ENV === 'development') {
+                console.warn('[Auth] CSRF token endpoint not available');
+            }
+        } finally {
+            csrfRefreshPromise = null;
         }
-    } catch {
-        // CSRF endpoint may not exist yet - continue without it
-        if (process.env.NODE_ENV === 'development') {
-            console.warn('[Auth] CSRF token endpoint not available');
-        }
-    } finally {
-        csrfRefreshInProgress = false;
-    }
-    return null;
+        return null;
+    })();
+
+    return csrfRefreshPromise;
 }
 
 /**

@@ -693,7 +693,11 @@ namespace QBDesktopExtractor
                         if (i + 1 < args.Length && int.TryParse(args[++i], out int retries))
                             options.MaxRetries = retries;
                         break;
-                    case "--skip-validation": options.SkipValidation = true; break;
+                    // AUDIT FIX: --skip-validation removed for security
+                    // Session validation must never be bypassed
+                    case "--skip-validation":
+                        Console.Error.WriteLine("WARNING: --skip-validation is deprecated and ignored for security.");
+                        break;
                 }
             }
             return options;

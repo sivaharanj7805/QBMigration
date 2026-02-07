@@ -60,6 +60,8 @@ def send_verification_email(email, token):
     try:
         server_url = current_app.config.get("SERVER_URL")
         verify_url = f"{server_url}/api/auth/verify/{token}"
+        # AUDIT FIX: HTML-escape URL to prevent XSS in email templates
+        safe_verify_url = str(html_escape(verify_url))
 
         subject = "Verify your QB Migration account"
 
@@ -84,7 +86,7 @@ QB Migration Team
     <h2 style="color: #2563eb;">Welcome to QB Migration!</h2>
     <p>Please verify your email address by clicking the button below:</p>
     <p style="margin: 30px 0;">
-        <a href="{verify_url}" style="background-color: #2563eb; color: white;
+        <a href="{safe_verify_url}" style="background-color: #2563eb; color: white;
  padding: 12px 24px; text-decoration: none; border-radius: 4px;
  display: inline-block;">
             Verify Email Address
@@ -92,7 +94,7 @@ QB Migration Team
     </p>
     <p style="color: #666; font-size: 14px;">
         Or copy and paste this link into your browser:<br>
-        <a href="{verify_url}">{verify_url}</a>
+        <a href="{safe_verify_url}">{safe_verify_url}</a>
     </p>
     <p style="color: #666; font-size: 14px;">
         This link will expire in 24 hours.

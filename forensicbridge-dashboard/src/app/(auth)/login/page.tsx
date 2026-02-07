@@ -63,7 +63,8 @@ export default function LoginPage() {
             if (err instanceof TypeError && err.message === 'Failed to fetch') {
                 setError('Cannot connect to server. Please check if the API is running.');
             } else {
-                setError(err instanceof Error ? err.message : 'Login failed');
+                // AUDIT FIX P1-04: Generic error prevents user enumeration
+                setError('Invalid email or password. Please try again.');
             }
         } finally {
             setLoading(false);

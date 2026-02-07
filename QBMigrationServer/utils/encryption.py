@@ -94,8 +94,9 @@ class EncryptionManager:
             # This ensures consistent security posture and key recoverability
             flask_env = os.environ.get("FLASK_ENV", "development")
 
-            # Check if we're in testing mode (allow auto-generation for tests only)
-            is_testing = flask_env == "testing" or os.environ.get("PYTEST_CURRENT_TEST")
+            # AUDIT FIX P2-05: Only use FLASK_ENV for test detection, not PYTEST env var
+            # PYTEST_CURRENT_TEST could be accidentally set in production
+            is_testing = flask_env == "testing"
 
             if is_testing:
                 # Testing only: Generate a deterministic test password
@@ -114,7 +115,10 @@ class EncryptionManager:
                     'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
                 )
 
-        with open(private_key_path, "wb") as f:
+        # AUDIT FIX P2-04: Create file with restricted permissions atomically
+        # to prevent race window where key is world-readable
+        fd = os.open(private_key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
             f.write(
                 self._private_key.private_bytes(
                     encoding=serialization.Encoding.PEM,
@@ -124,7 +128,6 @@ class EncryptionManager:
                     ),
                 )
             )
-        os.chmod(private_key_path, 0o600)
         logger.info("Generated and saved new RSA key pair")
 
     def get_public_key_xml(self):

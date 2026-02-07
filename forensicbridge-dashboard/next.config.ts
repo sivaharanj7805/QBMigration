@@ -43,8 +43,8 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'", // AUDIT FIX HIGH-04: Removed unsafe-eval
-              "style-src 'self' 'unsafe-inline'",
+              "script-src 'self'", // AUDIT FIX P1-01: Removed unsafe-inline for scripts
+              "style-src 'self' 'unsafe-inline'", // Required for Tailwind CSS
               "img-src 'self' data: https:",
               "font-src 'self' data:",
               `connect-src 'self' ${connectSrcDomains}`,
@@ -72,6 +72,11 @@ const nextConfig: NextConfig = {
           {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=()',
+          },
+          {
+            // AUDIT FIX P1-05: HSTS header to prevent SSL stripping attacks
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains; preload',
           },
         ],
       },

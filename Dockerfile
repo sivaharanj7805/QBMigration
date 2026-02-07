@@ -78,11 +78,15 @@ USER qbmigration
 # Expose port
 EXPOSE 5000
 
+# AUDIT FIX P3-06: Configurable Gunicorn workers via environment variables
+ENV GUNICORN_WORKERS=4 \
+    GUNICORN_THREADS=2
+
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", \
-     "--worker-class", "gthread", "--timeout", "120", "--keep-alive", "5", \
-     "--access-logfile", "-", "--error-logfile", "-", \
-     "QBMigrationServer.app:create_app()"]
+CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads "${GUNICORN_THREADS}" \
+     --worker-class gthread --timeout 120 --keep-alive 5 \
+     --access-logfile - --error-logfile - \
+     "QBMigrationServer.app:create_app()"
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development

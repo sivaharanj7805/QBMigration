@@ -95,8 +95,19 @@ echo "[3/6] Pulling latest code..."
 
 cd "$APP_DIR"
 
-# Stash any local changes
-git stash
+# AUDIT FIX P1-03: Validate branch name to prevent shell injection
+if ! echo "$BRANCH" | grep -qE '^[a-zA-Z0-9/_.-]+$'; then
+    echo "Error: Invalid branch name '$BRANCH'. Only alphanumeric, /, _, ., - allowed."
+    exit 1
+fi
+
+# AUDIT FIX P2-10: Save stash reference for recovery instead of silent discard
+STASH_REF=$(git stash create 2>/dev/null)
+if [ -n "$STASH_REF" ]; then
+    echo "Stashed local changes: $STASH_REF"
+    echo "$(date): $STASH_REF" >> "$BACKUP_DIR/stash-refs.log"
+    git stash store -m "pre-deploy-$(date +%s)" "$STASH_REF"
+fi
 
 # Fetch and checkout
 git fetch origin
@@ -113,7 +124,12 @@ echo "[4/6] Updating Python dependencies..."
 
 source "$APP_DIR/venv/bin/activate"
 pip install --upgrade pip wheel
-pip install -r requirements.txt
+# AUDIT FIX P2-13: Verify dependency integrity with hash checking if available
+if [ -f requirements-locked.txt ]; then
+    pip install --require-hashes -r requirements-locked.txt
+else
+    pip install -r requirements.txt
+fi
 pip install -r QBMigrationServer/requirements.txt 2>/dev/null || true
 
 # =============================================================================

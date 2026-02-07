@@ -182,9 +182,14 @@ class ApiClient {
         };
 
         // SECURITY: Add CSRF token for mutation requests
+        // AUDIT FIX: Warn in development if CSRF token missing for mutations
         const csrfToken = getCsrfToken();
-        if (method !== 'GET' && method !== 'HEAD' && csrfToken) {
-            (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+        if (method !== 'GET' && method !== 'HEAD') {
+            if (csrfToken) {
+                (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
+            } else if (process.env.NODE_ENV === 'development') {
+                console.warn(`[API] CSRF token missing for ${method} ${endpoint}`);
+            }
         }
 
         let lastError: Error | null = null;

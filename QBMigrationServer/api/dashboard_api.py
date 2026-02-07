@@ -98,6 +98,10 @@ def get_live_status(migration_id):  # noqa: C901
         ]
     }
     """
+    # AUDIT FIX: Add UUID validation to prevent malformed ID injection
+    if not is_valid_uuid(migration_id):
+        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_user_id()
@@ -584,6 +588,10 @@ def get_trial_balance(migration_id):
         "hash_match": true
     }
     """
+    # AUDIT FIX: Add UUID validation
+    if not is_valid_uuid(migration_id):
+        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_user_id()
@@ -1369,6 +1377,10 @@ def get_caseware_status(migration_id):
     """
     Get Caseware bundle generation status for a migration.
     """
+    # AUDIT FIX: Add UUID validation
+    if not is_valid_uuid(migration_id):
+        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_user_id()

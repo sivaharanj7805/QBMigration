@@ -70,19 +70,20 @@ function validatePassword(password: string): PasswordValidation {
  * or if password is too similar to a common pattern (not the reverse)
  */
 function isCommonPassword(password: string): boolean {
-    const commonPatterns = [
+    // AUDIT FIX P2-14: Use exact match instead of substring check
+    // Prevents legitimate passwords like "MySecurePassword123!" from being rejected
+    const commonPasswords = [
         'password', '123456', 'qwerty', 'abc123', 'letmein',
         'admin', 'welcome', 'monkey', 'dragon', 'master',
         '12345678', '123456789', '1234567890', 'password1',
+        'password123', 'iloveyou', 'sunshine', 'princess',
     ];
 
     const lower = password.toLowerCase();
 
-    // Check if password contains any common pattern
-    // OR if password is essentially the same as a common pattern (exact match)
-    // FIX: Removed pattern.includes(lower) which incorrectly flags short passwords
-    return commonPatterns.some(pattern =>
-        lower.includes(pattern) || lower === pattern
+    // Only flag exact matches or trivial derivations (pattern + single char)
+    return commonPasswords.some(pattern =>
+        lower === pattern || lower === pattern + '!' || lower === pattern + '1'
     );
 }
 
@@ -239,7 +240,8 @@ export default function RegisterPage() {
             if (err instanceof TypeError && err.message === 'Failed to fetch') {
                 setError('Cannot connect to server. Please check if the API is running.');
             } else {
-                setError(err instanceof Error ? err.message : 'Registration failed');
+                // AUDIT FIX P1-04: Generic error prevents information disclosure
+                setError('Registration could not be completed. Please try again.');
             }
         } finally {
             setLoading(false);
