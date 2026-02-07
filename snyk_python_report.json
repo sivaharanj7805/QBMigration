@@ -1,5 +1,0 @@
-﻿{
-  "ok": false,
-  "error": "Required packages missing: requests-oauthlib\r\n\nPlease run `pip install -r requirements.txt`. If the issue persists try again with --skip-unresolved.",
-  "path": "C:\\Users\\Sivaharan\\QBMigration"
-}
