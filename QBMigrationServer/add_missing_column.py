@@ -6,10 +6,12 @@ from sqlalchemy import create_engine, text
 logger = logging.getLogger(__name__)
 
 
-db_url = os.getenv(
-    "DATABASE_URL",
-    "postgresql://qbmigration:TestPass123@localhost:5432/qbmigration_dev",
-)
+db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    raise EnvironmentError(
+        "DATABASE_URL environment variable is required. "
+        "Example: postgresql://user:pass@host:5432/dbname"
+    )
 engine = create_engine(db_url)
 
 with engine.connect() as conn:

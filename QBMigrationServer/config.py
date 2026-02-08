@@ -618,6 +618,8 @@ class ProductionConfig(Config):
             "SENTRY_DSN",
             "WEBHOOK_SECRET",
             "BACKUP_ENCRYPTION_KEY",
+            "SERVER_URL",
+            "QBO_REDIRECT_URI",
         ]
 
         missing = [var for var in required_vars if not os.getenv(var)]
