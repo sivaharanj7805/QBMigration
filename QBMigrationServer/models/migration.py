@@ -148,6 +148,10 @@ class Migration(db.Model):
     caseware_bundle_path = db.Column(db.String(500))
     caseware_bundle_ready = db.Column(db.Boolean, default=False)
 
+    # Celery task tracking
+    # CRIT-04 FIX: Added column so migrations.py can store the Celery task ID
+    celery_task_id = db.Column(db.String(255), nullable=True)
+
     # Webhook tracking (prevent replay attacks)
     webhook_processed_ids = db.Column(db.Text)  # JSON array of processed webhook IDs
     last_webhook_at = db.Column(db.DateTime)

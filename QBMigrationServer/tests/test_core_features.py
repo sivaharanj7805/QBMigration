@@ -210,11 +210,12 @@ class TestReconciliationShield:
         assert data["discrepancy"] == 500.00
 
     def test_trial_balance_not_found(self, client, auth_headers):
-        """Test trial balance returns 404 for non-existent migration."""
+        """Test trial balance returns 400 for invalid migration ID format."""
         response = client.get(
             "/api/migrations/non_existent_id/trial-balance", headers=auth_headers
         )
-        assert response.status_code == 404
+        # UUID validation now rejects non-UUID strings with 400
+        assert response.status_code == 400
 
 
 class TestCasewareBundle:
@@ -504,11 +505,12 @@ class TestErrorHandling:
     """Test error handling scenarios."""
 
     def test_invalid_migration_id(self, client, auth_headers):
-        """Test handling of invalid migration ID."""
+        """Test handling of invalid migration ID format."""
         response = client.get(
             "/api/migrations/invalid_id/trial-balance", headers=auth_headers
         )
-        assert response.status_code == 404
+        # UUID validation rejects non-UUID strings with 400
+        assert response.status_code == 400
 
     def test_unauthorized_access(self, client, test_migration):
         """Test unauthorized access is denied."""

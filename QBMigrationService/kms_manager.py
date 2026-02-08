@@ -73,7 +73,10 @@ class AWSKMSManager:
 
         # ADV-02: Per-tenant key isolation
         # Each tenant gets their own KMS CMK for data isolation
-        if tenant_id and os.environ.get("ENABLE_TENANT_KEY_ISOLATION", "false").lower() == "true":
+        if (
+            tenant_id
+            and os.environ.get("ENABLE_TENANT_KEY_ISOLATION", "false").lower() == "true"
+        ):
             self.key_alias = f"alias/forensicbridge-tenant-{tenant_id}"
         else:
             self.key_alias = key_alias
@@ -125,7 +128,9 @@ class AWSKMSManager:
             # ADV-02: Tag tenant-specific keys for isolation tracking
             if self.tenant_id:
                 tags.append({"TagKey": "TenantId", "TagValue": self.tenant_id})
-                description = f"ForensicBridge Encryption Key (Tenant: {self.tenant_id})"
+                description = (
+                    f"ForensicBridge Encryption Key (Tenant: {self.tenant_id})"
+                )
             else:
                 description = "ForensicBridge Migration Encryption Key"
 
@@ -379,8 +384,12 @@ class KMSFallbackManager:
             import os as _os
 
             self.local_key = _os.urandom(32)
-            with open(key_path, "wb") as f:
-                f.write(self.local_key)
+            # HIGH-03 FIX: Write key with restrictive 0600 permissions
+            fd = _os.open(key_path, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+            try:
+                _os.write(fd, self.local_key)
+            finally:
+                _os.close(fd)
             logger.warning(
                 "Generated local master key. " "For production, use AWS KMS instead."
             )

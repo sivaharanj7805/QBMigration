@@ -1236,54 +1236,30 @@ def validate_session():
 
 @auth_bp.route("/tiers", methods=["GET"])
 def get_available_tiers():
-    """Get all available pricing tiers"""
-    tiers = [
-        {
-            "id": "starter",
-            "name": "Starter",
-            "price": 0,
-            "price_display": "Free",
-            "max_transactions": 5000,
-            "description": "Small business, 1-2 years of data",
-            "migrations": 1,
-        },
-        {
-            "id": "business",
-            "name": "Business",
-            "price": 4900,
-            "price_display": "$49.00",
-            "max_transactions": 25000,
-            "description": "Established business, 3-5 years of history",
-            "migrations": 1,
-        },
-        {
-            "id": "professional",
-            "name": "Professional",
-            "price": 9900,
-            "price_display": "$99.00",
-            "max_transactions": 100000,
-            "description": "Complex business, multi-year audit trail",
-            "migrations": 1,
-        },
-        {
-            "id": "enterprise",
-            "name": "Enterprise",
-            "price": 19900,
-            "price_display": "$199.00",
-            "max_transactions": 500000,
-            "description": "Large company, decade+ of records",
-            "migrations": 1,
-        },
-        {
-            "id": "forensic",
-            "name": "Forensic",
-            "price": 49900,
-            "price_display": "$499.00",
-            "max_transactions": -1,
-            "description": "Litigation-ready, expert documentation",
-            "migrations": 1,
-        },
-    ]
+    """Get all available pricing tiers.
+
+    CRIT-02 FIX: Prices now sourced from MigrationCredit.TIER_CONFIG to prevent
+    mismatch between display prices and actual charged amounts.
+    """
+    from models.migration_credit import MigrationCredit
+
+    tiers = []
+    for tier_id, config in MigrationCredit.TIER_CONFIG.items():
+        price_cents = config["price_cents"]
+        price_dollars = price_cents / 100
+        tiers.append(
+            {
+                "id": tier_id,
+                "name": config["name"],
+                "price": price_cents,
+                "price_display": (
+                    "Free" if price_cents == 0 else f"${price_dollars:,.2f}"
+                ),
+                "max_transactions": config["transaction_limit"],
+                "description": config["description"],
+                "migrations": 1,
+            }
+        )
     return jsonify({"success": True, "tiers": tiers})
 
 
@@ -1321,18 +1297,12 @@ def select_tier():
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get("migrations", 1)
 
-    # SECURITY FIX: Determine pricing and payment requirements per tier
-    # Define tier prices in cents
-    tier_prices = {
-        "starter": 0,  # Free tier
-        "business": 4900,  # $49.00
-        "professional": 9900,  # $99.00
-        "enterprise": 19900,  # $199.00
-        "forensic": 49900,  # $499.00
-    }
-    price_cents = tier_prices.get(tier_id, 0)
+    # CRIT-02 FIX: Use canonical prices from MigrationCredit.TIER_CONFIG
+    # Previously auth.py had 10x lower prices than the credit model
+    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
+    price_cents = credit_config.get("price_cents", 0)
 
-    # For paid tiers, require payment verification
+    # For paid tiers, require and verify payment with Stripe
     if price_cents > 0:
         payment_intent_id = data.get("payment_intent_id")
         if not payment_intent_id:
@@ -1340,32 +1310,100 @@ def select_tier():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Payment required for this tier. Please provide payment_intent_id.",
+                        "error": "Payment required for this tier.",
                     }
                 ),
                 402,
             )
-        # Note: In production, verify payment_intent_id with Stripe API
-        # For now, just validate it's provided
+
+        # CRIT-01 FIX: Verify payment_intent_id with Stripe API
+        import stripe
+
+        try:
+            stripe.api_key = current_app.config.get(
+                "STRIPE_SECRET_KEY", os.environ.get("STRIPE_SECRET_KEY", "")
+            )
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if intent.status != "succeeded":
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Payment has not been completed.",
+                        }
+                    ),
+                    402,
+                )
+
+            if intent.amount < price_cents:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Payment amount does not match tier price.",
+                        }
+                    ),
+                    402,
+                )
+
+        except stripe.error.InvalidRequestError:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Invalid payment reference.",
+                    }
+                ),
+                402,
+            )
+        except Exception as e:
+            logger.error(f"Stripe verification failed: {e}")
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Payment verification failed. Please try again.",
+                    }
+                ),
+                500,
+            )
+
+        # HIGH-01 FIX: Idempotency — reject duplicate payment_intent_id
+        existing_credit = MigrationCredit.query.filter_by(
+            stripe_payment_intent_id=payment_intent_id
+        ).first()
+        if existing_credit:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "This payment has already been applied.",
+                    }
+                ),
+                409,
+            )
+
         payment_status = "paid"
     else:
         payment_status = "paid"  # Free tier
+        payment_intent_id = None
 
-    # CRITICAL FIX: Create MigrationCredit record(s) to ensure backend verification works
-    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
-    for _ in range(migrations_to_add):
+    # CRITICAL FIX: Create MigrationCredit record(s)
+    for i in range(migrations_to_add):
+        ts = datetime.datetime.now(timezone.utc).timestamp()
         credit = MigrationCredit(
             user_id=user_id,
             tier_type=tier_id,
             transaction_limit=credit_config.get("transaction_limit", 5000),
             price_cents=price_cents,
-            stripe_checkout_session_id=data.get("payment_intent_id")
-            or f"free-tier-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}",
+            stripe_checkout_session_id=payment_intent_id
+            or f"free-tier-{tier_id}-{user_id}-{ts}-{i}",
             payment_status=payment_status,
             status="available",
         )
-        if price_cents > 0:
-            credit.payment_intent_id = data.get("payment_intent_id")
+        if payment_intent_id:
+            credit.stripe_payment_intent_id = payment_intent_id
         credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
@@ -1417,15 +1455,9 @@ def upgrade_tier():
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get("migrations", 1)
 
-    # SECURITY FIX: Determine pricing and require payment for paid tiers
-    tier_prices = {
-        "starter": 0,  # Free tier
-        "business": 4900,  # $49.00
-        "professional": 9900,  # $99.00
-        "enterprise": 19900,  # $199.00
-        "forensic": 49900,  # $499.00
-    }
-    price_cents = tier_prices.get(tier_id, 0)
+    # CRIT-02 FIX: Use canonical prices from MigrationCredit.TIER_CONFIG
+    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
+    price_cents = credit_config.get("price_cents", 0)
 
     if price_cents > 0:
         payment_intent_id = data.get("payment_intent_id")
@@ -1434,32 +1466,100 @@ def upgrade_tier():
                 jsonify(
                     {
                         "success": False,
-                        "error": "Payment required for this tier upgrade. Please provide payment_intent_id.",
+                        "error": "Payment required for this tier upgrade.",
                     }
                 ),
                 402,
             )
-        # Note: In production, verify payment_intent_id with Stripe API
-        # For now, just validate it's provided
+
+        # CRIT-01 FIX: Verify payment with Stripe API
+        import stripe
+
+        try:
+            stripe.api_key = current_app.config.get(
+                "STRIPE_SECRET_KEY", os.environ.get("STRIPE_SECRET_KEY", "")
+            )
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if intent.status != "succeeded":
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Payment has not been completed.",
+                        }
+                    ),
+                    402,
+                )
+
+            if intent.amount < price_cents:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Payment amount does not match tier price.",
+                        }
+                    ),
+                    402,
+                )
+
+        except stripe.error.InvalidRequestError:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Invalid payment reference.",
+                    }
+                ),
+                402,
+            )
+        except Exception as e:
+            logger.error(f"Stripe verification failed: {e}")
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Payment verification failed. Please try again.",
+                    }
+                ),
+                500,
+            )
+
+        # HIGH-01 FIX: Idempotency check
+        existing_credit = MigrationCredit.query.filter_by(
+            stripe_payment_intent_id=payment_intent_id
+        ).first()
+        if existing_credit:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "This payment has already been applied.",
+                    }
+                ),
+                409,
+            )
+
         payment_status = "paid"
     else:
         payment_status = "paid"
+        payment_intent_id = None
 
-    # CRITICAL FIX: Create MigrationCredit record(s) for backend verification
-    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
-    for _ in range(migrations_to_add):
+    # CRITICAL FIX: Create MigrationCredit record(s)
+    for i in range(migrations_to_add):
+        ts = datetime.datetime.now(timezone.utc).timestamp()
         credit = MigrationCredit(
             user_id=user_id,
             tier_type=tier_id,
             transaction_limit=credit_config.get("transaction_limit", 5000),
             price_cents=price_cents,
-            stripe_checkout_session_id=data.get("payment_intent_id")
-            or f"upgrade-{tier_id}-{user_id}-{datetime.datetime.now(timezone.utc).timestamp()}",
+            stripe_checkout_session_id=payment_intent_id
+            or f"upgrade-{tier_id}-{user_id}-{ts}-{i}",
             payment_status=payment_status,
             status="available",
         )
-        if price_cents > 0:
-            credit.payment_intent_id = data.get("payment_intent_id")
+        if payment_intent_id:
+            credit.stripe_payment_intent_id = payment_intent_id
         credit.paid_at = datetime.datetime.now(timezone.utc)
         db.session.add(credit)
 
@@ -1766,8 +1866,14 @@ def forgot_password():
         # Generate reset token
         reset_token = _generate_password_reset_token(user.id, user.email)
 
-        # Store token JTI in user record for one-time use validation
-        # This would require a database field, so for now we rely on JWT expiry
+        # HIGH-02 FIX: Store token JTI so it can only be used once
+        token_payload = jwt.decode(
+            reset_token,
+            current_app.config["SECRET_KEY"],
+            algorithms=["HS256"],
+        )
+        user.password_reset_jti = token_payload.get("jti")
+        db.session.commit()
 
         # Send reset email
         _send_password_reset_email(email, reset_token)
@@ -1868,10 +1974,31 @@ def reset_password():
         logger.warning(f"Password reset token email mismatch for user {user_id}")
         return jsonify({"success": False, "error": "Invalid reset token"}), 400
 
+    # HIGH-02 FIX: Check if this token was already used
+    token_jti = payload.get("jti")
+    if (
+        token_jti
+        and hasattr(user, "password_reset_jti")
+        and user.password_reset_jti != token_jti
+    ):
+        logger.warning(f"Used/mismatched reset token JTI for user {user_id}")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "This reset link has already been used. "
+                    "Please request a new one.",
+                }
+            ),
+            400,
+        )
+
     # Set new password
     try:
         user.set_password(new_password)
         user.must_change_password = False  # Clear any forced reset flag
+        # HIGH-02 FIX: Invalidate the token by clearing the JTI
+        user.password_reset_jti = None
         db.session.commit()
 
         logger.info(f"Password reset completed for user {hash_email(user.email)}")

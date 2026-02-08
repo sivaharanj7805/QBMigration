@@ -79,12 +79,14 @@ USER qbmigration
 EXPOSE 5000
 
 # AUDIT FIX P3-06: Configurable Gunicorn workers via environment variables
+# HIGH-07 FIX: Worker class configurable via env (default gthread, .env.example recommends gevent)
 ENV GUNICORN_WORKERS=4 \
-    GUNICORN_THREADS=2
+    GUNICORN_THREADS=2 \
+    GUNICORN_WORKER_CLASS=gthread
 
 # Run with gunicorn for production
 CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads "${GUNICORN_THREADS}" \
-     --worker-class gthread --timeout 120 --keep-alive 5 \
+     --worker-class "${GUNICORN_WORKER_CLASS}" --timeout 120 --keep-alive 5 \
      --access-logfile - --error-logfile - \
      "QBMigrationServer.app:create_app()"
 
