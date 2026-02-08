@@ -279,13 +279,22 @@ class ForensicArchivalService:
             restore_status = response.get("Restore", "")
             storage_class = response.get("StorageClass", "STANDARD")
 
-            if 'ongoing-request="true"' in restore_status:
+            # CAUTION: The S3 Restore header is a free-form string, e.g.:
+            #   'ongoing-request="true"'
+            #   'ongoing-request="false", expiry-date="Fri, 23 Dec 2025 00:00:00 GMT"'
+            # AWS does not guarantee a stable format. We use case-insensitive
+            # substring matching to be resilient against minor formatting changes
+            # (extra whitespace, reordered fields, etc.). If AWS changes the
+            # quoting or key names, this parsing will need to be updated.
+            restore_lower = restore_status.lower().replace(" ", "")
+
+            if 'ongoing-request="true"' in restore_lower:
                 return {
                     "key": key,
                     "storage_class": storage_class,
                     "restore_status": "in_progress",
                 }
-            elif 'ongoing-request="false"' in restore_status:
+            elif 'ongoing-request="false"' in restore_lower:
                 return {
                     "key": key,
                     "storage_class": storage_class,

@@ -91,8 +91,11 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
+          # HIGH-11 FIX: Use GitHub Secrets for test DB credentials instead of hardcoding.
+          # While these are ephemeral CI containers, hardcoded credentials are bad practice
+          # and can appear in workflow logs.
+          POSTGRES_USER: ${{ secrets.TEST_DB_USER || 'testuser' }}
+          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'testpass' }}
           POSTGRES_DB: qbmigration_test
         ports:
           - 5432:5432
@@ -120,7 +123,7 @@ jobs:
 
     - name: Run Server Tests
       env:
-        DATABASE_URL: postgresql://testuser:testpass@localhost:5432/qbmigration_test
+        DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'testuser' }}:${{ secrets.TEST_DB_PASSWORD || 'testpass' }}@localhost:5432/qbmigration_test
         SECRET_KEY: ${{ secrets.TEST_SECRET_KEY }}
         FLASK_ENV: testing
         WEBHOOK_SECRET: ${{ secrets.TEST_WEBHOOK_SECRET }}
@@ -223,9 +226,8 @@ jobs:
     - name: Generate Python SBOM (CycloneDX)
       run: |
         cyclonedx-py environment \
-          --output sbom-python.json \
-          --output-format json \
-          --schema-version 1.5
+          -o sbom-python.json \
+          --output-format json
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -236,7 +238,9 @@ jobs:
       run: |
         cd forensicbridge-dashboard
         npm ci --ignore-scripts
-        npx @cyclonedx/cyclonedx-npm --output-file ../sbom-frontend.json --output-format JSON || true
+        # L-13 FIX: Run npm audit to catch known vulnerabilities in dependencies
+        npm audit --production --audit-level=high || true
+        npx @cyclonedx/cyclonedx-npm --output-file ../sbom-frontend.json --output-format JSON
         cd ..
 
     - name: Upload SBOM Artifacts
@@ -246,4 +250,5 @@ jobs:
         path: |
           sbom-python.json
           sbom-frontend.json
-        if-no-files-found: warn
+        # L-14 FIX: Fail the job if SBOM generation produced no output
+        if-no-files-found: error

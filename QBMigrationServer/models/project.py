@@ -26,35 +26,17 @@ def generate_session_id(max_retries: int = 10) -> str:
     """
     import time
 
-    for attempt in range(max_retries):
-        # FIX HIGH-04: Include microseconds for better uniqueness
-        now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y%m%d%H%M%S") + f"{now.microsecond:06d}"[:4]
+    # FIX M-05: Eliminate TOCTOU race - generate ID without pre-checking DB.
+    # With 12 random chars from 62-char alphabet (62^12 = 3.2e21 combinations),
+    # collisions are astronomically unlikely. The unique DB constraint catches
+    # the virtually impossible collision; caller retries on IntegrityError.
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime("%Y%m%d%H%M%S") + f"{now.microsecond:06d}"[:4]
 
-        # FIX HIGH-04: Use 12 random characters for 62^12 combinations
-        random_part = "".join(
-            secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12)
-        )
-        session_id = f"FB-{timestamp}-{random_part}"
-
-        # Check if this session ID already exists
-        # Note: The unique constraint on the database column provides the real guarantee
-        existing = db.session.query(
-            db.exists().where(Project.session_id == session_id)
-        ).scalar()
-
-        if not existing:
-            return session_id
-
-        # If collision, small delay before retry
-        if attempt < max_retries - 1:
-            time.sleep(0.001)
-
-    # Last resort: append extra random chars (virtually impossible to reach)
-    extra = "".join(
-        secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
+    random_part = "".join(
+        secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12)
     )
-    return f"FB-{timestamp}-{random_part}{extra}"
+    return f"FB-{timestamp}-{random_part}"
 
 
 class Project(db.Model):

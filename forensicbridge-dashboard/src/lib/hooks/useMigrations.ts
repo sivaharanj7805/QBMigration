@@ -32,8 +32,9 @@ import { api } from "../api";
 export function useMigrations() {
     return useQuery({
         queryKey: ["migrations"],
-        queryFn: async () => {
-            const result = await api.getMigrations();
+        // FIX F-06: Accept signal from React Query for proper abort on unmount
+        queryFn: async ({ signal }) => {
+            const result = await api.getMigrations(undefined, undefined, signal);
             if (!result.success) throw new Error(result.error);
             return result.data;
         },

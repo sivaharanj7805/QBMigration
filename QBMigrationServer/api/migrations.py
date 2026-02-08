@@ -1042,18 +1042,32 @@ def execute_migration_celery(migration_id):
                 "realm_id": user.qbo_realm_id,
             }
 
-        # Queue the migration task
-        task = run_migration_task.delay(
-            migration_id=migration_id,
-            encrypted_file_path=migration.s3_uri,
-            user_id=_get_current_user_id(),
-            oauth_tokens=oauth_tokens,
-        )
+        # FIX B-04: Queue the migration task with proper error handling
+        try:
+            task = run_migration_task.delay(
+                migration_id=migration_id,
+                encrypted_file_path=migration.s3_uri,
+                user_id=_get_current_user_id(),
+                oauth_tokens=oauth_tokens,
+            )
+        except Exception as task_err:
+            logger.error(
+                f"Failed to queue migration task for {migration_id}: {str(task_err)}"
+            )
+            # Don't leave migration in limbo - keep it in uploadable state
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to queue migration. Please try again.",
+                    }
+                ),
+                503,
+            )
 
         # Update status to queued
         migration.status = "queued"
-        if hasattr(migration, "celery_task_id"):
-            migration.celery_task_id = task.id
+        migration.celery_task_id = task.id
         db.session.commit()
 
         logger.info(f"Migration {migration_id} queued with task {task.id}")

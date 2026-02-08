@@ -33,8 +33,9 @@ import { api } from "../api";
 export function useDashboardOverview() {
     return useQuery({
         queryKey: ["dashboard-overview"],
-        queryFn: async () => {
-            const result = await api.getDashboardOverview();
+        // FIX F-06: Accept signal from React Query for proper abort on unmount
+        queryFn: async ({ signal }) => {
+            const result = await api.getDashboardOverview(signal);
             if (!result.success) throw new Error(result.error);
             return result.data?.overview;
         },
@@ -63,8 +64,9 @@ export function useDashboardOverview() {
 export function useRecentActivity() {
     return useQuery({
         queryKey: ["recent-activity"],
-        queryFn: async () => {
-            const result = await api.getRecentActivity();
+        // FIX F-06: Accept signal from React Query for proper abort on unmount
+        queryFn: async ({ signal }) => {
+            const result = await api.getRecentActivity(signal);
             if (!result.success) throw new Error(result.error);
             return result.data?.activities || [];
         },
@@ -93,8 +95,9 @@ export function useRecentActivity() {
 export function useHealth() {
     return useQuery({
         queryKey: ["health"],
-        queryFn: async () => {
-            const result = await api.getHealth();
+        // FIX F-06: Accept signal from React Query for proper abort on unmount
+        queryFn: async ({ signal }) => {
+            const result = await api.getHealth(signal);
             if (!result.success) throw new Error(result.error);
             return result.data;
         },

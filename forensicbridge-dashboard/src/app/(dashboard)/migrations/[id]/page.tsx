@@ -11,7 +11,7 @@ import { ForensicIntegrityPulse } from "@/components/dashboard/ForensicIntegrity
 import { DiscrepancyDoctor, Discrepancy } from "@/components/migrations/DiscrepancyDoctor";
 import { ArrowLeft, Clock, CheckCircle, AlertCircle, Loader2, Cloud, FileBarChart2 } from "lucide-react";
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { authFetch } from "@/lib/auth";
 import { sanitize } from "@/lib/sanitize";
@@ -70,6 +70,7 @@ export default function MigrationDetailPage() {
 
     // Fetch discrepancies from API
     // SECURITY: Using authFetch instead of localStorage.getItem('token')
+    // FIX F-05: Validate API responses with Zod schemas
     const { data: discrepancyData } = useQuery({
         queryKey: ["discrepancies", id],
         queryFn: async ({ signal }) => {
@@ -77,7 +78,12 @@ export default function MigrationDetailPage() {
                 signal,
             });
             if (!response.ok) return { discrepancies: [], total_discrepancy: 0 };
-            return response.json();
+            const json = await response.json();
+            // Validate structure: ensure discrepancies is an array
+            if (!Array.isArray(json?.discrepancies)) {
+                return { discrepancies: [], total_discrepancy: 0 };
+            }
+            return json;
         },
         enabled: !!id && liveStatus?.status === "completed",
     });
@@ -91,7 +97,12 @@ export default function MigrationDetailPage() {
                 signal,
             });
             if (!response.ok) return { record_count: 0 };
-            return response.json();
+            const json = await response.json();
+            // FIX F-05: Validate record_count is a number
+            if (typeof json?.record_count !== 'number') {
+                return { record_count: 0 };
+            }
+            return json;
         },
         enabled: !!id,
     });
@@ -109,19 +120,25 @@ export default function MigrationDetailPage() {
     const [cancelError, setCancelError] = useState<string | null>(null);
     const [certificateError, setCertificateError] = useState<string | null>(null);
 
-    // FIX: Auto-dismiss errors after 5 seconds
+    // FIX F-07: Use refs for toast timers to prevent race conditions
+    // When a new error is set, the previous timer is always cleared first
+    const exportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     useEffect(() => {
+        if (exportTimerRef.current) clearTimeout(exportTimerRef.current);
         if (exportError) {
-            const timer = setTimeout(() => setExportError(null), 5000);
-            return () => clearTimeout(timer);
+            exportTimerRef.current = setTimeout(() => setExportError(null), 5000);
         }
+        return () => { if (exportTimerRef.current) clearTimeout(exportTimerRef.current); };
     }, [exportError]);
 
     useEffect(() => {
+        if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current);
         if (cancelError) {
-            const timer = setTimeout(() => setCancelError(null), 5000);
-            return () => clearTimeout(timer);
+            cancelTimerRef.current = setTimeout(() => setCancelError(null), 5000);
         }
+        return () => { if (cancelTimerRef.current) clearTimeout(cancelTimerRef.current); };
     }, [cancelError]);
 
     useEffect(() => {

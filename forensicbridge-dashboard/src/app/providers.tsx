@@ -8,11 +8,15 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
  * MED-01 to MED-15 FIX: App providers with Error Boundary wrapper
  */
 export default function Providers({ children }: { children: React.ReactNode }) {
+    // HIGH-10 FIX: Enable retries in production for transient network failures.
+    // 3 retries with exponential backoff is the React Query default.
+    const isProd = process.env.NODE_ENV === "production";
     const [queryClient] = useState(() => new QueryClient({
         defaultOptions: {
             queries: {
                 staleTime: 60 * 1000,
-                retry: false, // Don't retry on failure during debugging
+                retry: isProd ? 3 : false,
+                retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
             },
         },
     }));

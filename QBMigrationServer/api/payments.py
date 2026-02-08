@@ -6,82 +6,53 @@ Handles checkout session creation and webhook verification.
 import logging
 import os
 from datetime import datetime, timezone
-from functools import wraps
-from typing import Any, Callable, Tuple
 
-import jwt
 import stripe
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from models.database import db
 from models.migration_credit import MigrationCredit
 from models.user import User
+
+# HIGH-06 FIX: Import shared auth decorator instead of maintaining a duplicate.
+# This ensures auth policy changes (e.g., JTI revocation, algorithm updates)
+# automatically apply to payment endpoints.
+from api.auth import require_auth
 
 logger = logging.getLogger(__name__)
 
 payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
 
-# Initialize Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+def _get_stripe():
+    """HIGH-09 FIX: Lazy-load Stripe API key to support key rotation without restart."""
+    key = os.getenv("STRIPE_SECRET_KEY") or current_app.config.get("STRIPE_SECRET_KEY")
+    if not key:
+        raise ValueError("STRIPE_SECRET_KEY not configured")
+    stripe.api_key = key
+    return stripe
 
 
-def token_required(f: Callable[..., Any]) -> Callable[..., Tuple[Response, int] | Any]:
-    """
-    Decorator to require valid JWT token.
-
-    Args:
-        f: The function to wrap
-
-    Returns:
-        Wrapped function that validates JWT token before execution
-    """
-
-    @wraps(f)
-    def decorated(*args: Any, **kwargs: Any) -> Tuple[Response, int] | Any:
-        token = None
-        auth_header = request.headers.get("Authorization")
-
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-
-        if not token:
-            return jsonify({"success": False, "error": "Token is missing"}), 401
-
-        try:
-            # CRITICAL FIX: Never use fallback for SECRET_KEY - fail if not set
-            secret_key = current_app.config.get("SECRET_KEY")
-            if not secret_key:
-                logger.error("SECRET_KEY not configured - rejecting authentication")
-                return (
-                    jsonify({"success": False, "error": "Server configuration error"}),
-                    500,
-                )
-            data = jwt.decode(token, secret_key, algorithms=["HS256"])
-            current_user = db.session.get(User, data["user_id"])
-
-            if not current_user:
-                return jsonify({"success": False, "error": "User not found"}), 401
-
-            if not current_user.is_active:
-                return jsonify({"success": False, "error": "Account is disabled"}), 403
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({"success": False, "error": "Token has expired"}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({"success": False, "error": "Invalid token"}), 401
-
-        return f(current_user, *args, **kwargs)
-
-    return decorated
+def _get_current_user():
+    """HIGH-06 helper: Resolve User model from request.current_user (set by require_auth)."""
+    user_id = request.current_user.get("user_id")
+    user = db.session.get(User, user_id)
+    if not user:
+        return None
+    return user
 
 
 @payments_bp.route("/create-checkout", methods=["POST"])
-@token_required
-def create_checkout(current_user):
+@require_auth
+def create_checkout():
     """
     Create a Stripe Checkout session for purchasing a migration credit.
     Returns a checkout URL that the frontend should redirect to.
     """
     try:
+        current_user = _get_current_user()
+        if not current_user:
+            return jsonify({"success": False, "error": "User not found"}), 401
+
         data = request.get_json()
         tier_type = data.get("tier_type")
 
@@ -96,8 +67,10 @@ def create_checkout(current_user):
                 400,
             )
 
-        # Check if Stripe is configured
-        if not stripe.api_key:
+        # HIGH-09 FIX: Lazy-load Stripe key (supports rotation without restart)
+        try:
+            _get_stripe()
+        except ValueError:
             return (
                 jsonify(
                     {
@@ -267,18 +240,26 @@ def stripe_webhook():
         logger.error(f"SECURITY: Invalid Stripe signature from {request.remote_addr}")
         return jsonify({"error": "Invalid signature"}), 400
 
-    # Handle the event
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        handle_successful_payment(session)
+    # FIX B-05: Handle events with proper error propagation
+    # Return 500 on critical failures so Stripe retries the webhook
+    try:
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+            handle_successful_payment(session)
 
-    elif event["type"] == "checkout.session.expired":
-        session = event["data"]["object"]
-        handle_expired_session(session)
+        elif event["type"] == "checkout.session.expired":
+            session = event["data"]["object"]
+            handle_expired_session(session)
 
-    elif event["type"] == "payment_intent.payment_failed":
-        payment_intent = event["data"]["object"]
-        handle_failed_payment(payment_intent)
+        elif event["type"] == "payment_intent.payment_failed":
+            payment_intent = event["data"]["object"]
+            handle_failed_payment(payment_intent)
+
+    except Exception as handler_err:
+        logger.exception(
+            f"Failed to handle Stripe event {event['type']}: {str(handler_err)}"
+        )
+        return jsonify({"received": False, "error": "Handler failed"}), 500
 
     return jsonify({"received": True})
 
@@ -374,13 +355,17 @@ def handle_failed_payment(payment_intent):
 
 
 @payments_bp.route("/credits", methods=["GET"])
-@token_required
-def get_credits(current_user):
+@require_auth
+def get_credits():
     """
     Get all migration credits for the current user.
     Returns breakdown by type and total available.
     """
     try:
+        current_user = _get_current_user()
+        if not current_user:
+            return jsonify({"success": False, "error": "User not found"}), 401
+
         # Get summary by type
         summary = MigrationCredit.get_credits_summary(current_user.id)
 
@@ -414,13 +399,17 @@ def get_credits(current_user):
 
 
 @payments_bp.route("/verify-session/<session_id>", methods=["GET"])
-@token_required
-def verify_session(current_user, session_id):
+@require_auth
+def verify_session(session_id):
     """
     Verify a checkout session after redirect.
     Frontend calls this to confirm payment was successful.
     """
     try:
+        current_user = _get_current_user()
+        if not current_user:
+            return jsonify({"success": False, "error": "User not found"}), 401
+
         # Find the credit
         credit = MigrationCredit.query.filter_by(
             stripe_checkout_session_id=session_id, user_id=current_user.id
@@ -429,12 +418,23 @@ def verify_session(current_user, session_id):
         if not credit:
             return jsonify({"success": False, "error": "Session not found"}), 404
 
-        # If still pending, check with Stripe
-        if credit.status == "pending":
+        # HIGH-01 FIX: Check both status AND payment_status to prevent double processing.
+        # The webhook may have already processed this payment between the user's redirect
+        # and this verification call, causing duplicate credit allocation.
+        if credit.status == "pending" and credit.payment_status != "paid":
             session = stripe.checkout.Session.retrieve(session_id)
 
             if session.payment_status == "paid":
-                credit.mark_paid(session.payment_intent)
+                # Use SELECT FOR UPDATE to prevent race with concurrent webhook
+                locked_credit = MigrationCredit.query.filter_by(
+                    id=credit.id
+                ).with_for_update().first()
+                if locked_credit and locked_credit.payment_status != "paid":
+                    locked_credit.mark_paid(session.payment_intent, auto_commit=False)
+                    db.session.commit()
+                else:
+                    logger.info(f"Credit {credit.id} already processed by webhook")
+                credit = locked_credit or credit
 
         return jsonify(
             {

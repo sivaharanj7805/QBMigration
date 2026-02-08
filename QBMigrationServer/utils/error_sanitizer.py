@@ -504,11 +504,14 @@ def log_error_safely(error: Exception, context: str, user_id: Optional[int] = No
     # Sanitize the error message for logging
     sanitized = sanitize_error_message(error, context)
 
-    # Hash user ID in production
+    # CRIT-06 FIX: Hash user ID in production to prevent PII leakage.
+    # Previously had a stray `pass` that made user_identifier always use
+    # the unhashed format regardless of the condition.
     if is_production() and user_id:
-        pass
+        import hashlib
 
-        user_identifier = f"user_id_{user_id}"
+        hashed = hashlib.sha256(str(user_id).encode()).hexdigest()[:12]
+        user_identifier = f"user_{hashed}"
     else:
         user_identifier = f"user_id={user_id}" if user_id else "anonymous"
 

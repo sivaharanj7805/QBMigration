@@ -254,21 +254,24 @@ def clear_cache():
 
 def get_cache_status() -> Dict[str, Any]:
     """Get current cache status for monitoring/debugging."""
-    if not _secrets_cache:
-        return {
-            "cached": False,
-            "ttl_seconds": SECRETS_CACHE_TTL_SECONDS,
-        }
+    # THREAD SAFETY FIX: Acquire lock before reading cache state to prevent
+    # races with concurrent cache updates or clears.
+    with _secrets_cache_lock:
+        if not _secrets_cache:
+            return {
+                "cached": False,
+                "ttl_seconds": SECRETS_CACHE_TTL_SECONDS,
+            }
 
-    age = time.time() - _secrets_cache_timestamp
-    return {
-        "cached": True,
-        "age_seconds": round(age, 1),
-        "ttl_seconds": SECRETS_CACHE_TTL_SECONDS,
-        "expires_in_seconds": round(max(0, SECRETS_CACHE_TTL_SECONDS - age), 1),
-        "is_valid": _is_cache_valid(),
-        "secret_count": len(_secrets_cache),
-    }
+        age = time.time() - _secrets_cache_timestamp
+        return {
+            "cached": True,
+            "age_seconds": round(age, 1),
+            "ttl_seconds": SECRETS_CACHE_TTL_SECONDS,
+            "expires_in_seconds": round(max(0, SECRETS_CACHE_TTL_SECONDS - age), 1),
+            "is_valid": _is_cache_valid(),
+            "secret_count": len(_secrets_cache),
+        }
 
 
 def validate_required_secrets(required_keys: list) -> Dict[str, bool]:

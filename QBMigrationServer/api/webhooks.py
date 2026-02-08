@@ -437,6 +437,7 @@ def migration_completed():
 
         # PRODUCTION FIX: Trigger async cleanup via Celery task
         # This prevents webhook response delays from AWS API calls
+        cleanup_status = "scheduled"
         try:
             from tasks import cleanup_migration_async
 
@@ -452,12 +453,19 @@ def migration_completed():
 
                 aws_manager = AWSMigrationManager()
                 aws_manager.cleanup_migration(migration_id, migration.aws_instance_id)
+                cleanup_status = "completed_sync"
             except Exception as sync_err:
                 logger.error(
                     f"Sync cleanup also failed for {migration_id}: {str(sync_err)}"
                 )
+                cleanup_status = "failed"
 
-        return jsonify({"success": True, "message": "Migration completed"}), 200
+        # FIX B-03: Always return 200 (migration IS completed) but include cleanup status
+        return jsonify({
+            "success": True,
+            "message": "Migration completed",
+            "cleanup_status": cleanup_status,
+        }), 200
 
     except Exception as e:
         logger.exception(f"Failed to process migration-completed webhook: {str(e)}")

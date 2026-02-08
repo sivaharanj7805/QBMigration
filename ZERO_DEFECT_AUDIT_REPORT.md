@@ -644,18 +644,20 @@ Three signing steps added for all Windows executables:
 Implementation details:
 - Certificate stored as Base64-encoded PFX in `CODE_SIGNING_CERT_BASE64` secret
 - Password in `CODE_SIGNING_CERT_PASSWORD` secret
-- DigiCert timestamp server (`http://timestamp.digicert.com`) for long-term validity
+- DigiCert timestamp server (`https://timestamp.digicert.com`) over HTTPS for secure transport
 - SHA256 file digest and timestamp digest
 - Post-sign verification via `signtool verify /pa`
-- Secure certificate cleanup (`Remove-Item -Force`)
+- `try/finally` block ensures certificate cleanup even on signing failure
+- Secrets availability checked via `secrets.CODE_SIGNING_CERT_BASE64 != ''`
 - Graceful skip when secrets not configured (no CI failure)
 
 ### ADV-02: Per-Tenant Key Isolation (kms_manager.py)
 
 Multi-tenant encryption isolation via dedicated KMS Customer Master Keys:
+- `tenant_id` validated against strict regex (`^[a-zA-Z0-9_-]{1,64}$`) to prevent alias injection
 - Each tenant receives its own CMK: `alias/forensicbridge-tenant-{tenant_id}`
 - Tenant ID tagged on CMK creation (`TenantId` tag) for audit trail
-- Encryption context automatically includes `tenant_id` for all data key operations
+- Encryption context always enforces instance `tenant_id` — caller-provided values are overwritten with warning
 - Cross-tenant decryption prevented by KMS encryption context binding
 - Gated by `ENABLE_TENANT_KEY_ISOLATION=true` environment variable
 
@@ -685,6 +687,7 @@ Software Bill of Materials generation in CI/CD:
 - Both SBOMs uploaded as CI artifacts (`sbom-artifacts`)
 - Includes all transitive dependencies from both `requirements.txt` files and `package-lock.json`
 - `--ignore-scripts` flag on `npm ci` prevents supply chain attacks during SBOM generation
+- Frontend SBOM step fails CI on error (no silent swallowing)
 
 ---
 
@@ -697,12 +700,12 @@ Software Bill of Materials generation in CI/CD:
 | `QBMigrationServer/api/internal.py:150-163` | S3 key validation: apply all checks to decoded key | CRITICAL |
 | `QBMigrationServer/api/internal.py:162` | Remove sensitive data from security log | HIGH |
 | `QBMigrationServer/api/internal.py:154` | Black formatting compliance | LOW |
-| `QBMigrationServer/utils/captcha_verifier.py:216-248` | IP spoofing fix: right-to-left X-Forwarded-For parsing | CRITICAL |
-| `.github/workflows/build-installer.yml` | ADV-01: Authenticode code signing for all `.exe` files | ADVISORY |
-| `QBMigrationService/kms_manager.py` | ADV-02: Per-tenant KMS key isolation | ADVISORY |
+| `QBMigrationServer/utils/captcha_verifier.py:216-248` | IP spoofing fix: right-to-left X-Forwarded-For parsing + IP format validation | CRITICAL |
+| `.github/workflows/build-installer.yml` | ADV-01: Authenticode code signing (HTTPS timestamp, try/finally cleanup, secrets check) | ADVISORY |
+| `QBMigrationService/kms_manager.py` | ADV-02: Per-tenant KMS key isolation with tenant_id validation and strict context enforcement | ADVISORY |
 | `QBMigrationService/kms_manager.py` | ADV-03: HSM-backed key storage via CloudHSM | ADVISORY |
 | `aws/cloudformation.yaml` | ADV-04: SNS alarm subscriptions on all 8 alarms | ADVISORY |
-| `.github/workflows/python-ci.yml` | ADV-05: CycloneDX SBOM generation (Python + frontend) | ADVISORY |
+| `.github/workflows/python-ci.yml` | ADV-05: CycloneDX SBOM generation (fixed CLI syntax, fail-fast on errors) | ADVISORY |
 
 ---
 

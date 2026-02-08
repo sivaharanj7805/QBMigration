@@ -358,7 +358,8 @@ export default function MigrationsPage() {
     });
 
     const migrations = data?.migrations || [];
-    const totalPages = data?.total_pages || 1;
+    // FIX F-04: Use pagination.pages from schema (consistent with MigrationListSchema)
+    const totalPages = data?.pagination?.pages || data?.total_pages || 1;
 
     // Client-side filtering (server-side would be better for large datasets)
     const filteredMigrations = migrations.filter((m: Migration) => {
