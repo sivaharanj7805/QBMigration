@@ -102,7 +102,8 @@ def detect_rapid_login_attempts(
         )
 
         row = result.fetchone()
-        if not row:
+        # M-05 FIX: Check row length before indexing to prevent IndexError
+        if not row or len(row) < 2:
             return False, ""
 
         failed_attempts = row[0] or 0
@@ -169,9 +170,12 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
 
         prev_ip, prev_login = row
 
-        # If IP changed significantly in < 1 hour, flag as suspicious
-        # Simplified: check if first 2 octets changed (crude location proxy)
-        if prev_ip and current_ip:
+        # M-06/M-07 FIX: This is a simplified proxy for geolocation.
+        # First-2-octets comparison only works for IPv4 and is unreliable
+        # (same /16 block can span continents). For production at scale,
+        # use MaxMind GeoIP2 with haversine distance calculation.
+        # IPv6 addresses are skipped (need GeoIP for proper handling).
+        if prev_ip and current_ip and ":" not in current_ip and ":" not in prev_ip:
             prev_prefix = ".".join(prev_ip.split(".")[:2])
             curr_prefix = ".".join(current_ip.split(".")[:2])
 

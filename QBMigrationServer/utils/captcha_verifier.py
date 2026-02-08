@@ -141,7 +141,21 @@ def verify_captcha_token(
         # Make verification request
         response = requests.post(config["verify_url"], data=verify_data, timeout=5)
         response.raise_for_status()
-        result = response.json()
+
+        # Validate response has expected JSON structure
+        try:
+            result = response.json()
+        except (ValueError, TypeError) as e:
+            logger.error(f"CAPTCHA response is not valid JSON: {e}")
+            return False, "Invalid CAPTCHA verification response"
+
+        if not isinstance(result, dict):
+            logger.error(f"CAPTCHA response is not a dict: {type(result)}")
+            return False, "Invalid CAPTCHA verification response format"
+
+        if "success" not in result:
+            logger.error(f"CAPTCHA response missing 'success' field: {result}")
+            return False, "Malformed CAPTCHA verification response"
 
         # Check verification result
         if not result.get("success"):

@@ -782,11 +782,15 @@ def create_app(config_name="development"):  # noqa: C901
         """Add comprehensive security headers to all responses."""
         # Content Security Policy - Prevents XSS attacks
         # Configurable via environment for different deployment scenarios
+        # CRIT-04 FIX: Removed 'unsafe-inline' from script-src to prevent XSS.
+        # Stripe.js and reCAPTCHA load as external scripts (no inline needed).
+        # Kept 'unsafe-inline' in style-src only (required by many CSS frameworks;
+        # style injection is significantly lower risk than script injection).
         csp_policy = os.getenv(
             "CSP_POLICY",
             (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' https://js.stripe.com"
+                "script-src 'self' https://js.stripe.com"
                 " https://www.google.com https://www.gstatic.com; "
                 "style-src 'self' 'unsafe-inline'"
                 " https://fonts.googleapis.com; "

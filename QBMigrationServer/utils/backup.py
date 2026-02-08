@@ -540,7 +540,8 @@ class BackupManager:
 
                     if "Contents" in response:
                         for obj in response["Contents"]:
-                            last_modified = obj["LastModified"].replace(tzinfo=None)
+                            # CRIT-02 FIX: Keep timezone-aware datetime from S3
+                            last_modified = obj["LastModified"]
 
                             if last_modified < cutoff_date:
                                 self.s3.delete_object(
@@ -592,7 +593,7 @@ class BackupManager:
                                     "filename": obj["Key"].split("/")[-1],
                                     "path": f"s3://{self.s3_bucket}/{obj['Key']}",
                                     "size": obj["Size"],
-                                    "created": obj["LastModified"].replace(tzinfo=None),
+                                    "created": obj["LastModified"],  # CRIT-02 FIX: Keep tz-aware
                                     "location": "s3",
                                     "encrypted": True,  # S3 server-side encryption
                                 }
@@ -629,7 +630,14 @@ class BackupManager:
                 bucket = s3_path[0]
                 key = s3_path[1]
 
-                local_path = os.path.join(self.backup_dir, "restore_temp.db")
+                # HIGH-14 FIX: Use unique temp filename to prevent data corruption
+                # during concurrent restore operations.
+                import tempfile
+
+                fd, local_path = tempfile.mkstemp(
+                    suffix=".db", prefix="restore_", dir=self.backup_dir
+                )
+                os.close(fd)
                 self.s3.download_file(bucket, key, local_path)
                 backup_path = local_path
 

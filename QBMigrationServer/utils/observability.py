@@ -89,7 +89,10 @@ def init_observability(app) -> bool:
             # Configure exporter
             otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
             if otlp_endpoint:
-                exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
+                exporter = OTLPSpanExporter(
+                    endpoint=otlp_endpoint,
+                    insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "false").lower() == "true",
+                )
                 _tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
                 logger.info(
                     f"OpenTelemetry tracing enabled, exporting to {otlp_endpoint}"
@@ -102,12 +105,16 @@ def init_observability(app) -> bool:
             # Auto-instrument Flask
             FlaskInstrumentor().instrument_app(app)
 
-            # Auto-instrument SQLAlchemy (if db is configured)
-            if hasattr(app, "extensions") and "sqlalchemy" in app.extensions:
-                SQLAlchemyInstrumentor().instrument(
-                    engine=app.extensions["sqlalchemy"].engine
-                )
-                logger.info("SQLAlchemy instrumentation enabled")
+            # L-03 FIX: Wrap SQLAlchemy instrumentation in try-except.
+            # app.extensions["sqlalchemy"] may not have .engine if db not initialized yet.
+            try:
+                if hasattr(app, "extensions") and "sqlalchemy" in app.extensions:
+                    SQLAlchemyInstrumentor().instrument(
+                        engine=app.extensions["sqlalchemy"].engine
+                    )
+                    logger.info("SQLAlchemy instrumentation enabled")
+            except Exception as e:
+                logger.warning(f"SQLAlchemy instrumentation failed (non-fatal): {e}")
 
             # Auto-instrument outgoing HTTP requests
             RequestsInstrumentor().instrument()

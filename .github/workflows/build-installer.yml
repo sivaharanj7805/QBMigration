@@ -55,10 +55,10 @@ jobs:
         dotnet restore QBDesktopReader/QBDesktopReader.csproj
 
     # 6. Build QBDesktopReader (produces QBExtractor.exe)
+    # HIGH-12 FIX: Removed continue-on-error to prevent releasing broken binaries
     - name: Build QBDesktopReader
       run: |
         dotnet build QBDesktopReader/QBDesktopReader.csproj --configuration Release --no-restore
-      continue-on-error: true
 
     # 7. Publish QBExtractor as self-contained single-file exe
     - name: Publish QBExtractor
@@ -71,7 +71,6 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:EnableCompressionInSingleFile=true `
           --output QBDesktopReader/publish
-      continue-on-error: true
 
     # 8. Verify QBExtractor output
     - name: Verify QBExtractor Build

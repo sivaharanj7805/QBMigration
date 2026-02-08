@@ -134,6 +134,17 @@ def storage_error_handler(e):
         return None  # Return None to allow the request in development
 
 
+# HIGH-04 FIX: Require Redis-backed rate limiting in production.
+# In-memory rate limiting is per-worker and trivially bypassed with Gunicorn's
+# multiple workers (effective rate = configured_limit * num_workers).
+_rate_limit_storage = os.getenv("RATELIMIT_STORAGE_URL", "memory://")
+if os.getenv("FLASK_ENV") == "production" and _rate_limit_storage == "memory://":
+    raise RuntimeError(
+        "RATELIMIT_STORAGE_URL must be set to a Redis URL in production. "
+        "In-memory rate limiting is per-worker and can be trivially bypassed. "
+        "Example: RATELIMIT_STORAGE_URL=redis://localhost:6379/1"
+    )
+
 # Shared Limiter instance with fail-closed behavior and per-user limiting
 # This allows blueprints to use decorators before the app is created
 limiter = Limiter(
@@ -141,11 +152,9 @@ limiter = Limiter(
     key_func=get_rate_limit_key,
     # CRITICAL: Fail-closed when storage backend fails
     on_breach=rate_limit_error_handler,
-    # Use in-memory fallback only in development
-    storage_uri=os.getenv("RATELIMIT_STORAGE_URL", "memory://"),
-    # Enable swallow_errors=False to catch storage failures
-    # This is handled by our custom storage_error_handler
-    swallow_errors=False if os.getenv("FLASK_ENV") == "production" else True,
+    storage_uri=_rate_limit_storage,
+    # Fail-closed: never swallow rate limit errors
+    swallow_errors=False,
     # Set default limits (applies to combined IP+user key)
     default_limits=["1000 per day", "100 per hour"],
 )
@@ -154,16 +163,16 @@ limiter = Limiter(
 ip_limiter = Limiter(
     key_func=get_ip_rate_limit_key,
     on_breach=rate_limit_error_handler,
-    storage_uri=os.getenv("RATELIMIT_STORAGE_URL", "memory://"),
-    swallow_errors=False if os.getenv("FLASK_ENV") == "production" else True,
+    storage_uri=_rate_limit_storage,
+    swallow_errors=False,
 )
 
 # Additional limiter for user-only quotas (API calls, resource creation)
 user_limiter = Limiter(
     key_func=get_user_rate_limit_key,
     on_breach=rate_limit_error_handler,
-    storage_uri=os.getenv("RATELIMIT_STORAGE_URL", "memory://"),
-    swallow_errors=False if os.getenv("FLASK_ENV") == "production" else True,
+    storage_uri=_rate_limit_storage,
+    swallow_errors=False,
 )
 
 

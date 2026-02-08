@@ -283,14 +283,3 @@ def is_in_future(dt: datetime) -> bool:
 def get_utc_now() -> datetime:
     """Alias for utcnow() - for compatibility."""
     return utcnow()
-
-
-# Deprecation warning for old usage patterns
-def _warn_deprecated_utcnow():
-    """Issue deprecation warning for datetime.now(timezone.utc) usage."""
-    warnings.warn(
-        "datetime.now(timezone.utc) is deprecated in Python 3.12+. "
-        "Use utils.datetime_utils.now(timezone.utc) instead.",
-        DeprecationWarning,
-        stacklevel=3,
-    )

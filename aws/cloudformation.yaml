@@ -300,7 +300,9 @@ Resources:
             Block: {}
           Statement:
             RateBasedStatement:
-              Limit: 2000
+              # M-18 FIX: Reduced from 2000 to 500 per 5-min window per IP.
+              # 2000/5min (400/min) was too permissive for brute force.
+              Limit: 500
               AggregateKeyType: IP
           VisibilityConfig:
             SampledRequestsEnabled: true
@@ -996,7 +998,9 @@ Resources:
       S3BucketName: !Ref CloudTrailBucket
       EnableLogFileValidation: true
       IncludeGlobalServiceEvents: true
-      IsMultiRegionTrail: false
+      # M-17 FIX: Multi-region trail captures events from all AWS regions,
+      # preventing blind spots for cross-region security events
+      IsMultiRegionTrail: true
 
   # ============================================================================
   # AUDIT FIX: SNS TOPIC FOR ALARM NOTIFICATIONS
@@ -1071,9 +1075,12 @@ Resources:
       MinSize: 2
       MaxSize: 4
       DesiredCapacity: 2
+      # M-19 FIX: Place instances in private subnets to reduce attack surface.
+      # ALB in public subnets handles internet-facing traffic; instances
+      # reach the internet via NAT Gateway for package updates only.
       VPCZoneIdentifier:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
       TargetGroupARNs:
         - !Ref ALBTargetGroup
       HealthCheckType: ELB

@@ -17,7 +17,7 @@ def hash_email(email: str) -> str:
         email: Email address to hash
 
     Returns:
-        SHA-256 hash of the email (first 12 characters)
+        SHA-256 hash of the email (first 32 characters / 128-bit)
 
     Example:
         >>> hash_email("user@example.com")

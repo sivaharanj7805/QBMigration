@@ -432,7 +432,8 @@ class ApiClient {
             page: number;
             per_page: number;
             total_pages: number;
-        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, undefined, undefined, signal);
+        // M-22 FIX: Pass MigrationListSchema for runtime Zod validation of pagination data
+        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, MigrationListSchema, undefined, signal);
     }
 
     async getMigration(migrationId: string, signal?: AbortSignal) {

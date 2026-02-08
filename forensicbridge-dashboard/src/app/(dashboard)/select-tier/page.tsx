@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle, Zap, Building2, Shield, Crown, Scale } from 'lucide-react';
+// CRIT-05 FIX: Use authFetch (httpOnly cookie auth) instead of localStorage token
+import { authFetch } from '@/lib/auth';
 
 // API configuration
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -80,13 +82,12 @@ export default function TierSelectionPage() {
         setSuccess('');
 
         try {
-            const token = localStorage.getItem('token');
-
-            const response = await fetch(`${API_URL}/api/auth/select-tier`, {
+            // CRIT-05 FIX: Use authFetch instead of localStorage token to prevent
+            // XSS token theft. authFetch uses httpOnly cookies + CSRF protection.
+            const response = await authFetch(`${API_URL}/api/auth/select-tier`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({ tier_id: tierId })
             });

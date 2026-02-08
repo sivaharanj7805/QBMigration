@@ -60,11 +60,13 @@ def send_verification_email(email, token):
     try:
         server_url = current_app.config.get("SERVER_URL")
         verify_url = f"{server_url}/api/auth/verify/{token}"
-        # AUDIT FIX: HTML-escape URL to prevent XSS in email templates
+        # AUDIT FIX: HTML-escape URL for HTML body to prevent XSS in email templates
         safe_verify_url = str(html_escape(verify_url))
 
         subject = "Verify your QB Migration account"
 
+        # M-08 FIX: Use raw URL (not HTML-escaped) in plaintext body.
+        # HTML-escaped URLs (& → &amp;) break when pasted into browsers.
         body = f"""
 Welcome to QB Migration!
 
@@ -189,12 +191,15 @@ def send_migration_failure_alert(migration):
 
         subject = f"Migration Failed: {migration.migration_id}"
 
+        # M-09 FIX: Sanitize user-controlled company_name to prevent
+        # header injection or email body manipulation via newlines
+        safe_company = (migration.company_name or "N/A").replace("\n", " ").replace("\r", " ")[:200]
         body = f"""
 Migration Failure Alert
 
 Migration ID: {migration.migration_id}
 User: {migration.user.email}
-Company: {migration.company_name or 'N/A'}
+Company: {safe_company}
 Status: {migration.status}
 Error: {migration.get_error_message() or 'Unknown error'}
 Retry Count: {migration.retry_count}/{migration.max_retries}

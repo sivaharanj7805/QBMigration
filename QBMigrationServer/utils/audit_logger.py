@@ -249,7 +249,7 @@ class AuditLogger:
         """Hash PII for privacy compliance."""
         if not value:
             return None
-        return hashlib.sha256(value.encode()).hexdigest()[:16]
+        return hashlib.sha256(value.encode()).hexdigest()[:32]
 
     def _get_request_context(self) -> Dict[str, Any]:
         """Extract context from current Flask request."""

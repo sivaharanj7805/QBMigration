@@ -470,8 +470,10 @@ class User(UserMixin, db.Model):
         try:
             # Acquire row-level lock to prevent concurrent modifications (PostgreSQL only)
             # SQLite doesn't support FOR UPDATE but has implicit locking
-            dialect = db.session.bind.dialect.name if db.session.bind else "sqlite"
-            if dialect == "postgresql":
+            # M-01 FIX: Use shared is_postgresql() instead of duplicating logic
+            from models.database import is_postgresql
+
+            if is_postgresql():
                 db.session.execute(
                     db.text(
                         "SELECT password_history FROM users WHERE id = :user_id FOR UPDATE"
@@ -647,8 +649,13 @@ class User(UserMixin, db.Model):
         from cryptography.fernet import Fernet
         from flask import current_app
 
-        key = current_app.config.get("QBO_ENCRYPTION_KEY") or current_app.config.get(
-            "BACKUP_ENCRYPTION_KEY"
+        # CRIT-01 FIX: Use same key chain as _get_mfa_secret to prevent
+        # encrypt/decrypt key mismatch. Order: MFA_ENCRYPTION_KEY (preferred,
+        # domain-separated) → QBO_ENCRYPTION_KEY → BACKUP_ENCRYPTION_KEY.
+        key = (
+            current_app.config.get("MFA_ENCRYPTION_KEY")
+            or current_app.config.get("QBO_ENCRYPTION_KEY")
+            or current_app.config.get("BACKUP_ENCRYPTION_KEY")
         )
         if not key:
             raise ValueError(

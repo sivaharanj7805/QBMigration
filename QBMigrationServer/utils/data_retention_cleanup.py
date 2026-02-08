@@ -96,6 +96,13 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
 
                 cleaned_count += 1
 
+                # Periodic commit every 100 records to avoid losing all
+                # progress if a later record fails. This ensures earlier
+                # successful cleanups are persisted even on partial failure.
+                if not dry_run and cleaned_count % 100 == 0:
+                    db.session.commit()
+                    logger.info(f"Periodic commit: cleaned {cleaned_count} migrations so far")
+
             except Exception as e:
                 error_msg = f"Failed to strip data from migration {migration.migration_id}: {str(e)}"
                 logger.error(error_msg)
@@ -104,7 +111,7 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
 
         if not dry_run:
             db.session.commit()
-            logger.info(f"Successfully cleaned {cleaned_count} migrations")
+            logger.info(f"Successfully cleaned {cleaned_count} migrations (final commit)")
         else:
             logger.info(f"[DRY RUN] Would clean {cleaned_count} migrations")
 
@@ -179,7 +186,10 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
 
             for obj in page["Contents"]:
                 # Check if object is older than cutoff
-                if obj["LastModified"].replace(tzinfo=None) < cutoff_time:
+                # CRIT-02 FIX: Keep timezone-aware datetime from S3 (UTC) to
+                # compare against timezone-aware cutoff_time. Stripping tzinfo
+                # caused TypeError: can't compare offset-naive and offset-aware.
+                if obj["LastModified"] < cutoff_time:
                     key = obj["Key"]
                     size = obj["Size"]
 
