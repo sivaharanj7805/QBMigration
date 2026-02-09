@@ -294,10 +294,11 @@ class TestCompleteExtraction:
             },
             content_type="application/json",
         )
-        assert response.status_code == 404
+        # CRIT-03 FIX: endpoint checks activation first (403) before project lookup (404)
+        assert response.status_code == 403
         data = response.get_json()
         assert data["success"] is False
-        assert "invalid" in data["error"].lower() or "session" in data["error"].lower()
+        assert "extraction" in data["error"].lower() or "active" in data["error"].lower()
 
 
 # ---------------------------------------------------------------------------

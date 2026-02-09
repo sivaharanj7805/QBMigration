@@ -50,9 +50,9 @@ class TestAccountLockout:
         test_user.account_locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
         db_session.commit()
         assert test_user.is_locked() is False
-        # Should also clear the lock fields
-        assert test_user.account_locked_until is None
-        assert test_user.failed_login_attempts == 0
+        # M-01 FIX: is_locked() is a pure query - no side effects
+        # Lock fields are NOT automatically cleared; use clear_expired_lock() for that
+        assert test_user.account_locked_until is not None
 
     def test_is_locked_naive_datetime(self, db_session, test_user):
         # Test with naive datetime (no tzinfo)

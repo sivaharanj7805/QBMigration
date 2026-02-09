@@ -53,9 +53,10 @@ class TestUserModel:
         db_session.commit()
 
         assert test_user.is_locked() is False
-        # Side effect: resets fields after expired lock
-        assert test_user.failed_login_attempts == 0
-        assert test_user.account_locked_until is None
+        # M-01 FIX: is_locked() is a pure query - no side effects
+        # Lock fields are NOT cleared by is_locked(); use clear_expired_lock() for that
+        assert test_user.failed_login_attempts == 5
+        assert test_user.account_locked_until is not None
 
     def test_is_locked_handles_naive_datetime(self, app, db_session, test_user):
         """is_locked should handle naive datetime stored in account_locked_until."""

@@ -102,7 +102,8 @@ class TestCompleteExtraction:
         )
         assert response.status_code == 400
 
-    def test_complete_extraction_nonexistent(self, client, db_session):
+    def test_complete_extraction_missing_token(self, client, db_session):
+        """CRIT-03: extraction_token is now required - missing token returns 400."""
         response = client.post(
             "/api/session/complete-extraction",
             json={
@@ -111,9 +112,11 @@ class TestCompleteExtraction:
                 "transaction_count": 100,
             },
         )
-        assert response.status_code == 404
+        # CRIT-03 FIX: extraction_token is required, so missing it returns 400
+        assert response.status_code == 400
 
-    def test_complete_extraction_success(self, client, db_session, test_user):
+    def test_complete_extraction_no_activation(self, client, db_session, test_user):
+        """CRIT-03: providing a token but no matching activation returns 403."""
         project = Project(
             user_id=test_user.id,
             name="Complete Project",
@@ -122,21 +125,21 @@ class TestCompleteExtraction:
         )
         db_session.add(project)
         db_session.commit()
-        session_id = project.session_id
 
         response = client.post(
             "/api/session/complete-extraction",
             json={
-                "session_id": session_id,
+                "session_id": project.session_id,
                 "device_fingerprint": "test-fp",
+                "extraction_token": "fake-token",
                 "transaction_count": 100,
             },
         )
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["success"] is True
+        # No activation exists for this device, so returns 403
+        assert response.status_code == 403
 
-    def test_complete_extraction_exceeds_limit(self, client, db_session, test_user):
+    def test_complete_extraction_exceeds_limit_no_token(self, client, db_session, test_user):
+        """Without extraction_token, complete-extraction returns 400 before checking limits."""
         project = Project(
             user_id=test_user.id,
             name="Limit Project",
@@ -155,7 +158,8 @@ class TestCompleteExtraction:
                 "transaction_count": 50,
             },
         )
-        assert response.status_code == 403
+        # CRIT-03 FIX: extraction_token is required
+        assert response.status_code == 400
 
 
 class TestHashFingerprint:
