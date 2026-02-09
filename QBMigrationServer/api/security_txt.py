@@ -34,7 +34,8 @@ def _get_security_txt_content() -> str:
     )
 
     # Calculate expiration date (1 year from now)
-    expires = datetime.now(timezone.utc).replace(year=datetime.now().year + 1)
+    now = datetime.now(timezone.utc)
+    expires = now.replace(year=now.year + 1)
     expires_str = expires.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     content = f"""# ForensicBridge Security Contact Information

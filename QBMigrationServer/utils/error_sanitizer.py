@@ -326,20 +326,8 @@ def is_production() -> bool:
     Returns:
         True if in production, False otherwise
     """
-    env = os.getenv("FLASK_ENV", "production").lower()
-    debug = os.getenv("FLASK_DEBUG", "0")
-
-    # Consider production if:
-    # 1. FLASK_ENV is not 'development', 'dev', or 'testing'
-    # 2. FLASK_DEBUG is not set to '1' or 'true'
-    is_prod = env not in ("development", "dev", "testing") and debug not in (
-        "1",
-        "true",
-        "True",
-        "TRUE",
-    )
-
-    return is_prod
+    from utils.env_helper import is_production as _is_prod
+    return _is_prod()
 
 
 def sanitize_error_message(error: Exception, context: Optional[str] = None) -> str:
@@ -400,10 +388,14 @@ def sanitize_error_message(error: Exception, context: Optional[str] = None) -> s
         "aws_secret",
         "Traceback",
         'File "/',
-        "line \\d+",
     ]
 
-    if any(indicator in sanitized for indicator in sensitive_indicators):
+    regex_indicators = [r"line \d+"]
+    string_indicators = [i for i in sensitive_indicators if i != "line \\d+"]
+    has_sensitive = any(indicator in sanitized for indicator in string_indicators)
+    if not has_sensitive:
+        has_sensitive = any(re.search(pattern, sanitized) for pattern in regex_indicators)
+    if has_sensitive:
         # Still contains sensitive info - use generic message
         generic_msg = get_generic_error_message(context)
         logger.warning(
@@ -515,13 +507,13 @@ def log_error_safely(error: Exception, context: str, user_id: Optional[int] = No
     else:
         user_identifier = f"user_id={user_id}" if user_id else "anonymous"
 
-    # Log with context
+    # Log with context (hash user_id in extra dict to prevent PII leakage)
     logger.error(
         f"[{context}] Error for {user_identifier}: {sanitized}",
         extra={
             "context": context,
             "exception_type": type(error).__name__,
-            "user_id": user_id,
+            "user_id": user_identifier,
         },
         exc_info=not is_production(),  # Include stack trace only in dev
     )

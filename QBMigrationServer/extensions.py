@@ -4,6 +4,7 @@ import os
 from flask import jsonify, request, session
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from utils.env_helper import is_production
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +109,7 @@ def storage_error_handler(e):
 
     In development mode, we log a warning but allow the request to proceed.
     """
-    is_production = os.getenv("FLASK_ENV", "development") == "production"
-
-    if is_production:
+    if is_production():
         # FAIL-CLOSED: Block requests when rate limiting storage is unavailable
         logger.error(
             f"CRITICAL: Rate limit storage unavailable - blocking request for security. "
@@ -138,7 +137,7 @@ def storage_error_handler(e):
 # In-memory rate limiting is per-worker and trivially bypassed with Gunicorn's
 # multiple workers (effective rate = configured_limit * num_workers).
 _rate_limit_storage = os.getenv("RATELIMIT_STORAGE_URL", "memory://")
-if os.getenv("FLASK_ENV") == "production" and _rate_limit_storage == "memory://":
+if is_production() and _rate_limit_storage == "memory://":
     raise RuntimeError(
         "RATELIMIT_STORAGE_URL must be set to a Redis URL in production. "
         "In-memory rate limiting is per-worker and can be trivially bypassed. "

@@ -141,7 +141,11 @@ def run_migration_task(
         from config import initialize_directories
         from main import MigrationOrchestrator
 
-        # Setup environment for OAuth if provided
+        # SECURITY NOTE: OAuth tokens are temporarily stored in env vars because
+        # MigrationOrchestrator reads them from os.environ. This is a security
+        # risk as env vars are visible in /proc/<pid>/environ on Linux and may
+        # leak into child processes, crash dumps, or logging. A future refactor
+        # should pass tokens as arguments through the orchestrator API instead.
         if oauth_tokens:
             os.environ["QBO_ACCESS_TOKEN"] = oauth_tokens.get("access_token", "")
             os.environ["QBO_REFRESH_TOKEN"] = oauth_tokens.get("refresh_token", "")
@@ -190,6 +194,12 @@ def run_migration_task(
         logger.exception(f"Migration {migration_id} failed with error: {e}")
         update_migration_status(migration_id, "failed", progress=0, error=str(e))
         raise
+
+    finally:
+        # FIX HIGH: Always clean up OAuth tokens from environment variables
+        # to minimize the window of exposure for sensitive credentials.
+        for env_key in ("QBO_ACCESS_TOKEN", "QBO_REFRESH_TOKEN", "QBO_REALM_ID"):
+            os.environ.pop(env_key, None)
 
 
 @celery.task(bind=True, name="tasks.generate_caseware_export")

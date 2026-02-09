@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple
 
 from models.database import db
 from sqlalchemy import text
+from utils.pii_redaction import hash_ip
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ ANOMALY_THRESHOLDS = {
 # Known IP ranges for common VPNs and proxies (basic list)
 SUSPICIOUS_IP_RANGES = [
     "10.8.0.",  # OpenVPN default
-    "192.168.",  # Private networks (could be corporate VPN)
+    # Removed 192.168.* -- standard RFC 1918 private space, false positive for all corporate/home networks
 ]
 
 
@@ -185,7 +186,7 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
                     return (
                         True,
                         f"Impossible travel: IP changed from"
-                        f" {prev_ip} to {current_ip}"
+                        f" {hash_ip(prev_ip)} to {hash_ip(current_ip)}"
                         f" in {time_diff.seconds // 60} minutes",
                     )
 
@@ -237,7 +238,7 @@ def detect_large_file_upload(file_size_bytes: int, user_id: int) -> Tuple[bool, 
     try:
         result = db.session.execute(
             text("""
-            SELECT COALESCE(SUM(encrypted_data_size_bytes), 0) as total_size
+            SELECT COALESCE(SUM(data_size_bytes), 0) as total_size
             FROM migrations
             WHERE user_id = :user_id
             AND created_at >= :window_start

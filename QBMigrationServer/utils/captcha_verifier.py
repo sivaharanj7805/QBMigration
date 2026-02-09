@@ -22,6 +22,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import requests
 from flask import request
+from utils.env_helper import is_production, is_testing
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,7 @@ def verify_captcha_token(
     # In production, if CAPTCHA is required but not configured, we MUST fail
     # This prevents attackers from bypassing CAPTCHA by removing the config
     if provider == "none":
-        is_production = os.getenv("FLASK_ENV", "development") == "production"
-
-        if is_production:
+        if is_production():
             # FAIL-CLOSED: In production, missing CAPTCHA config is a security failure
             logger.error(
                 "SECURITY CRITICAL: CAPTCHA verification required but no provider configured. "
@@ -169,7 +168,7 @@ def verify_captcha_token(
             threshold = config["score_threshold"]
             if score < threshold:
                 logger.warning(f"CAPTCHA score too low: {score} < {threshold}")
-                return False, f"CAPTCHA score too low: {score}"
+                return False, "CAPTCHA verification failed"
 
         # Verification successful
         logger.info(f"CAPTCHA verified successfully: provider={provider}")
@@ -202,10 +201,8 @@ def is_captcha_required(email: str, failed_attempts: int = 0) -> bool:
     Returns:
         True if CAPTCHA should be required, False otherwise
     """
-    import os
-
     # Skip CAPTCHA in testing environment
-    if os.getenv("FLASK_ENV") == "testing":
+    if is_testing():
         return False
 
     # FIX #38: Require CAPTCHA after 3 failed attempts

@@ -249,7 +249,7 @@ QB Migration Team
     <p>Great news! Your QuickBooks migration has completed successfully.</p>
     <div style="background-color: #f3f4f6; padding: 20px; border-radius: 4px; margin: 20px 0;">
         <h3 style="margin-top: 0;">Migration Details</h3>
-        <p><strong>Company:</strong> {migration.company_name or 'N/A'}</p>
+        <p><strong>Company:</strong> {html_escape(migration.company_name or 'N/A')}</p>
         <p><strong>Records Migrated:</strong> {migration.total_records_migrated}</p>
         <ul style="margin: 10px 0;">
             <li>Customers: {migration.customers_migrated}</li>

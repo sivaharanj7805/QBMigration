@@ -9,6 +9,7 @@ Handles OAuth2 flow for connecting to QuickBooks Online:
 """
 
 import logging
+import os
 import re
 import secrets
 import urllib.parse
@@ -19,6 +20,9 @@ from flask import Blueprint, current_app, jsonify, redirect, request, session
 from flask_login import current_user, login_required
 from models.database import db
 
+# H-32 FIX: Import limiter to rate-limit QBO OAuth and token refresh endpoints
+from extensions import limiter
+
 qbo_bp = Blueprint("qbo", __name__, url_prefix="/api/qbo")
 logger = logging.getLogger(__name__)
 
@@ -28,8 +32,32 @@ INTUIT_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 INTUIT_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
 
 
+def _get_frontend_url():
+    """
+    DASHBOARD-LOW-2 FIX: Get FRONTEND_URL with safety checks for non-development modes.
+
+    In production/staging, FRONTEND_URL must be explicitly configured.
+    Falling back to localhost in those environments is a misconfiguration
+    that could cause OAuth redirects to fail silently.
+    """
+    url = current_app.config.get("FRONTEND_URL") or os.getenv("FRONTEND_URL")
+    if url:
+        return url
+
+    env = os.getenv("FLASK_ENV", "development")
+    if env != "development":
+        logger.warning(
+            "FRONTEND_URL is not configured in %s mode. "
+            "OAuth redirects will fall back to http://localhost:3000 which is "
+            "almost certainly wrong. Set FRONTEND_URL to the correct origin.",
+            env,
+        )
+    return "http://localhost:3000"
+
+
 @qbo_bp.route("/connect")
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent OAuth initiation abuse
 def connect_qbo():
     """
     Initiate OAuth flow with QuickBooks Online
@@ -82,6 +110,7 @@ def connect_qbo():
 
 @qbo_bp.route("/callback")
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent OAuth callback abuse
 def qbo_callback():
     """
     Handle OAuth callback from QuickBooks
@@ -98,9 +127,7 @@ def qbo_callback():
         # Check for errors
         if error:
             logger.warning(f"QBO OAuth error: {error}")
-            frontend_url = current_app.config.get(
-                "FRONTEND_URL", "http://localhost:3000"
-            )
+            frontend_url = _get_frontend_url()
             # CRITICAL FIX: Use whitelist-based sanitization to prevent XSS and information disclosure
             from utils.error_sanitizer import (
                 get_qbo_user_message,
@@ -174,7 +201,7 @@ def qbo_callback():
         )
 
         # Redirect to frontend with success
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = _get_frontend_url()
         return redirect(f"{frontend_url}/settings?qbo=connected")
 
     except Exception as e:
@@ -186,6 +213,42 @@ def qbo_callback():
             ),
             500,
         )
+
+
+def _revoke_single_token(token, token_type, client_id, client_secret, user_id, reason):
+    """
+    Revoke a single QBO OAuth token at the Intuit server.
+
+    Args:
+        token: The plaintext token to revoke
+        token_type: 'access_token' or 'refresh_token' (for logging)
+        client_id: QBO OAuth client ID
+        client_secret: QBO OAuth client secret
+        user_id: User ID (for logging)
+        reason: Reason for revocation (for logging)
+
+    Returns:
+        tuple: (success: bool, error: str or None)
+    """
+    try:
+        response = requests.post(
+            INTUIT_REVOKE_URL,
+            data={"token": token},
+            auth=(client_id, client_secret),
+            headers={"Accept": "application/json"},
+            timeout=(10, 30),
+        )
+        if response.status_code in (200, 204):
+            logger.info(f"Revoked QBO {token_type} for user {user_id} ({reason})")
+            return True, None
+        else:
+            logger.warning(
+                f"QBO {token_type} revocation returned {response.status_code}"
+            )
+            return False, None
+    except Exception as e:
+        logger.warning(f"Failed to revoke QBO {token_type}: {e}")
+        return False, f"{token_type}: {str(e)}"
 
 
 def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
@@ -216,7 +279,6 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
         )
         return True
 
-    tokens_revoked = 0
     errors = []
 
     # CRITICAL FIX: Use decrypted token getters, NOT raw encrypted column values.
@@ -228,48 +290,22 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
         user.get_qbo_access_token() if hasattr(user, "get_qbo_access_token") else None
     )
     if access_token:
-        try:
-            response = requests.post(
-                INTUIT_REVOKE_URL,
-                data={"token": access_token},
-                auth=(client_id, client_secret),
-                headers={"Accept": "application/json"},
-                timeout=(10, 30),
-            )
-            if response.status_code in (200, 204):
-                tokens_revoked += 1
-                logger.info(f"Revoked QBO access token for user {user.id} ({reason})")
-            else:
-                logger.warning(
-                    f"QBO access token revocation returned {response.status_code}"
-                )
-        except Exception as e:
-            errors.append(f"access_token: {str(e)}")
-            logger.warning(f"Failed to revoke QBO access token: {e}")
+        success, error = _revoke_single_token(
+            access_token, "access_token", client_id, client_secret, user.id, reason
+        )
+        if error:
+            errors.append(error)
 
     # Revoke refresh token (if present)
     refresh_token = (
         user.get_qbo_refresh_token() if hasattr(user, "get_qbo_refresh_token") else None
     )
     if refresh_token:
-        try:
-            response = requests.post(
-                INTUIT_REVOKE_URL,
-                data={"token": refresh_token},
-                auth=(client_id, client_secret),
-                headers={"Accept": "application/json"},
-                timeout=(10, 30),
-            )
-            if response.status_code in (200, 204):
-                tokens_revoked += 1
-                logger.info(f"Revoked QBO refresh token for user {user.id} ({reason})")
-            else:
-                logger.warning(
-                    f"QBO refresh token revocation returned {response.status_code}"
-                )
-        except Exception as e:
-            errors.append(f"refresh_token: {str(e)}")
-            logger.warning(f"Failed to revoke QBO refresh token: {e}")
+        success, error = _revoke_single_token(
+            refresh_token, "refresh_token", client_id, client_secret, user.id, reason
+        )
+        if error:
+            errors.append(error)
 
     if errors:
         logger.warning(f"QBO token revocation had errors for user {user.id}: {errors}")
@@ -281,6 +317,7 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
     "/disconnect", methods=["POST"]
 )  # MED-14 FIX: Remove GET method for state-changing operation
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent disconnect abuse
 def disconnect_qbo():
     """
     Disconnect from QuickBooks Online
@@ -376,6 +413,7 @@ def qbo_status():
 
 @qbo_bp.route("/refresh", methods=["POST"])
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent token refresh abuse
 def refresh_qbo_token():
     """
     Refresh expired QBO access token

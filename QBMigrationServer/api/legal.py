@@ -5,7 +5,11 @@ Required for Intuit App Registration and compliance (GDPR, PIPEDA, PCI-DSS)
 100/100 FIX: Added comprehensive legal documentation
 """
 
+import logging
+
 from flask import Blueprint, jsonify, redirect, render_template, url_for
+
+logger = logging.getLogger(__name__)
 
 legal_bp = Blueprint("legal", __name__, url_prefix="/legal")
 
@@ -228,8 +232,8 @@ def eula():
     """End User License Agreement page"""
     try:
         return render_template("legal/eula.html", metadata=LEGAL_DOCUMENTS["eula"])
-    except Exception:
-        # Fallback to JSON if template not found
+    except Exception as e:
+        logger.warning(f"Template fallback: {e}")
         return eula_api()
 
 
@@ -240,7 +244,8 @@ def privacy_policy():
         return render_template(
             "legal/privacy.html", metadata=LEGAL_DOCUMENTS["privacy"]
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Template fallback: {e}")
         return privacy_api()
 
 
@@ -257,7 +262,8 @@ def cookie_policy():
         return render_template(
             "legal/cookies.html", metadata=LEGAL_DOCUMENTS["cookies"]
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Template fallback: {e}")
         return jsonify(
             {
                 "success": True,
@@ -292,7 +298,8 @@ def security():
         return render_template(
             "legal/security.html", metadata=LEGAL_DOCUMENTS["security"]
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Template fallback: {e}")
         return security_api()
 
 
@@ -303,5 +310,6 @@ def data_processing():
         return render_template(
             "legal/data-processing.html", metadata=LEGAL_DOCUMENTS["dpa"]
         )
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Template fallback: {e}")
         return dpa_api()

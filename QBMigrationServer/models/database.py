@@ -2,6 +2,7 @@ import os
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import Session
+from utils.env_helper import is_testing
 
 db = SQLAlchemy()
 
@@ -14,7 +15,7 @@ def init_db(app):
         # Prevent DetachedInstanceError in testing by keeping instances usable after commits
         # This avoids Flask-Login's current_user becoming detached when endpoints
         # access user attributes after session operations
-        if app.config.get("TESTING") or os.getenv("FLASK_ENV") == "testing":
+        if app.config.get("TESTING") or is_testing():
             from sqlalchemy import event
 
             @event.listens_for(Session, "after_begin")

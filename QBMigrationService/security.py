@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import logging
+import os
 import re
 import secrets
 import threading
@@ -9,6 +10,10 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 
 import pyotp
+
+
+def _get_env():
+    return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
 
 # FIX: Use proper logging instead of print statements
 logger = logging.getLogger(__name__)
@@ -126,9 +131,7 @@ class SecurityManager:
 
             except Exception as e:
                 # CRIT-12 FIX: Fail-closed in production when Redis unavailable
-                import os
-
-                flask_env = os.getenv("FLASK_ENV", "development")
+                flask_env = _get_env()
 
                 if flask_env == "production":
                     logger.critical(f"Redis rate limiting failed in production: {e}")
@@ -140,9 +143,7 @@ class SecurityManager:
                 logger.warning("Falling back to local rate limiting (development only)")
 
         # Fallback: In-memory rate limiting (DEVELOPMENT ONLY - single instance)
-        import os
-
-        if os.getenv("FLASK_ENV", "development") == "production":
+        if _get_env() == "production":
             # CRIT-12 FIX: Never use in-memory fallback in production
             logger.critical("In-memory rate limiting not allowed in production")
             return False

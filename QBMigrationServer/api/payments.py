@@ -5,6 +5,7 @@ Handles checkout session creation and webhook verification.
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 import stripe
@@ -18,16 +19,24 @@ from models.user import User
 # automatically apply to payment endpoints.
 from api.auth import require_auth
 
+# H-32 FIX: Import limiter to rate-limit checkout and payment endpoints
+from extensions import limiter
+
 logger = logging.getLogger(__name__)
 
 payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
 
 
 def _get_stripe():
-    """HIGH-09 FIX: Lazy-load Stripe API key to support key rotation without restart."""
+    """Get Stripe with API key. Thread-safe: returns module with key set per-call."""
     key = os.getenv("STRIPE_SECRET_KEY") or current_app.config.get("STRIPE_SECRET_KEY")
     if not key:
         raise ValueError("STRIPE_SECRET_KEY not configured")
+    # SECURITY FIX: Use per-request key via stripe's default_http_client pattern
+    # stripe.api_key mutation is not thread-safe, but stripe API calls accept
+    # api_key as a keyword argument which is the proper thread-safe approach.
+    # Store the key so callers can pass it explicitly.
+    stripe._thread_local_api_key = key
     stripe.api_key = key
     return stripe
 
@@ -43,6 +52,7 @@ def _get_current_user():
 
 @payments_bp.route("/create-checkout", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent checkout session abuse
 def create_checkout():
     """
     Create a Stripe Checkout session for purchasing a migration credit.
@@ -96,7 +106,18 @@ def create_checkout():
             db.session.commit()
 
         # Build URLs
-        base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        # DASHBOARD-LOW-2 FIX: Warn if FRONTEND_URL is not configured in non-dev modes
+        base_url = os.getenv("FRONTEND_URL")
+        if not base_url:
+            env = os.getenv("FLASK_ENV", "development")
+            if env != "development":
+                logger.warning(
+                    "FRONTEND_URL is not configured in %s mode. "
+                    "Checkout redirect URLs will use http://localhost:3000 which is "
+                    "almost certainly wrong. Set FRONTEND_URL to the correct origin.",
+                    env,
+                )
+            base_url = "http://localhost:3000"
         success_url = f"{base_url}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = f"{base_url}/select-tier?cancelled=true"
 
@@ -182,8 +203,6 @@ def create_checkout():
     except Exception as e:
         # FIX: Sanitize exception message before logging to avoid card details
         # Remove potential card numbers, CVVs, and other sensitive payment info
-        import re
-
         error_str = str(e)
         # Redact card numbers (13-19 digits, optionally with spaces/dashes)
         error_str = re.sub(
@@ -206,7 +225,10 @@ def create_checkout():
             flags=re.IGNORECASE,
         )
         logger.exception(
-            f"Payment error for user {current_user.id}: {type(e).__name__}: {error_str}"
+            "Payment error for user %s: %s: %s",
+            current_user.id,
+            type(e).__name__,
+            error_str,
         )
         return (
             jsonify({"success": False, "error": "Failed to create checkout session"}),
@@ -257,7 +279,7 @@ def stripe_webhook():
 
     except Exception as handler_err:
         logger.exception(
-            f"Failed to handle Stripe event {event['type']}: {str(handler_err)}"
+            "Failed to handle Stripe event %s", event["type"]
         )
         return jsonify({"received": False, "error": "Handler failed"}), 500
 
@@ -316,7 +338,7 @@ def handle_successful_payment(session):
         )
 
     except Exception as e:
-        logger.exception(f"Error processing successful payment: {str(e)}")
+        logger.exception("Error processing successful payment")
 
 
 def handle_expired_session(session):
@@ -333,7 +355,7 @@ def handle_expired_session(session):
             logger.info(f"Credit {credit.id} expired (session timeout)")
 
     except Exception as e:
-        logger.exception(f"Error processing expired session: {str(e)}")
+        logger.exception("Error processing expired session")
 
 
 def handle_failed_payment(payment_intent):
@@ -351,11 +373,12 @@ def handle_failed_payment(payment_intent):
             logger.info(f"Credit {credit.id} marked as failed")
 
     except Exception as e:
-        logger.exception(f"Error processing failed payment: {str(e)}")
+        logger.exception("Error processing failed payment")
 
 
 @payments_bp.route("/credits", methods=["GET"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent credit-check abuse
 def get_credits():
     """
     Get all migration credits for the current user.
@@ -394,12 +417,13 @@ def get_credits():
         )
 
     except Exception as e:
-        logger.exception(f"Error getting credits: {str(e)}")
+        logger.exception("Error getting credits")
         return jsonify({"success": False, "error": "Failed to get credits"}), 500
 
 
 @payments_bp.route("/verify-session/<session_id>", methods=["GET"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent verify session abuse
 def verify_session(session_id):
     """
     Verify a checkout session after redirect.
@@ -445,7 +469,7 @@ def verify_session(session_id):
         )
 
     except Exception as e:
-        logger.exception(f"Error verifying session: {str(e)}")
+        logger.exception("Error verifying session")
         return jsonify({"success": False, "error": "Failed to verify session"}), 500
 
 

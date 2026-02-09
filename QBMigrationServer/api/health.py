@@ -15,7 +15,7 @@ FIX HIGH-03: Added rate limiting to health endpoints
 import hmac
 import logging
 import os
-from datetime import timezone
+from datetime import datetime, timezone
 from functools import wraps
 
 from extensions import limiter
@@ -31,10 +31,6 @@ health_bp = Blueprint("health", __name__)
 HEALTH_RATE_LIMIT = "60 per minute"
 DETAILED_RATE_LIMIT = "10 per minute"
 
-# Admin API key for sensitive endpoints
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
-
-
 def require_admin_auth(f):
     """
     Decorator to require admin authentication for sensitive health endpoints.
@@ -44,8 +40,9 @@ def require_admin_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         api_key = request.headers.get("X-Admin-API-Key")
+        admin_api_key = os.getenv("ADMIN_API_KEY")
 
-        if not ADMIN_API_KEY:
+        if not admin_api_key:
             logger.error("ADMIN_API_KEY not configured - admin endpoints disabled")
             return jsonify({"error": "Admin endpoints not configured"}), 503
 
@@ -55,7 +52,7 @@ def require_admin_auth(f):
             )
             return jsonify({"error": "Admin authentication required"}), 401
 
-        if not hmac.compare_digest(api_key, ADMIN_API_KEY):
+        if not hmac.compare_digest(api_key, admin_api_key):
             logger.warning(f"Invalid admin API key from {request.remote_addr}")
             return jsonify({"error": "Invalid credentials"}), 403
 
@@ -114,8 +111,6 @@ def health_check():
             )
 
     # Add timestamp
-    from datetime import datetime, timezone
-
     health_status["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Return appropriate status code
@@ -124,115 +119,28 @@ def health_check():
     return jsonify(health_status), status_code
 
 
-@health_bp.route("/api/health/detailed", methods=["GET"])
-@limiter.limit(DETAILED_RATE_LIMIT)
-@require_admin_auth
-def detailed_health_check():  # noqa: C901
-    """
-    Detailed health check with full compliance verification.
-    Used for enterprise deployment validation.
-    FIX CRIT-05: Now requires admin authentication.
-    FIX HIGH-03: Rate limited.
-    """
-    from datetime import datetime
+def _check_database_health():
+    """Check database connectivity and connection pool stats.
 
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "checks": {},
-    }
+    Returns a dict with keys: database, connection_pool, sqlalchemy_pool.
+    """
+    result = {"database": None, "connection_pool": None, "sqlalchemy_pool": None}
 
-    # 1. Database Check
+    # Basic connectivity
     try:
         db.session.execute(text("SELECT 1"))
-        health_status["checks"]["database"] = {"status": "pass", "message": "Connected"}
+        result["database"] = {"status": "pass", "message": "Connected"}
     except Exception as e:
-        health_status["checks"]["database"] = {"status": "fail", "message": str(e)}
-        health_status["status"] = "unhealthy"
+        logger.error(f"Detailed health check database failure: {e}")
+        result["database"] = {"status": "fail", "message": "Database connection failed"}
 
-    # 2. Canadian Data Residency Check
-    aws_region = current_app.config.get("AWS_REGION", "not_configured")
-    if aws_region == REQUIRED_REGION:
-        health_status["checks"]["canadian_residency"] = {
-            "status": "pass",
-            "region": aws_region,
-            "location": "Montreal, Quebec, Canada",
-        }
-    else:
-        health_status["checks"]["canadian_residency"] = {
-            "status": "fail",
-            "region": aws_region,
-            "required": REQUIRED_REGION,
-            "message": "Data residency violation - must use ca-central-1",
-        }
-        health_status["status"] = "unhealthy"
-
-    # 3. S3 Bucket Location Verification
-    aws_bucket = current_app.config.get("AWS_S3_BUCKET")
-    if aws_bucket:
-        try:
-            import boto3
-
-            s3 = boto3.client("s3", region_name=aws_region)
-            response = s3.get_bucket_location(Bucket=aws_bucket)
-            bucket_location = response.get("LocationConstraint") or "us-east-1"
-
-            if bucket_location == REQUIRED_REGION:
-                health_status["checks"]["s3_bucket"] = {
-                    "status": "pass",
-                    "bucket": aws_bucket,
-                    "location": bucket_location,
-                }
-            else:
-                health_status["checks"]["s3_bucket"] = {
-                    "status": "fail",
-                    "bucket": aws_bucket,
-                    "location": bucket_location,
-                    "required": REQUIRED_REGION,
-                    "message": "S3 bucket not in required region",
-                }
-                health_status["status"] = "unhealthy"
-        except Exception as e:
-            health_status["checks"]["s3_bucket"] = {
-                "status": "warn",
-                "bucket": aws_bucket,
-                "message": f"Could not verify: {str(e)}",
-            }
-
-    # 4. SSO Configuration Check
-    sso_enabled = current_app.config.get("ENABLE_SSO", False)
-    health_status["checks"]["sso"] = {
-        "status": "pass" if sso_enabled else "info",
-        "enabled": sso_enabled,
-        "providers": current_app.config.get("SSO_PROVIDERS", []),
-    }
-
-    # 5. WORM Storage Check
-    worm_enabled = current_app.config.get("ENABLE_WORM_STORAGE", False)
-    health_status["checks"]["worm_storage"] = {
-        "status": "pass" if worm_enabled else "info",
-        "enabled": worm_enabled,
-        "retention_years": 7 if worm_enabled else None,
-    }
-
-    # 6. Multi-AZ Check
-    multi_az = current_app.config.get("ENABLE_MULTI_AZ", False)
-    health_status["checks"]["multi_az"] = {
-        "status": "pass" if multi_az else "info",
-        "enabled": multi_az,
-        "availability_zones": (
-            ["ca-central-1a", "ca-central-1b", "ca-central-1d"] if multi_az else []
-        ),
-    }
-
-    # FIX #40: Database Connection Pool Health Check
+    # Connection pool stats (PostgreSQL)
     try:
-        result = db.session.execute(text("""
+        row = db.session.execute(text("""
             SELECT
                 (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_connections,
                 (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
-        """))
-        row = result.fetchone()
+        """)).fetchone()
         if row:
             active_connections, max_connections = row
             pool_usage_pct = (
@@ -247,214 +155,20 @@ def detailed_health_check():  # noqa: C901
             if pool_usage_pct >= 95:
                 status = "critical"
 
-            health_status["checks"]["connection_pool"] = {
+            result["connection_pool"] = {
                 "status": status,
                 "active_connections": active_connections,
                 "max_connections": max_connections,
                 "usage_percent": round(pool_usage_pct, 2),
             }
-
-            if status in ("warn", "critical"):
-                health_status["status"] = "degraded"
     except Exception as e:
-        health_status["checks"]["connection_pool"] = {
+        result["connection_pool"] = {
             "status": "unknown",
             "message": f"Could not check: {str(e)}",
         }
 
-    # FIX #40: AWS S3 Service Connectivity Check
+    # SQLAlchemy pool status
     try:
-        import boto3
-        from botocore.exceptions import ClientError
-
-        s3 = boto3.client("s3", region_name=aws_region)
-
-        # Simple connectivity test - list buckets
-        s3.list_buckets()
-
-        health_status["checks"]["aws_s3_service"] = {
-            "status": "pass",
-            "message": "S3 service reachable",
-        }
-    except ClientError as e:
-        health_status["checks"]["aws_s3_service"] = {
-            "status": "fail",
-            "message": f'S3 service error: {e.response["Error"]["Code"]}',
-        }
-        health_status["status"] = "unhealthy"
-    except Exception as e:
-        health_status["checks"]["aws_s3_service"] = {
-            "status": "fail",
-            "message": f"Cannot reach S3: {str(e)}",
-        }
-        health_status["status"] = "unhealthy"
-
-    # FIX #40: QuickBooks Online API Connectivity Check (optional)
-    try:
-        import requests
-
-        # Check QBO API status page or a lightweight endpoint
-        # Using a simple HTTP check to verify network connectivity
-        qbo_status_response = requests.get(
-            "https://status.quickbooks.com/api/v2/status.json", timeout=5
-        )
-
-        if qbo_status_response.status_code == 200:
-            health_status["checks"]["qbo_api"] = {
-                "status": "pass",
-                "message": "QuickBooks Online API reachable",
-            }
-        else:
-            health_status["checks"]["qbo_api"] = {
-                "status": "warn",
-                "message": f"QBO API returned {qbo_status_response.status_code}",
-            }
-    except requests.exceptions.Timeout:
-        health_status["checks"]["qbo_api"] = {
-            "status": "fail",
-            "message": "QBO API timeout",
-        }
-        health_status["status"] = "degraded"
-    except requests.exceptions.RequestException as e:
-        health_status["checks"]["qbo_api"] = {
-            "status": "fail",
-            "message": f"Cannot reach QBO API: {str(e)}",
-        }
-        health_status["status"] = "degraded"
-    except Exception:
-        # Requests library not available - skip this check
-        health_status["checks"]["qbo_api"] = {
-            "status": "skipped",
-            "message": "Requests library not available",
-        }
-
-    # FIX #40: Encryption Service Check
-    encryption_key = os.getenv("ENCRYPTION_KEY")
-    encryption_key_b64 = os.getenv("ENCRYPTION_KEY_B64")
-
-    if encryption_key or encryption_key_b64:
-        health_status["checks"]["encryption"] = {
-            "status": "pass",
-            "configured": True,
-            "key_source": (
-                "ENCRYPTION_KEY_B64" if encryption_key_b64 else "ENCRYPTION_KEY"
-            ),
-        }
-    else:
-        health_status["checks"]["encryption"] = {
-            "status": "fail",
-            "configured": False,
-            "message": "No encryption key configured",
-        }
-        health_status["status"] = "unhealthy"
-
-    # FIX: Circuit Breaker Status for health check
-    try:
-        # Check if any circuit breakers are open
-        circuit_breaker_status = {"status": "pass", "breakers": {}}
-
-        # Get circuit breaker states from config or global state
-        # Common circuit breakers: database, s3, qbo_api
-        breakers = current_app.config.get("CIRCUIT_BREAKERS", {})
-
-        for breaker_name, breaker_state in breakers.items():
-            is_open = breaker_state.get("is_open", False)
-            failure_count = breaker_state.get("failure_count", 0)
-            last_failure = breaker_state.get("last_failure_time")
-            reset_timeout = breaker_state.get("reset_timeout_seconds", 60)
-
-            circuit_breaker_status["breakers"][breaker_name] = {
-                "state": "open" if is_open else "closed",
-                "failure_count": failure_count,
-                "last_failure": last_failure,
-                "reset_timeout_seconds": reset_timeout,
-            }
-
-            if is_open:
-                circuit_breaker_status["status"] = "warn"
-
-        # Add circuit breaker summary
-        open_breakers = sum(
-            1
-            for b in circuit_breaker_status["breakers"].values()
-            if b["state"] == "open"
-        )
-        circuit_breaker_status["open_count"] = open_breakers
-        circuit_breaker_status["total_count"] = len(circuit_breaker_status["breakers"])
-
-        if open_breakers > 0:
-            health_status["status"] = "degraded"
-            circuit_breaker_status["message"] = (
-                f"{open_breakers} circuit breaker(s) open"
-            )
-
-        health_status["checks"]["circuit_breakers"] = circuit_breaker_status
-
-    except Exception as e:
-        health_status["checks"]["circuit_breakers"] = {
-            "status": "unknown",
-            "message": f"Could not check circuit breakers: {str(e)}",
-        }
-
-    # FIX: Redis Cache Health Check
-    try:
-        redis_url = os.getenv("REDIS_URL") or current_app.config.get("REDIS_URL")
-        if redis_url:
-            import redis
-
-            redis_client = redis.from_url(redis_url, socket_connect_timeout=5)
-
-            # Ping test
-            redis_client.ping()
-
-            # Get basic info
-            info = redis_client.info("server")
-            memory_info = redis_client.info("memory")
-
-            health_status["checks"]["redis"] = {
-                "status": "pass",
-                "connected": True,
-                "version": info.get("redis_version", "unknown"),
-                "used_memory_human": memory_info.get("used_memory_human", "unknown"),
-                "connected_clients": redis_client.info("clients").get(
-                    "connected_clients", 0
-                ),
-            }
-        else:
-            health_status["checks"]["redis"] = {
-                "status": "info",
-                "configured": False,
-                "message": "Redis URL not configured",
-            }
-    except redis.exceptions.ConnectionError as e:
-        health_status["checks"]["redis"] = {
-            "status": "fail",
-            "connected": False,
-            "message": f"Connection failed: {str(e)}",
-        }
-        health_status["status"] = "degraded"
-    except redis.exceptions.TimeoutError:
-        health_status["checks"]["redis"] = {
-            "status": "fail",
-            "connected": False,
-            "message": "Connection timeout",
-        }
-        health_status["status"] = "degraded"
-    except ImportError:
-        health_status["checks"]["redis"] = {
-            "status": "skipped",
-            "message": "Redis library not installed",
-        }
-    except Exception as e:
-        health_status["checks"]["redis"] = {
-            "status": "unknown",
-            "message": f"Could not check Redis: {str(e)}",
-        }
-
-    # FIX: Database Pool Status (SQLAlchemy connection pool)
-    try:
-        pass
-
         engine = db.engine
 
         if hasattr(engine, "pool"):
@@ -492,20 +206,393 @@ def detailed_health_check():  # noqa: C901
                     if usage_pct >= 95:
                         pool_status["status"] = "critical"
                         pool_status["message"] = "Pool nearly exhausted"
-                        health_status["status"] = "degraded"
 
-            health_status["checks"]["sqlalchemy_pool"] = pool_status
+            result["sqlalchemy_pool"] = pool_status
         else:
-            health_status["checks"]["sqlalchemy_pool"] = {
+            result["sqlalchemy_pool"] = {
                 "status": "info",
                 "message": "No connection pool (NullPool or direct connection)",
             }
 
     except Exception as e:
-        health_status["checks"]["sqlalchemy_pool"] = {
+        result["sqlalchemy_pool"] = {
             "status": "unknown",
             "message": f"Could not check SQLAlchemy pool: {str(e)}",
         }
+
+    return result
+
+
+def _check_s3_health(aws_region):
+    """Check S3 bucket location, S3 service connectivity, and QBO API reachability.
+
+    Returns a dict with keys: s3_bucket (optional), aws_s3_service, qbo_api.
+    """
+    result = {}
+
+    # S3 Bucket Location Verification
+    aws_bucket = current_app.config.get("AWS_S3_BUCKET")
+    if aws_bucket:
+        try:
+            import boto3
+
+            s3 = boto3.client("s3", region_name=aws_region)
+            response = s3.get_bucket_location(Bucket=aws_bucket)
+            bucket_location = response.get("LocationConstraint") or "us-east-1"
+
+            if bucket_location == REQUIRED_REGION:
+                result["s3_bucket"] = {
+                    "status": "pass",
+                    "bucket": aws_bucket,
+                    "location": bucket_location,
+                }
+            else:
+                result["s3_bucket"] = {
+                    "status": "fail",
+                    "bucket": aws_bucket,
+                    "location": bucket_location,
+                    "required": REQUIRED_REGION,
+                    "message": "S3 bucket not in required region",
+                }
+        except Exception as e:
+            result["s3_bucket"] = {
+                "status": "warn",
+                "bucket": aws_bucket,
+                "message": f"Could not verify: {str(e)}",
+            }
+
+    # S3 Service Connectivity
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        s3 = boto3.client("s3", region_name=aws_region)
+
+        # Simple connectivity test - list buckets
+        s3.list_buckets()
+
+        result["aws_s3_service"] = {
+            "status": "pass",
+            "message": "S3 service reachable",
+        }
+    except ClientError as e:
+        result["aws_s3_service"] = {
+            "status": "fail",
+            "message": f'S3 service error: {e.response["Error"]["Code"]}',
+        }
+    except Exception as e:
+        result["aws_s3_service"] = {
+            "status": "fail",
+            "message": f"Cannot reach S3: {str(e)}",
+        }
+
+    # QuickBooks Online API Connectivity Check (optional)
+    try:
+        import requests
+
+        qbo_status_response = requests.get(
+            "https://status.quickbooks.com/api/v2/status.json", timeout=5
+        )
+
+        if qbo_status_response.status_code == 200:
+            result["qbo_api"] = {
+                "status": "pass",
+                "message": "QuickBooks Online API reachable",
+            }
+        else:
+            result["qbo_api"] = {
+                "status": "warn",
+                "message": f"QBO API returned {qbo_status_response.status_code}",
+            }
+    except requests.exceptions.Timeout:
+        result["qbo_api"] = {
+            "status": "fail",
+            "message": "QBO API timeout",
+        }
+    except requests.exceptions.RequestException as e:
+        result["qbo_api"] = {
+            "status": "fail",
+            "message": f"Cannot reach QBO API: {str(e)}",
+        }
+    except Exception:
+        # Requests library not available - skip this check
+        result["qbo_api"] = {
+            "status": "skipped",
+            "message": "Requests library not available",
+        }
+
+    return result
+
+
+def _check_redis_health():
+    """Check Redis cache connectivity and stats.
+
+    Returns a single dict with status/details.
+    """
+    try:
+        redis_url = os.getenv("REDIS_URL") or current_app.config.get("REDIS_URL")
+        if redis_url:
+            import redis
+
+            redis_client = redis.from_url(redis_url, socket_connect_timeout=5)
+
+            # Ping test
+            redis_client.ping()
+
+            # Get basic info
+            info = redis_client.info("server")
+            memory_info = redis_client.info("memory")
+
+            return {
+                "status": "pass",
+                "connected": True,
+                "version": info.get("redis_version", "unknown"),
+                "used_memory_human": memory_info.get("used_memory_human", "unknown"),
+                "connected_clients": redis_client.info("clients").get(
+                    "connected_clients", 0
+                ),
+            }
+        else:
+            return {
+                "status": "info",
+                "configured": False,
+                "message": "Redis URL not configured",
+            }
+    except redis.exceptions.ConnectionError as e:
+        return {
+            "status": "fail",
+            "connected": False,
+            "message": f"Connection failed: {str(e)}",
+        }
+    except redis.exceptions.TimeoutError:
+        return {
+            "status": "fail",
+            "connected": False,
+            "message": "Connection timeout",
+        }
+    except ImportError:
+        return {
+            "status": "skipped",
+            "message": "Redis library not installed",
+        }
+    except Exception as e:
+        return {
+            "status": "unknown",
+            "message": f"Could not check Redis: {str(e)}",
+        }
+
+
+def _check_celery_health():
+    """Check circuit breaker status (used by Celery and other services).
+
+    Returns a single dict with status/details.
+    """
+    try:
+        circuit_breaker_status = {"status": "pass", "breakers": {}}
+
+        breakers = current_app.config.get("CIRCUIT_BREAKERS", {})
+
+        for breaker_name, breaker_state in breakers.items():
+            is_open = breaker_state.get("is_open", False)
+            failure_count = breaker_state.get("failure_count", 0)
+            last_failure = breaker_state.get("last_failure_time")
+            reset_timeout = breaker_state.get("reset_timeout_seconds", 60)
+
+            circuit_breaker_status["breakers"][breaker_name] = {
+                "state": "open" if is_open else "closed",
+                "failure_count": failure_count,
+                "last_failure": last_failure,
+                "reset_timeout_seconds": reset_timeout,
+            }
+
+            if is_open:
+                circuit_breaker_status["status"] = "warn"
+
+        open_breakers = sum(
+            1
+            for b in circuit_breaker_status["breakers"].values()
+            if b["state"] == "open"
+        )
+        circuit_breaker_status["open_count"] = open_breakers
+        circuit_breaker_status["total_count"] = len(circuit_breaker_status["breakers"])
+
+        if open_breakers > 0:
+            circuit_breaker_status["message"] = (
+                f"{open_breakers} circuit breaker(s) open"
+            )
+
+        return circuit_breaker_status
+
+    except Exception as e:
+        return {
+            "status": "unknown",
+            "message": f"Could not check circuit breakers: {str(e)}",
+        }
+
+
+def _check_disk_health(aws_region):
+    """Check Canadian data residency, SSO, WORM storage, and Multi-AZ configuration.
+
+    Returns a dict with keys: canadian_residency, sso, worm_storage, multi_az.
+    """
+    result = {}
+
+    # Canadian Data Residency Check
+    if aws_region == REQUIRED_REGION:
+        result["canadian_residency"] = {
+            "status": "pass",
+            "region": aws_region,
+            "location": "Montreal, Quebec, Canada",
+        }
+    else:
+        result["canadian_residency"] = {
+            "status": "fail",
+            "region": aws_region,
+            "required": REQUIRED_REGION,
+            "message": "Data residency violation - must use ca-central-1",
+        }
+
+    # SSO Configuration Check
+    sso_enabled = current_app.config.get("ENABLE_SSO", False)
+    result["sso"] = {
+        "status": "pass" if sso_enabled else "info",
+        "enabled": sso_enabled,
+        "providers": current_app.config.get("SSO_PROVIDERS", []),
+    }
+
+    # WORM Storage Check
+    worm_enabled = current_app.config.get("ENABLE_WORM_STORAGE", False)
+    result["worm_storage"] = {
+        "status": "pass" if worm_enabled else "info",
+        "enabled": worm_enabled,
+        "retention_years": 7 if worm_enabled else None,
+    }
+
+    # Multi-AZ Check
+    multi_az = current_app.config.get("ENABLE_MULTI_AZ", False)
+    result["multi_az"] = {
+        "status": "pass" if multi_az else "info",
+        "enabled": multi_az,
+        "availability_zones": (
+            ["ca-central-1a", "ca-central-1b", "ca-central-1d"] if multi_az else []
+        ),
+    }
+
+    return result
+
+
+def _check_memory_health():
+    """Check encryption service configuration.
+
+    Returns a single dict with status/details.
+    """
+    encryption_key = os.getenv("ENCRYPTION_KEY")
+    encryption_key_b64 = os.getenv("ENCRYPTION_KEY_B64")
+
+    if encryption_key or encryption_key_b64:
+        return {
+            "status": "pass",
+            "configured": True,
+            "key_source": (
+                "ENCRYPTION_KEY_B64" if encryption_key_b64 else "ENCRYPTION_KEY"
+            ),
+        }
+    else:
+        return {
+            "status": "fail",
+            "configured": False,
+            "message": "No encryption key configured",
+        }
+
+
+def _derive_overall_status(health_status):
+    """Derive the overall health status from individual check results.
+
+    Replicates the original status-setting logic:
+    - database/canadian_residency/s3_bucket/aws_s3_service/encryption fail -> unhealthy
+    - connection_pool/sqlalchemy_pool warn/critical -> degraded
+    - circuit_breakers open -> degraded
+    - redis fail -> degraded
+    - qbo_api fail -> degraded
+    """
+    checks = health_status.get("checks", {})
+    status = "healthy"
+
+    # Any "fail" in core checks -> unhealthy
+    for key in ("database", "canadian_residency", "s3_bucket", "aws_s3_service", "encryption"):
+        check = checks.get(key)
+        if check and check.get("status") == "fail":
+            return "unhealthy"
+
+    # Connection pool critical or warn -> degraded
+    for key in ("connection_pool", "sqlalchemy_pool"):
+        check = checks.get(key)
+        if check and check.get("status") in ("warn", "critical"):
+            status = "degraded"
+
+    # Circuit breakers open -> degraded
+    cb = checks.get("circuit_breakers")
+    if cb and cb.get("open_count", 0) > 0:
+        status = "degraded"
+
+    # Redis failure -> degraded
+    redis_check = checks.get("redis")
+    if redis_check and redis_check.get("status") == "fail":
+        status = "degraded"
+
+    # QBO API failure -> degraded
+    qbo_check = checks.get("qbo_api")
+    if qbo_check and qbo_check.get("status") == "fail":
+        status = "degraded"
+
+    return status
+
+
+@health_bp.route("/api/health/detailed", methods=["GET"])
+@limiter.limit(DETAILED_RATE_LIMIT)
+@require_admin_auth
+def detailed_health_check():
+    """
+    Detailed health check with full compliance verification.
+    Used for enterprise deployment validation.
+    FIX CRIT-05: Now requires admin authentication.
+    FIX HIGH-03: Rate limited.
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "checks": {},
+    }
+
+    aws_region = current_app.config.get("AWS_REGION", "not_configured")
+
+    # 1. Database health (connectivity, connection pool, SQLAlchemy pool)
+    db_checks = _check_database_health()
+    health_status["checks"]["database"] = db_checks["database"]
+    if db_checks["connection_pool"] is not None:
+        health_status["checks"]["connection_pool"] = db_checks["connection_pool"]
+    if db_checks["sqlalchemy_pool"] is not None:
+        health_status["checks"]["sqlalchemy_pool"] = db_checks["sqlalchemy_pool"]
+
+    # 2. Infrastructure checks (residency, SSO, WORM, Multi-AZ)
+    disk_checks = _check_disk_health(aws_region)
+    health_status["checks"].update(disk_checks)
+
+    # 3. S3 and external API checks
+    s3_checks = _check_s3_health(aws_region)
+    health_status["checks"].update(s3_checks)
+
+    # 4. Redis cache health
+    health_status["checks"]["redis"] = _check_redis_health()
+
+    # 5. Circuit breaker / Celery health
+    health_status["checks"]["circuit_breakers"] = _check_celery_health()
+
+    # 6. Encryption / memory health
+    health_status["checks"]["encryption"] = _check_memory_health()
+
+    # Derive overall status from all checks
+    health_status["status"] = _derive_overall_status(health_status)
 
     status_code = 200 if health_status["status"] in ("healthy", "degraded") else 503
     return jsonify(health_status), status_code
@@ -521,8 +608,6 @@ def compliance_check():
     FIX CRIT-05: Now requires admin authentication.
     FIX HIGH-03: Rate limited.
     """
-    from datetime import datetime
-
     compliance = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "data_residency": {

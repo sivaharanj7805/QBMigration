@@ -21,6 +21,10 @@ import os
 import sys
 from typing import Optional
 
+
+def _get_env():
+    return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
+
 # ============================================================================
 # LOGGING LEVELS BY ENVIRONMENT
 # ============================================================================
@@ -58,7 +62,7 @@ def configure_logging(
         backup_count: Number of backup files to keep
         json_format: Use JSON format for logs (for log aggregation)
     """
-    env = environment or os.getenv("FLASK_ENV", os.getenv("ENVIRONMENT", "development"))
+    env = environment or _get_env()
     level = LOGGING_LEVELS.get(env, logging.INFO)
 
     # Choose format based on environment

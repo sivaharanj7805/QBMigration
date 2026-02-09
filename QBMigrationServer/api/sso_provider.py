@@ -13,6 +13,7 @@ FIX 100/100: Implements proper SAML signature validation using python3-saml.
 
 import base64
 import datetime
+import hmac
 import logging
 import os
 import secrets
@@ -23,7 +24,10 @@ from typing import Any, Dict, Optional
 
 import defusedxml.ElementTree as SafeET
 from flask import Blueprint, current_app, jsonify, redirect, request, session
-from flask_login import login_required
+from flask_login import current_user, login_required
+
+from utils.auth import admin_required
+from utils.pii_redaction import hash_email
 
 # SAML signature validation - required for production
 try:
@@ -44,31 +48,39 @@ sso_bp = Blueprint("sso", __name__, url_prefix="/api/sso")
 # =============================================================================
 
 
-def validate_relay_state(relay_state: str) -> str:  # noqa: C901
+def _check_relay_format(relay_state: str) -> str:
     """
-    CRITICAL SECURITY FIX: Validate relay_state to prevent open redirect attacks.
-
-    Only allows:
-    1. Relative paths starting with /
-    2. Explicitly whitelisted domains from ALLOWED_RELAY_DOMAINS
+    SECURITY: Sanitize relay_state format -- strip whitespace and reject
+    empty/whitespace-only values.
 
     Args:
-        relay_state: The redirect URL from SSO flow
+        relay_state: Raw relay_state string
 
     Returns:
-        str: Safe redirect path (defaults to '/' if invalid)
+        Stripped relay_state, or "/" if empty/None
     """
     if not relay_state:
         return "/"
 
-    # Strip whitespace
     relay_state = relay_state.strip()
-
-    # SECURITY: Reject empty or whitespace-only values
     if not relay_state:
         return "/"
 
-    # SECURITY: Check for dangerous URL schemes
+    return relay_state
+
+
+def _sanitize_relay_state(relay_state: str) -> str:
+    """
+    SECURITY: Check for dangerous URL schemes, protocol-relative URLs,
+    and encoded newlines in relay_state.
+
+    Args:
+        relay_state: The relay_state after format checking
+
+    Returns:
+        The relay_state if it passes all checks, or "/" if blocked
+    """
+    # Check for dangerous URL schemes
     dangerous_schemes = ["javascript:", "data:", "vbscript:", "file:"]
     lower_state = relay_state.lower().strip()
     for scheme in dangerous_schemes:
@@ -76,14 +88,14 @@ def validate_relay_state(relay_state: str) -> str:  # noqa: C901
             logger.warning(f"SSO open redirect attempt blocked: {relay_state[:50]}")
             return "/"
 
-    # SECURITY: Check for protocol-relative URLs (//evil.com)
+    # Check for protocol-relative URLs (//evil.com)
     if relay_state.startswith("//"):
         logger.warning(
             f"SSO open redirect attempt blocked (protocol-relative): {relay_state[:50]}"
         )
         return "/"
 
-    # CASE 1: Relative path (safe - starts with / but not //)
+    # Relative path (safe - starts with / but not //)
     if relay_state.startswith("/") and not relay_state.startswith("//"):
         # Additional check: no double-encoding or newlines
         if "%0" in relay_state.lower() or "\n" in relay_state or "\r" in relay_state:
@@ -93,7 +105,22 @@ def validate_relay_state(relay_state: str) -> str:  # noqa: C901
             return "/"
         return relay_state
 
-    # CASE 2: Absolute URL - must be in whitelist
+    # Not a relative path -- caller must validate as absolute URL
+    return relay_state
+
+
+def _validate_relay_url(relay_state: str) -> str:
+    """
+    Validate an absolute URL relay_state against the domain whitelist.
+    Only HTTPS is allowed in production. The host must match an allowed domain
+    exactly or be a subdomain of one.
+
+    Args:
+        relay_state: An absolute URL string (must have scheme and netloc)
+
+    Returns:
+        The relay_state if allowed, or "/" if blocked
+    """
     try:
         parsed = urllib.parse.urlparse(relay_state)
 
@@ -103,8 +130,6 @@ def validate_relay_state(relay_state: str) -> str:  # noqa: C901
             return "/"
 
         # Only allow HTTPS in production
-        import os
-
         if os.getenv("FLASK_ENV") == "production" and parsed.scheme != "https":
             logger.warning(f"SSO non-HTTPS relay_state blocked: {relay_state[:50]}")
             return "/"
@@ -156,6 +181,36 @@ def validate_relay_state(relay_state: str) -> str:  # noqa: C901
     except Exception as e:
         logger.warning(f"SSO relay_state validation error: {e}")
         return "/"
+
+
+def validate_relay_state(relay_state: str) -> str:
+    """
+    CRITICAL SECURITY FIX: Validate relay_state to prevent open redirect attacks.
+
+    Only allows:
+    1. Relative paths starting with /
+    2. Explicitly whitelisted domains from ALLOWED_RELAY_DOMAINS
+
+    Args:
+        relay_state: The redirect URL from SSO flow
+
+    Returns:
+        str: Safe redirect path (defaults to '/' if invalid)
+    """
+    relay_state = _check_relay_format(relay_state)
+    if relay_state == "/":
+        return "/"
+
+    sanitized = _sanitize_relay_state(relay_state)
+    if sanitized == "/":
+        return "/"
+
+    # If it's a relative path, _sanitize_relay_state already approved it
+    if sanitized.startswith("/"):
+        return sanitized
+
+    # Absolute URL -- validate against whitelist
+    return _validate_relay_url(sanitized)
 
 
 class SSOProvider:
@@ -432,6 +487,132 @@ def _get_saml_settings(provider: "SSOProvider") -> Dict[str, Any]:
     }
 
 
+def _parse_saml_response(saml_response, org_id, provider):
+    """
+    Parse and validate a SAML response, returning an sso_user dict on success.
+
+    FIX 100/100: Implements proper SAML signature validation using python3-saml.
+    SECURITY: Default-deny. Only skips validation if explicitly opted out AND not in production.
+
+    Args:
+        saml_response: The Base64-encoded SAML response from the IdP
+        org_id: The organization ID from the SSO session
+        provider: The SSOProvider instance for this org
+
+    Returns:
+        Tuple of (sso_user_dict, error_response).
+        On success error_response is None; on failure sso_user_dict is None.
+    """
+    if SAML_AVAILABLE and provider.certificate:
+        # Use python3-saml for proper validation
+        req = _prepare_saml_request(provider)
+        settings = _get_saml_settings(provider)
+
+        try:
+            auth = OneLogin_Saml2_Auth(req, settings)
+            auth.process_response()
+            errors = auth.get_errors()
+
+            if errors:
+                error_reason = auth.get_last_error_reason()
+                logger.error(
+                    f"SAML validation failed for org '{org_id}': {errors} - {error_reason}"
+                )
+                return None, (
+                    jsonify(
+                        {"error": "SAML validation failed", "details": str(errors)}
+                    ),
+                    401,
+                )
+
+            if not auth.is_authenticated():
+                logger.warning(f"SAML authentication failed for org '{org_id}'")
+                return None, (jsonify({"error": "Authentication failed"}), 401)
+
+            # Extract validated user attributes
+            attributes = auth.get_attributes()
+            name_id = auth.get_nameid()
+            session_index = auth.get_session_index()
+
+            sso_user = {
+                "org_id": org_id,
+                "provider": provider.provider_type,
+                "email": name_id,
+                "attributes": attributes,
+                "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
+                "session_index": session_index or secrets.token_urlsafe(16),
+            }
+
+            logger.info(
+                f"SAML authentication successful for org '{org_id}', user: {hash_email(name_id) if name_id else 'unknown'}"
+            )
+            return sso_user, None
+
+        except OneLogin_Saml2_Error as e:
+            logger.error(f"SAML processing error for org '{org_id}': {str(e)}")
+            return None, (jsonify({"error": "SAML processing failed"}), 401)
+    else:
+        # Fallback for development/testing without certificate
+        # SECURITY: Default-deny. Only skip validation if explicitly opted out
+        # AND not in production.
+        if not (os.getenv("SKIP_SAML_VALIDATION") == "true" and os.getenv("FLASK_ENV") != "production"):
+            logger.error(
+                "SAML validation unavailable - certificate required"
+            )
+            return None, (jsonify({"error": "SAML not properly configured"}), 500)
+
+        logger.warning(
+            f"SAML validation skipped for org '{org_id}' (SKIP_SAML_VALIDATION=true)"
+        )
+
+        # Basic XML parsing for development only
+        try:
+            decoded = base64.b64decode(saml_response)
+            # Parse XML to extract NameID (development only)
+            root = SafeET.fromstring(decoded)  # nosec B314
+            ns = {"saml": "urn:oasis:names:tc:SAML:2.0:assertion"}
+            name_id_elem = root.find(".//saml:NameID", ns)
+            name_id = name_id_elem.text if name_id_elem is not None else "unknown"
+        except Exception:
+            name_id = "dev-user"
+
+        sso_user = {
+            "org_id": org_id,
+            "provider": provider.provider_type,
+            "email": name_id,
+            "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
+            "session_index": secrets.token_urlsafe(16),
+            "_dev_mode": True,  # Flag for audit trail
+        }
+        return sso_user, None
+
+
+def _establish_sso_session(sso_user):
+    """
+    SECURITY FIX (C-06): Regenerate session to prevent session fixation.
+    Saves the relay_state, clears the old session, stores sso_user data,
+    and returns the safe redirect URL.
+
+    Args:
+        sso_user: The authenticated SSO user dict
+
+    Returns:
+        A safe redirect URL string (validated against relay_state whitelist)
+    """
+    saved_relay_state = session.get("sso_relay_state", "/")
+    sso_data = sso_user
+    old_keys = list(session.keys())
+    for key in old_keys:
+        session.pop(key, None)
+    session["sso_user"] = sso_data
+    session.modified = True
+
+    logger.info(f"SSO authentication successful for org '{sso_user.get('org_id')}'")
+
+    # SECURITY FIX: Validate stored relay_state before redirect
+    return validate_relay_state(saved_relay_state)
+
+
 @sso_bp.route("/acs", methods=["POST"])
 def assertion_consumer_service():
     """
@@ -463,93 +644,13 @@ def assertion_consumer_service():
         if not provider:
             return jsonify({"error": "Provider not found"}), 400
 
-        # FIX 100/100: Proper SAML signature validation
-        if SAML_AVAILABLE and provider.certificate:
-            # Use python3-saml for proper validation
-            req = _prepare_saml_request(provider)
-            settings = _get_saml_settings(provider)
+        # Parse and validate SAML response
+        sso_user, parse_error = _parse_saml_response(saml_response, org_id, provider)
+        if parse_error:
+            return parse_error
 
-            try:
-                auth = OneLogin_Saml2_Auth(req, settings)
-                auth.process_response()
-                errors = auth.get_errors()
-
-                if errors:
-                    error_reason = auth.get_last_error_reason()
-                    logger.error(
-                        f"SAML validation failed for org '{org_id}': {errors} - {error_reason}"
-                    )
-                    return (
-                        jsonify(
-                            {"error": "SAML validation failed", "details": str(errors)}
-                        ),
-                        401,
-                    )
-
-                if not auth.is_authenticated():
-                    logger.warning(f"SAML authentication failed for org '{org_id}'")
-                    return jsonify({"error": "Authentication failed"}), 401
-
-                # Extract validated user attributes
-                attributes = auth.get_attributes()
-                name_id = auth.get_nameid()
-                session_index = auth.get_session_index()
-
-                sso_user = {
-                    "org_id": org_id,
-                    "provider": provider.provider_type,
-                    "email": name_id,
-                    "attributes": attributes,
-                    "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
-                    "session_index": session_index or secrets.token_urlsafe(16),
-                }
-
-                logger.info(
-                    f"SAML authentication successful for org '{org_id}', user: {name_id}"
-                )
-
-            except OneLogin_Saml2_Error as e:
-                logger.error(f"SAML processing error for org '{org_id}': {str(e)}")
-                return jsonify({"error": "SAML processing failed"}), 401
-        else:
-            # Fallback for development/testing without certificate
-            # SECURITY: Only allowed in non-production environments
-            if os.getenv("FLASK_ENV") == "production":
-                logger.error(
-                    "SAML validation unavailable in production - certificate required"
-                )
-                return jsonify({"error": "SAML not properly configured"}), 500
-
-            logger.warning(
-                f"SAML validation skipped for org '{org_id}' (development mode)"
-            )
-
-            # Basic XML parsing for development only
-            try:
-                decoded = base64.b64decode(saml_response)
-                # Parse XML to extract NameID (development only)
-                root = SafeET.fromstring(decoded)  # nosec B314
-                ns = {"saml": "urn:oasis:names:tc:SAML:2.0:assertion"}
-                name_id_elem = root.find(".//saml:NameID", ns)
-                name_id = name_id_elem.text if name_id_elem is not None else "unknown"
-            except Exception:
-                name_id = "dev-user"
-
-            sso_user = {
-                "org_id": org_id,
-                "provider": provider.provider_type,
-                "email": name_id,
-                "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
-                "session_index": secrets.token_urlsafe(16),
-                "_dev_mode": True,  # Flag for audit trail
-            }
-
-        session["sso_user"] = sso_user
-
-        logger.info(f"SSO authentication successful for org '{org_id}'")
-
-        # SECURITY FIX: Validate stored relay_state before redirect
-        safe_redirect = validate_relay_state(session.get("sso_relay_state", "/"))
+        # Establish session and redirect
+        safe_redirect = _establish_sso_session(sso_user)
         return redirect(safe_redirect)
 
     except Exception as e:
@@ -573,9 +674,9 @@ def oauth_callback():
     if not code:
         return jsonify({"error": "Missing authorization code"}), 400
 
-    # Validate state
+    # Validate state (H-26: use constant-time comparison to prevent timing attacks)
     stored_state = session.get("sso_state")
-    if state != stored_state:
+    if not hmac.compare_digest(str(state or ''), str(stored_state or '')):
         logger.warning("SSO state mismatch - possible CSRF")
         return jsonify({"error": "Invalid state"}), 400
 
@@ -595,12 +696,19 @@ def oauth_callback():
             "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
         }
 
-        session["sso_user"] = sso_user
+        # SECURITY FIX (C-06): Regenerate session to prevent session fixation
+        saved_relay_state = session.get("sso_relay_state", "/")
+        sso_data = sso_user
+        old_keys = list(session.keys())
+        for key in old_keys:
+            session.pop(key, None)
+        session["sso_user"] = sso_data
+        session.modified = True
 
         logger.info(f"OAuth callback successful for org '{org_id}'")
 
         # SECURITY FIX: Validate stored relay_state before redirect
-        safe_redirect = validate_relay_state(session.get("sso_relay_state", "/"))
+        safe_redirect = validate_relay_state(saved_relay_state)
         return redirect(safe_redirect)
 
     except Exception as e:
@@ -662,6 +770,7 @@ def sp_metadata():
 
 @sso_bp.route("/configure", methods=["POST"])
 @login_required
+@admin_required
 def configure_provider():
     """
     Configure SSO provider for an organization (admin endpoint)

@@ -4,6 +4,7 @@ Provides endpoints for viewing and restoring archived (completed) migrations.
 """
 
 import logging
+import re
 
 from api.auth import require_auth
 from extensions import limiter
@@ -13,6 +14,11 @@ from models.migration import Migration
 
 vault_bp = Blueprint("vault", __name__, url_prefix="/api/vault")
 logger = logging.getLogger(__name__)
+
+# UUID validation pattern for migration IDs
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
 
 
 def _get_user_id():
@@ -112,7 +118,7 @@ def list_vault():
         )
 
     except Exception as e:
-        logger.exception(f"Failed to list vault for user {user_id}: {e}")
+        logger.exception(f"Failed to list vault for user {user_id}")
         return (
             jsonify(
                 {
@@ -136,6 +142,9 @@ def list_vault():
 @require_auth
 def restore_vault_item(migration_id):
     """Restore an archived migration (mark it for re-processing)."""
+    if not UUID_PATTERN.match(migration_id):
+        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
+
     user_id = _get_user_id()
 
     try:
@@ -181,7 +190,7 @@ def restore_vault_item(migration_id):
 
     except Exception as e:
         logger.exception(
-            f"Failed to restore vault item {migration_id} for user {user_id}: {e}"
+            f"Failed to restore vault item {migration_id} for user {user_id}"
         )
         db.session.rollback()
         return jsonify({"success": False, "error": "Failed to initiate restore"}), 500

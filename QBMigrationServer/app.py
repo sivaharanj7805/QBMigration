@@ -1,7 +1,9 @@
 import logging
 import os
+import re
 
 from dotenv import load_dotenv
+from utils.env_helper import get_env, is_production, is_testing
 
 load_dotenv()
 
@@ -112,7 +114,7 @@ def setup_logging(app):
     app.logger.info("=" * 80)
     app.logger.info("QB MIGRATION SERVER STARTING")
     app.logger.info("=" * 80)
-    app.logger.info(f'Environment: {os.getenv("FLASK_ENV", "development")}')
+    app.logger.info(f'Environment: {get_env()}')
     app.logger.info(f'Debug Mode: {app.config.get("DEBUG", False)}')
     # FIX: Never log database URI - may contain credentials
     db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "unknown")
@@ -386,8 +388,29 @@ def auto_migrate_database(app):
                 ("verification_results", "TEXT"),
             ]
             # PRODUCTION FIX: Track migration errors instead of silently swallowing them
+            # H-10 FIX: Whitelist column names to prevent SQL injection via f-string
+            _VALID_COLUMN_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+            _VALID_TYPE_RE = re.compile(
+                r"^[A-Z][A-Z0-9_()',. ]{0,80}$"
+            )
             migration_errors = []
             for col_name, col_type in migration_columns:
+                if not _VALID_COLUMN_RE.match(col_name):
+                    migration_errors.append(
+                        f"{col_name}: rejected by column name whitelist"
+                    )
+                    app.logger.error(
+                        f"Schema migration blocked: invalid column name '{col_name}'"
+                    )
+                    continue
+                if not _VALID_TYPE_RE.match(col_type):
+                    migration_errors.append(
+                        f"{col_name}: rejected by type whitelist"
+                    )
+                    app.logger.error(
+                        f"Schema migration blocked: invalid type '{col_type}' for column '{col_name}'"
+                    )
+                    continue
                 try:
                     conn.execute(
                         text(
@@ -450,8 +473,10 @@ def auto_migrate_database(app):
                 " migration_credit tables)"
             )
     except Exception as e:
-        # Log but don't crash - columns might already exist or other non-fatal issue
-        app.logger.warning(f"Schema migration note: {str(e)}")
+        # H-11 FIX: Log as error, re-raise in production to prevent silent data loss
+        app.logger.error(f"Schema migration failed: {str(e)}", exc_info=True)
+        if is_production():
+            raise
 
 
 def create_app(config_name="development"):  # noqa: C901
@@ -639,7 +664,7 @@ def create_app(config_name="development"):  # noqa: C901
 
     # SECURITY FIX: Enable CORS with origins from environment variable
     # FIX: In production, require explicit ALLOWED_ORIGINS - no localhost defaults
-    if os.getenv("FLASK_ENV", "development") == "production":
+    if is_production():
         allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").split(",")
         if not allowed_origins_env or allowed_origins_env == [""]:
             raise ValueError(
@@ -686,7 +711,7 @@ def create_app(config_name="development"):  # noqa: C901
 
     # CRITICAL SECURITY FIX: Block localhost in production CORS origins
     # This is a security risk - localhost should never be allowed in production
-    if os.getenv("FLASK_ENV", "development") == "production" and "localhost" in str(
+    if is_production() and "localhost" in str(
         allowed_origins
     ):
         raise ValueError(
@@ -809,7 +834,7 @@ def create_app(config_name="development"):  # noqa: C901
 
         # Strict Transport Security - Forces HTTPS for 1 year, includes subdomains
         # Only set in production to avoid development issues
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )
@@ -820,8 +845,9 @@ def create_app(config_name="development"):  # noqa: C901
         # Prevent MIME type sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
 
-        # XSS Protection (legacy but still useful for older browsers)
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # XSS Protection - set to 0 to disable (1; mode=block is deprecated
+        # and can introduce vulnerabilities in legacy browsers)
+        response.headers["X-XSS-Protection"] = "0"
 
         # Referrer Policy - Don't leak URLs to third parties
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -1026,55 +1052,13 @@ def create_app(config_name="development"):  # noqa: C901
     # Root endpoint
     @app.route("/")
     def index():
-        """Root endpoint - basic server info"""
+        """Root endpoint - minimal server info only"""
         return (
             jsonify(
                 {
-                    "message": "ForensicBridge Migration Server",
-                    "status": "running",
+                    "name": "ForensicBridge Migration Server",
                     "version": "4.3.0",
-                    "environment": os.getenv("FLASK_ENV", "development"),
-                    "features": {
-                        "aws_enabled": bool(app.config.get("AWS_S3_BUCKET")),
-                        "rate_limiting": app.config.get("RATELIMIT_ENABLED", False),
-                        "auto_cleanup": app.config.get("AUTO_CLEANUP_ENABLED", False),
-                    },
-                    "endpoints": {
-                        "health": "/health",
-                        "legal": {
-                            "eula": "/legal/eula",
-                            "privacy": "/legal/privacy",
-                            "security": "/legal/security",
-                        },
-                        "auth": {
-                            "register": "/api/auth/register",
-                            "login": "/api/auth/login",
-                            "logout": "/api/auth/logout",
-                            "me": "/api/auth/me",
-                            "verify": "/api/auth/verify/<token>",
-                        },
-                        "qbo": {
-                            "connect": "/api/qbo/connect",
-                            "callback": "/api/qbo/callback",
-                            "disconnect": "/api/qbo/disconnect",
-                            "status": "/api/qbo/status",
-                        },
-                        "upload": "/api/upload",
-                        "migrations": {
-                            "list": "/api/migrations",
-                            "get": "/api/migrations/<id>",
-                            "status": "/api/migrations/<id>/status",
-                            "start": "/api/migrations/<id>/start",
-                            "cancel": "/api/migrations/<id>/cancel",
-                            "retry": "/api/migrations/<id>/retry",
-                        },
-                        "webhooks": {
-                            "started": "/api/webhooks/migration-started",
-                            "progress": "/api/webhooks/migration-progress",
-                            "completed": "/api/webhooks/migration-completed",
-                            "failed": "/api/webhooks/migration-failed",
-                        },
-                    },
+                    "status": "running",
                 }
             ),
             200,
@@ -1259,7 +1243,7 @@ def create_app(config_name="development"):  # noqa: C901
     @app.before_request
     def redirect_to_https():
         """Force HTTPS in production (exempt health check endpoints to avoid redirect loops)"""
-        if os.getenv("FLASK_ENV", "development") == "production":
+        if is_production():
             # Skip HTTPS redirect for health check endpoints used by load balancers/proxies
             if request.path in ("/health", "/api/health", "/api/health/detailed"):
                 return None
@@ -1464,8 +1448,8 @@ def create_app(config_name="development"):  # noqa: C901
 
 
 # Create the app instance (only when not imported by test runner)
-if os.getenv("FLASK_ENV") != "testing":
-    app = create_app(os.getenv("FLASK_ENV", "development"))
+if not is_testing():
+    app = create_app(get_env())
 else:
     app = None
 
@@ -1506,7 +1490,7 @@ if __name__ == "__main__":
         logger.info("")
 
     try:
-        is_debug = os.environ.get("FLASK_ENV") != "production"
+        is_debug = not is_production()
         app.run(host=host, port=5000, debug=is_debug)  # nosec B201
     except KeyboardInterrupt:
         logger.info("\n\nServer stopped by user")

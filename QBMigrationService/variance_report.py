@@ -332,15 +332,16 @@ class VarianceReportGenerator:
         account_rows = ""
         for acct in report.get("account_details", []):
             severity_class = acct["severity"].lower()
+            # FIX: Values are already strings from _decimal_to_str(), use directly
             variance_display = (
-                f"${acct['variance']:,.2f}" if acct["has_variance"] else "-"
+                f"${acct['variance']}" if acct["has_variance"] else "-"
             )
             account_rows += f"""
             <tr class="severity-{severity_class}">
                 <td>{acct['account_name']}</td>
                 <td>{acct['account_type']}</td>
-                <td class="amount">${acct['source_balance']:,.2f}</td>
-                <td class="amount">${acct['destination_balance']:,.2f}</td>
+                <td class="amount">${acct['source_balance']}</td>
+                <td class="amount">${acct['destination_balance']}</td>
                 <td class="amount variance">{variance_display}</td>
             </tr>
             """
@@ -349,12 +350,13 @@ class VarianceReportGenerator:
         pl_rows = ""
         for pl in report.get("profit_loss", []):
             status = "✓" if not pl["has_variance"] else "⚠"
+            # FIX: Values are strings from _decimal_to_str(), use directly
             pl_rows += f"""
             <tr>
                 <td>FY {pl['fiscal_year']}</td>
-                <td class="amount">${pl['source_net_income']:,.2f}</td>
-                <td class="amount">${pl['destination_net_income']:,.2f}</td>
-                <td class="amount">${pl['variance']:,.2f}</td>
+                <td class="amount">${pl['source_net_income']}</td>
+                <td class="amount">${pl['destination_net_income']}</td>
+                <td class="amount">${pl['variance']}</td>
                 <td>{status}</td>
             </tr>
             """

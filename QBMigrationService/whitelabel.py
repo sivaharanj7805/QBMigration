@@ -105,8 +105,14 @@ class LicenseManager:
         },
     }
 
-    def __init__(self, secret_key: str = "forensicbridge-license-key"):
-        self.secret_key = secret_key
+    def __init__(self, secret_key: Optional[str] = None):
+        # SECURITY FIX: No hardcoded default. Require secret from env or caller.
+        self.secret_key = secret_key or os.environ.get("LICENSE_SIGNING_KEY")
+        if not self.secret_key:
+            raise ValueError(
+                "License signing key required. Set LICENSE_SIGNING_KEY env var "
+                "or pass secret_key parameter."
+            )
 
     def generate_license_key(
         self, company_name: str, tier: str, valid_days: int = 365
@@ -126,11 +132,12 @@ class LicenseManager:
             "features": self.LICENSE_TIERS[tier],
         }
 
-        # Create signature
+        # Create signature using HMAC (not hash concatenation)
+        import hmac
         data_str = json.dumps(license_data, sort_keys=True)
-        signature = hashlib.sha256((data_str + self.secret_key).encode()).hexdigest()[
-            :16
-        ]
+        signature = hmac.new(
+            self.secret_key.encode(), data_str.encode(), hashlib.sha256
+        ).hexdigest()
 
         license_data["signature"] = signature
 
@@ -161,14 +168,15 @@ class LicenseManager:
             license_json = base64.b64decode(license_key).decode()
             license_data = json.loads(license_json)
 
-            # Verify signature
+            # Verify signature using HMAC with constant-time comparison
+            import hmac as _hmac
             stored_sig = license_data.pop("signature")
             data_str = json.dumps(license_data, sort_keys=True)
-            expected_sig = hashlib.sha256(
-                (data_str + self.secret_key).encode()
-            ).hexdigest()[:16]
+            expected_sig = _hmac.new(
+                self.secret_key.encode(), data_str.encode(), hashlib.sha256
+            ).hexdigest()
 
-            if stored_sig != expected_sig:
+            if not _hmac.compare_digest(stored_sig, expected_sig):
                 return {"valid": False, "error": "Invalid signature"}
 
             license_data["signature"] = stored_sig

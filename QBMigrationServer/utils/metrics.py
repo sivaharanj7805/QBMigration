@@ -30,6 +30,8 @@ import logging
 import os
 import time
 
+from utils.env_helper import get_env
+
 logger = logging.getLogger(__name__)
 
 # Metrics collection enabled flag
@@ -319,7 +321,7 @@ def init_metrics(app):
     APP_INFO.info(
         {
             "version": "4.3.0",
-            "environment": os.getenv("FLASK_ENV", "development"),
+            "environment": get_env(),
             "aws_region": os.getenv("AWS_REGION", "ca-central-1"),
         }
     )
@@ -333,7 +335,14 @@ def init_metrics(app):
     @app.route("/metrics")
     def metrics():
         """Prometheus metrics endpoint."""
-        from flask import Response
+        from flask import Response, request
+
+        # FIX HIGH: Authenticate metrics endpoint if METRICS_AUTH_TOKEN is set
+        metrics_auth_token = os.getenv("METRICS_AUTH_TOKEN")
+        if metrics_auth_token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header != metrics_auth_token:
+                return Response("Unauthorized", status=401, mimetype="text/plain")
 
         # Collect DB metrics before generating output
         collect_db_metrics(app)

@@ -13,6 +13,10 @@ from functools import wraps
 
 from flask import Flask, jsonify, render_template_string, request
 
+
+def _get_env():
+    return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
+
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -24,7 +28,7 @@ ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "./archives")
 # This prevents accidental production deployments with weak credentials
 _api_key = os.environ.get("ARCHIVE_API_KEY", "")
 if not _api_key or _api_key == "dev-key-changeme":
-    _is_production = os.environ.get("FLASK_ENV", "development") == "production"
+    _is_production = _get_env() == "production"
     if _is_production:
         raise RuntimeError(
             "CRITICAL: ARCHIVE_API_KEY environment variable must be set to a strong value in production. "

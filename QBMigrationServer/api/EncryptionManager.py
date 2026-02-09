@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import shutil
+import stat
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
@@ -135,6 +137,8 @@ class EncryptionManager:
                     encryption_algorithm=serialization.NoEncryption(),
                 )
             )
+        # Restrict private key file to owner read/write only (0o600)
+        os.chmod(self.private_key_path, stat.S_IRUSR | stat.S_IWUSR)
 
         # Save public key
         with open(self.public_key_path, "wb") as f:
@@ -496,7 +500,7 @@ class EncryptionManager:
             # GCM expects ciphertext + tag concatenated
             ciphertext_with_tag = ciphertext + tag
 
-            plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, None)
+            plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, b"forensicbridge-v1")
 
             return plaintext
 
@@ -560,7 +564,7 @@ class EncryptionManager:
             # Validate JSON
             try:
                 json.loads(plaintext)
-                logger.info("✓ Decryption successful, JSON valid")
+                logger.info("Decryption successful, JSON valid")
             except json.JSONDecodeError as e:
                 logger.warning(f"Decrypted data is not valid JSON: {str(e)}")
 
@@ -596,7 +600,7 @@ class EncryptionManager:
 
             # Encrypt
             aesgcm = AESGCM(aes_key)
-            ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, None)
+            ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, b"forensicbridge-v1")
 
             # Split ciphertext and tag
             ciphertext = ciphertext_with_tag[:-16]
@@ -618,13 +622,16 @@ class EncryptionManager:
 
 # Singleton instance
 _encryption_manager = None
+_encryption_manager_lock = threading.Lock()
 
 
 def get_encryption_manager():
-    """Get or create global encryption manager instance"""
+    """Get or create global encryption manager instance (thread-safe)"""
     global _encryption_manager
     if _encryption_manager is None:
-        _encryption_manager = EncryptionManager()
+        with _encryption_manager_lock:
+            if _encryption_manager is None:
+                _encryption_manager = EncryptionManager()
     return _encryption_manager
 
 

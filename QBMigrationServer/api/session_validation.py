@@ -11,6 +11,7 @@ Security Features:
 """
 
 import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -19,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 from models.database import db
 from models.project import Project
+from utils.pii_redaction import hash_ip
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +130,6 @@ def hash_fingerprint(fingerprint):
     """
     if not fingerprint:
         return None
-    import hmac
 
     from flask import current_app
 
@@ -167,7 +168,7 @@ def validate_session():
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
     device_name = data.get("device_name", "").strip()
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
 
     if not session_id:
         return jsonify({"valid": False, "error": "Session ID is required"}), 400
@@ -257,8 +258,6 @@ def validate_session():
     existing_activations = query.all()
 
     # FIX M-07: Use hmac.compare_digest for constant-time fingerprint comparison
-    import hmac
-
     device_activation = next(
         (
             a
@@ -334,32 +333,27 @@ def validate_session():
     )
 
 
-@session_validation_bp.route("/activate", methods=["POST"])
-def activate_session():  # noqa: C901
-    """
-    Activate a session on a new device.
-    Must be called after validate() confirms the session is valid.
+def _validate_hardware_fingerprint(data):
+    """Validate request data for session activation.
 
-    Request body:
-    {
-        "session_id": "FB-20260127123456-ABCD1234",
-        "device_fingerprint": "hardware-specific-id",
-        "device_name": "John's Workstation" (optional)
-    }
-    """
-    data = request.get_json()
+    Extracts and validates session_id / device_fingerprint, checks rate limits,
+    and verifies the session exists in the database.
 
+    Returns:
+        tuple: (session_id, fingerprint_hash, ip_address, user_agent, device_name, project)
+               on success, or (None, error_response) on failure.
+    """
     if not data:
-        return jsonify({"success": False, "error": "No data provided"}), 400
+        return None, (jsonify({"success": False, "error": "No data provided"}), 400)
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
     device_name = data.get("device_name", "Unknown Device").strip()
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
     user_agent = request.headers.get("User-Agent", "")
 
     if not session_id or not device_fingerprint:
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -373,7 +367,7 @@ def activate_session():  # noqa: C901
 
     # Check rate limit
     if check_rate_limit(session_id, ip_address):
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -389,124 +383,184 @@ def activate_session():  # noqa: C901
         log_validation_attempt(
             session_id, fingerprint_hash, ip_address, "activate", "invalid"
         )
-        return jsonify({"success": False, "error": "Invalid session code"}), 404
+        return None, (jsonify({"success": False, "error": "Invalid session code"}), 404)
 
+    return (session_id, fingerprint_hash, ip_address, user_agent, device_name, project), None
+
+
+def _bind_session(session_id, fingerprint_hash, ip_address, user_agent, device_name):
+    """Bind a device to a session using database-level locking.
+
+    Handles race-condition-safe activation: checks for existing activation,
+    enforces device limits, and creates new activations under row-level locks.
+
+    Returns:
+        tuple: (activation, active_count) on success, or an error response tuple on failure.
+    """
     # RACE CONDITION FIX: Use database-level locking to prevent duplicate activations
-    # This ensures that concurrent requests don't both pass the device limit check
     from models.database import is_postgresql
     from sqlalchemy import text
-    from sqlalchemy.exc import IntegrityError
 
-    try:
-        # Lock existing activations for this session to prevent race conditions
-        # This ensures only one request can check and create at a time
-        # PostgreSQL uses FOR UPDATE, SQLite has implicit database-level locking
-        if is_postgresql():
-            locked_activations = db.session.execute(
-                text("""
-                    SELECT id, device_fingerprint, extraction_count, status
-                    FROM session_activations
-                    WHERE session_id = :session_id
-                    FOR UPDATE
-                """),
-                {"session_id": session_id},
-            ).fetchall()
-        else:
-            locked_activations = db.session.execute(
-                text("""
-                    SELECT id, device_fingerprint, extraction_count, status
-                    FROM session_activations
-                    WHERE session_id = :session_id
-                """),
-                {"session_id": session_id},
-            ).fetchall()
+    # Lock existing activations for this session to prevent race conditions
+    # PostgreSQL uses FOR UPDATE, SQLite has implicit database-level locking
+    if is_postgresql():
+        locked_activations = db.session.execute(
+            text("""
+                SELECT id, device_fingerprint, extraction_count, status
+                FROM session_activations
+                WHERE session_id = :session_id
+                FOR UPDATE
+            """),
+            {"session_id": session_id},
+        ).fetchall()
+    else:
+        locked_activations = db.session.execute(
+            text("""
+                SELECT id, device_fingerprint, extraction_count, status
+                FROM session_activations
+                WHERE session_id = :session_id
+            """),
+            {"session_id": session_id},
+        ).fetchall()
 
-        # Check for existing activation for this device
-        existing = None
-        active_count = 0
-        for row in locked_activations:
-            if row.device_fingerprint == fingerprint_hash:
-                existing = db.session.get(SessionActivation, row.id)
-            if row.status == "active":
-                active_count += 1
+    # Check for existing activation for this device
+    existing = None
+    active_count = 0
+    for row in locked_activations:
+        if hmac.compare_digest(row.device_fingerprint or "", fingerprint_hash or ""):
+            existing = db.session.get(SessionActivation, row.id)
+        if row.status == "active":
+            active_count += 1
 
-        if existing:
-            # Update last used
-            existing.last_used_at = datetime.now(timezone.utc)
-            existing.status = "active"
-            db.session.commit()
-
-            log_validation_attempt(
-                session_id,
-                fingerprint_hash,
-                ip_address,
-                "activate",
-                "success",
-                "Existing activation renewed",
-            )
-
-            return jsonify(
-                {
-                    "success": True,
-                    "message": "Device already activated",
-                    "activation_id": existing.id,
-                    "extractions_used": existing.extraction_count,
-                }
-            )
-
-        # Check device limit (with lock held, this is race-safe)
-        if active_count >= MAX_DEVICES_PER_SESSION:
-            db.session.rollback()  # Release lock
-            log_validation_attempt(
-                session_id,
-                fingerprint_hash,
-                ip_address,
-                "activate",
-                "failed",
-                "Device limit reached",
-            )
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": f"Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session",
-                    }
-                ),
-                403,
-            )
-
-        # Create new activation (still holding lock)
-        activation = SessionActivation(
-            session_id=session_id,
-            device_fingerprint=fingerprint_hash,
-            device_name=device_name[:255] if device_name else "Unknown",
-            ip_address=ip_address,
-            user_agent=user_agent[:500] if user_agent else None,
-            status="active",
-        )
-
-        db.session.add(activation)
+    if existing:
+        # Update last used
+        existing.last_used_at = datetime.now(timezone.utc)
+        existing.status = "active"
         db.session.commit()
 
         log_validation_attempt(
-            session_id, fingerprint_hash, ip_address, "activate", "success"
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "activate",
+            "success",
+            "Existing activation renewed",
         )
 
-        # Update project status
-        if project.status == "pending":
-            project.status = "active"
-            project.updated_at = datetime.now(timezone.utc)
-            db.session.commit()
-
-        return jsonify(
+        return None, jsonify(
             {
                 "success": True,
-                "message": "Device activated successfully",
-                "activation_id": activation.id,
-                "device_number": active_count + 1,
-                "max_devices": MAX_DEVICES_PER_SESSION,
+                "message": "Device already activated",
+                "activation_id": existing.id,
+                "extractions_used": existing.extraction_count,
             }
         )
+
+    # Check device limit (with lock held, this is race-safe)
+    if active_count >= MAX_DEVICES_PER_SESSION:
+        db.session.rollback()  # Release lock
+        log_validation_attempt(
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "activate",
+            "failed",
+            "Device limit reached",
+        )
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Maximum of {MAX_DEVICES_PER_SESSION} devices allowed per session",
+                }
+            ),
+            403,
+        )
+
+    # Create new activation (still holding lock)
+    activation = SessionActivation(
+        session_id=session_id,
+        device_fingerprint=fingerprint_hash,
+        device_name=device_name[:255] if device_name else "Unknown",
+        ip_address=ip_address,
+        user_agent=user_agent[:500] if user_agent else None,
+        status="active",
+    )
+
+    db.session.add(activation)
+    db.session.commit()
+
+    log_validation_attempt(
+        session_id, fingerprint_hash, ip_address, "activate", "success"
+    )
+
+    return (activation, active_count), None
+
+
+def _generate_session_tokens(activation, active_count, project):
+    """Finalize session activation and generate the success response.
+
+    Updates the project status from 'pending' to 'active' if needed,
+    and returns the activation details.
+
+    Returns:
+        Flask JSON response with activation details.
+    """
+    # Update project status
+    if project.status == "pending":
+        project.status = "active"
+        project.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+    return jsonify(
+        {
+            "success": True,
+            "message": "Device activated successfully",
+            "activation_id": activation.id,
+            "device_number": active_count + 1,
+            "max_devices": MAX_DEVICES_PER_SESSION,
+        }
+    )
+
+
+@session_validation_bp.route("/activate", methods=["POST"])
+def activate_session():
+    """
+    Activate a session on a new device.
+    Must be called after validate() confirms the session is valid.
+
+    Request body:
+    {
+        "session_id": "FB-20260127123456-ABCD1234",
+        "device_fingerprint": "hardware-specific-id",
+        "device_name": "John's Workstation" (optional)
+    }
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    data = request.get_json()
+
+    # Validate inputs, rate limit, and look up session
+    validated, error_response = _validate_hardware_fingerprint(data)
+    if error_response is not None:
+        return error_response
+
+    session_id, fingerprint_hash, ip_address, user_agent, device_name, project = validated
+
+    try:
+        # Bind device to session with race-condition-safe locking
+        bind_result, bind_response = _bind_session(
+            session_id, fingerprint_hash, ip_address, user_agent, device_name
+        )
+
+        if bind_response is not None:
+            # Either an existing-activation renewal or a device-limit error
+            return bind_response
+
+        activation, active_count = bind_result
+
+        # Generate final success response and update project status
+        return _generate_session_tokens(activation, active_count, project)
 
     except IntegrityError as e:
         # Unique constraint violation - device was activated by concurrent request
@@ -546,50 +600,23 @@ def activate_session():  # noqa: C901
         )
 
 
-@session_validation_bp.route("/start-extraction", methods=["POST"])
-def start_extraction():
+def _setup_s3_for_extraction(session_id, fingerprint_hash, ip_address):
+    """Validate session and device for extraction, and check all limits.
+
+    Verifies that the session exists, the device is activated, the extraction
+    limit has not been reached, and the project's transaction limit is not exhausted.
+
+    Returns:
+        tuple: (project, activation, total_extractions, transactions_remaining) on
+               success, or (None, error_response) on failure.
     """
-    Called when the extractor starts an extraction.
-    Validates the session and increments the extraction counter.
-
-    Request body:
-    {
-        "session_id": "FB-20260127123456-ABCD1234",
-        "device_fingerprint": "hardware-specific-id",
-        "company_name": "Client Company" (optional, for logging)
-    }
-
-    Returns an extraction_token that must be passed to complete-extraction.
-    """
-    data = request.get_json()
-
-    if not data:
-        return jsonify({"success": False, "error": "No data provided"}), 400
-
-    session_id = data.get("session_id", "").strip()
-    device_fingerprint = data.get("device_fingerprint", "").strip()
-    ip_address = request.remote_addr
-
-    if not session_id or not device_fingerprint:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "Session ID and device fingerprint are required",
-                }
-            ),
-            400,
-        )
-
-    fingerprint_hash = hash_fingerprint(device_fingerprint)
-
     # Verify session and device
     project = Project.query.filter_by(session_id=session_id).first()
     if not project:
         log_validation_attempt(
             session_id, fingerprint_hash, ip_address, "extract", "invalid"
         )
-        return jsonify({"success": False, "error": "Invalid session code"}), 404
+        return None, (jsonify({"success": False, "error": "Invalid session code"}), 404)
 
     # Verify device is activated
     activation = SessionActivation.query.filter_by(
@@ -605,7 +632,7 @@ def start_extraction():
             "failed",
             "Device not activated",
         )
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -632,7 +659,7 @@ def start_extraction():
             "failed",
             "Extraction limit reached",
         )
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -655,7 +682,7 @@ def start_extraction():
             "failed",
             "Transaction limit reached",
         )
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -670,14 +697,28 @@ def start_extraction():
             403,
         )
 
+    return (project, activation, total_extractions, transactions_remaining), None
+
+
+def _generate_extraction_credentials(
+    session_id, fingerprint_hash, ip_address, project, activation,
+    total_extractions, transactions_remaining
+):
+    """Generate an extraction token and update activation tracking.
+
+    Creates a cryptographically secure token for chain-of-custody validation
+    (CRIT-03 FIX), increments the extraction counter, and commits to the database.
+
+    Returns:
+        Flask JSON response with extraction credentials on success,
+        or an error response on failure.
+    """
     # Generate extraction token (used to complete extraction)
     extraction_token = secrets.token_urlsafe(32)
 
     # CRIT-03 FIX: Store token in DB so complete_extraction can validate it.
     # This ensures only the caller who started the extraction can complete it,
     # maintaining forensic chain of custody.
-    import hmac as _hmac
-
     activation.extraction_token = hashlib.sha256(
         extraction_token.encode()
     ).hexdigest()
@@ -720,21 +761,20 @@ def start_extraction():
         return jsonify({"success": False, "error": "Failed to start extraction"}), 500
 
 
-@session_validation_bp.route("/complete-extraction", methods=["POST"])
-def complete_extraction():
+@session_validation_bp.route("/start-extraction", methods=["POST"])
+def start_extraction():
     """
-    Called when extraction completes successfully.
-    Records the transaction count against the project's tier limit.
+    Called when the extractor starts an extraction.
+    Validates the session and increments the extraction counter.
 
     Request body:
     {
         "session_id": "FB-20260127123456-ABCD1234",
         "device_fingerprint": "hardware-specific-id",
-        "extraction_token": "token-from-start-extraction",
-        "transaction_count": 5000,
-        "company_name": "Client Company",
-        "qb_version": "Enterprise 2024"
+        "company_name": "Client Company" (optional, for logging)
     }
+
+    Returns an extraction_token that must be passed to complete-extraction.
     """
     data = request.get_json()
 
@@ -743,9 +783,7 @@ def complete_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    extraction_token = data.get("extraction_token", "").strip()
-    transaction_count = data.get("transaction_count", 0)
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
 
     if not session_id or not device_fingerprint:
         return (
@@ -758,20 +796,35 @@ def complete_extraction():
             400,
         )
 
-    # CRIT-03 FIX: Require extraction_token for chain-of-custody validation
-    if not extraction_token:
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "Extraction token is required. Call start-extraction first.",
-                }
-            ),
-            400,
-        )
-
     fingerprint_hash = hash_fingerprint(device_fingerprint)
 
+    # Validate session, device activation, and all limits
+    setup_result, error_response = _setup_s3_for_extraction(
+        session_id, fingerprint_hash, ip_address
+    )
+    if error_response is not None:
+        return error_response
+
+    project, activation, total_extractions, transactions_remaining = setup_result
+
+    # Generate token, update counters, and return credentials
+    return _generate_extraction_credentials(
+        session_id, fingerprint_hash, ip_address, project, activation,
+        total_extractions, transactions_remaining
+    )
+
+
+def _verify_upload_completion(session_id, fingerprint_hash, ip_address,
+                              extraction_token, transaction_count):
+    """Verify extraction token and transaction limits before completing extraction.
+
+    Validates the chain-of-custody token (CRIT-03 FIX), clears the single-use
+    token, looks up the project, and checks whether the transaction count is
+    within the tier's remaining limit.
+
+    Returns:
+        tuple: (project, activation) on success, or (None, error_response) on failure.
+    """
     # CRIT-03 FIX: Validate extraction_token against stored hash.
     # Only the caller who received the token from start_extraction can complete.
     activation = SessionActivation.query.filter_by(
@@ -779,7 +832,7 @@ def complete_extraction():
     ).first()
 
     if not activation or not activation.extraction_token:
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -789,15 +842,13 @@ def complete_extraction():
             403,
         )
 
-    import hmac as _hmac
-
     token_hash = hashlib.sha256(extraction_token.encode()).hexdigest()
-    if not _hmac.compare_digest(token_hash, activation.extraction_token):
+    if not hmac.compare_digest(token_hash, activation.extraction_token):
         log_validation_attempt(
             session_id, fingerprint_hash, ip_address, "complete", "failed",
             "Invalid extraction token — chain of custody violation"
         )
-        return (
+        return None, (
             jsonify({"success": False, "error": "Invalid extraction token"}),
             403,
         )
@@ -808,7 +859,7 @@ def complete_extraction():
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()
     if not project:
-        return jsonify({"success": False, "error": "Invalid session"}), 404
+        return None, (jsonify({"success": False, "error": "Invalid session"}), 404)
 
     # Check if project can handle this transaction count
     if not project.can_extract_transactions(transaction_count):
@@ -821,7 +872,7 @@ def complete_extraction():
             "failed",
             f"Transaction limit exceeded: {transaction_count} > {remaining}",
         )
-        return (
+        return None, (
             jsonify(
                 {
                     "success": False,
@@ -836,6 +887,19 @@ def complete_extraction():
             403,
         )
 
+    return (project, activation), None
+
+
+def _update_extraction_status(session_id, fingerprint_hash, ip_address,
+                               project, transaction_count):
+    """Record transactions and update project status after extraction completes.
+
+    Generates a migration ID, records the transaction count against the project,
+    marks the project as 'completed' if all transactions are used, and commits.
+
+    Returns:
+        Flask JSON response with extraction result.
+    """
     # Generate a migration ID for tracking
     migration_id = (
         f"MIG-{session_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
@@ -881,6 +945,82 @@ def complete_extraction():
             jsonify({"success": False, "error": "Failed to record transactions"}),
             500,
         )
+
+
+@session_validation_bp.route("/complete-extraction", methods=["POST"])
+def complete_extraction():
+    """
+    Called when extraction completes successfully.
+    Records the transaction count against the project's tier limit.
+
+    Request body:
+    {
+        "session_id": "FB-20260127123456-ABCD1234",
+        "device_fingerprint": "hardware-specific-id",
+        "extraction_token": "token-from-start-extraction",
+        "transaction_count": 5000,
+        "company_name": "Client Company",
+        "qb_version": "Enterprise 2024"
+    }
+    """
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    session_id = data.get("session_id", "").strip()
+    device_fingerprint = data.get("device_fingerprint", "").strip()
+    extraction_token = data.get("extraction_token", "").strip()
+    transaction_count = data.get("transaction_count")
+    if transaction_count is not None:
+        try:
+            transaction_count = int(transaction_count)
+            if transaction_count < 0 or transaction_count > 10000000:
+                return jsonify({"error": "Invalid transaction count"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid transaction count format"}), 400
+    else:
+        transaction_count = 0
+    ip_address = hash_ip(request.remote_addr)
+
+    if not session_id or not device_fingerprint:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Session ID and device fingerprint are required",
+                }
+            ),
+            400,
+        )
+
+    # CRIT-03 FIX: Require extraction_token for chain-of-custody validation
+    if not extraction_token:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Extraction token is required. Call start-extraction first.",
+                }
+            ),
+            400,
+        )
+
+    fingerprint_hash = hash_fingerprint(device_fingerprint)
+
+    # Verify extraction token chain-of-custody and transaction limits
+    verified, error_response = _verify_upload_completion(
+        session_id, fingerprint_hash, ip_address, extraction_token, transaction_count
+    )
+    if error_response is not None:
+        return error_response
+
+    project, activation = verified
+
+    # Record transactions and finalize extraction status
+    return _update_extraction_status(
+        session_id, fingerprint_hash, ip_address, project, transaction_count
+    )
 
 
 @session_validation_bp.route("/status/<session_id>", methods=["GET"])

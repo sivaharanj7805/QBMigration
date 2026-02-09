@@ -18,6 +18,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 from api.auth import require_auth
+from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request, send_file
 from models.database import db
 from models.migration import Migration
@@ -71,9 +72,220 @@ def _get_user_id():
 # =============================================================================
 
 
+def _build_progress_steps(migration):
+    """
+    Build progress phase steps from migration progress percentage.
+
+    Phase definitions based on orchestrator.py percentages:
+        Phase 1: Extraction (0-15%)
+        Phase 2: Transit/Upload (15-20%)
+        Phase 3: Transformation (20-85%)
+        Phase 4: Verification (85-100%)
+
+    Args:
+        migration: Migration model instance.
+
+    Returns tuple of (phases, phase_number, phase_name).
+    """
+    progress = migration.progress_percent or 0
+
+    phases = []
+    phase_number = 1
+    phase_name = "EXTRACTION"
+
+    if progress >= 0:
+        phases.append(
+            {
+                "name": "EXTRACTION",
+                "status": (
+                    "completed"
+                    if progress >= 15
+                    else "in_progress" if progress > 0 else "pending"
+                ),
+                "percentage": (
+                    min(100, (progress / 15) * 100) if progress < 15 else 100
+                ),
+                "description": "Decrypting and hashing records",
+            }
+        )
+
+    if progress >= 15:
+        phases.append(
+            {
+                "name": "TRANSIT",
+                "status": "completed" if progress >= 20 else "in_progress",
+                "percentage": (
+                    min(100, ((progress - 15) / 5) * 100) if progress < 20 else 100
+                ),
+                "description": "Uploading to secure cloud",
+            }
+        )
+        if progress < 20:
+            phase_number = 2
+            phase_name = "TRANSIT"
+    else:
+        phases.append(
+            {
+                "name": "TRANSIT",
+                "status": "pending",
+                "percentage": 0,
+                "description": "Uploading to secure cloud",
+            }
+        )
+
+    if progress >= 20:
+        transformation_pct = (
+            min(100, ((progress - 20) / 65) * 100) if progress < 85 else 100
+        )
+        phases.append(
+            {
+                "name": "TRANSFORMATION",
+                "status": "completed" if progress >= 85 else "in_progress",
+                "percentage": transformation_pct,
+                "description": "Reconstructing linked transactions",
+            }
+        )
+        if progress < 85:
+            phase_number = 3
+            phase_name = "TRANSFORMATION"
+    else:
+        phases.append(
+            {
+                "name": "TRANSFORMATION",
+                "status": "pending",
+                "percentage": 0,
+                "description": "Reconstructing linked transactions",
+            }
+        )
+
+    if progress >= 85:
+        verification_pct = (
+            min(100, ((progress - 85) / 15) * 100) if progress < 100 else 100
+        )
+        phases.append(
+            {
+                "name": "VERIFICATION",
+                "status": "completed" if progress >= 100 else "in_progress",
+                "percentage": verification_pct,
+                "description": "Validating trial balance",
+            }
+        )
+        if progress < 100:
+            phase_number = 4
+            phase_name = "VERIFICATION"
+    else:
+        phases.append(
+            {
+                "name": "VERIFICATION",
+                "status": "pending",
+                "percentage": 0,
+                "description": "Validating trial balance",
+            }
+        )
+
+    return phases, phase_number, phase_name
+
+
+def _build_record_summary(migration):
+    """
+    Build record summary from migration current step.
+
+    Args:
+        migration: Migration model instance.
+
+    Returns dict with current_entity and current_step.
+    """
+    current_step = getattr(migration, "current_step", None) or ""
+
+    current_entity = None
+    if "Migrating" in current_step:
+        current_entity = current_step.replace("Migrating ", "")
+    elif current_step:
+        current_entity = current_step
+
+    return {
+        "current_entity": current_entity,
+        "current_step": current_step,
+    }
+
+
+def _build_status_response(migration, steps, summary):
+    """
+    Build the complete live status response dict.
+
+    Args:
+        migration: Migration model instance.
+        steps: tuple of (phases, phase_number, phase_name) from _build_progress_steps.
+        summary: dict from _build_record_summary.
+
+    Returns dict suitable for JSON response.
+    """
+    phases, phase_number, phase_name = steps
+    progress = migration.progress_percent or 0
+    current_step = summary["current_step"]
+
+    response = {
+        "success": True,
+        "migration_id": migration.migration_id,
+        "phase": phase_name,
+        "phase_number": phase_number,
+        "percentage": progress,
+        "current_entity": summary["current_entity"],
+        "status_message": current_step or f"Processing {phase_name.lower()}...",
+        "status": migration.status,
+        "alerts": [],
+        "integrity_verified": migration.status == "completed",
+        "phases": phases,
+        "company_name": migration.company_name,
+        "started_at": (
+            migration.created_at.isoformat() if migration.created_at else None
+        ),
+        "elapsed_seconds": (
+            (
+                datetime.now(timezone.utc)
+                - (
+                    migration.created_at.replace(tzinfo=timezone.utc)
+                    if migration.created_at and migration.created_at.tzinfo is None
+                    else migration.created_at
+                )
+            ).total_seconds()
+            if migration.created_at
+            else 0
+        ),
+    }
+
+    # Add completion data if done
+    if migration.status == "completed" and migration.completed_at:
+        response["completed_at"] = migration.completed_at.isoformat()
+        if migration.created_at:
+            created = (
+                migration.created_at.replace(tzinfo=timezone.utc)
+                if migration.created_at.tzinfo is None
+                else migration.created_at
+            )
+            completed = (
+                migration.completed_at.replace(tzinfo=timezone.utc)
+                if migration.completed_at.tzinfo is None
+                else migration.completed_at
+            )
+            response["duration_seconds"] = (completed - created).total_seconds()
+
+    # Add error info if failed
+    if migration.status == "failed":
+        error_msg = (
+            migration.get_error_message()
+            if hasattr(migration, "get_error_message")
+            else getattr(migration, "error_message", None)
+        )
+        response["error"] = error_msg
+        response["alerts"].append(f"Migration failed: {error_msg}")
+
+    return response
+
+
 @dashboard_bp.route("/api/migrations/<migration_id>/live-status", methods=["GET"])
 @require_auth
-def get_live_status(migration_id):  # noqa: C901
+def get_live_status(migration_id):
     """
     Enhanced status endpoint for Pizza Tracker polling.
     Returns detailed phase information for real-time UI updates.
@@ -110,173 +322,9 @@ def get_live_status(migration_id):  # noqa: C901
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404
 
-        # Determine current phase from progress percentage
-        progress = migration.progress_percent or 0
-        current_step = getattr(migration, "current_step", None) or ""
-
-        # Phase definitions based on orchestrator.py percentages
-        # Phase 1: Extraction (0-15%)
-        # Phase 2: Transit/Upload (15-20%)
-        # Phase 3: Transformation (20-85%)
-        # Phase 4: Verification (85-100%)
-
-        phases = []
-        phase_number = 1
-        phase_name = "EXTRACTION"
-
-        if progress >= 0:
-            phases.append(
-                {
-                    "name": "EXTRACTION",
-                    "status": (
-                        "completed"
-                        if progress >= 15
-                        else "in_progress" if progress > 0 else "pending"
-                    ),
-                    "percentage": (
-                        min(100, (progress / 15) * 100) if progress < 15 else 100
-                    ),
-                    "description": "Decrypting and hashing records",
-                }
-            )
-
-        if progress >= 15:
-            phases.append(
-                {
-                    "name": "TRANSIT",
-                    "status": "completed" if progress >= 20 else "in_progress",
-                    "percentage": (
-                        min(100, ((progress - 15) / 5) * 100) if progress < 20 else 100
-                    ),
-                    "description": "Uploading to secure cloud",
-                }
-            )
-            if progress < 20:
-                phase_number = 2
-                phase_name = "TRANSIT"
-        else:
-            phases.append(
-                {
-                    "name": "TRANSIT",
-                    "status": "pending",
-                    "percentage": 0,
-                    "description": "Uploading to secure cloud",
-                }
-            )
-
-        if progress >= 20:
-            transformation_pct = (
-                min(100, ((progress - 20) / 65) * 100) if progress < 85 else 100
-            )
-            phases.append(
-                {
-                    "name": "TRANSFORMATION",
-                    "status": "completed" if progress >= 85 else "in_progress",
-                    "percentage": transformation_pct,
-                    "description": "Reconstructing linked transactions",
-                }
-            )
-            if progress < 85:
-                phase_number = 3
-                phase_name = "TRANSFORMATION"
-        else:
-            phases.append(
-                {
-                    "name": "TRANSFORMATION",
-                    "status": "pending",
-                    "percentage": 0,
-                    "description": "Reconstructing linked transactions",
-                }
-            )
-
-        if progress >= 85:
-            verification_pct = (
-                min(100, ((progress - 85) / 15) * 100) if progress < 100 else 100
-            )
-            phases.append(
-                {
-                    "name": "VERIFICATION",
-                    "status": "completed" if progress >= 100 else "in_progress",
-                    "percentage": verification_pct,
-                    "description": "Validating trial balance",
-                }
-            )
-            if progress < 100:
-                phase_number = 4
-                phase_name = "VERIFICATION"
-        else:
-            phases.append(
-                {
-                    "name": "VERIFICATION",
-                    "status": "pending",
-                    "percentage": 0,
-                    "description": "Validating trial balance",
-                }
-            )
-
-        # Extract current entity from status message if available
-        current_entity = None
-        if "Migrating" in current_step:
-            current_entity = current_step.replace("Migrating ", "")
-        elif current_step:
-            current_entity = current_step
-
-        # Build response
-        response = {
-            "success": True,
-            "migration_id": migration.migration_id,
-            "phase": phase_name,
-            "phase_number": phase_number,
-            "percentage": progress,
-            "current_entity": current_entity,
-            "status_message": current_step or f"Processing {phase_name.lower()}...",
-            "status": migration.status,
-            "alerts": [],
-            "integrity_verified": migration.status == "completed",
-            "phases": phases,
-            "company_name": migration.company_name,
-            "started_at": (
-                migration.created_at.isoformat() if migration.created_at else None
-            ),
-            "elapsed_seconds": (
-                (
-                    datetime.now(timezone.utc)
-                    - (
-                        migration.created_at.replace(tzinfo=timezone.utc)
-                        if migration.created_at and migration.created_at.tzinfo is None
-                        else migration.created_at
-                    )
-                ).total_seconds()
-                if migration.created_at
-                else 0
-            ),
-        }
-
-        # Add completion data if done
-        if migration.status == "completed" and migration.completed_at:
-            response["completed_at"] = migration.completed_at.isoformat()
-            if migration.created_at:
-                created = (
-                    migration.created_at.replace(tzinfo=timezone.utc)
-                    if migration.created_at.tzinfo is None
-                    else migration.created_at
-                )
-                completed = (
-                    migration.completed_at.replace(tzinfo=timezone.utc)
-                    if migration.completed_at.tzinfo is None
-                    else migration.completed_at
-                )
-                response["duration_seconds"] = (completed - created).total_seconds()
-
-        # Add error info if failed
-        if migration.status == "failed":
-            error_msg = (
-                migration.get_error_message()
-                if hasattr(migration, "get_error_message")
-                else getattr(migration, "error_message", None)
-            )
-            response["error"] = error_msg
-            response["alerts"].append(f"Migration failed: {error_msg}")
+        steps = _build_progress_steps(migration)
+        summary = _build_record_summary(migration)
+        response = _build_status_response(migration, steps, summary)
 
         return jsonify(response), 200
 
@@ -680,6 +728,7 @@ def get_trial_balance(migration_id):
 
 @dashboard_bp.route("/api/migrations/<migration_id>/audit-certificate", methods=["GET"])
 @require_auth
+@limiter.limit("5 per minute")
 def download_audit_certificate(migration_id):
     """
     Download PDF audit certificate for completed migration.
@@ -814,6 +863,10 @@ def preview_audit_certificate(migration_id):
     """
     Get audit certificate preview data (for thumbnail card).
     """
+    # H-04 FIX: Validate migration_id format before it reaches the DB query
+    if not re.match(r'^[a-zA-Z0-9\-]{1,64}$', migration_id):
+        return jsonify({"error": "Invalid migration ID format"}), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_user_id()
@@ -856,9 +909,195 @@ def preview_audit_certificate(migration_id):
 # =============================================================================
 
 
+def _generate_caseware_data(migration):
+    """
+    Load QB data from migration and generate Caseware audit bundle files.
+
+    Args:
+        migration: Migration model instance.
+
+    Returns dict with 'result' (CasewareExporter output) and 'bundle_dir' on success.
+    Raises ImportError if CasewareExporter is not available.
+    """
+    migration_id = migration.migration_id
+
+    # Create output directory for Caseware bundle
+    bundle_dir = os.path.join(
+        current_app.root_path, "caseware_bundles", migration_id
+    )
+    os.makedirs(bundle_dir, exist_ok=True)
+
+    # Import the CasewareExporter
+    from caseware_exporter import CasewareExporter
+
+    # Create exporter
+    exporter = CasewareExporter(
+        output_dir=bundle_dir, company_name=migration.company_name or "Company"
+    )
+
+    # Get QB data from S3 or stored data
+    qb_data = {}
+
+    # Try to load stored data
+    if (
+        hasattr(migration, "trial_balance_data")
+        and migration.trial_balance_data
+    ):
+        try:
+            stored_data = json.loads(migration.trial_balance_data)
+            if "accounts" in stored_data:
+                qb_data["accounts"] = stored_data["accounts"]
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            logger.warning(f"Failed to parse trial_balance_data: {e}")
+
+    # If no stored data, generate sample structure for demo
+    if not qb_data.get("accounts"):
+        qb_data = {
+            "accounts": [
+                {
+                    "Name": "Cash",
+                    "AccountType": "Bank",
+                    "Balance": 125000.00,
+                    "AccountNumber": "1000",
+                },
+                {
+                    "Name": "Accounts Receivable",
+                    "AccountType": "Accounts Receivable",
+                    "Balance": 45000.00,
+                    "AccountNumber": "1100",
+                },
+                {
+                    "Name": "Inventory",
+                    "AccountType": "Inventory",
+                    "Balance": 35000.00,
+                    "AccountNumber": "1200",
+                },
+                {
+                    "Name": "Accounts Payable",
+                    "AccountType": "Accounts Payable",
+                    "Balance": 28000.00,
+                    "AccountNumber": "2000",
+                },
+                {
+                    "Name": "Revenue",
+                    "AccountType": "Income",
+                    "Balance": 250000.00,
+                    "AccountNumber": "4000",
+                },
+            ],
+            "transactions": [],
+        }
+
+    # Generate the bundle
+    result = exporter.generate_audit_bundle(qb_data)
+
+    return {
+        "result": result,
+        "bundle_dir": bundle_dir,
+    }
+
+
+def _encrypt_caseware_bundle(data, key):
+    """
+    Create zip from Caseware bundle files and encrypt it with Fernet (AES-256).
+
+    Args:
+        data: dict with 'result' (CasewareExporter output), 'bundle_dir', 'migration_id'.
+        key: App secret key string for PBKDF2 key derivation.
+
+    Returns dict with 'encrypted_data' (bytes) and 'zip_path' (path to plaintext zip),
+    or (response, status_code) on error.
+    """
+    import base64
+    import zipfile
+
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    result = data["result"]
+    bundle_dir = data["bundle_dir"]
+    migration_id = data["migration_id"]
+
+    # CRITICAL FIX: Use deterministic salt derived from migration_id
+    # Previous code used random salt but didn't store it, making decryption impossible
+    # Using migration_id as salt is acceptable because:
+    # 1. The app_secret is the primary security
+    # 2. Each migration gets a unique derived key
+    # 3. We need to be able to decrypt for download
+    migration_salt = migration_id.encode("utf-8")
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=migration_salt,
+        iterations=100000,
+        backend=default_backend(),
+    )
+    encryption_key = base64.urlsafe_b64encode(kdf.derive(key.encode()))
+    cipher = Fernet(encryption_key)
+
+    zip_path = os.path.join(bundle_dir, f"{migration_id}_caseware_bundle.zip")
+
+    # Create zip with standard compression (we'll encrypt the whole file)
+    temp_files = []
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for filename, filepath in result.get("files", {}).items():
+            if os.path.exists(filepath):
+                zipf.write(filepath, os.path.basename(filepath))
+                temp_files.append(filepath)  # Track for cleanup
+
+    # FIX #65: Delete unencrypted CSV files immediately after zipping
+    # Prevents plaintext financial data from persisting on disk
+    for temp_file in temp_files:
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                logger.info(
+                    f"Deleted temporary file: {os.path.basename(temp_file)}"
+                )
+        except Exception as cleanup_error:
+            logger.warning(
+                f"Failed to delete temporary file {temp_file}: {cleanup_error}"
+            )
+
+    # CRITICAL: Encrypt the zip file at rest
+    with open(zip_path, "rb") as f:
+        plaintext_data = f.read()
+
+    encrypted_data = cipher.encrypt(plaintext_data)
+
+    return {
+        "encrypted_data": encrypted_data,
+        "zip_path": zip_path,
+    }
+
+
+def _write_caseware_zip(encrypted_data, path):
+    """
+    Write encrypted Caseware bundle to disk, replacing the plaintext zip.
+
+    Args:
+        encrypted_data: Encrypted bytes to write.
+        path: Path to the original (plaintext) zip file to replace.
+
+    Returns the path to the encrypted file.
+    """
+    encrypted_zip_path = path + ".encrypted"
+    with open(encrypted_zip_path, "wb") as f:
+        f.write(encrypted_data)
+
+    # Remove plaintext zip
+    os.remove(path)
+
+    return encrypted_zip_path
+
+
 @dashboard_bp.route("/api/migrations/<migration_id>/export-caseware", methods=["POST"])
 @require_auth
-def export_caseware_bundle(migration_id):  # noqa: C901
+@limiter.limit("5 per minute")
+def export_caseware_bundle(migration_id):
     """
     Generate Caseware Audit Bundle for a completed migration.
     This is the 'Caseware Mode' alternative to QBO migration.
@@ -895,84 +1134,10 @@ def export_caseware_bundle(migration_id):  # noqa: C901
                 400,
             )
 
-        # Create output directory for Caseware bundle
-        bundle_dir = os.path.join(
-            current_app.root_path, "caseware_bundles", migration_id
-        )
-        os.makedirs(bundle_dir, exist_ok=True)
-
         try:
-            # Import the CasewareExporter
-            from caseware_exporter import CasewareExporter
+            # Generate Caseware data and bundle files
+            generated = _generate_caseware_data(migration)
 
-            # Create exporter
-            exporter = CasewareExporter(
-                output_dir=bundle_dir, company_name=migration.company_name or "Company"
-            )
-
-            # Get QB data from S3 or stored data
-            qb_data = {}
-
-            # Try to load stored data
-            if (
-                hasattr(migration, "trial_balance_data")
-                and migration.trial_balance_data
-            ):
-                try:
-                    stored_data = json.loads(migration.trial_balance_data)
-                    if "accounts" in stored_data:
-                        qb_data["accounts"] = stored_data["accounts"]
-                except (json.JSONDecodeError, TypeError, KeyError) as e:
-                    logger.warning(f"Failed to parse trial_balance_data: {e}")
-
-            # If no stored data, generate sample structure for demo
-            if not qb_data.get("accounts"):
-                qb_data = {
-                    "accounts": [
-                        {
-                            "Name": "Cash",
-                            "AccountType": "Bank",
-                            "Balance": 125000.00,
-                            "AccountNumber": "1000",
-                        },
-                        {
-                            "Name": "Accounts Receivable",
-                            "AccountType": "Accounts Receivable",
-                            "Balance": 45000.00,
-                            "AccountNumber": "1100",
-                        },
-                        {
-                            "Name": "Inventory",
-                            "AccountType": "Inventory",
-                            "Balance": 35000.00,
-                            "AccountNumber": "1200",
-                        },
-                        {
-                            "Name": "Accounts Payable",
-                            "AccountType": "Accounts Payable",
-                            "Balance": 28000.00,
-                            "AccountNumber": "2000",
-                        },
-                        {
-                            "Name": "Revenue",
-                            "AccountType": "Income",
-                            "Balance": 250000.00,
-                            "AccountNumber": "4000",
-                        },
-                    ],
-                    "transactions": [],
-                }
-
-            # Generate the bundle
-            result = exporter.generate_audit_bundle(qb_data)
-
-            # SECURITY FIX: Create encrypted zip file (AES-256)
-            import base64
-            import zipfile
-
-            from cryptography.fernet import Fernet
-
-            # Generate encryption key from app secret (deterministic for same migration)
             # SECURITY FIX: Fail if no encryption key configured - never use default
             app_secret = current_app.config.get("BACKUP_ENCRYPTION_KEY")
             if not app_secret:
@@ -981,76 +1146,33 @@ def export_caseware_bundle(migration_id):  # noqa: C901
                     500,
                 )
 
-            # CRITICAL FIX: Use deterministic salt derived from migration_id
-            # Previous code used random salt but didn't store it, making decryption impossible
-            # Using migration_id as salt is acceptable because:
-            # 1. The app_secret is the primary security
-            # 2. Each migration gets a unique derived key
-            # 3. We need to be able to decrypt for download
-            migration_salt = migration_id.encode("utf-8")
-
-            from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives import hashes
-            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=migration_salt,
-                iterations=100000,
-                backend=default_backend(),
+            # Encrypt the bundle
+            encrypted = _encrypt_caseware_bundle(
+                {
+                    "result": generated["result"],
+                    "bundle_dir": generated["bundle_dir"],
+                    "migration_id": migration_id,
+                },
+                key=app_secret,
             )
-            encryption_key = base64.urlsafe_b64encode(kdf.derive(app_secret.encode()))
-            cipher = Fernet(encryption_key)
+            if isinstance(encrypted, tuple):
+                return encrypted
 
-            zip_path = os.path.join(bundle_dir, f"{migration_id}_caseware_bundle.zip")
-
-            # Create zip with standard compression (we'll encrypt the whole file)
-            temp_files = []
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for filename, filepath in result.get("files", {}).items():
-                    if os.path.exists(filepath):
-                        zipf.write(filepath, os.path.basename(filepath))
-                        temp_files.append(filepath)  # Track for cleanup
-
-            # FIX #65: Delete unencrypted CSV files immediately after zipping
-            # Prevents plaintext financial data from persisting on disk
-            for temp_file in temp_files:
-                try:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        logger.info(
-                            f"Deleted temporary file: {os.path.basename(temp_file)}"
-                        )
-                except Exception as cleanup_error:
-                    logger.warning(
-                        f"Failed to delete temporary file {temp_file}: {cleanup_error}"
-                    )
-
-            # CRITICAL: Encrypt the zip file at rest
-            with open(zip_path, "rb") as f:
-                plaintext_data = f.read()
-
-            encrypted_data = cipher.encrypt(plaintext_data)
-
-            # Overwrite with encrypted version
-            encrypted_zip_path = zip_path + ".encrypted"
-            with open(encrypted_zip_path, "wb") as f:
-                f.write(encrypted_data)
-
-            # Remove plaintext zip
-            os.remove(zip_path)
+            # Write encrypted zip to disk
+            encrypted_zip_path = _write_caseware_zip(
+                encrypted["encrypted_data"], encrypted["zip_path"]
+            )
 
             # Store encryption info in migration (for later decryption during download)
             migration.caseware_encryption_method = "Fernet-AES256"
-            zip_path = encrypted_zip_path  # Update path to encrypted file
 
             # Update migration record
-            migration.caseware_bundle_path = zip_path
+            migration.caseware_bundle_path = encrypted_zip_path
             migration.caseware_bundle_ready = True
             migration.destination = "caseware"
             db.session.commit()
 
+            result = generated["result"]
             return (
                 jsonify(
                     {
@@ -1066,120 +1188,10 @@ def export_caseware_bundle(migration_id):  # noqa: C901
             )
 
         except ImportError as ie:
+            # C-14 FIX: Never write unencrypted financial data as fallback.
+            # Return an error instead of generating an unencrypted zip bundle.
             logger.warning(f"CasewareExporter not available: {str(ie)}")
-            # Generate basic CSV files if exporter not available
-            import csv
-
-            # FIX #33: Initialize locale-aware lead sheet mapper for fallback
-            if LeadSheetMapper:
-                mapper = LeadSheetMapper()
-                # Try to detect from migration metadata if available
-                company_data = {}
-                try:
-                    if migration.encrypted_data_s3_uri:
-                        # Could extract company data from S3, but for now use defaults
-                        pass
-                except AttributeError:
-                    pass
-                mapper.detect_accounting_standard(company_data)
-                logger.info(
-                    f"Caseware fallback using {mapper.detected_standard} lead sheet codes"
-                )
-            else:
-                mapper = None
-
-            # Generate basic Audit_TB.csv
-            tb_path = os.path.join(bundle_dir, "Audit_TB.csv")
-            with open(tb_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["# Caseware Audit Trial Balance"])
-                writer.writerow([f"# Company: {migration.company_name}"])
-                writer.writerow(
-                    [f"# Generated: {datetime.now(timezone.utc).isoformat()}"]
-                )
-                if mapper:
-                    writer.writerow(
-                        [f"# Accounting Standard: {mapper.detected_standard}"]
-                    )
-                writer.writerow([])
-                writer.writerow(
-                    [
-                        "Account_Number",
-                        "Account_Description",
-                        "Type",
-                        "Lead_Sheet_Code",
-                        "Balance",
-                    ]
-                )
-
-                # FIX #33: Use locale-aware lead sheet codes
-                if mapper:
-                    cash_code = mapper.get_lead_sheet_code("Bank")
-                    ar_code = mapper.get_lead_sheet_code("Accounts Receivable")
-                else:
-                    # Fallback to US GAAP
-                    cash_code = "A1"
-                    ar_code = "A2"
-
-                writer.writerow(["1000", "Cash", "A", cash_code, "125000.00"])
-                writer.writerow(
-                    ["1100", "Accounts Receivable", "A", ar_code, "45000.00"]
-                )
-
-            # Generate basic Audit_GL.csv
-            gl_path = os.path.join(bundle_dir, "Audit_GL.csv")
-            with open(gl_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["# Caseware Audit General Ledger"])
-                writer.writerow([f"# Company: {migration.company_name}"])
-                writer.writerow([])
-                writer.writerow(
-                    [
-                        "Account_Number",
-                        "Date",
-                        "Reference",
-                        "Description",
-                        "Debit",
-                        "Credit",
-                    ]
-                )
-
-            # Create zip
-            import zipfile
-
-            zip_path = os.path.join(bundle_dir, f"{migration_id}_caseware_bundle.zip")
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(tb_path, "Audit_TB.csv")
-                zipf.write(gl_path, "Audit_GL.csv")
-
-            # FIX #65: Delete unencrypted CSV files immediately after zipping
-            # Prevents plaintext financial data from persisting on disk
-            try:
-                if os.path.exists(tb_path):
-                    os.remove(tb_path)
-                if os.path.exists(gl_path):
-                    os.remove(gl_path)
-                logger.info(f"Deleted temporary CSV files for migration {migration_id}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to delete temporary CSV files: {cleanup_error}")
-
-            migration.caseware_bundle_path = zip_path
-            migration.caseware_bundle_ready = True
-            migration.destination = "caseware"
-            db.session.commit()
-
-            return (
-                jsonify(
-                    {
-                        "success": True,
-                        "message": "Basic Caseware bundle generated",
-                        "bundle_id": f"cw_{migration_id}",
-                        "files": ["Audit_TB.csv", "Audit_GL.csv"],
-                        "download_url": f"/api/migrations/{migration_id}/caseware-bundle",
-                    }
-                ),
-                200,
-            )
+            return jsonify({"error": "Caseware export not available. Please contact support."}), 503
 
     except Exception as e:
         logger.exception(f"Failed to export Caseware bundle for {migration_id}")
@@ -1190,9 +1202,191 @@ def export_caseware_bundle(migration_id):  # noqa: C901
         return jsonify({"success": False, "error": sanitized_error}), 500
 
 
+def _find_caseware_file(migration_id):
+    """
+    Find and validate the Caseware bundle file for a migration.
+    Checks ownership, readiness, file existence, and path security.
+
+    Args:
+        migration_id: UUID string of the migration.
+
+    Returns dict with 'migration' and 'bundle_path' on success,
+    or (response, status_code) on error.
+    """
+    # FIX: Validate migration_id format to prevent path traversal
+    if not is_valid_uuid(migration_id):
+        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
+
+    migration = Migration.query.filter_by(
+        migration_id=migration_id, user_id=_get_user_id()
+    ).first()
+
+    if not migration:
+        return jsonify({"success": False, "error": "Migration not found"}), 404
+
+    if not migration.caseware_bundle_ready or not migration.caseware_bundle_path:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Caseware bundle not yet generated. Call /export-caseware first.",
+                }
+            ),
+            400,
+        )
+
+    if not os.path.exists(migration.caseware_bundle_path):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Bundle file not found. Please regenerate.",
+                }
+            ),
+            404,
+        )
+
+    # FIX: Validate path is within allowed directories (prevent serving arbitrary files)
+    # Using os.path.commonpath() instead of startswith() for secure path validation
+    bundle_path = os.path.realpath(migration.caseware_bundle_path)
+    allowed_dirs = [
+        os.path.realpath(current_app.root_path),
+        os.path.realpath(
+            os.environ.get("CASEWARE_TEMP_DIR", tempfile.gettempdir())
+        ),  # nosec B108
+    ]
+    path_is_valid = False
+    for allowed_dir in allowed_dirs:
+        try:
+            # os.path.commonpath raises ValueError if paths are on different drives (Windows)
+            # or returns the common path if they share a prefix
+            common = os.path.commonpath([bundle_path, allowed_dir])
+            if common == allowed_dir:
+                path_is_valid = True
+                break
+        except ValueError:
+            # Paths on different drives or no common path - not valid
+            continue
+
+    if not path_is_valid:
+        logger.warning(
+            f"Attempted to serve file outside allowed dirs: {bundle_path}"
+        )
+        return jsonify({"success": False, "error": "Invalid bundle path"}), 400
+
+    return {
+        "migration": migration,
+        "bundle_path": bundle_path,
+    }
+
+
+def _decrypt_caseware_bundle(path, key):
+    """
+    Decrypt an encrypted Caseware bundle file. Tries embedded salt first,
+    then falls back to migration_id-based salt for legacy files.
+
+    Args:
+        path: Absolute path to the encrypted bundle file.
+        key: App secret key string for PBKDF2 key derivation.
+
+    Returns decrypted bytes on success, or (response, status_code) on error.
+    """
+    import base64
+
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    # Read encrypted data
+    with open(path, "rb") as f:
+        encrypted_data = f.read()
+
+    # FIX B-01: Read salt from encrypted file (first 16 bytes = salt)
+    # Standard format: [16-byte salt][encrypted data]
+    # Falls back to migration_id salt for legacy files
+    SALT_LENGTH = 16
+
+    if len(encrypted_data) > SALT_LENGTH:
+        # Try embedded salt first (new format)
+        embedded_salt = encrypted_data[:SALT_LENGTH]
+        payload = encrypted_data[SALT_LENGTH:]
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=embedded_salt,
+            iterations=100000,
+            backend=default_backend(),
+        )
+        encryption_key = base64.urlsafe_b64encode(
+            kdf.derive(key.encode())
+        )
+        cipher = Fernet(encryption_key)
+
+        try:
+            return cipher.decrypt(payload)
+        except Exception:
+            logger.info(
+                "Embedded salt decryption failed, trying legacy migration_id salt"
+            )
+
+    # Legacy fallback: use migration_id from directory structure as salt
+    migration_id = os.path.basename(os.path.dirname(path))
+    migration_salt = migration_id.encode("utf-8")
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=migration_salt,
+        iterations=100000,
+        backend=default_backend(),
+    )
+    encryption_key = base64.urlsafe_b64encode(
+        kdf.derive(key.encode())
+    )
+    cipher = Fernet(encryption_key)
+
+    try:
+        return cipher.decrypt(encrypted_data)
+    except Exception as decrypt_error:
+        logger.error(
+            f"Failed to decrypt Caseware bundle: {decrypt_error}"
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Bundle decryption failed. Please regenerate the bundle.",
+                }
+            ),
+            500,
+        )
+
+
+def _serve_caseware_download(data, filename):
+    """
+    Send decrypted Caseware bundle data as a file download response.
+
+    Args:
+        data: Decrypted bytes of the zip file.
+        filename: Download filename for the response.
+
+    Returns Flask send_file response.
+    """
+    import io
+
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
 @dashboard_bp.route("/api/migrations/<migration_id>/caseware-bundle", methods=["GET"])
 @require_auth
-def download_caseware_bundle(migration_id):  # noqa: C901
+@limiter.limit("5 per minute")
+def download_caseware_bundle(migration_id):
     """
     Download the generated Caseware Audit Bundle (.zip).
 
@@ -1201,67 +1395,15 @@ def download_caseware_bundle(migration_id):  # noqa: C901
     - Audit_GL.csv
     - Audit_Mapping.cvw
     """
-    # FIX: Validate migration_id format to prevent path traversal
-    if not is_valid_uuid(migration_id):
-        return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
-
     try:
-        migration = Migration.query.filter_by(
-            migration_id=migration_id, user_id=_get_user_id()
-        ).first()
+        # Find and validate the bundle file
+        found = _find_caseware_file(migration_id)
+        if isinstance(found, tuple):
+            return found
 
-        if not migration:
-            return jsonify({"success": False, "error": "Migration not found"}), 404
-
-        if not migration.caseware_bundle_ready or not migration.caseware_bundle_path:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Caseware bundle not yet generated. Call /export-caseware first.",
-                    }
-                ),
-                400,
-            )
-
-        if not os.path.exists(migration.caseware_bundle_path):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Bundle file not found. Please regenerate.",
-                    }
-                ),
-                404,
-            )
-
-        # FIX: Validate path is within allowed directories (prevent serving arbitrary files)
-        # Using os.path.commonpath() instead of startswith() for secure path validation
-        bundle_path = os.path.realpath(migration.caseware_bundle_path)
-        allowed_dirs = [
-            os.path.realpath(current_app.root_path),
-            os.path.realpath(
-                os.environ.get("CASEWARE_TEMP_DIR", tempfile.gettempdir())
-            ),  # nosec B108
-        ]
-        path_is_valid = False
-        for allowed_dir in allowed_dirs:
-            try:
-                # os.path.commonpath raises ValueError if paths are on different drives (Windows)
-                # or returns the common path if they share a prefix
-                common = os.path.commonpath([bundle_path, allowed_dir])
-                if common == allowed_dir:
-                    path_is_valid = True
-                    break
-            except ValueError:
-                # Paths on different drives or no common path - not valid
-                continue
-
-        if not path_is_valid:
-            logger.warning(
-                f"Attempted to serve file outside allowed dirs: {bundle_path}"
-            )
-            return jsonify({"success": False, "error": "Invalid bundle path"}), 400
+        migration = found["migration"]
+        bundle_path = found["bundle_path"]
+        download_name = f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip"
 
         # CRITICAL FIX: Decrypt the file before sending to user
         # Previous code returned the encrypted blob which users couldn't open
@@ -1270,14 +1412,6 @@ def download_caseware_bundle(migration_id):  # noqa: C901
             and migration.caseware_encryption_method == "Fernet-AES256"
         ):
             try:
-                import base64
-                import io
-
-                from cryptography.fernet import Fernet
-                from cryptography.hazmat.backends import default_backend
-                from cryptography.hazmat.primitives import hashes
-                from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
                 # Get encryption key (must match the one used during export)
                 app_secret = current_app.config.get("BACKUP_ENCRYPTION_KEY")
                 if not app_secret:
@@ -1288,80 +1422,11 @@ def download_caseware_bundle(migration_id):  # noqa: C901
                         500,
                     )
 
-                # Read encrypted data
-                with open(bundle_path, "rb") as f:
-                    encrypted_data = f.read()
+                decrypted = _decrypt_caseware_bundle(bundle_path, app_secret)
+                if isinstance(decrypted, tuple):
+                    return decrypted
 
-                # FIX B-01: Read salt from encrypted file (first 16 bytes = salt)
-                # Standard format: [16-byte salt][encrypted data]
-                # Falls back to migration_id salt for legacy files
-                SALT_LENGTH = 16
-
-                if len(encrypted_data) > SALT_LENGTH:
-                    # Try embedded salt first (new format)
-                    embedded_salt = encrypted_data[:SALT_LENGTH]
-                    payload = encrypted_data[SALT_LENGTH:]
-
-                    kdf = PBKDF2HMAC(
-                        algorithm=hashes.SHA256(),
-                        length=32,
-                        salt=embedded_salt,
-                        iterations=100000,
-                        backend=default_backend(),
-                    )
-                    encryption_key = base64.urlsafe_b64encode(
-                        kdf.derive(app_secret.encode())
-                    )
-                    cipher = Fernet(encryption_key)
-
-                    try:
-                        decrypted_data = cipher.decrypt(payload)
-                        return send_file(
-                            io.BytesIO(decrypted_data),
-                            mimetype="application/zip",
-                            as_attachment=True,
-                            download_name=f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip",
-                        )
-                    except Exception:
-                        logger.info(
-                            "Embedded salt decryption failed, trying legacy migration_id salt"
-                        )
-
-                # Legacy fallback: use migration_id as salt
-                migration_salt = migration_id.encode("utf-8")
-                kdf = PBKDF2HMAC(
-                    algorithm=hashes.SHA256(),
-                    length=32,
-                    salt=migration_salt,
-                    iterations=100000,
-                    backend=default_backend(),
-                )
-                encryption_key = base64.urlsafe_b64encode(
-                    kdf.derive(app_secret.encode())
-                )
-                cipher = Fernet(encryption_key)
-
-                try:
-                    decrypted_data = cipher.decrypt(encrypted_data)
-                    return send_file(
-                        io.BytesIO(decrypted_data),
-                        mimetype="application/zip",
-                        as_attachment=True,
-                        download_name=f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip",
-                    )
-                except Exception as decrypt_error:
-                    logger.error(
-                        f"Failed to decrypt Caseware bundle: {decrypt_error}"
-                    )
-                    return (
-                        jsonify(
-                            {
-                                "success": False,
-                                "error": "Bundle decryption failed. Please regenerate the bundle.",
-                            }
-                        ),
-                        500,
-                    )
+                return _serve_caseware_download(decrypted, download_name)
 
             except ImportError as ie:
                 logger.error(f"Cryptography library not available: {ie}")
@@ -1375,7 +1440,7 @@ def download_caseware_bundle(migration_id):  # noqa: C901
             bundle_path,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip",
+            download_name=download_name,
         )
 
     except Exception as e:

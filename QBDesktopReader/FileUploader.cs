@@ -51,7 +51,14 @@ namespace QBDesktopExtractor
                 url = "https://" + url;
             }
 
-            bool isLocalhost = url.Contains("localhost") || url.Contains("127.0.0.1");
+            // FIX CSHARP-MED-5: Use Uri class for proper hostname check instead of string-based Contains
+            bool isLocalhost = false;
+            if (Uri.TryCreate(url, UriKind.Absolute, out Uri parsedUri))
+            {
+                isLocalhost = parsedUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                    || parsedUri.Host == "127.0.0.1"
+                    || parsedUri.Host == "::1";
+            }
             if (url.StartsWith("http://") && !isLocalhost)
             {
                 _logger?.Log(LogLevel.Warning, "Using HTTP for non-localhost URL - data is encrypted but metadata visible");
@@ -302,13 +309,21 @@ namespace QBDesktopExtractor
             // Collect all NDJSON files
             foreach (var entity in manifest.Entities)
             {
-                var filePath = Path.Combine(outputDirectory, entity.FileName);
+                // FIX C-16: Sanitize filename to prevent path traversal (e.g. "../../etc/passwd")
+                var safeFileName = Path.GetFileName(entity.FileName);
+                if (string.IsNullOrWhiteSpace(safeFileName))
+                {
+                    _logger?.Log(LogLevel.Warning, "Skipping entity with empty filename: {0}", entity.EntityName);
+                    continue;
+                }
+
+                var filePath = Path.Combine(outputDirectory, safeFileName);
                 if (File.Exists(filePath))
                 {
                     var fileBytes = File.ReadAllBytes(filePath);
                     bundleFiles.Add(new BundleFileEntry
                     {
-                        FileName = entity.FileName,
+                        FileName = safeFileName,
                         EntityType = entity.EntityName,
                         RecordCount = entity.RecordCount,
                         ContentBase64 = Convert.ToBase64String(fileBytes),

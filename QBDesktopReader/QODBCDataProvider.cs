@@ -746,12 +746,16 @@ namespace QBDesktopExtractor
 
                 if (modifiedSince.HasValue)
                 {
-                    sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                    sql += " WHERE TimeModified >= ?";
                 }
 
                 using (var cmd = new OdbcCommand(sql, _connection))
                 {
                     cmd.CommandTimeout = 300;
+                    if (modifiedSince.HasValue)
+                    {
+                        cmd.Parameters.Add(new OdbcParameter("@modifiedSince", OdbcType.DateTime)).Value = modifiedSince.Value;
+                    }
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
                     {
                         while (await Task.Run(() => reader.Read(), ct))
@@ -1286,12 +1290,16 @@ namespace QBDesktopExtractor
                 string sql = $"SELECT * FROM {tableName}";
                 if (modifiedSince.HasValue)
                 {
-                    sql += $" WHERE TimeModified >= {{ts '{modifiedSince.Value:yyyy-MM-dd HH:mm:ss}'}}";
+                    sql += " WHERE TimeModified >= ?";
                 }
 
                 using (var cmd = new OdbcCommand(sql, _connection))
                 {
                     cmd.CommandTimeout = 600;
+                    if (modifiedSince.HasValue)
+                    {
+                        cmd.Parameters.Add(new OdbcParameter("@modifiedSince", OdbcType.DateTime)).Value = modifiedSince.Value;
+                    }
                     using (var reader = await Task.Run(() => cmd.ExecuteReader(), ct))
                     {
                         var properties = typeof(T).GetProperties();

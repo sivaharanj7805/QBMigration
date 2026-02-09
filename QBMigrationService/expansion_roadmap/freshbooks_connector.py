@@ -278,7 +278,8 @@ class FreshBooksConnector(BaseAccountingConnector):
 
     def compute_record_hash(self, record: Dict, record_type: str) -> str:
         """Compute SHA-256 hash for FreshBooks record."""
-        canonical = f"{record_type}:{str(sorted(record.items()))}"
+        # FIX: Use json.dumps for deterministic canonical serialization of nested data
+        canonical = f"{record_type}:{json.dumps(record, sort_keys=True, default=str)}"
         return hashlib.sha256(canonical.encode()).hexdigest()
 
     def get_supported_entity_types(self) -> List[str]:

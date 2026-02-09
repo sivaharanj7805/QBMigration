@@ -19,10 +19,12 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from api.auth import require_auth
+from api.EncryptionManager import EncryptionManager
 from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request
 from models.database import db
 from models.migration import Migration
+from models.user import User
 from utils.aws_manager import AWSMigrationManager
 
 
@@ -224,7 +226,7 @@ def validate_upload():  # noqa: C901
         )
 
     except Exception as e:
-        logger.exception(f"File validation failed: {e}")
+        logger.exception("File validation failed")
         return jsonify({"success": False, "error": "File validation failed"}), 500
 
 
@@ -276,8 +278,6 @@ def upload_file():
     # Auth is handled by @require_auth decorator which sets request.current_user
     try:
         # Get user from current session (request.current_user is set by @require_auth)
-        from models.user import User
-
         user_id = request.current_user.get("user_id")
         user = db.session.get(User, user_id)
         if not user:
@@ -491,14 +491,17 @@ def _handle_original_upload(data, user):
         )
 
 
-def _handle_v31_upload(data, user):  # noqa: C901
+def _decrypt_v31_payload(data, encryption_key):
     """
-    Handle v3.1 format upload (NEW)
+    Extract and decode the v3.1 encryption payload from request data.
+
+    Args:
+        data: Full request JSON data containing 'encryption' block.
+        encryption_key: Reserved for future use (server-side key operations).
+
+    Returns dict with encryption fields on success, or (response, status_code) on error.
     """
-    session_id = data.get("session_id", str(uuid.uuid4()))
     encryption = data.get("encryption", {})
-    metadata = data.get("metadata", {})
-    company_info = data.get("company_info", {})
 
     # Extract encryption fields
     encrypted_data = encryption.get("encrypted_data", "")
@@ -533,18 +536,9 @@ def _handle_v31_upload(data, user):  # noqa: C901
             400,
         )
 
-    # SECURITY FIX: Get and sanitize company info
-    company_name = sanitize_input(
-        company_info.get("company_name", "Unknown Company"), max_length=255
-    )
-    qb_file_name = sanitize_input(
-        company_info.get("qb_file_name", "quickbooks.qbw"), max_length=255
-    )
-
     # Decode to check size
     try:
         encrypted_data_bytes = base64.b64decode(encrypted_data)
-        data_size_bytes = len(encrypted_data_bytes)
     except Exception as e:
         logger.error(f"Base64 decode error: {str(e)}")
         return (
@@ -554,13 +548,71 @@ def _handle_v31_upload(data, user):  # noqa: C901
             400,
         )
 
+    return {
+        "encrypted_data_bytes": encrypted_data_bytes,
+        "aes_key": aes_key,
+        "encrypted_aes_key": encrypted_aes_key,
+        "is_key_encrypted": is_key_encrypted,
+        "iv": iv,
+        "tag": tag,
+        "algorithm": algorithm,
+        "version": encryption.get("version", "3.1"),
+        "client_hash": encryption.get("data_hash", "").lower().strip(),
+    }
+
+
+def _parse_ndjson_data(raw_data):
+    """
+    Parse metadata, company info, and session ID from v3.1 upload request data.
+
+    Args:
+        raw_data: Full request JSON data.
+
+    Returns dict with sanitized session_id, company_name, qb_file_name, and metadata.
+    """
+    session_id = raw_data.get("session_id", str(uuid.uuid4()))
+    metadata = raw_data.get("metadata", {})
+    company_info = raw_data.get("company_info", {})
+
+    # SECURITY FIX: Get and sanitize company info
+    company_name = sanitize_input(
+        company_info.get("company_name", "Unknown Company"), max_length=255
+    )
+    qb_file_name = sanitize_input(
+        company_info.get("qb_file_name", "quickbooks.qbw"), max_length=255
+    )
+
+    return {
+        "session_id": session_id,
+        "company_name": company_name,
+        "qb_file_name": qb_file_name,
+        "metadata": metadata,
+        "company_info": company_info,
+    }
+
+
+def _validate_v31_records(records):
+    """
+    Validate v3.1 upload records: hash verification, size check, duplicate detection.
+
+    Args:
+        records: dict with encrypted_data_bytes, client_hash, session_id, user.
+
+    Returns dict with file_hash and data_size_bytes on success,
+    or (response, status_code) on error.
+    """
+    encrypted_data_bytes = records["encrypted_data_bytes"]
+    client_hash = records["client_hash"]
+    session_id = records["session_id"]
+    user = records["user"]
+
+    data_size_bytes = len(encrypted_data_bytes)
+
     # SECURITY: Calculate SHA-256 hash for data integrity verification
     file_hash = hashlib.sha256(encrypted_data_bytes).hexdigest()
 
     # FIX #44: FORENSIC REQUIREMENT - MANDATORY hash verification (no backward compatibility)
     # Client must provide data_hash for integrity verification
-    client_hash = encryption.get("data_hash", "").lower().strip()
-
     if not client_hash:
         logger.error(
             f"Client did not provide mandatory data_hash for verification (session_id: {session_id})"
@@ -645,43 +697,55 @@ def _handle_v31_upload(data, user):  # noqa: C901
             200,
         )
 
-    # Generate migration ID
-    migration_id = str(uuid.uuid4())
+    return {
+        "file_hash": file_hash,
+        "data_size_bytes": data_size_bytes,
+    }
 
-    logger.info(
-        f"v3.1 Upload from user {user.id}: {data_size_bytes:,} bytes, session: {session_id}"
-    )
 
-    # Create migration record
-    migration = Migration(
-        migration_id=migration_id,
-        user_id=user.id,
-        company_name=company_name,
-        qb_file_name=qb_file_name,
-        file_hash=file_hash,
-        data_size_bytes=data_size_bytes,
-        status="pending",
-    )
+def _save_v31_to_s3(records, migration):
+    """
+    Upload v3.1 encrypted data to S3 and store encryption metadata.
 
-    db.session.add(migration)
-    db.session.commit()
+    Args:
+        records: dict with encrypted_data_bytes, encryption fields, session_id, metadata, user.
+        migration: Migration model instance.
+
+    Returns Flask response tuple.
+    """
+    encrypted_data_bytes = records["encrypted_data_bytes"]
+    session_id = records["session_id"]
+    metadata = records["metadata"]
+    user = records["user"]
+    migration_id = migration.migration_id
+    company_name = migration.company_name
 
     # Prepare encryption metadata for storage
     encryption_metadata = {
-        "iv": iv,
-        "tag": tag,
-        "algorithm": algorithm,
-        "version": encryption.get("version", "3.1"),
-        "is_key_encrypted": is_key_encrypted,
+        "iv": records["iv"],
+        "tag": records["tag"],
+        "algorithm": records["algorithm"],
+        "version": records["version"],
+        "is_key_encrypted": records["is_key_encrypted"],
     }
 
-    # Store the AES key (encrypted or plaintext depending on client)
-    if is_key_encrypted and encrypted_aes_key:
-        encryption_metadata["encrypted_aes_key"] = encrypted_aes_key
+    # Store the AES key - always encrypted at rest
+    if records["is_key_encrypted"] and records["encrypted_aes_key"]:
+        encryption_metadata["encrypted_aes_key"] = records["encrypted_aes_key"]
         logger.info(f"Migration {migration_id}: Using RSA-encrypted AES key")
-    elif aes_key:
-        encryption_metadata["aes_key"] = aes_key
-        logger.info(f"Migration {migration_id}: Using TLS-protected AES key")
+    elif records["aes_key"]:
+        # SECURITY FIX C-03: Never store plaintext AES key alongside encrypted data.
+        # Encrypt it server-side before storage.
+        try:
+            enc_mgr = EncryptionManager()
+            aes_key = records["aes_key"]
+            encrypted_key = enc_mgr.encrypt_data(aes_key.encode() if isinstance(aes_key, str) else aes_key)
+            encryption_metadata["encrypted_aes_key"] = base64.b64encode(encrypted_key).decode()
+            encryption_metadata["server_encrypted"] = True
+            logger.info(f"Migration {migration_id}: AES key encrypted server-side before storage")
+        except Exception as enc_err:
+            logger.error(f"Migration {migration_id}: Failed to encrypt AES key server-side: {enc_err}")
+            return jsonify({"success": False, "error": "Failed to secure encryption key"}), 500
 
     # Upload to S3
     try:
@@ -700,7 +764,7 @@ def _handle_v31_upload(data, user):  # noqa: C901
                 "user_id": str(user.id),
                 "migration_id": migration_id,
                 "company_name": company_name,
-                "file_hash": file_hash,
+                "file_hash": migration.file_hash,
                 "session_id": session_id,
                 "client_version": metadata.get("client_version", "3.1.0"),
                 "data_version": metadata.get("data_version", "qb_desktop_3.1"),
@@ -736,7 +800,7 @@ def _handle_v31_upload(data, user):  # noqa: C901
         migration.s3_key = result["key"]
         db.session.commit()
 
-        logger.info(f"✓ Upload successful: {migration_id}")
+        logger.info(f"Upload successful: {migration_id}")
 
         return (
             jsonify(
@@ -763,9 +827,206 @@ def _handle_v31_upload(data, user):  # noqa: C901
         )
 
 
+def _handle_v31_upload(data, user):
+    """
+    Handle v3.1 format upload (NEW).
+    Delegates to _decrypt_v31_payload, _parse_ndjson_data,
+    _validate_v31_records, and _save_v31_to_s3.
+    """
+    # Decrypt and validate the encryption payload
+    payload = _decrypt_v31_payload(data, encryption_key=None)
+    if isinstance(payload, tuple):
+        return payload
+
+    # Parse metadata and company info
+    parsed = _parse_ndjson_data(data)
+
+    # Validate records: hash verification, size check, duplicate detection
+    validation = _validate_v31_records({
+        "encrypted_data_bytes": payload["encrypted_data_bytes"],
+        "client_hash": payload["client_hash"],
+        "session_id": parsed["session_id"],
+        "user": user,
+    })
+    if isinstance(validation, tuple):
+        return validation
+
+    # Generate migration ID and create migration record
+    migration_id = str(uuid.uuid4())
+
+    logger.info(
+        f"v3.1 Upload from user {user.id}: {validation['data_size_bytes']:,} bytes, "
+        f"session: {parsed['session_id']}"
+    )
+
+    migration = Migration(
+        migration_id=migration_id,
+        user_id=user.id,
+        company_name=parsed["company_name"],
+        qb_file_name=parsed["qb_file_name"],
+        file_hash=validation["file_hash"],
+        data_size_bytes=validation["data_size_bytes"],
+        status="pending",
+    )
+
+    db.session.add(migration)
+    db.session.commit()
+
+    # Save to S3 with encryption metadata
+    return _save_v31_to_s3(
+        {
+            "encrypted_data_bytes": payload["encrypted_data_bytes"],
+            "iv": payload["iv"],
+            "tag": payload["tag"],
+            "algorithm": payload["algorithm"],
+            "version": payload["version"],
+            "is_key_encrypted": payload["is_key_encrypted"],
+            "aes_key": payload["aes_key"],
+            "encrypted_aes_key": payload["encrypted_aes_key"],
+            "session_id": parsed["session_id"],
+            "metadata": parsed["metadata"],
+            "user": user,
+        },
+        migration,
+    )
+
+
 # ============================================================================
 # NEW: NDJSON BUNDLE UPLOAD ENDPOINT (v4.3)
 # ============================================================================
+
+
+def _validate_ndjson_bundle(data):
+    """
+    Validate NDJSON bundle upload data: check files present, calculate total size,
+    sanitize company info.
+
+    Args:
+        data: Request JSON data.
+
+    Returns dict with validated/sanitized fields on success,
+    or (response, status_code) on error.
+    """
+    session_id = data.get("session_id", str(uuid.uuid4()))
+    files = data.get("files", [])
+    company_info = data.get("company_info", {})
+    total_records = data.get("total_records", 0)
+    company_fingerprint = data.get("company_fingerprint", "")
+
+    if not files:
+        return jsonify({"success": False, "error": "No files in bundle"}), 400
+
+    # Calculate total size
+    total_size = 0
+    for file_entry in files:
+        content_b64 = file_entry.get("content_base64", "")
+        if content_b64:
+            total_size += len(base64.b64decode(content_b64))
+
+    # SECURITY FIX: Get and sanitize company name
+    company_name = sanitize_input(
+        company_info.get("company_name", "Unknown Company"), max_length=255
+    )
+
+    return {
+        "session_id": session_id,
+        "files": files,
+        "company_info": company_info,
+        "total_records": total_records,
+        "company_fingerprint": company_fingerprint,
+        "total_size": total_size,
+        "company_name": company_name,
+    }
+
+
+def _process_ndjson_bundle(data, migration):
+    """
+    Process and store NDJSON bundle files in S3.
+
+    Args:
+        data: Validated bundle data dict with files, session_id, total_records.
+        migration: Migration model instance.
+
+    Returns Flask response tuple.
+    """
+    files = data["files"]
+    total_records = data["total_records"]
+    migration_id = migration.migration_id
+
+    try:
+        aws = AWSMigrationManager()
+
+        # Store each file with entity prefix
+        stored_files = []
+        for file_entry in files:
+            file_name = file_entry.get("file_name", "unknown.ndjson")
+            # Prevent path traversal - remove directory components and unsafe characters
+            file_name = os.path.basename(file_name)
+            file_name = re.sub(r"[^\w\-.]", "_", file_name)
+            content_b64 = file_entry.get("content_base64", "")
+
+            if content_b64:
+                content_bytes = base64.b64decode(content_b64)
+
+                # Upload to S3
+                result = aws.upload_to_s3(
+                    file_obj=BytesIO(content_bytes),
+                    migration_id=migration_id,
+                    file_name=file_name,
+                    metadata={
+                        "entity_type": file_entry.get("entity_type", "unknown"),
+                        "record_count": str(file_entry.get("record_count", 0)),
+                        "sha256": file_entry.get("sha256", ""),
+                    },
+                )
+
+                if result:
+                    stored_files.append(
+                        {
+                            "file_name": file_name,
+                            "s3_key": result.get("key"),
+                            "record_count": file_entry.get("record_count", 0),
+                        }
+                    )
+
+        # Update migration status
+        migration.status = "uploaded"
+        migration.s3_uri = f"s3://{aws.bucket_name}/migrations/{migration_id}/"
+        db.session.commit()
+
+        logger.info(
+            f"NDJSON bundle uploaded: {migration_id}, {len(stored_files)} files"
+        )
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "migration_id": migration_id,
+                    "status": "uploaded_ndjson_bundle",
+                    "total_files": len(stored_files),
+                    "total_records": total_records,
+                    "message": "NDJSON bundle uploaded successfully",
+                }
+            ),
+            201,
+        )
+
+    except Exception as e:
+        logger.error(f"S3 upload error for NDJSON bundle {migration_id}: {str(e)}")
+        migration.status = "failed"
+        migration.set_error_message(f"Bundle upload error: {str(e)}")
+        db.session.commit()
+
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to upload bundle to secure storage",
+                }
+            ),
+            500,
+        )
 
 
 @upload_bp.route("/ndjson-bundle", methods=["POST"])
@@ -807,125 +1068,36 @@ def upload_ndjson_bundle():
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        session_id = data.get("session_id", str(uuid.uuid4()))
-        files = data.get("files", [])
-        company_info = data.get("company_info", {})
-        total_records = data.get("total_records", 0)
-        company_fingerprint = data.get("company_fingerprint", "")
-
-        if not files:
-            return jsonify({"success": False, "error": "No files in bundle"}), 400
-
-        # Calculate total size
-        total_size = 0
-        for file_entry in files:
-            content_b64 = file_entry.get("content_base64", "")
-            if content_b64:
-                total_size += len(base64.b64decode(content_b64))
+        # Validate bundle data
+        validated = _validate_ndjson_bundle(data)
+        if isinstance(validated, tuple):
+            return validated
 
         # Generate migration ID
         migration_id = str(uuid.uuid4())
 
         logger.info(
-            f"NDJSON bundle upload: {len(files)} files, {total_records} records, "
-            f"{total_size:,} bytes, session: {session_id}"
-        )
-
-        # SECURITY FIX: Get and sanitize company name
-        company_name = sanitize_input(
-            company_info.get("company_name", "Unknown Company"), max_length=255
+            f"NDJSON bundle upload: {len(validated['files'])} files, "
+            f"{validated['total_records']} records, "
+            f"{validated['total_size']:,} bytes, session: {validated['session_id']}"
         )
 
         # Create migration record
         migration = Migration(
             migration_id=migration_id,
             user_id=int(request.current_user["user_id"]),
-            company_name=company_name,
-            qb_file_name=company_info.get("qb_file_name", "ndjson_bundle"),
-            file_hash=company_fingerprint,
-            data_size_bytes=total_size,
+            company_name=validated["company_name"],
+            qb_file_name=validated["company_info"].get("qb_file_name", "ndjson_bundle"),
+            file_hash=validated["company_fingerprint"],
+            data_size_bytes=validated["total_size"],
             status="pending",
         )
 
         db.session.add(migration)
         db.session.commit()
 
-        # Store bundle in S3
-        try:
-            aws = AWSMigrationManager()
-
-            # Store each file with entity prefix
-            stored_files = []
-            for file_entry in files:
-                file_name = file_entry.get("file_name", "unknown.ndjson")
-                # Prevent path traversal - remove directory components and unsafe characters
-                file_name = os.path.basename(file_name)
-                file_name = re.sub(r"[^\w\-.]", "_", file_name)
-                content_b64 = file_entry.get("content_base64", "")
-
-                if content_b64:
-                    content_bytes = base64.b64decode(content_b64)
-                    s3_key = f"migrations/{migration_id}/{file_name}"
-
-                    # Upload to S3
-                    result = aws.upload_to_s3(
-                        file_obj=BytesIO(content_bytes),
-                        migration_id=migration_id,
-                        file_name=file_name,
-                        metadata={
-                            "entity_type": file_entry.get("entity_type", "unknown"),
-                            "record_count": str(file_entry.get("record_count", 0)),
-                            "sha256": file_entry.get("sha256", ""),
-                        },
-                    )
-
-                    if result:
-                        stored_files.append(
-                            {
-                                "file_name": file_name,
-                                "s3_key": result.get("key"),
-                                "record_count": file_entry.get("record_count", 0),
-                            }
-                        )
-
-            # Update migration status
-            migration.status = "uploaded"
-            migration.s3_uri = f"s3://{aws.bucket_name}/migrations/{migration_id}/"
-            db.session.commit()
-
-            logger.info(
-                f"✓ NDJSON bundle uploaded: {migration_id}, {len(stored_files)} files"
-            )
-
-            return (
-                jsonify(
-                    {
-                        "success": True,
-                        "migration_id": migration_id,
-                        "status": "uploaded_ndjson_bundle",
-                        "total_files": len(stored_files),
-                        "total_records": total_records,
-                        "message": "NDJSON bundle uploaded successfully",
-                    }
-                ),
-                201,
-            )
-
-        except Exception as e:
-            logger.error(f"S3 upload error for NDJSON bundle {migration_id}: {str(e)}")
-            migration.status = "failed"
-            migration.set_error_message(f"Bundle upload error: {str(e)}")
-            db.session.commit()
-
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Failed to upload bundle to secure storage",
-                    }
-                ),
-                500,
-            )
+        # Process and store bundle in S3
+        return _process_ndjson_bundle(validated, migration)
 
     except Exception as e:
         logger.error(f"NDJSON bundle upload error: {str(e)}")
@@ -1375,9 +1547,138 @@ def chunk_exists():
         else:
             return jsonify({"exists": False, "chunk_hash": None}), 200
 
-    except (ValueError, Exception) as e:
+    except Exception as e:
         logger.error(f"Chunk exists check error: {str(e)}")
         return jsonify({"exists": False, "chunk_hash": None}), 200
+
+
+def _assemble_chunks(upload_id, chunk_count):
+    """
+    Validate chunked upload session and verify all chunks are present.
+
+    Args:
+        upload_id: The upload session ID.
+        chunk_count: Expected total number of chunks (unused; actual count read from session).
+
+    Returns dict with session_data, received_chunks, total_chunks, total_size on success,
+    or (response, status_code) on error.
+    """
+    # Validate upload session (from Redis)
+    session_data = _get_upload_session(upload_id)
+
+    if not session_data:
+        return jsonify({"success": False, "error": "Upload session not found"}), 404
+
+    if session_data["user_id"] != int(request.current_user["user_id"]):
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+    if time.time() > session_data["expires_at"]:
+        _delete_upload_session(upload_id)
+        return jsonify({"success": False, "error": "Upload session expired"}), 410
+
+    # Verify all chunks are present
+    total_chunks = session_data["total_chunks"]
+    received_chunks = session_data["chunks"]
+
+    # JSON keys are strings, so check both int and string keys
+    missing_chunks = [
+        i
+        for i in range(total_chunks)
+        if str(i) not in received_chunks and i not in received_chunks
+    ]
+
+    if missing_chunks:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Missing {len(missing_chunks)} chunks",
+                    "missing_chunks": missing_chunks[:20],
+                }
+            ),
+            400,
+        )
+
+    # Calculate total size from chunks
+    total_size = sum(c.get("size", 0) for c in received_chunks.values())
+
+    return {
+        "session_data": session_data,
+        "received_chunks": received_chunks,
+        "total_chunks": total_chunks,
+        "total_size": total_size,
+    }
+
+
+def _validate_assembled_data(data, expected_hash):
+    """
+    Store commit manifest and encryption metadata in S3 for assembled chunks.
+
+    Args:
+        data: dict with upload_id, session_id, key_id, encryption_metadata,
+              metadata, received_chunks, total_chunks, migration_id, total_size.
+        expected_hash: Expected SHA-256 hash of the encrypted data (for manifest).
+
+    Returns True on success. Raises on S3 storage failure.
+    """
+    upload_id = data["upload_id"]
+    session_id = data["session_id"]
+    key_id = data["key_id"]
+    encryption_metadata = data["encryption_metadata"]
+    metadata = data["metadata"]
+    received_chunks = data["received_chunks"]
+    total_chunks = data["total_chunks"]
+    migration_id = data["migration_id"]
+    total_size = data["total_size"]
+
+    aws = AWSMigrationManager()
+
+    commit_manifest = {
+        "upload_id": upload_id,
+        "session_id": session_id,
+        "key_id": key_id,
+        "encryption_metadata": encryption_metadata,
+        "extraction_metadata": metadata,
+        "chunks": {
+            str(k): {
+                "hash": v["hash"],
+                "s3_key": v["s3_key"],
+                "size": v.get("size", 0),
+            }
+            for k, v in received_chunks.items()
+        },
+        "total_size_bytes": total_size,
+        "committed_at": datetime.now(timezone.utc).isoformat() + "Z",
+    }
+
+    # Store commit manifest
+    aws.upload_to_s3(
+        file_obj=BytesIO(json.dumps(commit_manifest, indent=2).encode("utf-8")),
+        migration_id=migration_id,
+        file_name="commit_manifest.json",
+        metadata={
+            "upload_id": upload_id,
+            "migration_id": migration_id,
+            "type": "commit_manifest",
+        },
+    )
+
+    # Store encryption metadata separately
+    aws.store_encryption_metadata(
+        migration_id,
+        {
+            "key_id": key_id,
+            "algorithm": encryption_metadata.get("algorithm", ""),
+            "data_hash_sha256": encryption_metadata.get("data_hash_sha256", ""),
+            "encrypted_hash_sha256": encryption_metadata.get(
+                "encrypted_hash_sha256", ""
+            ),
+            "chunk_size": encryption_metadata.get("chunk_size", 0),
+            "total_chunks": total_chunks,
+        },
+    )
+
+    return True
 
 
 @upload_bp.route("/commit", methods=["POST"])
@@ -1432,51 +1733,22 @@ def commit_chunked_upload():
         if not upload_id:
             return jsonify({"success": False, "error": "upload_id is required"}), 400
 
-        # Validate upload session (from Redis)
-        session_data = _get_upload_session(upload_id)
+        # Assemble and validate all chunks are present
+        assembled = _assemble_chunks(upload_id, chunk_count=0)
+        if isinstance(assembled, tuple):
+            return assembled
 
-        if not session_data:
-            return jsonify({"success": False, "error": "Upload session not found"}), 404
-
-        if session_data["user_id"] != int(request.current_user["user_id"]):
-            return jsonify({"success": False, "error": "Unauthorized"}), 401
-
-        if time.time() > session_data["expires_at"]:
-            _delete_upload_session(upload_id)
-            return jsonify({"success": False, "error": "Upload session expired"}), 410
-
-        # Verify all chunks are present
-        total_chunks = session_data["total_chunks"]
-        received_chunks = session_data["chunks"]
-
-        # JSON keys are strings, so check both int and string keys
-        missing_chunks = [
-            i
-            for i in range(total_chunks)
-            if str(i) not in received_chunks and i not in received_chunks
-        ]
-
-        if missing_chunks:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": f"Missing {len(missing_chunks)} chunks",
-                        "missing_chunks": missing_chunks[:20],
-                    }
-                ),
-                400,
-            )
-
-        # Calculate total size from chunks
-        total_size = sum(c.get("size", 0) for c in received_chunks.values())
+        total_chunks = assembled["total_chunks"]
+        received_chunks = assembled["received_chunks"]
+        total_size = assembled["total_size"]
 
         # Generate migration ID
         migration_id = str(uuid.uuid4())
 
         # Use encrypted hash from session or encryption_metadata
         file_hash = encryption_metadata.get(
-            "encrypted_hash_sha256", session_data.get("encrypted_hash", "")
+            "encrypted_hash_sha256",
+            assembled["session_data"].get("encrypted_hash", ""),
         )
 
         logger.info(
@@ -1503,53 +1775,20 @@ def commit_chunked_upload():
 
         # Store commit manifest and encryption metadata in S3
         try:
-            aws = AWSMigrationManager()
-
-            commit_manifest = {
-                "upload_id": upload_id,
-                "session_id": session_id,
-                "key_id": key_id,
-                "encryption_metadata": encryption_metadata,
-                "extraction_metadata": metadata,
-                "chunks": {
-                    str(k): {
-                        "hash": v["hash"],
-                        "s3_key": v["s3_key"],
-                        "size": v.get("size", 0),
-                    }
-                    for k, v in received_chunks.items()
-                },
-                "total_size_bytes": total_size,
-                "committed_at": datetime.now(timezone.utc).isoformat() + "Z",
-            }
-
-            # Store commit manifest
-            aws.upload_to_s3(
-                file_obj=BytesIO(json.dumps(commit_manifest, indent=2).encode("utf-8")),
-                migration_id=migration_id,
-                file_name="commit_manifest.json",
-                metadata={
-                    "upload_id": upload_id,
-                    "migration_id": migration_id,
-                    "type": "commit_manifest",
-                },
-            )
-
-            # Store encryption metadata separately
-            aws.store_encryption_metadata(
-                migration_id,
+            _validate_assembled_data(
                 {
+                    "upload_id": upload_id,
+                    "session_id": session_id,
                     "key_id": key_id,
-                    "algorithm": encryption_metadata.get("algorithm", ""),
-                    "data_hash_sha256": encryption_metadata.get("data_hash_sha256", ""),
-                    "encrypted_hash_sha256": encryption_metadata.get(
-                        "encrypted_hash_sha256", ""
-                    ),
-                    "chunk_size": encryption_metadata.get("chunk_size", 0),
+                    "encryption_metadata": encryption_metadata,
+                    "metadata": metadata,
+                    "received_chunks": received_chunks,
                     "total_chunks": total_chunks,
+                    "migration_id": migration_id,
+                    "total_size": total_size,
                 },
+                expected_hash=file_hash,
             )
-
         except Exception as e:
             logger.error(f"Failed to store commit metadata for {upload_id}: {str(e)}")
             # Continue - chunks are already stored in S3

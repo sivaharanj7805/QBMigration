@@ -10,8 +10,8 @@ Endpoints:
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
-from functools import wraps
 
 import jwt
 from config import Config
@@ -20,12 +20,31 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from models.database import db
 from models.license import LICENSE_TIERS, License, LicenseActivation
+from utils.auth import admin_required
 
 # FIX #53: Import PII redaction for secure logging
-from utils.pii_redaction import hash_email
+from utils.pii_redaction import hash_email, hash_ip
 
 license_bp = Blueprint("license", __name__, url_prefix="/api/license")
 logger = logging.getLogger(__name__)
+
+# C-08: Compiled format-validation patterns (used across all public endpoints)
+_LICENSE_KEY_RE = re.compile(r"^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
+_FINGERPRINT_RE = re.compile(r"^[a-zA-Z0-9+/=\-]{8,128}$")
+
+
+def _validate_license_format(key):
+    """Return True if *key* matches the FB-XXXX-XXXX-XXXX-XXXX pattern."""
+    if not key or not _LICENSE_KEY_RE.match(key):
+        return False
+    return True
+
+
+def _validate_fingerprint_format(fp):
+    """Return True if *fp* is a valid base64-style hardware fingerprint."""
+    if not fp or not _FINGERPRINT_RE.match(fp):
+        return False
+    return True
 
 
 # ============================================================================
@@ -96,32 +115,13 @@ def log_activation(license_obj, action, fingerprint, success, error=None, notes=
         license_id=license_obj.id,
         action=action,
         hardware_fingerprint=fingerprint,
-        ip_address=request.remote_addr,
+        ip_address=hash_ip(request.remote_addr),
         user_agent=request.headers.get("User-Agent", "")[:255],
         success=success,
         error_message=error,
         notes=notes,
     )
     db.session.add(activation)
-
-
-def admin_required(f):
-    """Decorator for admin-only endpoints"""
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Check if user is authenticated and is admin
-        if not current_user.is_authenticated:
-            return jsonify({"error": "Authentication required"}), 401
-
-        # Use Config method to properly parse admin emails
-        admin_emails = Config.get_admin_emails()
-        if current_user.email not in admin_emails:
-            return jsonify({"error": "Admin access required"}), 403
-
-        return f(*args, **kwargs)
-
-    return decorated_function
 
 
 # ============================================================================
@@ -166,6 +166,13 @@ def validate_license():
                 jsonify({"valid": False, "error": "Hardware fingerprint required"}),
                 400,
             )
+
+        # C-08: Format validation
+        if not _validate_license_format(license_key):
+            return jsonify({"valid": False, "error": "Invalid license key format"}), 400
+
+        if not _validate_fingerprint_format(hardware_fingerprint):
+            return jsonify({"valid": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -255,6 +262,13 @@ def activate_license():
                 jsonify({"success": False, "error": "Hardware fingerprint required"}),
                 400,
             )
+
+        # C-08: Format validation
+        if not _validate_license_format(license_key):
+            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+
+        if not _validate_fingerprint_format(hardware_fingerprint):
+            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -359,6 +373,13 @@ def get_usage():
                 400,
             )
 
+        # C-08: Format validation
+        if not _validate_license_format(license_key):
+            return jsonify({"error": "Invalid license key format"}), 400
+
+        if not _validate_fingerprint_format(hardware_fingerprint):
+            return jsonify({"error": "Invalid hardware fingerprint format"}), 400
+
         # Find and validate license
         license_obj = License.find_by_key(license_key)
 
@@ -427,6 +448,13 @@ def use_migration():
                 ),
                 400,
             )
+
+        # C-08: Format validation
+        if not _validate_license_format(license_key):
+            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+
+        if not _validate_fingerprint_format(hardware_fingerprint):
+            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find and validate license
         license_obj = License.find_by_key(license_key)

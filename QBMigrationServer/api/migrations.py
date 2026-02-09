@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 
 from api.auth import require_auth
@@ -10,7 +11,9 @@ from models.database import db
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
 from models.user import User
+from sqlalchemy import func
 from utils.aws_manager import AWSMigrationManager
+from utils.validators import sanitize_string
 
 migrations_bp = Blueprint("migrations", __name__)
 logger = logging.getLogger(__name__)
@@ -110,8 +113,6 @@ def create_migration():
         201: {success, migration_id}
         400: Invalid input
     """
-    import uuid
-
     try:
         data = request.get_json()
         if not data:
@@ -141,8 +142,6 @@ def create_migration():
         migration_id = str(uuid.uuid4())
 
         # SECURITY FIX: Sanitize user-supplied file names before storage
-        from utils.validators import sanitize_string
-
         raw_file_name = files[0] if files else ""
         safe_file_name = sanitize_string(raw_file_name, max_length=255)
         company_name = (
@@ -172,7 +171,7 @@ def create_migration():
         )
 
     except Exception as e:
-        logger.exception(f"Failed to create migration: {e}")
+        logger.exception("Failed to create migration")
         db.session.rollback()
         return jsonify({"success": False, "error": "Failed to create migration"}), 500
 
@@ -314,7 +313,7 @@ def list_migrations():
         )
 
     except Exception as e:
-        logger.exception(f"Failed to list migrations: {str(e)}")
+        logger.exception("Failed to list migrations")
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -357,7 +356,13 @@ def get_migration(migration_id):
         # Use to_dict if available
         if hasattr(migration, "to_dict") and callable(migration.to_dict):
             migration_data = migration.to_dict()
+            # UPLOAD-MED-03 FIX: Strip internal S3 infrastructure details
+            # from API responses to avoid exposing bucket names and keys.
+            for _s3_key in ("s3_uri", "s3_bucket", "s3_key"):
+                migration_data.pop(_s3_key, None)
         else:
+            # UPLOAD-MED-03 FIX: Replaced s3_uri with a boolean has_file flag
+            # to avoid leaking internal S3 infrastructure details.
             migration_data = {
                 "id": migration.id,
                 "migration_id": migration.migration_id,
@@ -368,13 +373,13 @@ def get_migration(migration_id):
                 "created_at": (
                     migration.created_at.isoformat() if migration.created_at else None
                 ),
-                "s3_uri": migration.s3_uri,
+                "has_file": bool(migration.s3_uri),
             }
 
         return jsonify({"success": True, "migration": migration_data}), 200
 
     except Exception as e:
-        logger.exception(f"Failed to get migration {migration_id}: {str(e)}")
+        logger.exception("Failed to get migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -427,17 +432,287 @@ def get_migration_status(migration_id):
         return jsonify(status_data), 200
 
     except Exception as e:
-        logger.exception(f"Failed to get migration status {migration_id}: {str(e)}")
+        logger.exception("Failed to get migration status %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
         return jsonify({"success": False, "error": "Failed to get status"}), 500
 
 
+def _validate_migration_credits(user_id, migration):
+    """
+    C-04 FIX: Preliminary credit check (non-locking, for fast-fail UX only).
+    The authoritative atomic check+consume happens later with SELECT FOR UPDATE.
+
+    Args:
+        user_id: The current user's ID
+        migration: Not used here, kept for consistent helper signature
+
+    Returns:
+        None if credits are available, or a (response, status_code) tuple on failure
+    """
+    total_remaining = MigrationCredit.query.filter_by(
+        user_id=user_id, status="available", payment_status="paid"
+    ).count()
+
+    if total_remaining <= 0:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "No migration credits available. Please purchase credits first.",
+                }
+            ),
+            402,
+        )
+    return None
+
+
+def _decrypt_qbo_credentials(migration_id, data):
+    """
+    SECURITY FIX: Get QBO credentials from request with encryption support.
+    Credentials must be sent as encrypted_credentials (Base64-encoded encrypted JSON).
+
+    Args:
+        migration_id: The migration ID (for logging)
+        data: The parsed request JSON body
+
+    Returns:
+        Tuple of (qbo_credentials dict, error_response).
+        On success error_response is None; on failure qbo_credentials is None.
+    """
+    if data.get("encrypted_credentials"):
+        try:
+            from api.EncryptionManager import decrypt_client_credentials
+
+            qbo_credentials = decrypt_client_credentials(
+                data["encrypted_credentials"]
+            )
+            logger.info(f"Migration {migration_id}: Using encrypted credentials")
+        except Exception as e:
+            logger.error(f"Failed to decrypt credentials for {migration_id}: {e}")
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to decrypt credentials. Please re-encrypt and try again.",
+                    }
+                ),
+                400,
+            )
+    else:
+        # SECURITY FIX P0-01: Plaintext credentials removed entirely.
+        # All credentials MUST be encrypted. No environment variable override.
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        "Encrypted credentials required."
+                        " Use the encrypted_credentials field"
+                        " with client-side encryption."
+                    ),
+                }
+            ),
+            400,
+        )
+
+    if not qbo_credentials or not all(
+        k in qbo_credentials
+        for k in ["client_id", "client_secret", "refresh_token"]
+    ):
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "QuickBooks Online credentials required (client_id, client_secret, refresh_token)",
+                }
+            ),
+            400,
+        )
+
+    # SECURITY: Validate and log receipt WITHOUT logging actual credentials
+    client_id_masked = (
+        qbo_credentials.get("client_id", "")[:8] + "..."
+        if qbo_credentials.get("client_id")
+        else "missing"
+    )
+    logger.info(
+        f"Received QBO credentials for migration {migration_id} (client_id: {client_id_masked})"
+    )
+
+    return qbo_credentials, None
+
+
+def _ensure_realm_id(qbo_credentials):
+    """
+    CRITICAL FIX: Ensure realm_id is present in QBO credentials.
+    Falls back to the user's stored qbo_realm_id if not provided.
+
+    Args:
+        qbo_credentials: The QBO credentials dict (modified in place)
+
+    Returns:
+        None on success, or a (response, status_code) tuple on failure
+    """
+    if "realm_id" not in qbo_credentials or not qbo_credentials["realm_id"]:
+        user = db.session.get(User, _get_current_user_id())
+        if user and user.qbo_realm_id:
+            qbo_credentials["realm_id"] = user.qbo_realm_id
+        else:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "realm_id required. Please connect to QuickBooks Online first.",
+                    }
+                ),
+                400,
+            )
+    return None
+
+
+def _provision_aws_instance(migration_id, migration, qbo_credentials):
+    """
+    Provision an EC2 instance for the migration and mark it as processing.
+
+    Args:
+        migration_id: The migration UUID string
+        migration: The Migration model instance
+        qbo_credentials: Decrypted QBO credentials dict
+
+    Returns:
+        Tuple of (aws_manager, instance_id, error_response).
+        On success error_response is None; on failure aws_manager and instance_id are None.
+    """
+    # Mark as provisioning
+    if hasattr(migration, "mark_as_provisioning") and callable(
+        migration.mark_as_provisioning
+    ):
+        migration.mark_as_provisioning()
+    else:
+        migration.status = "provisioning"
+        db.session.commit()
+
+    # Initialize AWS manager
+    logger.info(f"Starting AWS migration for {migration_id}...")
+    aws_manager = AWSMigrationManager(
+        region=current_app.config.get("AWS_REGION", "us-east-1")
+    )
+
+    # Get webhook secret
+    webhook_secret = current_app.config.get("WEBHOOK_SECRET")
+
+    # Create EC2 instance
+    instance_id = aws_manager.create_ec2_instance(
+        migration_id=migration_id,
+        s3_uri=migration.s3_uri,
+        qbo_credentials=qbo_credentials,
+        webhook_secret=webhook_secret,
+    )
+
+    if not instance_id:
+        logger.error(f"Failed to create EC2 instance for {migration_id}")
+        if hasattr(migration, "mark_as_failed") and callable(
+            migration.mark_as_failed
+        ):
+            migration.mark_as_failed(
+                "Failed to create AWS instance", "EC2_CREATE_ERROR"
+            )
+        else:
+            migration.status = "failed"
+            db.session.commit()
+        return None, None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to create AWS instance. Please try again.",
+                }
+            ),
+            500,
+        )
+
+    # Mark as processing
+    if hasattr(migration, "mark_as_processing") and callable(
+        migration.mark_as_processing
+    ):
+        migration.mark_as_processing(instance_id)
+    else:
+        migration.status = "processing"
+        if hasattr(migration, "aws_instance_id"):
+            migration.aws_instance_id = instance_id
+        db.session.commit()
+
+    return aws_manager, instance_id, None
+
+
+def _consume_migration_credit(user_id, migration_id, migration, aws_manager, instance_id):
+    """
+    C-04 FIX: Atomic credit check + consumption using SELECT FOR UPDATE.
+    This is the authoritative credit gate -- the earlier count() is only
+    a non-locking fast-fail for UX.  The row lock here prevents the
+    TOCTOU double-spend race between concurrent requests.
+
+    Args:
+        user_id: The current user's ID
+        migration_id: The migration UUID string
+        migration: The Migration model instance
+        aws_manager: The AWSMigrationManager instance (for cleanup on failure)
+        instance_id: The EC2 instance ID (for cleanup on failure)
+
+    Returns:
+        None on success, or a (response, status_code) tuple on failure
+    """
+    available_credit = (
+        MigrationCredit.query.filter_by(
+            user_id=user_id, status="available", payment_status="paid"
+        )
+        .with_for_update()
+        .first()
+    )
+    if not available_credit:
+        # Another request consumed the last credit between the early
+        # check and here.  Terminate the EC2 instance we just launched
+        # and fail the migration.
+        logger.error(
+            f"Credit consumed by concurrent request for migration {migration_id}; "
+            f"terminating instance {instance_id}"
+        )
+        try:
+            aws_manager.cleanup_migration(
+                migration_id=migration_id, instance_id=instance_id
+            )
+        except Exception as cleanup_err:
+            logger.warning(f"Cleanup after credit race failed: {cleanup_err}")
+        if hasattr(migration, "mark_as_failed") and callable(
+            migration.mark_as_failed
+        ):
+            migration.mark_as_failed(
+                "No migration credits available", "CREDIT_EXHAUSTED"
+            )
+        else:
+            migration.status = "failed"
+            db.session.commit()
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "No migration credits available. Please purchase credits first.",
+                }
+            ),
+            402,
+        )
+    available_credit.status = "used"
+    available_credit.used_at = datetime.now(timezone.utc)
+    available_credit.migration_id = migration.id
+    db.session.commit()
+    return None
+
+
 @migrations_bp.route("/api/migrations/<migration_id>/start", methods=["POST"])
 @limiter.limit("5 per minute")
 @require_auth
-def start_migration(migration_id):  # noqa: C901
+def start_migration(migration_id):
     """
     Start migration on ephemeral AWS instance
 
@@ -465,27 +740,9 @@ def start_migration(migration_id):  # noqa: C901
         user_id = _get_current_user_id()
         user = db.session.get(User, user_id)
 
-        # SECURITY FIX P0-02: Use SELECT FOR UPDATE on credit check to prevent
-        # race condition where concurrent requests both pass the check
-        available_credits = (
-            MigrationCredit.query.filter_by(
-                user_id=user_id, status="available", payment_status="paid"
-            )
-            .with_for_update()
-            .all()
-        )
-        total_remaining = len(available_credits)
-
-        if total_remaining <= 0:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "No migration credits available. Please purchase credits first.",
-                    }
-                ),
-                402,
-            )
+        credit_error = _validate_migration_credits(user_id, None)
+        if credit_error:
+            return credit_error
 
         # Use SELECT FOR UPDATE to prevent concurrent starts (race condition fix)
         migration = (
@@ -522,168 +779,33 @@ def start_migration(migration_id):  # noqa: C901
                 400,
             )
 
-        # SECURITY FIX: Get QBO credentials from request with encryption support
-        # Credentials can be sent in two formats:
-        # 1. encrypted_credentials: Base64-encoded encrypted JSON (recommended)
-        # 2. qbo_credentials: Plain JSON (only allowed if ALLOW_PLAINTEXT_CREDENTIALS=true in dev)
+        # Decrypt and validate QBO credentials
         data = request.get_json() or {}
-
-        qbo_credentials = None
-
-        # PRIORITY 1: Check for encrypted credentials (production-recommended)
-        if data.get("encrypted_credentials"):
-            try:
-                from api.EncryptionManager import decrypt_client_credentials
-
-                qbo_credentials = decrypt_client_credentials(
-                    data["encrypted_credentials"]
-                )
-                logger.info(f"Migration {migration_id}: Using encrypted credentials")
-            except Exception as e:
-                logger.error(f"Failed to decrypt credentials for {migration_id}: {e}")
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Failed to decrypt credentials. Please re-encrypt and try again.",
-                        }
-                    ),
-                    400,
-                )
-        else:
-            # SECURITY FIX P0-01: Plaintext credentials removed entirely.
-            # All credentials MUST be encrypted. No environment variable override.
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": (
-                            "Encrypted credentials required."
-                            " Use the encrypted_credentials field"
-                            " with client-side encryption."
-                        ),
-                    }
-                ),
-                400,
-            )
-
-        if not qbo_credentials or not all(
-            k in qbo_credentials
-            for k in ["client_id", "client_secret", "refresh_token"]
-        ):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "QuickBooks Online credentials required (client_id, client_secret, refresh_token)",
-                    }
-                ),
-                400,
-            )
-
-        # SECURITY: Validate and log receipt WITHOUT logging actual credentials
-        client_id_masked = (
-            qbo_credentials.get("client_id", "")[:8] + "..."
-            if qbo_credentials.get("client_id")
-            else "missing"
-        )
-        logger.info(
-            f"Received QBO credentials for migration {migration_id} (client_id: {client_id_masked})"
-        )
+        qbo_credentials, cred_error = _decrypt_qbo_credentials(migration_id, data)
+        if cred_error:
+            return cred_error
 
         # SECURITY: Immediately store credentials in Secrets Manager instead of passing through logs
         # This prevents credential exposure in CloudWatch, access logs, etc.
 
-        # CRITICAL FIX: Ensure realm_id is present - use from user if not provided
-        if "realm_id" not in qbo_credentials or not qbo_credentials["realm_id"]:
-            from models.user import User
+        # Ensure realm_id is present
+        realm_error = _ensure_realm_id(qbo_credentials)
+        if realm_error:
+            return realm_error
 
-            user = User.query.get(_get_current_user_id())
-            if user and user.qbo_realm_id:
-                qbo_credentials["realm_id"] = user.qbo_realm_id
-            else:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "realm_id required. Please connect to QuickBooks Online first.",
-                        }
-                    ),
-                    400,
-                )
-
-        # Mark as provisioning
-        if hasattr(migration, "mark_as_provisioning") and callable(
-            migration.mark_as_provisioning
-        ):
-            migration.mark_as_provisioning()
-        else:
-            migration.status = "provisioning"
-            db.session.commit()
-
-        # Initialize AWS manager
-        logger.info(f"Starting AWS migration for {migration_id}...")
-        aws_manager = AWSMigrationManager(
-            region=current_app.config.get("AWS_REGION", "us-east-1")
+        # Provision AWS instance
+        aws_manager, instance_id, provision_error = _provision_aws_instance(
+            migration_id, migration, qbo_credentials
         )
+        if provision_error:
+            return provision_error
 
-        # Get webhook secret
-        webhook_secret = current_app.config.get("WEBHOOK_SECRET")
-
-        # Create EC2 instance
-        instance_id = aws_manager.create_ec2_instance(
-            migration_id=migration_id,
-            s3_uri=migration.s3_uri,
-            qbo_credentials=qbo_credentials,
-            webhook_secret=webhook_secret,
+        # Atomically consume a migration credit
+        consume_error = _consume_migration_credit(
+            user_id, migration_id, migration, aws_manager, instance_id
         )
-
-        if not instance_id:
-            logger.error(f"Failed to create EC2 instance for {migration_id}")
-            if hasattr(migration, "mark_as_failed") and callable(
-                migration.mark_as_failed
-            ):
-                migration.mark_as_failed(
-                    "Failed to create AWS instance", "EC2_CREATE_ERROR"
-                )
-            else:
-                migration.status = "failed"
-                db.session.commit()
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Failed to create AWS instance. Please try again.",
-                    }
-                ),
-                500,
-            )
-
-        # Mark as processing
-        if hasattr(migration, "mark_as_processing") and callable(
-            migration.mark_as_processing
-        ):
-            migration.mark_as_processing(instance_id)
-        else:
-            migration.status = "processing"
-            if hasattr(migration, "aws_instance_id"):
-                migration.aws_instance_id = instance_id
-            db.session.commit()
-
-        # Consume one migration credit
-        # SECURITY FIX: Only consume credits that are actually paid
-        available_credit = (
-            MigrationCredit.query.filter_by(
-                user_id=user_id, status="available", payment_status="paid"
-            )
-            .with_for_update()
-            .first()
-        )
-        if available_credit:
-            available_credit.status = "used"
-            available_credit.used_at = datetime.now(timezone.utc)
-            available_credit.migration_id = migration.id
-            db.session.commit()
+        if consume_error:
+            return consume_error
 
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
 
@@ -701,7 +823,7 @@ def start_migration(migration_id):  # noqa: C901
         )
 
     except Exception as e:
-        logger.exception(f"Failed to start migration {migration_id}: {str(e)}")
+        logger.exception("Failed to start migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -747,10 +869,11 @@ def cancel_migration(migration_id):
         return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
 
     try:
-        # Get migration
+        # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
+        # cancel/retry races on the same migration row.
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_current_user_id()
-        ).first()
+        ).with_for_update().first()
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404
@@ -814,7 +937,7 @@ def cancel_migration(migration_id):
         )
 
     except Exception as e:
-        logger.exception(f"Failed to cancel migration {migration_id}: {str(e)}")
+        logger.exception("Failed to cancel migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -841,10 +964,11 @@ def retry_migration(migration_id):
         return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
 
     try:
-        # Get migration
+        # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
+        # cancel/retry races on the same migration row.
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_current_user_id()
-        ).first()
+        ).with_for_update().first()
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404
@@ -910,7 +1034,7 @@ def retry_migration(migration_id):
         )
 
     except Exception as e:
-        logger.exception(f"Failed to retry migration {migration_id}: {str(e)}")
+        logger.exception("Failed to retry migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -968,7 +1092,7 @@ def delete_migration(migration_id):
         return jsonify({"success": True, "message": "Migration deleted"}), 200
 
     except Exception as e:
-        logger.exception(f"Failed to delete migration {migration_id}: {str(e)}")
+        logger.exception("Failed to delete migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -1030,10 +1154,8 @@ def execute_migration_celery(migration_id):
             )
 
         # Get OAuth tokens from user if available
-        from models.user import User
-
         oauth_tokens = None
-        user = User.query.get(_get_current_user_id())
+        user = db.session.get(User, _get_current_user_id())
         if user and user.qbo_access_token:
             # SECURITY FIX: Use decryption methods instead of raw encrypted columns
             oauth_tokens = {
@@ -1098,7 +1220,7 @@ def execute_migration_celery(migration_id):
         )
 
     except Exception as e:
-        logger.exception(f"Failed to queue migration {migration_id}: {str(e)}")
+        logger.exception("Failed to queue migration %s", migration_id)
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()
@@ -1114,10 +1236,6 @@ def get_migration_stats():
     Returns real data (not mock) for the current user.
     """
     try:
-        from datetime import datetime, timezone
-
-        from sqlalchemy import func
-
         user_id = _get_current_user_id()
 
         # Get current month's migrations
@@ -1203,7 +1321,7 @@ def get_migration_stats():
         )
 
     except Exception as e:
-        logger.exception(f"Failed to get migration stats: {str(e)}")
+        logger.exception("Failed to get migration stats")
         # SECURITY FIX: Clean up database session on error
         db.session.rollback()
         db.session.remove()

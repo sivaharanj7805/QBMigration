@@ -6,6 +6,7 @@ User Model with Enterprise Security
 - Account lockout protection
 """
 
+import hmac
 import json
 import re
 import secrets
@@ -16,6 +17,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 from flask_login import UserMixin
 from models.database import db
+from utils.env_helper import is_production
 
 # Initialize Argon2 password hasher with secure parameters
 ph = PasswordHasher(
@@ -134,7 +136,7 @@ class User(UserMixin, db.Model):
 
         key = current_app.config.get("QBO_ENCRYPTION_KEY")
         if not key:
-            if os.getenv("FLASK_ENV") == "production":
+            if is_production():
                 raise ValueError(
                     "QBO_ENCRYPTION_KEY not configured. "
                     "Production requires dedicated encryption key per domain."
@@ -626,7 +628,7 @@ class User(UserMixin, db.Model):
                 return None
         # Fall back to legacy unencrypted column (DEPRECATED)
         if self.mfa_secret:
-            if os.getenv("FLASK_ENV") == "production":
+            if is_production():
                 logging.getLogger(__name__).error(
                     f"User {self.id} has unencrypted MFA secret in production. "
                     "Run migrate_legacy_mfa_data() immediately."
@@ -775,13 +777,17 @@ class User(UserMixin, db.Model):
         if totp.verify(token, valid_window=1):
             return True
 
-        # Try backup codes
+        # Try backup codes (constant-time comparison to prevent timing attacks)
         backup_codes = self._get_backup_codes()
         if backup_codes:
             try:
-                if token.upper() in backup_codes:
-                    # Remove used backup code
-                    backup_codes.remove(token.upper())
+                token_upper = token.upper()
+                matched_code = None
+                for code in backup_codes:
+                    if hmac.compare_digest(token_upper, code):
+                        matched_code = code
+                if matched_code is not None:
+                    backup_codes.remove(matched_code)
                     self._set_backup_codes(backup_codes)
                     return True
             except (TypeError, ValueError):

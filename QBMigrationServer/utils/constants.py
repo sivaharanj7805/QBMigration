@@ -157,11 +157,11 @@ class RetryConfig:
 class Security:
     """Security-related constants"""
 
-    # Password requirements
-    MIN_PASSWORD_LENGTH = 8
+    # Password requirements (MIN must match enforcement in user.py and validators.py)
+    MIN_PASSWORD_LENGTH = 12
     MAX_PASSWORD_LENGTH = 128
-    BCRYPT_MIN_ROUNDS = 10
-    BCRYPT_DEFAULT_ROUNDS = 12
+    ARGON2_TIME_COST = 3
+    ARGON2_MEMORY_COST = 65536
 
     # Account lockout
     MAX_FAILED_LOGINS = 5
@@ -352,7 +352,7 @@ def get_all_constants() -> Dict[str, Any]:
         },
         "security": {
             "min_password_length": Security.MIN_PASSWORD_LENGTH,
-            "bcrypt_rounds": Security.BCRYPT_DEFAULT_ROUNDS,
+            "argon2_time_cost": Security.ARGON2_TIME_COST,
             "max_failed_logins": Security.MAX_FAILED_LOGINS,
         },
         "qbo": {

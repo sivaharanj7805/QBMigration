@@ -64,7 +64,12 @@ ACCESS_TOKEN = os.getenv("QBO_ACCESS_TOKEN", "")  # Optional for initial setup
 
 # Validate critical credentials
 if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
-    logger.info("WARNING: QBO credentials not configured. Set environment variables.")
+    if ENVIRONMENT == "production":
+        raise RuntimeError(
+            "QBO credentials contain placeholders. "
+            "Set QBO_CLIENT_ID and QBO_CLIENT_SECRET environment variables."
+        )
+    logger.warning("QBO credentials not configured. Set environment variables.")
 
 # ============================================================================
 # ENVIRONMENT & REGION CONFIGURATION
@@ -73,8 +78,8 @@ if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
 # Environment (sandbox or production)
 ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
 if ENVIRONMENT not in ("sandbox", "production"):
-    logger.info(
-        f"Warning: Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
+    logger.warning(
+        f"Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
     )
     ENVIRONMENT = "sandbox"
 

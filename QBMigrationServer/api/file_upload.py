@@ -4,12 +4,15 @@ Handles IIF, CSV, and Excel file uploads for migration
 """
 
 import os
+import re
+import shutil
 import tempfile
 from pathlib import Path
 
 from api.auth import require_auth
 from flask import Blueprint, jsonify, request
 from models import Migration, db
+from utils.pii_redaction import hash_ip
 from werkzeug.utils import secure_filename
 
 file_upload_bp = Blueprint("file_upload", __name__, url_prefix="/api/files")
@@ -36,8 +39,6 @@ def allowed_file(filename: str) -> bool:
 
     # HIGH FIX: Reject files with multiple extensions (common attack vector)
     # Count extensions by looking for patterns like ".xxx" (dot followed by alphanumeric)
-    import re
-
     extensions = re.findall(r"\.[a-zA-Z0-9]+", filename)
     if len(extensions) > 1:
         # Multiple extensions detected - potential bypass attempt
@@ -125,7 +126,7 @@ def upload_qb_export():
                 user_id=user_id,
                 session_id=session_id,
                 status="parsing",
-                ip_address=request.remote_addr,
+                ip_address=hash_ip(request.remote_addr),
             )
             db.session.add(migration)
 
@@ -154,8 +155,6 @@ def upload_qb_export():
 
     finally:
         # FIX: Guaranteed cleanup of temp directory regardless of success or failure
-        import shutil
-
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)

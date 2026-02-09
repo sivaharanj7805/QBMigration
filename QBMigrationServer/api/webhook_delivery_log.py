@@ -17,7 +17,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import List
+from typing import List, Optional
 
 from flask import Blueprint, jsonify, request
 from flask_login import current_user
@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 webhook_logs_bp = Blueprint("webhook_logs", __name__, url_prefix="/api/webhook-logs")
 
-# Admin API key for admin-only endpoints
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+
+def _get_admin_api_key():
+    """Read ADMIN_API_KEY at call time, not module-load time."""
+    return os.getenv("ADMIN_API_KEY")
 
 
 def require_auth_or_admin(f):
@@ -43,10 +45,11 @@ def require_auth_or_admin(f):
     def decorated_function(*args, **kwargs):
         # Check for admin API key
         admin_key = request.headers.get("X-Admin-API-Key")
+        admin_api_key = _get_admin_api_key()
         if (
             admin_key
-            and ADMIN_API_KEY
-            and hmac.compare_digest(admin_key, ADMIN_API_KEY)
+            and admin_api_key
+            and hmac.compare_digest(admin_key, admin_api_key)
         ):
             return f(*args, **kwargs)
 
@@ -71,14 +74,15 @@ def require_admin_only(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         admin_key = request.headers.get("X-Admin-API-Key")
+        admin_api_key = _get_admin_api_key()
 
-        if not ADMIN_API_KEY:
+        if not admin_api_key:
             return jsonify({"error": "Admin API key not configured"}), 503
 
         if not admin_key:
             return jsonify({"error": "Admin authentication required"}), 401
 
-        if not hmac.compare_digest(admin_key, ADMIN_API_KEY):
+        if not hmac.compare_digest(admin_key, admin_api_key):
             logger.warning(
                 f"Invalid admin key for webhook logs from {request.remote_addr}"
             )
@@ -165,8 +169,8 @@ class WebhookLogger:
         webhook_id: str,
         migration_id: str,
         webhook_type: str,
-        source_ip: str = None,
-        instance_id: str = None,
+        source_ip: Optional[str] = None,
+        instance_id: Optional[str] = None,
     ) -> WebhookDeliveryLog:
         """
         Log that a webhook was received.
@@ -215,7 +219,7 @@ class WebhookLogger:
 
     @staticmethod
     def log_processed(
-        webhook_id: str, response_code: int, error_message: str = None
+        webhook_id: str, response_code: int, error_message: Optional[str] = None
     ) -> bool:
         """
         Log webhook processing completion.
@@ -271,14 +275,25 @@ class WebhookLogger:
     def get_delivery_stats(hours: int = 24) -> dict:
         """
         Get delivery statistics for monitoring dashboard.
+        Uses SQL aggregation instead of loading all rows into Python.
         """
+        from sqlalchemy import case, func
+
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-        logs = WebhookDeliveryLog.query.filter(
-            WebhookDeliveryLog.received_at >= cutoff
-        ).all()
+        # Aggregate totals, avg processing time, and success count in SQL
+        summary = db.session.query(
+            func.count(WebhookDeliveryLog.id).label("total"),
+            func.avg(WebhookDeliveryLog.processing_time_ms).label("avg_time"),
+            func.sum(
+                case(
+                    (WebhookDeliveryLog.response_code == 200, 1),
+                    else_=0,
+                )
+            ).label("successful"),
+        ).filter(WebhookDeliveryLog.received_at >= cutoff).first()
 
-        total = len(logs)
+        total = summary.total or 0
         if total == 0:
             return {
                 "period_hours": hours,
@@ -289,24 +304,32 @@ class WebhookLogger:
                 "success_rate": 0,
             }
 
-        by_status = {}
-        by_type = {}
-        processing_times = []
-        successful = 0
+        avg_time = float(summary.avg_time) if summary.avg_time else 0
+        successful = int(summary.successful) if summary.successful else 0
 
-        for log in logs:
-            by_status[log.status] = by_status.get(log.status, 0) + 1
-            by_type[log.webhook_type] = by_type.get(log.webhook_type, 0) + 1
-
-            if log.processing_time_ms:
-                processing_times.append(log.processing_time_ms)
-
-            if log.response_code == 200:
-                successful += 1
-
-        avg_time = (
-            sum(processing_times) / len(processing_times) if processing_times else 0
+        # Aggregate by_status in SQL
+        status_rows = (
+            db.session.query(
+                WebhookDeliveryLog.status,
+                func.count(WebhookDeliveryLog.id),
+            )
+            .filter(WebhookDeliveryLog.received_at >= cutoff)
+            .group_by(WebhookDeliveryLog.status)
+            .all()
         )
+        by_status = {row[0]: row[1] for row in status_rows}
+
+        # Aggregate by_type in SQL
+        type_rows = (
+            db.session.query(
+                WebhookDeliveryLog.webhook_type,
+                func.count(WebhookDeliveryLog.id),
+            )
+            .filter(WebhookDeliveryLog.received_at >= cutoff)
+            .group_by(WebhookDeliveryLog.webhook_type)
+            .all()
+        )
+        by_type = {row[0]: row[1] for row in type_rows}
 
         return {
             "period_hours": hours,

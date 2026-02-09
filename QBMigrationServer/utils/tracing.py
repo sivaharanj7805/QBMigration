@@ -41,6 +41,8 @@ import os
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, Optional
 
+from utils.env_helper import get_env
+
 logger = logging.getLogger(__name__)
 
 # Tracing enabled flag
@@ -178,7 +180,7 @@ def init_tracing(app):  # noqa: C901
     try:
         # Service name from environment or config
         service_name = os.getenv("OTEL_SERVICE_NAME", "qbmigration")
-        environment = os.getenv("FLASK_ENV", "development")
+        environment = get_env()
 
         # Create resource with service info
         resource = Resource.create(

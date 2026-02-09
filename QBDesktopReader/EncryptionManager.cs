@@ -28,6 +28,7 @@ namespace QBDesktopExtractor
         public const int DefaultChunkSize = 64 * 1024; // 64KB chunks
 
         private static readonly object _keyGenLock = new object();
+        private static readonly System.Net.Http.HttpClient _kmsHttpClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         /// <summary>
         /// Generate a cryptographically secure key
@@ -328,24 +329,21 @@ namespace QBDesktopExtractor
                     // the wrapped (encrypted) key bytes.
                     try
                     {
-                        using (var client = new System.Net.Http.HttpClient())
+                        var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, kmsEndpoint + "/encrypt");
+                        request.Content = new System.Net.Http.ByteArrayContent(key);
+                        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+                        // Add authorization if KMS auth token is configured
+                        string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
+                        if (!string.IsNullOrEmpty(kmsAuthToken))
                         {
-                            client.Timeout = TimeSpan.FromSeconds(10);
-                            var content = new System.Net.Http.ByteArrayContent(key);
-                            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-
-                            // Add authorization if KMS auth token is configured
-                            string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
-                            if (!string.IsNullOrEmpty(kmsAuthToken))
-                            {
-                                client.DefaultRequestHeaders.Authorization =
-                                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
-                            }
-
-                            var response = client.PostAsync(kmsEndpoint + "/encrypt", content).Result;
-                            response.EnsureSuccessStatusCode();
-                            return response.Content.ReadAsByteArrayAsync().Result;
+                            request.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
                         }
+
+                        var response = _kmsHttpClient.SendAsync(request).Result;
+                        response.EnsureSuccessStatusCode();
+                        return response.Content.ReadAsByteArrayAsync().Result;
                     }
                     catch (Exception ex)
                     {
@@ -391,6 +389,7 @@ namespace QBDesktopExtractor
                 throw new CryptographicException("Protected key is null or empty");
             }
 
+#if DEBUG
             // Check for non-Windows fallback marker
             byte[] marker = Encoding.UTF8.GetBytes("NOPROTECT:");
             if (protectedKey.Length > marker.Length)
@@ -413,6 +412,7 @@ namespace QBDesktopExtractor
                     return key;
                 }
             }
+#endif
 
             // Standard Windows DPAPI protection
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -432,23 +432,20 @@ namespace QBDesktopExtractor
 
                     try
                     {
-                        using (var client = new System.Net.Http.HttpClient())
+                        var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post, kmsEndpoint + "/decrypt");
+                        request.Content = new System.Net.Http.ByteArrayContent(protectedKey);
+                        request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+
+                        string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
+                        if (!string.IsNullOrEmpty(kmsAuthToken))
                         {
-                            client.Timeout = TimeSpan.FromSeconds(10);
-                            var content = new System.Net.Http.ByteArrayContent(protectedKey);
-                            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-
-                            string kmsAuthToken = Environment.GetEnvironmentVariable("KMS_AUTH_TOKEN");
-                            if (!string.IsNullOrEmpty(kmsAuthToken))
-                            {
-                                client.DefaultRequestHeaders.Authorization =
-                                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
-                            }
-
-                            var response = client.PostAsync(kmsEndpoint + "/decrypt", content).Result;
-                            response.EnsureSuccessStatusCode();
-                            return response.Content.ReadAsByteArrayAsync().Result;
+                            request.Headers.Authorization =
+                                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
                         }
+
+                        var response = _kmsHttpClient.SendAsync(request).Result;
+                        response.EnsureSuccessStatusCode();
+                        return response.Content.ReadAsByteArrayAsync().Result;
                     }
                     catch (Exception ex)
                     {

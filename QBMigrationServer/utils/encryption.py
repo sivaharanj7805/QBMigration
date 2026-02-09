@@ -11,6 +11,7 @@ import threading
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from utils.env_helper import get_env, is_testing
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +93,11 @@ class EncryptionManager:
         if not key_password:
             # FIX 100/100: Require RSA_KEY_PASSWORD in ALL environments
             # This ensures consistent security posture and key recoverability
-            flask_env = os.environ.get("FLASK_ENV", "development")
 
-            # AUDIT FIX P2-05: Only use FLASK_ENV for test detection, not PYTEST env var
+            # AUDIT FIX P2-05: Only use environment for test detection, not PYTEST env var
             # PYTEST_CURRENT_TEST could be accidentally set in production
-            is_testing = flask_env == "testing"
 
-            if is_testing:
+            if is_testing():
                 # Testing only: Generate a deterministic test password
                 key_password = "test-rsa-key-password-for-ci-cd"
                 logger.info(
@@ -109,7 +108,7 @@ class EncryptionManager:
                 # This forces proper secrets management everywhere
                 raise RuntimeError(
                     "CRITICAL SECURITY ERROR: RSA_KEY_PASSWORD not set in environment or Secrets Manager. "
-                    f"Environment: {flask_env}. "
+                    f"Environment: {get_env()}. "
                     "Cannot generate RSA keys without a configured password. "
                     "Please set RSA_KEY_PASSWORD environment variable or add 'rsa_key_password' to Secrets Manager. "
                     'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"'

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet, InvalidToken
 from flask import current_app
 from models.database import db
+from utils.env_helper import is_production
 
 # Configuration constants (CQ-05: Extracted from magic numbers)
 MIGRATION_EXPIRY_HOURS = 48
@@ -179,16 +180,12 @@ class Migration(db.Model):
             self.error_message_encrypted = None
             return
 
-        import os
-
         try:
             key = current_app.config.get("BACKUP_ENCRYPTION_KEY")
             if not key:
                 # CRITICAL FIX: Fail-closed instead of storing unencrypted
                 # Storing unencrypted error messages could leak sensitive QB data
-                is_production = os.getenv("FLASK_ENV", "development") == "production"
-
-                if is_production:
+                if is_production():
                     # In production, raise an exception - encryption is mandatory
                     raise ValueError(
                         "BACKUP_ENCRYPTION_KEY not configured - cannot store error messages securely. "

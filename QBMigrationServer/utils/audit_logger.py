@@ -202,6 +202,14 @@ class AuditEvent:
         return json.dumps(self.to_dict(), default=str)
 
 
+def _sanitize_log_value(value):
+    """Sanitize a value for safe logging (prevent log injection)."""
+    if isinstance(value, str):
+        # Remove newlines and control characters that could inject fake log entries
+        return value.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+    return value
+
+
 class AuditLogger:
     """
     SOC2-compliant audit logger with structured JSON output.
@@ -287,10 +295,11 @@ class AuditLogger:
         # Log to audit file (JSON format)
         self.logger.info(event.to_json())
 
-        # Also log summary to app logger
+        # Also log summary to app logger (sanitize user-controlled fields to prevent log injection)
         self.app_logger.info(
-            f"AUDIT: {event.event_type} | actor={event.actor_id} | "
-            f"resource={event.resource_type}:{event.resource_id} | outcome={event.outcome}"
+            f"AUDIT: {_sanitize_log_value(event.event_type)} | actor={event.actor_id} | "
+            f"resource={_sanitize_log_value(event.resource_type)}:{_sanitize_log_value(event.resource_id)} | "
+            f"outcome={_sanitize_log_value(event.outcome)}"
         )
 
     # =========================================================================

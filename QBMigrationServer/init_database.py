@@ -53,8 +53,15 @@ def init_database():
             "tier_purchased_at": "TIMESTAMP DEFAULT NULL",
         }
 
+        # SECURITY FIX: Validate DDL identifiers against allowlist before interpolation
+        import re as _re
+        _VALID_IDENTIFIER = _re.compile(r"^[a-z_]+$")
+        _VALID_TYPE = _re.compile(r"^[A-Z()0-9 ]+$")
+
         with db.engine.connect() as conn:
             for col_name, col_type in tier_columns.items():
+                assert _VALID_IDENTIFIER.match(col_name), f"Invalid column name: {col_name}"
+                assert _VALID_TYPE.match(col_type.split(" DEFAULT")[0].strip()), f"Invalid type: {col_type}"
                 if col_name not in existing_columns:
                     try:
                         conn.execute(
@@ -63,10 +70,10 @@ def init_database():
                         conn.commit()
                         logger.info(f"   [OK] Added column: {col_name}")
                     except Exception as e:
-                        if "already exists" in str(e):
+                        if "already exists" in str(e).lower():
                             logger.info(f"   [--] Column exists: {col_name}")
                         else:
-                            logger.info(f"   [ERR] Error adding {col_name}: {e}")
+                            logger.error(f"   [ERR] Error adding {col_name}: {e}")
                 else:
                     logger.info(f"   [--] Column exists: {col_name}")
 

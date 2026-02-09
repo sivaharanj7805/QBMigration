@@ -15,9 +15,12 @@ Usage:
 import json
 import logging
 import os
+import secrets as stdlib_secrets
 import threading
 import time
 from typing import Any, Dict, Optional
+
+from utils.env_helper import get_env, is_development, is_production
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +90,7 @@ def get_all_secrets(
     global _secrets_cache_timestamp  # noqa: F824
 
     # In development mode, fall back to environment variables
-    if os.getenv("FLASK_ENV", "development") == "development":
+    if is_development():
         logger.info(
             "Development mode: Using environment variables instead of Secrets Manager"
         )
@@ -194,10 +197,26 @@ def _get_env_secrets() -> Dict[str, Any]:
         "webhook_secret",
     ]
 
+    _is_production = is_production()
+
+    # Resolve SECRET_KEY: require explicit value in production, random fallback in dev
+    secret_key_env = os.getenv("SECRET_KEY", "")
+    if not secret_key_env:
+        if _is_production:
+            raise SecretsManagerError(
+                "SECRET_KEY environment variable must be set in production"
+            )
+        else:
+            secret_key_env = stdlib_secrets.token_hex(32)
+            logger.warning(
+                "SECRET_KEY not set; generated random ephemeral key for development. "
+                "Sessions will not persist across restarts."
+            )
+
     secrets = {
         # Flask
-        "flask_secret_key": os.getenv("SECRET_KEY", ""),
-        "flask_env": os.getenv("FLASK_ENV", "development"),
+        "flask_secret_key": secret_key_env,
+        "flask_env": get_env(),
         # Database
         "database_url": os.getenv("DATABASE_URL", ""),
         # AWS
@@ -218,13 +237,12 @@ def _get_env_secrets() -> Dict[str, Any]:
     }
 
     # Validate required secrets
-    is_production = os.getenv("FLASK_ENV") == "production"
-    required = PRODUCTION_REQUIRED_SECRETS if is_production else REQUIRED_SECRETS
+    required = PRODUCTION_REQUIRED_SECRETS if _is_production else REQUIRED_SECRETS
 
     missing = [k for k in required if not secrets.get(k)]
     if missing:
         error_msg = f"Missing required secrets: {', '.join(missing)}"
-        if is_production:
+        if _is_production:
             logger.critical(error_msg)
             raise SecretsManagerError(error_msg)
         else:
@@ -324,7 +342,7 @@ SECRETS_TEMPLATE = """
 if __name__ == "__main__":
     # Test the secrets manager
     logger.info("Testing Secrets Manager...")
-    logger.info(f"Flask ENV: {os.getenv('FLASK_ENV', 'development')}")
+    logger.info(f"Flask ENV: {get_env()}")
 
     try:
         secrets = get_all_secrets()

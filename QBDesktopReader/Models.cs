@@ -706,7 +706,9 @@ namespace QBDesktopExtractor
         [JsonProperty("firstName")] public string FirstName { get; set; }
         [JsonProperty("middleName")] public string MiddleName { get; set; }
         [JsonProperty("lastName")] public string LastName { get; set; }
+        [JsonIgnore]
         [JsonProperty("ssn")] public string SSN { get; set; }  // Sensitive - redact in output
+        public string SSNMasked => string.IsNullOrEmpty(SSN) ? "" : $"***-**-{SSN[^4..]}";
         [JsonProperty("phone")] public string Phone { get; set; }
         [JsonProperty("altPhone")] public string AltPhone { get; set; }
         [JsonProperty("fax")] public string Fax { get; set; }

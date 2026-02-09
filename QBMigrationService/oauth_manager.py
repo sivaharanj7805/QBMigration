@@ -18,12 +18,17 @@ Grade: A+
 import base64
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Dict, List, Optional
 
 import requests
+
+
+def _get_env():
+    return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +81,7 @@ class OAuthManager:
                 self.encryption_manager = EncryptionManager
             except ImportError:
                 # HIGH-10 FIX: Fail in production mode instead of storing tokens in plaintext
-                import os
-
-                if os.getenv("FLASK_ENV", "development") == "production":
+                if _get_env() == "production":
                     raise ImportError(
                         "EncryptionManager not available. Tokens cannot be stored securely. "
                         "Install the encryption module or set FLASK_ENV=development for testing."
@@ -120,8 +123,6 @@ class OAuthManager:
         Returns:
             (key, salt) tuple
         """
-        import os
-
         # Try AWS KMS first
         aws_kms_key_id = os.getenv("AWS_KMS_KEY_ID")
         if aws_kms_key_id:
@@ -175,9 +176,9 @@ class OAuthManager:
                 logger.info(f"⚠️  Azure Key Vault failed: {e}")
                 logger.info("   Falling back to derived key")
 
-        # SECURITY FIX: Default to 'production' (fail-safe) when FLASK_ENV is not set
+        # SECURITY FIX: Default to 'production' (fail-safe) when environment is not set
         # This ensures that unset environments don't silently use insecure key derivation
-        flask_env = os.getenv("FLASK_ENV", "production")
+        flask_env = _get_env()
         if flask_env != "development":
             raise RuntimeError(
                 "CRITICAL: No KMS configured for token encryption. "

@@ -24,15 +24,18 @@ FLASK_DEBUG=0
 # Security Keys (REQUIRED - generate unique values for each environment!)
 # -----------------------------------------------------------------------------
 # JWT signing and session encryption key (min 32 characters)
+# SECURITY: Change this value before deployment - do not use the default
 SECRET_KEY=REPLACE_WITH_OUTPUT_OF_openssl_rand_base64_32
 
 # Fernet key for encrypting OAuth tokens (must be valid Fernet key)
+# SECURITY: Change this value before deployment - do not use the default
 BACKUP_ENCRYPTION_KEY=REPLACE_WITH_OUTPUT_OF_fernet_generate_key
 
 # -----------------------------------------------------------------------------
 # Database Configuration
 # -----------------------------------------------------------------------------
 # Option 1: AWS RDS PostgreSQL (recommended for production)
+# SECURITY: Change this value before deployment - do not use the default
 DATABASE_URL=postgresql://qbmigration:YOUR_PASSWORD@your-rds-instance.region.rds.amazonaws.com:5432/qbmigration
 
 # Option 2: Local PostgreSQL
@@ -40,6 +43,7 @@ DATABASE_URL=postgresql://qbmigration:YOUR_PASSWORD@your-rds-instance.region.rds
 
 # PostgreSQL credentials (used if running local PostgreSQL)
 POSTGRES_USER=qbmigration
+# SECURITY: Change this value before deployment - do not use the default
 POSTGRES_PASSWORD=REPLACE_WITH_STRONG_PASSWORD
 POSTGRES_DB=qbmigration
 

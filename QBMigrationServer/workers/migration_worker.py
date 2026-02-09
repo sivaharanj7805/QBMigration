@@ -45,7 +45,7 @@ def process_migration(self, db_id):
     from orchestrator import MigrationOrchestrator
 
     with app.app_context():
-        migration = Migration.query.get(db_id)
+        migration = db.session.get(Migration, db_id)
         if not migration:
             logger.error(f"Migration record {db_id} not found")
             return
@@ -80,9 +80,9 @@ def process_migration(self, db_id):
             )
 
             if result["success"]:
-                migration.status = "completed"
-                migration.completed_at = datetime.now(timezone.utc)
-                migration.progress_percent = 100
+                # CRITICAL FIX: Use mark_as_completed() to enforce trial balance
+                # verification. Direct status assignment bypasses forensic checks.
+                migration.mark_as_completed(results=result)
             else:
                 migration.status = "failed"
                 # CRITICAL FIX: Use set_error_message() to encrypt error data
