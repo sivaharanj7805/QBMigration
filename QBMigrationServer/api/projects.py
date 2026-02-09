@@ -6,6 +6,7 @@ Projects are created when a user has a paid migration credit.
 Each project is tied to a specific tier that determines transaction limits.
 """
 
+import logging
 from datetime import datetime, timezone
 
 from api.auth import require_auth
@@ -14,6 +15,8 @@ from models import Migration, Project, db
 from models.database import is_postgresql
 from models.migration_credit import MigrationCredit
 from models.project import generate_session_id
+
+logger = logging.getLogger(__name__)
 
 projects_bp = Blueprint("projects", __name__, url_prefix="/api/projects")
 
@@ -175,9 +178,7 @@ def create_project():
 
     except Exception as e:
         db.session.rollback()
-        import logging
-
-        logging.getLogger(__name__).error(f"Project creation failed: {e}")
+        logger.error(f"Project creation failed: {e}")
         return jsonify({"error": "Failed to create project. Please try again."}), 500
 
     return (

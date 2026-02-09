@@ -72,7 +72,7 @@ def save_whitelabel():
         )
 
     except Exception as e:
-        logger.exception(f"Failed to save whitelabel settings for user {user_id}: {e}")
+        logger.exception(f"Failed to save whitelabel settings for user {user_id}")
         db.session.rollback()
         return (
             jsonify({"success": False, "error": "Failed to save branding settings"}),

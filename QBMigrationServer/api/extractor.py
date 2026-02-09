@@ -459,7 +459,7 @@ def download_extractor():
     # Try zip package first (recommended - includes all dependencies)
     zip_path = find_zip_path()
     if zip_path:
-        logger.info(f"Serving deployment zip from: {zip_path}")
+        logger.info("Serving deployment zip package")
         return send_file(
             zip_path,
             as_attachment=True,
@@ -470,7 +470,7 @@ def download_extractor():
     # Fall back to local exe file
     extractor_path = find_extractor_path()
     if extractor_path:
-        logger.info(f"Serving extractor from: {extractor_path}")
+        logger.info("Serving extractor from local source")
         return send_file(
             extractor_path,
             as_attachment=True,
@@ -481,7 +481,7 @@ def download_extractor():
     # Try cached version
     if is_cache_valid():
         cache_path = os.path.join(CACHE_DIR, "QBExtractor.exe")
-        logger.info(f"Serving extractor from cache: {cache_path}")
+        logger.info("Serving extractor from cache")
         return send_file(
             cache_path,
             as_attachment=True,
@@ -492,7 +492,7 @@ def download_extractor():
     # Try to download and cache from GitHub
     cached_path = download_and_cache_from_github()
     if cached_path:
-        logger.info(f"Serving freshly cached extractor: {cached_path}")
+        logger.info("Serving freshly cached extractor")
         return send_file(
             cached_path,
             as_attachment=True,
@@ -853,7 +853,8 @@ def clear_cache():
 
         return jsonify({"success": True, "message": "Cache cleared successfully"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        logger.exception("Failed to clear cache")
+        return jsonify({"success": False, "error": "Failed to clear cache"}), 500
 
 
 def generate_fallback_installer():
@@ -1038,7 +1039,7 @@ def download_zip():
             404,
         )
 
-    logger.info(f"Serving deployment zip from: {zip_path}")
+    logger.info("Serving deployment zip package")
     return send_file(
         zip_path,
         as_attachment=True,
@@ -1160,7 +1161,7 @@ def regenerate_zip_hash():
     if not zip_path:
         return jsonify({"error": "No deployment zip found to hash"}), 404
 
-    logger.info(f"Regenerating hash for: {zip_path}")
+    logger.info("Regenerating hash for deployment zip")
     metadata = generate_zip_metadata(zip_path)
 
     return jsonify(

@@ -18,6 +18,8 @@ import logging
 import os
 from typing import Optional
 
+from utils.env_helper import get_env, is_production
+
 logger = logging.getLogger(__name__)
 
 # Tracing state
@@ -44,10 +46,10 @@ def init_observability(app) -> bool:
     global _tracer_provider
 
     # Check if observability is enabled
-    flask_env = os.getenv("FLASK_ENV", "development")
+    flask_env = get_env()
     traces_enabled = (
         os.getenv(
-            "OTEL_TRACES_ENABLED", "true" if flask_env == "production" else "false"
+            "OTEL_TRACES_ENABLED", "true" if is_production() else "false"
         ).lower()
         == "true"
     )

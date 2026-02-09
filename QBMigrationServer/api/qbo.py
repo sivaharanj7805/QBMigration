@@ -215,6 +215,42 @@ def qbo_callback():
         )
 
 
+def _revoke_single_token(token, token_type, client_id, client_secret, user_id, reason):
+    """
+    Revoke a single QBO OAuth token at the Intuit server.
+
+    Args:
+        token: The plaintext token to revoke
+        token_type: 'access_token' or 'refresh_token' (for logging)
+        client_id: QBO OAuth client ID
+        client_secret: QBO OAuth client secret
+        user_id: User ID (for logging)
+        reason: Reason for revocation (for logging)
+
+    Returns:
+        tuple: (success: bool, error: str or None)
+    """
+    try:
+        response = requests.post(
+            INTUIT_REVOKE_URL,
+            data={"token": token},
+            auth=(client_id, client_secret),
+            headers={"Accept": "application/json"},
+            timeout=(10, 30),
+        )
+        if response.status_code in (200, 204):
+            logger.info(f"Revoked QBO {token_type} for user {user_id} ({reason})")
+            return True, None
+        else:
+            logger.warning(
+                f"QBO {token_type} revocation returned {response.status_code}"
+            )
+            return False, None
+    except Exception as e:
+        logger.warning(f"Failed to revoke QBO {token_type}: {e}")
+        return False, f"{token_type}: {str(e)}"
+
+
 def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
     """
     Revoke all QBO OAuth tokens for a user at the Intuit server.
@@ -243,7 +279,6 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
         )
         return True
 
-    tokens_revoked = 0
     errors = []
 
     # CRITICAL FIX: Use decrypted token getters, NOT raw encrypted column values.
@@ -255,48 +290,22 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
         user.get_qbo_access_token() if hasattr(user, "get_qbo_access_token") else None
     )
     if access_token:
-        try:
-            response = requests.post(
-                INTUIT_REVOKE_URL,
-                data={"token": access_token},
-                auth=(client_id, client_secret),
-                headers={"Accept": "application/json"},
-                timeout=(10, 30),
-            )
-            if response.status_code in (200, 204):
-                tokens_revoked += 1
-                logger.info(f"Revoked QBO access token for user {user.id} ({reason})")
-            else:
-                logger.warning(
-                    f"QBO access token revocation returned {response.status_code}"
-                )
-        except Exception as e:
-            errors.append(f"access_token: {str(e)}")
-            logger.warning(f"Failed to revoke QBO access token: {e}")
+        success, error = _revoke_single_token(
+            access_token, "access_token", client_id, client_secret, user.id, reason
+        )
+        if error:
+            errors.append(error)
 
     # Revoke refresh token (if present)
     refresh_token = (
         user.get_qbo_refresh_token() if hasattr(user, "get_qbo_refresh_token") else None
     )
     if refresh_token:
-        try:
-            response = requests.post(
-                INTUIT_REVOKE_URL,
-                data={"token": refresh_token},
-                auth=(client_id, client_secret),
-                headers={"Accept": "application/json"},
-                timeout=(10, 30),
-            )
-            if response.status_code in (200, 204):
-                tokens_revoked += 1
-                logger.info(f"Revoked QBO refresh token for user {user.id} ({reason})")
-            else:
-                logger.warning(
-                    f"QBO refresh token revocation returned {response.status_code}"
-                )
-        except Exception as e:
-            errors.append(f"refresh_token: {str(e)}")
-            logger.warning(f"Failed to revoke QBO refresh token: {e}")
+        success, error = _revoke_single_token(
+            refresh_token, "refresh_token", client_id, client_secret, user.id, reason
+        )
+        if error:
+            errors.append(error)
 
     if errors:
         logger.warning(f"QBO token revocation had errors for user {user.id}: {errors}")

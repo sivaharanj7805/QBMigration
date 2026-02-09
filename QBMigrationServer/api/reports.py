@@ -634,6 +634,64 @@ def _generate_health_report(migration, output_path):
         logger.warning("ReportLab not available, generated text file instead")
 
 
+def _format_discrepancy_row(item):
+    """
+    Format a single discrepancy item into a table row.
+
+    Args:
+        item: A dict with keys account_name, source_balance, destination_balance, difference
+
+    Returns:
+        A list of formatted strings suitable for a reportlab Table row
+    """
+    return [
+        item.get("account_name", "N/A"),
+        f"${item.get('source_balance', 0):,.2f}",
+        f"${item.get('destination_balance', 0):,.2f}",
+        f"${item.get('difference', 0):,.2f}",
+    ]
+
+
+def _build_discrepancy_table(migration):
+    """
+    Extract discrepancy data from a migration's verification_results.
+
+    Checks for explicit discrepancies first, then falls back to computing
+    from trial_balance totals if no explicit discrepancies are stored.
+
+    Args:
+        migration: The Migration model instance
+
+    Returns:
+        A list of discrepancy dicts (may be empty if no discrepancies found)
+    """
+    discrepancies = []
+    if (
+        hasattr(migration, "verification_results")
+        and migration.verification_results
+    ):
+        try:
+            verification_data = json.loads(migration.verification_results)
+            discrepancies = verification_data.get("discrepancies", [])
+
+            if not discrepancies and "trial_balance" in verification_data:
+                tb = verification_data["trial_balance"]
+                diff = tb.get("source_total", 0) - tb.get("destination_total", 0)
+                if abs(diff) > 0.01:
+                    discrepancies = [
+                        {
+                            "account_name": "Trial Balance",
+                            "source_balance": tb.get("source_total", 0),
+                            "destination_balance": tb.get("destination_total", 0),
+                            "difference": diff,
+                        }
+                    ]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return discrepancies
+
+
 def _generate_discrepancy_report(migration, output_path):
     """Generate a discrepancy analysis report PDF."""
     try:
@@ -674,29 +732,7 @@ def _generate_discrepancy_report(migration, output_path):
         story.append(Spacer(1, 20))
 
         # Get discrepancy data
-        discrepancies = []
-        if (
-            hasattr(migration, "verification_results")
-            and migration.verification_results
-        ):
-            try:
-                verification_data = json.loads(migration.verification_results)
-                discrepancies = verification_data.get("discrepancies", [])
-
-                if not discrepancies and "trial_balance" in verification_data:
-                    tb = verification_data["trial_balance"]
-                    diff = tb.get("source_total", 0) - tb.get("destination_total", 0)
-                    if abs(diff) > 0.01:
-                        discrepancies = [
-                            {
-                                "account_name": "Trial Balance",
-                                "source_balance": tb.get("source_total", 0),
-                                "destination_balance": tb.get("destination_total", 0),
-                                "difference": diff,
-                            }
-                        ]
-            except (json.JSONDecodeError, TypeError):
-                pass
+        discrepancies = _build_discrepancy_table(migration)
 
         if discrepancies:
             story.append(
@@ -706,14 +742,7 @@ def _generate_discrepancy_report(migration, output_path):
 
             table_data = [["Account", "Source", "Destination", "Difference"]]
             for d in discrepancies:
-                table_data.append(
-                    [
-                        d.get("account_name", "N/A"),
-                        f"${d.get('source_balance', 0):,.2f}",
-                        f"${d.get('destination_balance', 0):,.2f}",
-                        f"${d.get('difference', 0):,.2f}",
-                    ]
-                )
+                table_data.append(_format_discrepancy_row(d))
 
             table = Table(
                 table_data, colWidths=[2 * inch, 1.5 * inch, 1.5 * inch, 1.5 * inch]

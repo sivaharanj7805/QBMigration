@@ -10,14 +10,21 @@ import hmac
 import logging
 import os
 import re
+import secrets as _secrets
+import threading
+import time as _time
 from datetime import timezone
 from functools import wraps
 from typing import Any, Callable, Optional, Tuple
 
 import jwt
+import stripe
 from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request, session
+from flask_wtf.csrf import generate_csrf
 from models.database import db
+from models.migration_credit import MigrationCredit
+from models.team_invite import TeamInvite
 from models.user import User
 from utils.anomaly_detector import check_login_anomalies, log_anomaly
 from utils.captcha_verifier import (
@@ -37,9 +44,6 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 # H-03 FIX: In-memory JWT blocklist for logout revocation.
 # Stores (jti, expiry_timestamp) tuples. Entries are cleaned up on each add.
 # Falls back to this if Redis is unavailable.
-import threading
-import time as _time
-
 _jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp
 _jwt_blocklist_lock = threading.Lock()
 
@@ -561,8 +565,6 @@ def create_token(user_id: int, email: str, expires_hours: int = 1) -> str:
     MED-03 FIX: Uses configurable algorithm (HS256 default, RS256 ready).
     H-03 FIX: Reduced default expiry from 24h to 1h to limit JWT reuse window.
     """
-    import secrets as _secrets
-
     payload = {
         "user_id": user_id,
         "email": email,
@@ -836,7 +838,7 @@ def register():
 
     except Exception as e:
         db.session.rollback()
-        logger.exception(f"Registration error: {str(e)}")
+        logger.exception("Registration error")
         return (
             jsonify(
                 {"success": False, "error": "Registration failed. Please try again."}
@@ -993,8 +995,6 @@ def login():
     token = create_token(user.id, user.email)
 
     # Generate CSRF token for the frontend
-    from flask_wtf.csrf import generate_csrf
-
     csrf_token = generate_csrf()
 
     # Create response with user data
@@ -1038,21 +1038,16 @@ def login():
     return response
 
 
-@auth_bp.route("/me", methods=["GET"])
-@require_auth
-def get_current_user():
-    """Get current user info including tier and migration balance"""
-    from models.migration_credit import MigrationCredit
+def _auto_sync_legacy_credits(user):
+    """
+    AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them.
+    This fixes existing users who selected tiers before the MigrationCredit fix.
+    HIGH-01 FIX: Wrapped in proper transaction with rollback on failure.
 
-    user_id = request.current_user["user_id"]
-    user = db.session.get(User, user_id)
-
-    if not user:
-        return jsonify({"success": False, "error": "User not found"}), 404
-
-    # AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them
-    # This fixes existing users who selected tiers before the MigrationCredit fix
-    # HIGH-01 FIX: Wrap in proper transaction with rollback on failure
+    Args:
+        user: The User model instance to sync credits for
+    """
+    user_id = user.id
     try:
         legacy_purchased = getattr(user, "migrations_purchased", None) or 0
         legacy_used = getattr(user, "migrations_used", None) or 0
@@ -1100,6 +1095,19 @@ def get_current_user():
     except Exception as e:
         logger.warning(f"Auto-sync credits failed for user {user_id}: {e}")
         # Continue anyway - don't block the /me endpoint
+
+
+@auth_bp.route("/me", methods=["GET"])
+@require_auth
+def get_current_user():
+    """Get current user info including tier and migration balance"""
+    user_id = request.current_user["user_id"]
+    user = db.session.get(User, user_id)
+
+    if not user:
+        return jsonify({"success": False, "error": "User not found"}), 404
+
+    _auto_sync_legacy_credits(user)
 
     # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
     # If tier info can't be retrieved, user should know something is wrong
@@ -1245,8 +1253,6 @@ def get_csrf_token():
     Returns:
         JSON with csrf_token and expiration info
     """
-    from flask_wtf.csrf import generate_csrf
-
     # Generate CSRF token (Flask-WTF handles session binding)
     token = generate_csrf()
 
@@ -1307,8 +1313,6 @@ def get_available_tiers():
     CRIT-02 FIX: Prices now sourced from MigrationCredit.TIER_CONFIG to prevent
     mismatch between display prices and actual charged amounts.
     """
-    from models.migration_credit import MigrationCredit
-
     tiers = []
     for tier_id, config in MigrationCredit.TIER_CONFIG.items():
         price_cents = config["price_cents"]
@@ -1329,38 +1333,29 @@ def get_available_tiers():
     return jsonify({"success": True, "tiers": tiers})
 
 
-@auth_bp.route("/select-tier", methods=["POST"])
-@limiter.limit("3 per hour")  # C-09 FIX: Rate limit to prevent free credit farming
-@require_auth
-def select_tier():
+def _process_tier_purchase(user, tier_id, payment_intent_id=None, is_upgrade=False):
     """
-    Select/purchase a tier after registration.
-    In production, this would integrate with Stripe Checkout.
+    Shared helper for tier selection and upgrade. Validates payment, checks for
+    duplicate/free-farming, creates MigrationCredit records, and updates legacy
+    User fields.
 
-    CRITICAL FIX: This endpoint now creates MigrationCredit records to ensure
-    consistency with the credit verification system. Previously, it only updated
-    User.migrations_purchased which caused a mismatch.
+    CRITICAL FIX: Creates MigrationCredit records to ensure consistency with
+    the credit verification system.
+    CRIT-01 FIX: Verifies payment_intent_id with Stripe API.
+    CRIT-02 FIX: Uses canonical prices from MigrationCredit.TIER_CONFIG.
+    HIGH-01 FIX: Idempotency -- rejects duplicate payment_intent_id.
+    C-09 FIX: Prevents free credit farming.
+
+    Args:
+        user: The User model instance
+        tier_id: Validated tier identifier string
+        payment_intent_id: Stripe PaymentIntent ID (None for free tiers)
+        is_upgrade: If True, uses "upgrade-" prefix for free-tier session IDs
+
+    Returns:
+        A (response_json, status_code) tuple suitable for returning from a route
     """
-    from models.migration_credit import MigrationCredit
-
-    data = request.get_json()
-    if not data:
-        return jsonify({"success": False, "error": "No data provided"}), 400
-
-    tier_id = data.get("tier_id", "").lower()
-
-    # Validate tier
-    valid_tiers = ["starter", "business", "professional", "enterprise", "forensic"]
-    if tier_id not in valid_tiers:
-        return jsonify({"success": False, "error": f"Invalid tier: {tier_id}"}), 400
-
-    user_id = request.current_user["user_id"]
-    user = db.session.get(User, user_id)
-
-    if not user:
-        return jsonify({"success": False, "error": "User not found"}), 404
-
-    # Get tier config
+    user_id = user.id
     tier_config = User.TIER_CONFIG.get(tier_id, {})
     migrations_to_add = tier_config.get("migrations", 1)
 
@@ -1369,23 +1364,22 @@ def select_tier():
     credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
     price_cents = credit_config.get("price_cents", 0)
 
+    free_prefix = "upgrade" if is_upgrade else "free-tier"
+
     # For paid tiers, require and verify payment with Stripe
     if price_cents > 0:
-        payment_intent_id = data.get("payment_intent_id")
         if not payment_intent_id:
             return (
                 jsonify(
                     {
                         "success": False,
-                        "error": "Payment required for this tier.",
+                        "error": f"Payment required for this tier{' upgrade' if is_upgrade else ''}.",
                     }
                 ),
                 402,
             )
 
         # CRIT-01 FIX: Verify payment_intent_id with Stripe API
-        import stripe
-
         try:
             stripe.api_key = current_app.config.get(
                 "STRIPE_SECRET_KEY", os.environ.get("STRIPE_SECRET_KEY", "")
@@ -1436,7 +1430,7 @@ def select_tier():
                 500,
             )
 
-        # HIGH-01 FIX: Idempotency — reject duplicate payment_intent_id
+        # HIGH-01 FIX: Idempotency -- reject duplicate payment_intent_id
         existing_credit = MigrationCredit.query.filter_by(
             stripe_payment_intent_id=payment_intent_id
         ).first()
@@ -1453,7 +1447,7 @@ def select_tier():
 
         payment_status = "paid"
     else:
-        # C-09 FIX: Prevent free credit farming — reject if user already has active free-tier credits
+        # C-09 FIX: Prevent free credit farming -- reject if user already has active free-tier credits
         existing_free = MigrationCredit.query.filter_by(
             user_id=user_id, price_cents=0, status="available"
         ).first()
@@ -1479,7 +1473,7 @@ def select_tier():
             transaction_limit=credit_config.get("transaction_limit", 5000),
             price_cents=price_cents,
             stripe_checkout_session_id=payment_intent_id
-            or f"free-tier-{tier_id}-{user_id}-{ts}-{i}",
+            or f"{free_prefix}-{tier_id}-{user_id}-{ts}-{i}",
             payment_status=payment_status,
             status="available",
         )
@@ -1492,18 +1486,59 @@ def select_tier():
     user.add_migrations(migrations_to_add, tier=tier_id)
     db.session.commit()
 
-    # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
-    logger.info(
-        f"User {hash_email(user.email)} selected tier {tier_id} with {migrations_to_add} migration(s)"
-    )
+    if is_upgrade:
+        message = f'Successfully upgraded to {tier_config.get("name", tier_id)}'
+    else:
+        message = f'Successfully selected {tier_config.get("name", tier_id)} tier'
+        # SECURITY: Redact email from logs (GDPR/PIPEDA compliance)
+        logger.info(
+            f"User {hash_email(user.email)} selected tier {tier_id} with {migrations_to_add} migration(s)"
+        )
 
     return jsonify(
         {
             "success": True,
-            "message": f'Successfully selected {tier_config.get("name", tier_id)} tier',
+            "message": message,
             "tier": tier_id,
             "migrations_remaining": user.get_migrations_remaining(),
         }
+    )
+
+
+@auth_bp.route("/select-tier", methods=["POST"])
+@limiter.limit("3 per hour")  # C-09 FIX: Rate limit to prevent free credit farming
+@require_auth
+def select_tier():
+    """
+    Select/purchase a tier after registration.
+    In production, this would integrate with Stripe Checkout.
+
+    CRITICAL FIX: This endpoint now creates MigrationCredit records to ensure
+    consistency with the credit verification system. Previously, it only updated
+    User.migrations_purchased which caused a mismatch.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    tier_id = data.get("tier_id", "").lower()
+
+    # Validate tier
+    valid_tiers = ["starter", "business", "professional", "enterprise", "forensic"]
+    if tier_id not in valid_tiers:
+        return jsonify({"success": False, "error": f"Invalid tier: {tier_id}"}), 400
+
+    user_id = request.current_user["user_id"]
+    user = db.session.get(User, user_id)
+
+    if not user:
+        return jsonify({"success": False, "error": "User not found"}), 404
+
+    return _process_tier_purchase(
+        user,
+        tier_id,
+        payment_intent_id=data.get("payment_intent_id"),
+        is_upgrade=False,
     )
 
 
@@ -1516,8 +1551,6 @@ def upgrade_tier():
 
     CRITICAL FIX: Now creates MigrationCredit records for consistency.
     """
-    from models.migration_credit import MigrationCredit
-
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No data provided"}), 400
@@ -1534,142 +1567,11 @@ def upgrade_tier():
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
 
-    tier_config = User.TIER_CONFIG.get(tier_id, {})
-    migrations_to_add = tier_config.get("migrations", 1)
-
-    # CRIT-02 FIX: Use canonical prices from MigrationCredit.TIER_CONFIG
-    credit_config = MigrationCredit.TIER_CONFIG.get(tier_id, {})
-    price_cents = credit_config.get("price_cents", 0)
-
-    if price_cents > 0:
-        payment_intent_id = data.get("payment_intent_id")
-        if not payment_intent_id:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Payment required for this tier upgrade.",
-                    }
-                ),
-                402,
-            )
-
-        # CRIT-01 FIX: Verify payment with Stripe API
-        import stripe
-
-        try:
-            stripe.api_key = current_app.config.get(
-                "STRIPE_SECRET_KEY", os.environ.get("STRIPE_SECRET_KEY", "")
-            )
-            intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-
-            if intent.status != "succeeded":
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Payment has not been completed.",
-                        }
-                    ),
-                    402,
-                )
-
-            if intent.amount < price_cents:
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Payment amount does not match tier price.",
-                        }
-                    ),
-                    402,
-                )
-
-        except stripe.error.InvalidRequestError:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Invalid payment reference.",
-                    }
-                ),
-                402,
-            )
-        except Exception as e:
-            logger.error(f"Stripe verification failed: {e}")
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "Payment verification failed. Please try again.",
-                    }
-                ),
-                500,
-            )
-
-        # HIGH-01 FIX: Idempotency check
-        existing_credit = MigrationCredit.query.filter_by(
-            stripe_payment_intent_id=payment_intent_id
-        ).first()
-        if existing_credit:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "This payment has already been applied.",
-                    }
-                ),
-                409,
-            )
-
-        payment_status = "paid"
-    else:
-        # C-09 FIX: Prevent free credit farming — reject if user already has active free-tier credits
-        existing_free = MigrationCredit.query.filter_by(
-            user_id=user_id, price_cents=0, status="available"
-        ).first()
-        if existing_free:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "You already have an active free-tier credit.",
-                    }
-                ),
-                409,
-            )
-        payment_status = "paid"
-        payment_intent_id = None
-
-    # CRITICAL FIX: Create MigrationCredit record(s)
-    for i in range(migrations_to_add):
-        ts = datetime.datetime.now(timezone.utc).timestamp()
-        credit = MigrationCredit(
-            user_id=user_id,
-            tier_type=tier_id,
-            transaction_limit=credit_config.get("transaction_limit", 5000),
-            price_cents=price_cents,
-            stripe_checkout_session_id=payment_intent_id
-            or f"upgrade-{tier_id}-{user_id}-{ts}-{i}",
-            payment_status=payment_status,
-            status="available",
-        )
-        if payment_intent_id:
-            credit.stripe_payment_intent_id = payment_intent_id
-        credit.paid_at = datetime.datetime.now(timezone.utc)
-        db.session.add(credit)
-
-    # Also update legacy User fields for backwards compatibility
-    user.add_migrations(migrations_to_add, tier=tier_id)
-    db.session.commit()
-
-    return jsonify(
-        {
-            "success": True,
-            "message": f'Successfully upgraded to {tier_config.get("name", tier_id)}',
-            "tier": tier_id,
-            "migrations_remaining": user.get_migrations_remaining(),
-        }
+    return _process_tier_purchase(
+        user,
+        tier_id,
+        payment_intent_id=data.get("payment_intent_id"),
+        is_upgrade=True,
     )
 
 
@@ -1689,8 +1591,6 @@ def list_team_members():
         return jsonify({"success": False, "error": "User not found"}), 404
 
     try:
-        from models.team_invite import TeamInvite
-
         # Get team members (accepted invites)
         team_members = TeamInvite.get_team_members(user_id)
 
@@ -1748,7 +1648,6 @@ def invite_team_member():
         return jsonify({"success": False, "error": "No data provided"}), 400
 
     email = data.get("email", "").strip().lower()
-    role = data.get("role", "member")  # noqa: F841 - reserved for future use
 
     if not email:
         return jsonify({"success": False, "error": "Email is required"}), 400
@@ -1790,13 +1689,11 @@ def _generate_password_reset_token(user_id: int, email: str) -> str:
     Returns:
         JWT token for password reset
     """
-    import secrets as secrets_module
-
     payload = {
         "user_id": user_id,
         "email": email,
         "purpose": "password_reset",
-        "jti": secrets_module.token_hex(16),  # Unique token ID
+        "jti": _secrets.token_hex(16),  # Unique token ID
         "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=1),
         "iat": datetime.datetime.now(timezone.utc),
     }
@@ -1909,7 +1806,7 @@ If you didn't request this, please ignore this email or contact support.
         return False
 
     except Exception as e:
-        logger.exception(f"Failed to send password reset email: {e}")
+        logger.exception("Failed to send password reset email")
         return False
 
 
@@ -1933,9 +1830,7 @@ def forgot_password():
         "message": "If an account exists with that email, a reset link has been sent."
     }
     """
-    import time
-
-    start_time = time.time()
+    start_time = _time.time()
 
     data = request.get_json()
     if not data:
@@ -1977,8 +1872,6 @@ def forgot_password():
         logger.info(f"Password reset requested for {hash_email(email)}")
     else:
         # User doesn't exist - still perform timing-consistent operations
-        import os
-
         from argon2 import PasswordHasher
 
         ph = PasswordHasher()
@@ -2114,7 +2007,7 @@ def reset_password():
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         db.session.rollback()
-        logger.exception(f"Password reset failed: {e}")
+        logger.exception("Password reset failed")
         return jsonify({"success": False, "error": "Failed to reset password"}), 500
 
 
@@ -2136,13 +2029,11 @@ def _generate_email_verification_token(user_id: int, email: str) -> str:
     Returns:
         JWT token for email verification
     """
-    import secrets as secrets_module
-
     payload = {
         "user_id": user_id,
         "email": email,
         "purpose": "email_verification",
-        "jti": secrets_module.token_hex(16),
+        "jti": _secrets.token_hex(16),
         "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=24),
         "iat": datetime.datetime.now(timezone.utc),
     }
@@ -2250,7 +2141,7 @@ If you didn't create an account, please ignore this email.
         return False
 
     except Exception as e:
-        logger.exception(f"Failed to send verification email: {e}")
+        logger.exception("Failed to send verification email")
         return False
 
 
@@ -2474,9 +2365,7 @@ def check_captcha_requirement():
         "threshold": 3
     }
     """
-    import time
-
-    start_time = time.time()
+    start_time = _time.time()
 
     data = request.get_json()
 
@@ -2528,8 +2417,6 @@ def sync_credits():
 
     Should be called once per user after deployment of the credit fix.
     """
-    from models.migration_credit import MigrationCredit
-
     user_id = request.current_user["user_id"]
     user = db.session.get(User, user_id)
 

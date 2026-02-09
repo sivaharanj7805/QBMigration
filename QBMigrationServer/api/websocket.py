@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from functools import wraps
+from typing import Optional
 
 import jwt
 from flask import Blueprint, request
@@ -25,8 +26,9 @@ websocket_bp = Blueprint("websocket", __name__, url_prefix="/api/ws")
 # SocketIO instance - initialized in app.py
 socketio = None
 
-# Internal API key for worker authentication (CRIT-01 FIX)
-INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY")
+def _get_internal_api_key():
+    """Read INTERNAL_API_KEY at call time, not module-load time."""
+    return os.getenv("INTERNAL_API_KEY")
 
 
 def require_internal_auth(f):
@@ -39,8 +41,9 @@ def require_internal_auth(f):
     def decorated_function(*args, **kwargs):
         # Check for internal API key
         api_key = request.headers.get("X-Internal-API-Key")
+        internal_api_key = _get_internal_api_key()
 
-        if not INTERNAL_API_KEY:
+        if not internal_api_key:
             logger.error(
                 "INTERNAL_API_KEY not configured - WebSocket REST endpoints disabled"
             )
@@ -53,7 +56,7 @@ def require_internal_auth(f):
             return {"success": False, "error": "Authentication required"}, 401
 
         # Use constant-time comparison to prevent timing attacks
-        if not hmac.compare_digest(api_key, INTERNAL_API_KEY):
+        if not hmac.compare_digest(api_key, internal_api_key):
             logger.warning(
                 f"Invalid API key for WebSocket REST endpoint from {request.remote_addr}"
             )
@@ -121,7 +124,7 @@ def init_socketio(app, secret_key):
     else:
         # Try eventlet first, fall back to threading
         try:
-            pass
+            import eventlet  # noqa: F401
 
             async_mode = "eventlet"
         except ImportError:
@@ -210,7 +213,7 @@ def emit_migration_progress(
     progress: int,
     step: str,
     status: str = "processing",
-    details: dict = None,
+    details: Optional[dict] = None,
 ):
     """
     Emit progress update to all clients subscribed to a migration
@@ -291,7 +294,7 @@ def emit_migration_failed(migration_id: str, error: str, error_code: str = None)
 @require_internal_auth
 def emit_progress_rest():
     """REST endpoint for Celery workers to emit progress (requires internal auth)"""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     migration_id = data.get("migration_id")
     progress = data.get("progress", 0)
@@ -308,7 +311,7 @@ def emit_progress_rest():
 @require_internal_auth
 def emit_completed_rest():
     """REST endpoint for completion notification (requires internal auth)"""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     migration_id = data.get("migration_id")
     results = data.get("results", {})
@@ -322,7 +325,7 @@ def emit_completed_rest():
 @require_internal_auth
 def emit_failed_rest():
     """REST endpoint for failure notification (requires internal auth)"""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     migration_id = data.get("migration_id")
     error = data.get("error", "Unknown error")

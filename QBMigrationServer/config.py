@@ -4,6 +4,7 @@ import secrets
 from datetime import timedelta
 
 from dotenv import load_dotenv
+from utils.env_helper import get_env, is_production
 
 load_dotenv()
 
@@ -19,7 +20,7 @@ class Config:
     # ============================================================================
     SECRET_KEY = os.getenv("SECRET_KEY")
     if not SECRET_KEY:
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             raise ValueError("SECRET_KEY must be set in production!")
         else:
             SECRET_KEY = "dev-only-secret-key-CHANGE-IN-PRODUCTION"
@@ -28,7 +29,7 @@ class Config:
     # M-21 FIX: Increased minimum from 32 to 64 characters.
     # 32 chars = ~192 bits effective entropy (alphanumeric), which is below
     # the 256-bit standard for HMAC-SHA256 JWT signing.
-    if os.getenv("FLASK_ENV") == "production" and len(SECRET_KEY) < 64:
+    if is_production() and len(SECRET_KEY) < 64:
         raise ValueError(
             "SECRET_KEY must be at least 64 characters for adequate JWT signing entropy. "
             'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'
@@ -42,7 +43,7 @@ class Config:
     # ============================================================================
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")
     if not SQLALCHEMY_DATABASE_URI:
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             raise ValueError("DATABASE_URL must be set in production!")
         else:
             logger.warning("DATABASE_URL not set - using SQLite for development")
@@ -75,7 +76,7 @@ class Config:
     @staticmethod
     def warn_aws_credentials():
         """Warn if using AWS access keys instead of IAM roles in production"""
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             if os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_SECRET_ACCESS_KEY"):
                 import warnings
 
@@ -91,7 +92,7 @@ class Config:
 
     # S3
     AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
-    if not AWS_S3_BUCKET and os.getenv("FLASK_ENV") == "production":
+    if not AWS_S3_BUCKET and is_production():
         raise ValueError("AWS_S3_BUCKET must be set in production!")
     AWS_S3_CODE_BUCKET = os.getenv(
         "AWS_S3_CODE_BUCKET", "qb-migration-worker-code"
@@ -162,7 +163,7 @@ class Config:
     # ============================================================================
     # SECURITY FIX: SESSION_COOKIE_SECURE should be True in production
     # Set to True when FLASK_ENV=production to enforce HTTPS-only cookies
-    SESSION_COOKIE_SECURE = os.getenv("FLASK_ENV") == "production"
+    SESSION_COOKIE_SECURE = is_production()
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     PERMANENT_SESSION_LIFETIME = timedelta(
@@ -177,7 +178,7 @@ class Config:
     RATELIMIT_ENABLED = True
     RATELIMIT_STORAGE_URL = os.getenv("REDIS_URL")
     if not RATELIMIT_STORAGE_URL:
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             raise ValueError(
                 "REDIS_URL must be set in production for rate limiting! "
                 "In-memory rate limiting is per-worker and ineffective."
@@ -229,7 +230,7 @@ class Config:
     # a backup key compromise from also exposing QBO OAuth tokens.
     # In production, require a dedicated QBO_ENCRYPTION_KEY.
     QBO_ENCRYPTION_KEY = os.getenv("QBO_ENCRYPTION_KEY")
-    if not QBO_ENCRYPTION_KEY and os.getenv("FLASK_ENV") == "production":
+    if not QBO_ENCRYPTION_KEY and is_production():
         import warnings
 
         warnings.warn(
@@ -282,7 +283,7 @@ class Config:
     # MONITORING & ALERTING
     # ============================================================================
     SENTRY_DSN = os.getenv("SENTRY_DSN")
-    SENTRY_ENVIRONMENT = os.getenv("FLASK_ENV", "development")
+    SENTRY_ENVIRONMENT = get_env()
     SENTRY_TRACES_SAMPLE_RATE = 0.1
 
     CLOUDWATCH_LOG_GROUP = os.getenv("CLOUDWATCH_LOG_GROUP", "/aws/qb-migration")
@@ -290,7 +291,7 @@ class Config:
 
     # PRODUCTION FIX: No placeholder email - must be set explicitly
     ALERT_EMAIL = os.getenv("ALERT_EMAIL")
-    if not ALERT_EMAIL and os.getenv("FLASK_ENV") == "production":
+    if not ALERT_EMAIL and is_production():
         logger.warning(
             "ALERT_EMAIL not set - migration failure alerts will not be sent"
         )
@@ -316,7 +317,7 @@ class Config:
     # A generated secret would break webhook signature verification on restart
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
     if not WEBHOOK_SECRET:
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             raise ValueError(
                 "CRITICAL: WEBHOOK_SECRET must be set in production! "
                 "This secret is used to sign webhook requests and must persist across restarts. "
@@ -423,7 +424,7 @@ class Config:
     # Generating a random key on each import would invalidate all existing license tokens
     LICENSE_SECRET_KEY = os.getenv("LICENSE_SECRET_KEY")
     if not LICENSE_SECRET_KEY:
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             raise ValueError(
                 "CRITICAL: LICENSE_SECRET_KEY must be set in production! "
                 "This secret is used to sign license tokens and must persist across restarts. "
@@ -670,7 +671,7 @@ def validate_config():
 
     logger = logging.getLogger(__name__)
 
-    env = os.getenv("FLASK_ENV", "development")
+    env = get_env()
 
     # Always required settings
     base_required = ["SECRET_KEY", "DATABASE_URL"]

@@ -17,6 +17,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
 from flask_login import UserMixin
 from models.database import db
+from utils.env_helper import is_production
 
 # Initialize Argon2 password hasher with secure parameters
 ph = PasswordHasher(
@@ -135,7 +136,7 @@ class User(UserMixin, db.Model):
 
         key = current_app.config.get("QBO_ENCRYPTION_KEY")
         if not key:
-            if os.getenv("FLASK_ENV") == "production":
+            if is_production():
                 raise ValueError(
                     "QBO_ENCRYPTION_KEY not configured. "
                     "Production requires dedicated encryption key per domain."
@@ -627,7 +628,7 @@ class User(UserMixin, db.Model):
                 return None
         # Fall back to legacy unencrypted column (DEPRECATED)
         if self.mfa_secret:
-            if os.getenv("FLASK_ENV") == "production":
+            if is_production():
                 logging.getLogger(__name__).error(
                     f"User {self.id} has unencrypted MFA secret in production. "
                     "Run migrate_legacy_mfa_data() immediately."

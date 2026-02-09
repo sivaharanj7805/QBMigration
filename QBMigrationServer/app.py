@@ -3,6 +3,7 @@ import os
 import re
 
 from dotenv import load_dotenv
+from utils.env_helper import get_env, is_production, is_testing
 
 load_dotenv()
 
@@ -113,7 +114,7 @@ def setup_logging(app):
     app.logger.info("=" * 80)
     app.logger.info("QB MIGRATION SERVER STARTING")
     app.logger.info("=" * 80)
-    app.logger.info(f'Environment: {os.getenv("FLASK_ENV", "development")}')
+    app.logger.info(f'Environment: {get_env()}')
     app.logger.info(f'Debug Mode: {app.config.get("DEBUG", False)}')
     # FIX: Never log database URI - may contain credentials
     db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "unknown")
@@ -474,7 +475,7 @@ def auto_migrate_database(app):
     except Exception as e:
         # H-11 FIX: Log as error, re-raise in production to prevent silent data loss
         app.logger.error(f"Schema migration failed: {str(e)}", exc_info=True)
-        if os.getenv("FLASK_ENV", "development") == "production":
+        if is_production():
             raise
 
 
@@ -663,7 +664,7 @@ def create_app(config_name="development"):  # noqa: C901
 
     # SECURITY FIX: Enable CORS with origins from environment variable
     # FIX: In production, require explicit ALLOWED_ORIGINS - no localhost defaults
-    if os.getenv("FLASK_ENV", "development") == "production":
+    if is_production():
         allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").split(",")
         if not allowed_origins_env or allowed_origins_env == [""]:
             raise ValueError(
@@ -710,7 +711,7 @@ def create_app(config_name="development"):  # noqa: C901
 
     # CRITICAL SECURITY FIX: Block localhost in production CORS origins
     # This is a security risk - localhost should never be allowed in production
-    if os.getenv("FLASK_ENV", "development") == "production" and "localhost" in str(
+    if is_production() and "localhost" in str(
         allowed_origins
     ):
         raise ValueError(
@@ -833,7 +834,7 @@ def create_app(config_name="development"):  # noqa: C901
 
         # Strict Transport Security - Forces HTTPS for 1 year, includes subdomains
         # Only set in production to avoid development issues
-        if os.getenv("FLASK_ENV") == "production":
+        if is_production():
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains; preload"
             )
@@ -1242,7 +1243,7 @@ def create_app(config_name="development"):  # noqa: C901
     @app.before_request
     def redirect_to_https():
         """Force HTTPS in production (exempt health check endpoints to avoid redirect loops)"""
-        if os.getenv("FLASK_ENV", "development") == "production":
+        if is_production():
             # Skip HTTPS redirect for health check endpoints used by load balancers/proxies
             if request.path in ("/health", "/api/health", "/api/health/detailed"):
                 return None
@@ -1447,8 +1448,8 @@ def create_app(config_name="development"):  # noqa: C901
 
 
 # Create the app instance (only when not imported by test runner)
-if os.getenv("FLASK_ENV") != "testing":
-    app = create_app(os.getenv("FLASK_ENV", "development"))
+if not is_testing():
+    app = create_app(get_env())
 else:
     app = None
 
@@ -1489,7 +1490,7 @@ if __name__ == "__main__":
         logger.info("")
 
     try:
-        is_debug = os.environ.get("FLASK_ENV") != "production"
+        is_debug = not is_production()
         app.run(host=host, port=5000, debug=is_debug)  # nosec B201
     except KeyboardInterrupt:
         logger.info("\n\nServer stopped by user")

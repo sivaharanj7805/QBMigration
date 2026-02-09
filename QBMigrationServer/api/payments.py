@@ -5,6 +5,7 @@ Handles checkout session creation and webhook verification.
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 import stripe
@@ -202,8 +203,6 @@ def create_checkout():
     except Exception as e:
         # FIX: Sanitize exception message before logging to avoid card details
         # Remove potential card numbers, CVVs, and other sensitive payment info
-        import re
-
         error_str = str(e)
         # Redact card numbers (13-19 digits, optionally with spaces/dashes)
         error_str = re.sub(
@@ -226,7 +225,10 @@ def create_checkout():
             flags=re.IGNORECASE,
         )
         logger.exception(
-            f"Payment error for user {current_user.id}: {type(e).__name__}: {error_str}"
+            "Payment error for user %s: %s: %s",
+            current_user.id,
+            type(e).__name__,
+            error_str,
         )
         return (
             jsonify({"success": False, "error": "Failed to create checkout session"}),
@@ -277,7 +279,7 @@ def stripe_webhook():
 
     except Exception as handler_err:
         logger.exception(
-            f"Failed to handle Stripe event {event['type']}: {str(handler_err)}"
+            "Failed to handle Stripe event %s", event["type"]
         )
         return jsonify({"received": False, "error": "Handler failed"}), 500
 
@@ -336,7 +338,7 @@ def handle_successful_payment(session):
         )
 
     except Exception as e:
-        logger.exception(f"Error processing successful payment: {str(e)}")
+        logger.exception("Error processing successful payment")
 
 
 def handle_expired_session(session):
@@ -353,7 +355,7 @@ def handle_expired_session(session):
             logger.info(f"Credit {credit.id} expired (session timeout)")
 
     except Exception as e:
-        logger.exception(f"Error processing expired session: {str(e)}")
+        logger.exception("Error processing expired session")
 
 
 def handle_failed_payment(payment_intent):
@@ -371,7 +373,7 @@ def handle_failed_payment(payment_intent):
             logger.info(f"Credit {credit.id} marked as failed")
 
     except Exception as e:
-        logger.exception(f"Error processing failed payment: {str(e)}")
+        logger.exception("Error processing failed payment")
 
 
 @payments_bp.route("/credits", methods=["GET"])
@@ -415,7 +417,7 @@ def get_credits():
         )
 
     except Exception as e:
-        logger.exception(f"Error getting credits: {str(e)}")
+        logger.exception("Error getting credits")
         return jsonify({"success": False, "error": "Failed to get credits"}), 500
 
 
@@ -467,7 +469,7 @@ def verify_session(session_id):
         )
 
     except Exception as e:
-        logger.exception(f"Error verifying session: {str(e)}")
+        logger.exception("Error verifying session")
         return jsonify({"success": False, "error": "Failed to verify session"}), 500
 
 

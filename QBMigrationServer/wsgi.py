@@ -15,6 +15,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
+from utils.env_helper import is_production
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ from app import app as application  # noqa: E402
 # Validate configuration at startup
 from config import validate_config  # noqa: E402
 
-if os.getenv("FLASK_ENV") == "production":
+if is_production():
     try:
         validate_config()
     except RuntimeError as e:

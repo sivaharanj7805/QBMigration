@@ -30,6 +30,8 @@ import logging
 import os
 import time
 
+from utils.env_helper import get_env
+
 logger = logging.getLogger(__name__)
 
 # Metrics collection enabled flag
@@ -319,7 +321,7 @@ def init_metrics(app):
     APP_INFO.info(
         {
             "version": "4.3.0",
-            "environment": os.getenv("FLASK_ENV", "development"),
+            "environment": get_env(),
             "aws_region": os.getenv("AWS_REGION", "ca-central-1"),
         }
     )

@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import stat
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
@@ -563,7 +564,7 @@ class EncryptionManager:
             # Validate JSON
             try:
                 json.loads(plaintext)
-                logger.info("✓ Decryption successful, JSON valid")
+                logger.info("Decryption successful, JSON valid")
             except json.JSONDecodeError as e:
                 logger.warning(f"Decrypted data is not valid JSON: {str(e)}")
 
@@ -621,13 +622,16 @@ class EncryptionManager:
 
 # Singleton instance
 _encryption_manager = None
+_encryption_manager_lock = threading.Lock()
 
 
 def get_encryption_manager():
-    """Get or create global encryption manager instance"""
+    """Get or create global encryption manager instance (thread-safe)"""
     global _encryption_manager
     if _encryption_manager is None:
-        _encryption_manager = EncryptionManager()
+        with _encryption_manager_lock:
+            if _encryption_manager is None:
+                _encryption_manager = EncryptionManager()
     return _encryption_manager
 
 

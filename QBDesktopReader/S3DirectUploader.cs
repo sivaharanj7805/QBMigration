@@ -16,7 +16,12 @@ namespace QBDesktopExtractor
     /// </summary>
     public class S3DirectUploader : IDisposable
     {
-        private readonly HttpClient _httpClient;
+        // FIX: Use static HttpClient to prevent socket exhaustion from per-instance creation.
+        // Auth headers are added per-request instead of via DefaultRequestHeaders.
+        private static readonly HttpClient _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(30)
+        };
         private readonly string _serverUrl;
         private readonly string _authToken;
         private readonly IRedactingLogger _logger;
@@ -28,16 +33,22 @@ namespace QBDesktopExtractor
             _serverUrl = serverUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(serverUrl));
             _authToken = authToken;
             _logger = logger;
-            
-            _httpClient = new HttpClient
+        }
+
+        /// <summary>
+        /// Send an authenticated POST request to the server API.
+        /// Uses per-request Authorization header instead of DefaultRequestHeaders
+        /// to support static HttpClient shared across instances.
+        /// </summary>
+        private async Task<HttpResponseMessage> PostAuthenticatedAsync(string url, HttpContent content)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            if (!string.IsNullOrEmpty(_authToken))
             {
-                Timeout = TimeSpan.FromMinutes(30)
-            };
-            
-            if (!string.IsNullOrEmpty(authToken))
-            {
-                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {authToken}");
+                request.Headers.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _authToken);
             }
+            return await _httpClient.SendAsync(request);
         }
 
         /// <summary>
@@ -224,7 +235,7 @@ namespace QBDesktopExtractor
                 ["content_type"] = "application/octet-stream"
             };
 
-            var response = await _httpClient.PostAsync(
+            var response = await PostAuthenticatedAsync(
                 $"{_serverUrl}/api/upload/presigned-url",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
@@ -256,7 +267,7 @@ namespace QBDesktopExtractor
                 ["file_size"] = fileSize
             };
 
-            var response = await _httpClient.PostAsync(
+            var response = await PostAuthenticatedAsync(
                 $"{_serverUrl}/api/upload/multipart/init",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
@@ -288,7 +299,7 @@ namespace QBDesktopExtractor
                 ["s3_key"] = s3Key
             };
 
-            var response = await _httpClient.PostAsync(
+            var response = await PostAuthenticatedAsync(
                 $"{_serverUrl}/api/upload/multipart/part-url",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
@@ -321,7 +332,7 @@ namespace QBDesktopExtractor
                 ["migration_id"] = migrationId
             };
 
-            var response = await _httpClient.PostAsync(
+            var response = await PostAuthenticatedAsync(
                 $"{_serverUrl}/api/upload/multipart/complete",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
@@ -341,7 +352,7 @@ namespace QBDesktopExtractor
                 ["sha256_hash"] = hash
             };
 
-            var response = await _httpClient.PostAsync(
+            var response = await PostAuthenticatedAsync(
                 $"{_serverUrl}/api/upload/complete",
                 new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
 
@@ -367,7 +378,8 @@ namespace QBDesktopExtractor
         {
             if (_disposed) return;
             _disposed = true;
-            _httpClient?.Dispose();
+            // Note: _httpClient is static and shared across instances - do not dispose it here.
+            // Static HttpClient is disposed when the application exits.
         }
     }
 

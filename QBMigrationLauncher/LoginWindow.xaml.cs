@@ -114,7 +114,7 @@ namespace QBMigrationLauncher
                 // CRIT-08 FIX: Check local expiry before making network call
                 if (session.ExpiresAt != DateTime.MinValue && DateTime.UtcNow >= session.ExpiresAt)
                 {
-                    Console.WriteLine("Session token expired locally - clearing session");
+                    System.Diagnostics.Debug.WriteLine("[LoginWindow] Session token expired locally - clearing session");
                     File.Delete(SESSION_PATH);
                     return;
                 }
@@ -140,7 +140,7 @@ namespace QBMigrationLauncher
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Session restore error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[LoginWindow] Session restore error: {ex.Message}");
             }
             finally
             {
@@ -262,7 +262,7 @@ namespace QBMigrationLauncher
                 var serverError = errorResult?.error ?? "";
 
                 // Log the actual error for debugging (server-side only in production)
-                Console.WriteLine($"Login failed: {serverError}");
+                System.Diagnostics.Debug.WriteLine($"[LoginWindow] Login failed: {serverError}");
 
                 // FIX #7: Show generic error to user, don't leak server internals
                 ShowError(MapServerErrorToUserMessage(serverError));
@@ -278,7 +278,7 @@ namespace QBMigrationLauncher
             catch (Exception ex)
             {
                 // FIX #7: Don't expose exception details to users - log internally only
-                Console.WriteLine($"Login error (internal): {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[LoginWindow] Login error (internal): {ex.Message}");
                 ShowError("An unexpected error occurred. Please try again.");
             }
             finally
@@ -399,7 +399,7 @@ namespace QBMigrationLauncher
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Session save error: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[LoginWindow] Session save error: {ex.Message}");
             }
         }
         

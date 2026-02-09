@@ -326,20 +326,8 @@ def is_production() -> bool:
     Returns:
         True if in production, False otherwise
     """
-    env = os.getenv("FLASK_ENV", "production").lower()
-    debug = os.getenv("FLASK_DEBUG", "0")
-
-    # Consider production if:
-    # 1. FLASK_ENV is not 'development', 'dev', or 'testing'
-    # 2. FLASK_DEBUG is not set to '1' or 'true'
-    is_prod = env not in ("development", "dev", "testing") and debug not in (
-        "1",
-        "true",
-        "True",
-        "TRUE",
-    )
-
-    return is_prod
+    from utils.env_helper import is_production as _is_prod
+    return _is_prod()
 
 
 def sanitize_error_message(error: Exception, context: Optional[str] = None) -> str:

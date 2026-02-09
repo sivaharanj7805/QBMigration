@@ -352,7 +352,7 @@ def get_all_constants() -> Dict[str, Any]:
         },
         "security": {
             "min_password_length": Security.MIN_PASSWORD_LENGTH,
-            "bcrypt_rounds": Security.BCRYPT_DEFAULT_ROUNDS,
+            "argon2_time_cost": Security.ARGON2_TIME_COST,
             "max_failed_logins": Security.MAX_FAILED_LOGINS,
         },
         "qbo": {

@@ -5,6 +5,7 @@ Enables direct uploads from C# client to S3
 
 import logging
 import os
+import re as _re
 from datetime import datetime, timezone
 
 import boto3
@@ -13,6 +14,7 @@ from botocore.config import Config
 from flask import Blueprint, jsonify, request
 from models import Migration, db
 from utils.anomaly_detector import check_upload_anomalies, log_anomaly
+from utils.error_sanitizer import sanitize_error_message
 from utils.pii_redaction import hash_ip
 
 logger = logging.getLogger(__name__)
@@ -68,8 +70,6 @@ def get_presigned_url():
         return jsonify({"error": "session_id required"}), 400
 
     # SECURITY FIX: Sanitize session_id and file_name to prevent path traversal
-    import re as _re
-
     if not _re.match(r"^[a-zA-Z0-9\-]{1,100}$", session_id):
         return jsonify({"error": "Invalid session_id format"}), 400
 
@@ -133,8 +133,6 @@ def get_presigned_url():
     except Exception as e:
         db.session.rollback()
         # FIX #34: Sanitize error message for security
-        from utils.error_sanitizer import sanitize_error_message
-
         sanitized_error = sanitize_error_message(e, context="upload")
         return jsonify({"error": sanitized_error}), 500
 
@@ -190,9 +188,6 @@ def complete_upload():
             # For critical anomalies (> 5GB single file), add warning
             critical_anomalies = [a for a in anomalies if a["severity"] == "critical"]
             if critical_anomalies:
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.warning(
                     f"CRITICAL upload anomaly for user {user_id}: "
                     f"{', '.join(a['reason'] for a in critical_anomalies)}"
@@ -245,8 +240,6 @@ def init_multipart_upload():
         return jsonify({"error": "session_id required"}), 400
 
     # SECURITY FIX C-01: Sanitize session_id and file_name to prevent path traversal
-    import re as _re
-
     if not _re.match(r"^[a-zA-Z0-9\-]{1,100}$", session_id):
         return jsonify({"error": "Invalid session_id format"}), 400
 
@@ -298,8 +291,6 @@ def init_multipart_upload():
     except Exception as e:
         db.session.rollback()
         # FIX #34: Sanitize error message for security
-        from utils.error_sanitizer import sanitize_error_message
-
         sanitized_error = sanitize_error_message(e, context="upload")
         return jsonify({"error": sanitized_error}), 500
 
@@ -355,8 +346,6 @@ def get_part_upload_url():
 
     except Exception as e:
         # FIX #34: Sanitize error message for security
-        from utils.error_sanitizer import sanitize_error_message
-
         sanitized_error = sanitize_error_message(e, context="upload")
         return jsonify({"error": sanitized_error}), 500
 
@@ -413,7 +402,5 @@ def complete_multipart_upload():
 
     except Exception as e:
         # FIX #34: Sanitize error message for security
-        from utils.error_sanitizer import sanitize_error_message
-
         sanitized_error = sanitize_error_message(e, context="upload")
         return jsonify({"error": sanitized_error}), 500
