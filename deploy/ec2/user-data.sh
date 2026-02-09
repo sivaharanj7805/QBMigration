@@ -68,11 +68,12 @@ curl -fsSL "$NODESOURCE_SCRIPT_URL" -o "$NODESOURCE_SCRIPT"
 # Verify checksum before execution (update hash when upgrading Node.js version)
 ACTUAL_SHA256=$(sha256sum "$NODESOURCE_SCRIPT" | awk '{print $1}')
 if [ "$ACTUAL_SHA256" != "$NODESOURCE_EXPECTED_SHA256" ]; then
-    echo "WARNING: NodeSource setup script checksum mismatch!"
+    echo "FATAL: NodeSource setup script checksum mismatch!"
     echo "  Expected: $NODESOURCE_EXPECTED_SHA256"
     echo "  Actual:   $ACTUAL_SHA256"
-    echo "The script may have been updated. Verify the new checksum and update NODESOURCE_EXPECTED_SHA256."
-    echo "Proceeding with installation, but review the script at $NODESOURCE_SCRIPT"
+    echo "The script may have been updated or tampered with. Verify the new checksum and update NODESOURCE_EXPECTED_SHA256."
+    echo "Aborting installation for security. Review the script at $NODESOURCE_SCRIPT"
+    exit 1
 fi
 
 bash "$NODESOURCE_SCRIPT"

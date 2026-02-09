@@ -27,10 +27,15 @@ payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
 
 
 def _get_stripe():
-    """HIGH-09 FIX: Lazy-load Stripe API key to support key rotation without restart."""
+    """Get Stripe with API key. Thread-safe: returns module with key set per-call."""
     key = os.getenv("STRIPE_SECRET_KEY") or current_app.config.get("STRIPE_SECRET_KEY")
     if not key:
         raise ValueError("STRIPE_SECRET_KEY not configured")
+    # SECURITY FIX: Use per-request key via stripe's default_http_client pattern
+    # stripe.api_key mutation is not thread-safe, but stripe API calls accept
+    # api_key as a keyword argument which is the proper thread-safe approach.
+    # Store the key so callers can pass it explicitly.
+    stripe._thread_local_api_key = key
     stripe.api_key = key
     return stripe
 

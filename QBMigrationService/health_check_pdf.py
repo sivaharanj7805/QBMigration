@@ -5,6 +5,7 @@ Generates a professional PDF report for pre-migration health checks.
 Outputs: Red/Yellow/Green status for migration readiness.
 """
 
+import html
 import logging
 from datetime import datetime
 from typing import Dict, List
@@ -306,7 +307,7 @@ class HealthCheckPDFGenerator:
             return ""
 
         items = "\n".join(
-            [f'<div class="issue {css_class}">{issue}</div>' for issue in issues]
+            [f'<div class="issue {css_class}">{html.escape(issue)}</div>' for issue in issues]
         )
 
         return f"""

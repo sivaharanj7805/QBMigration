@@ -52,7 +52,15 @@ if CELERY_AVAILABLE:
         deleted_count = 0
         failed_count = 0
 
+        # SECURITY FIX: Validate file paths to prevent arbitrary file deletion
+        allowed_base = os.environ.get("DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data")
         for file_path in job_data["file_paths"]:
+            # Path traversal prevention
+            real_path = os.path.realpath(file_path)
+            if not real_path.startswith(os.path.realpath(allowed_base)):
+                logger.error(f"Path traversal blocked: {file_path} is outside {allowed_base}")
+                failed_count += 1
+                continue
             if os.path.exists(file_path):
                 try:
                     EncryptionManager.secure_delete(file_path)
@@ -61,7 +69,7 @@ if CELERY_AVAILABLE:
                     )
                     deleted_count += 1
                 except Exception as e:
-                    logger.info(f"❌ Failed to delete {file_path}: {e}")
+                    logger.error(f"Failed to delete {file_path}: {e}")
                     failed_count += 1
 
         return {
@@ -234,7 +242,7 @@ class DataRetentionManager:
                     deleted_count += 1
 
                 except Exception as e:
-                    logger.info(f"❌ Failed to delete {file_path}: {e}")
+                    logger.error(f"Failed to delete {file_path}: {e}")
                     failed_count += 1
 
                     self.logger.log_security_event(
@@ -273,7 +281,7 @@ class DataRetentionManager:
                     logger.info(f"✓ Deleted: {os.path.basename(file_path)}")
                     deleted_count += 1
                 except Exception as e:
-                    logger.info(f"❌ Failed to delete {file_path}: {e}")
+                    logger.error(f"Failed to delete {file_path}: {e}")
 
         return deleted_count
 

@@ -169,7 +169,7 @@ def verify_captcha_token(
             threshold = config["score_threshold"]
             if score < threshold:
                 logger.warning(f"CAPTCHA score too low: {score} < {threshold}")
-                return False, f"CAPTCHA score too low: {score}"
+                return False, "CAPTCHA verification failed"
 
         # Verification successful
         logger.info(f"CAPTCHA verified successfully: provider={provider}")

@@ -22,13 +22,13 @@ class Config:
         if os.getenv("FLASK_ENV") == "production":
             raise ValueError("SECRET_KEY must be set in production!")
         else:
-            SECRET_KEY = "dev-secret-key-CHANGE-IN-PRODUCTION-" + secrets.token_hex(16)
-            logger.info("⚠️  WARNING: Using generated SECRET_KEY for development")
+            SECRET_KEY = "dev-only-secret-key-CHANGE-IN-PRODUCTION"
+            logger.info("⚠️  WARNING: Using fixed dev SECRET_KEY - set SECRET_KEY env var for production")
 
     # M-21 FIX: Increased minimum from 32 to 64 characters.
     # 32 chars = ~192 bits effective entropy (alphanumeric), which is below
     # the 256-bit standard for HMAC-SHA256 JWT signing.
-    if len(SECRET_KEY) < 64:
+    if os.getenv("FLASK_ENV") == "production" and len(SECRET_KEY) < 64:
         raise ValueError(
             "SECRET_KEY must be at least 64 characters for adequate JWT signing entropy. "
             'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'

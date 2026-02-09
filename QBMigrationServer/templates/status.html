@@ -20,7 +20,7 @@
 </div>
 
 <script>
-const migrationId = '{{ migration_id }}';
+const migrationId = {{ migration_id | tojson }};
 
 // FIX CRIT-05: HTML escaping function to prevent XSS attacks
 function escapeHtml(text) {

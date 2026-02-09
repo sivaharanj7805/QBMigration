@@ -74,8 +74,31 @@ def make_celery(app: Flask = None) -> Celery:
     )
 
     if app:
-        # Update with Flask app config
-        celery.conf.update(app.config)
+        # FIX HIGH: Only pass Celery-relevant keys from Flask config.
+        # Previously used celery.conf.update(app.config) which dumped the
+        # ENTIRE Flask config (including SECRET_KEY, database credentials,
+        # API tokens, etc.) into Celery's configuration namespace.
+        CELERY_CONFIG_WHITELIST = [
+            "CELERY_BROKER_URL",
+            "CELERY_RESULT_BACKEND",
+            "CELERY_TASK_SERIALIZER",
+            "CELERY_ACCEPT_CONTENT",
+            "CELERY_RESULT_SERIALIZER",
+            "CELERY_TIMEZONE",
+            "CELERY_ENABLE_UTC",
+            "CELERY_TASK_TRACK_STARTED",
+            "CELERY_TASK_TIME_LIMIT",
+            "CELERY_TASK_SOFT_TIME_LIMIT",
+            "CELERY_WORKER_PREFETCH_MULTIPLIER",
+            "CELERY_TASK_ACKS_LATE",
+            "CELERY_RESULT_EXPIRES",
+            "CELERY_TASK_DEFAULT_RETRY_DELAY",
+            "CELERY_TASK_MAX_RETRIES",
+        ]
+        celery_config = {
+            k: v for k, v in app.config.items() if k in CELERY_CONFIG_WHITELIST
+        }
+        celery.conf.update(celery_config)
 
         # Create a task base class that runs within Flask app context
         class ContextTask(celery.Task):  # type: ignore[name-defined]

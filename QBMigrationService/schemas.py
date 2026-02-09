@@ -516,9 +516,11 @@ def validate_migration_id(migration_id: str) -> Tuple[bool, List[str]]:
 
     if not migration_id:
         errors.append("Migration ID is required")
+        return False, errors
 
     if not isinstance(migration_id, str):
         errors.append("Migration ID must be a string")
+        return False, errors
 
     import re
 

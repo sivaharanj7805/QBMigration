@@ -211,10 +211,10 @@ export default function RegisterPage() {
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
                 body: JSON.stringify({
-                    name: sanitize.text(name),
-                    email: sanitize.text(email),
+                    name,
+                    email,
                     password,
-                    company: sanitize.text(company),
+                    company,
                 }),
             });
 

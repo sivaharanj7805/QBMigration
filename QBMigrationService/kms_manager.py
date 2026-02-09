@@ -279,7 +279,11 @@ class AWSKMSManager:
         token_bytes = json.dumps(tokens).encode()
         ciphertext = aesgcm.encrypt(nonce, token_bytes, None)
 
-        # Clear plaintext key from memory (best effort)
+        # SECURITY FIX: Securely zero plaintext key from memory
+        # Setting to None does not overwrite the bytes object in CPython
+        if isinstance(plaintext_key, (bytearray, memoryview)):
+            for i in range(len(plaintext_key)):
+                plaintext_key[i] = 0
         plaintext_key = None
 
         return {
@@ -313,7 +317,10 @@ class AWSKMSManager:
         aesgcm = AESGCM(plaintext_key)
         token_bytes = aesgcm.decrypt(nonce, ciphertext, None)
 
-        # Clear plaintext key
+        # SECURITY FIX: Securely zero plaintext key from memory
+        if isinstance(plaintext_key, (bytearray, memoryview)):
+            for i in range(len(plaintext_key)):
+                plaintext_key[i] = 0
         plaintext_key = None
 
         return json.loads(token_bytes.decode())
@@ -393,7 +400,8 @@ class KMSFallbackManager:
 
     def _load_or_generate_key(self):
         """Load or generate a local master key."""
-        key_path = os.environ.get("LOCAL_MASTER_KEY_PATH", ".master_key")
+        # SECURITY FIX: Use secure absolute path instead of relative CWD
+        key_path = os.environ.get("LOCAL_MASTER_KEY_PATH", "/var/lib/forensicbridge/.master_key")
 
         if os.path.exists(key_path):
             with open(key_path, "rb") as f:

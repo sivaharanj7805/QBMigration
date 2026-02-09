@@ -1,8 +1,8 @@
 {
   "serverUrl": "https://forensicbridge.ca/api",
   "incrementalSyncFromDate": null,
-  "version": "4.3",
-  "schemaVersion": "4.3",
+  "version": "4.4",
+  "schemaVersion": "4.4",
   "advanced": {
     "chunkSizeKB": 1024,
     "chunkedUploadThresholdMB": 10,

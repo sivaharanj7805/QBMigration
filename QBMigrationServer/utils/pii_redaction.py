@@ -10,7 +10,17 @@ import re
 from typing import Optional
 
 # Application-level salt to prevent rainbow-table reversal of PII hashes
-_PII_SALT = os.getenv("PII_HASH_SALT", "forensicbridge-default-salt-change-in-production")
+_PII_SALT = os.getenv("PII_HASH_SALT", "")
+if not _PII_SALT:
+    import logging as _logging
+    _pii_logger = _logging.getLogger(__name__)
+    _env = os.getenv("FLASK_ENV", os.getenv("APP_ENV", "development"))
+    if _env == "production":
+        raise RuntimeError("PII_HASH_SALT must be set in production to prevent rainbow-table attacks")
+    # Generate random salt for non-production to avoid using a known default
+    import secrets as _secrets
+    _PII_SALT = _secrets.token_hex(32)
+    _pii_logger.warning("PII_HASH_SALT not set -- using random salt (PII hashes will not persist across restarts)")
 
 
 def hash_email(email: str) -> str:

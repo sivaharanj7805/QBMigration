@@ -35,7 +35,6 @@ const HTML_ENTITIES: Record<string, string> = {
     '>': '&gt;',
     '"': '&quot;',
     "'": '&#x27;',
-    '/': '&#x2F;',
     '`': '&#x60;',
     '=': '&#x3D;',
 };
@@ -59,7 +58,7 @@ export function escapeHtml(str: string): string {
     if (typeof str !== 'string') {
         return '';
     }
-    return str.replace(/[&<>"'`=/]/g, (char) => HTML_ENTITIES[char] || char);
+    return str.replace(/[&<>"'`=]/g, (char) => HTML_ENTITIES[char] || char);
 }
 
 /**

@@ -616,11 +616,14 @@ def _generate_health_report(migration, output_path):
         )
         story.append(Spacer(1, 20))
 
-        # Health indicators
+        # Health indicators -- derive from actual migration data
         story.append(Paragraph("<b>Health Indicators:</b>", styles["Heading2"]))
-        story.append(Paragraph("Data Integrity: PASSED", styles["Normal"]))
-        story.append(Paragraph("Hash Verification: PASSED", styles["Normal"]))
-        story.append(Paragraph("Trial Balance: BALANCED", styles["Normal"]))
+        integrity_status = "PASSED" if migration.status == "completed" else "NOT VERIFIED"
+        hash_status = "PASSED" if getattr(migration, "file_hash", None) else "NOT VERIFIED"
+        balance_status = "BALANCED" if getattr(migration, "trial_balance_variance", None) == 0 else "NOT VERIFIED"
+        story.append(Paragraph(f"Data Integrity: {integrity_status}", styles["Normal"]))
+        story.append(Paragraph(f"Hash Verification: {hash_status}", styles["Normal"]))
+        story.append(Paragraph(f"Trial Balance: {balance_status}", styles["Normal"]))
 
         doc.build(story)
         logger.info(f"Generated health report for {migration.migration_id}")

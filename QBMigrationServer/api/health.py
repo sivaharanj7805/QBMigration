@@ -147,7 +147,8 @@ def detailed_health_check():  # noqa: C901
         db.session.execute(text("SELECT 1"))
         health_status["checks"]["database"] = {"status": "pass", "message": "Connected"}
     except Exception as e:
-        health_status["checks"]["database"] = {"status": "fail", "message": str(e)}
+        logger.error(f"Detailed health check database failure: {e}")
+        health_status["checks"]["database"] = {"status": "fail", "message": "Database connection failed"}
         health_status["status"] = "unhealthy"
 
     # 2. Canadian Data Residency Check

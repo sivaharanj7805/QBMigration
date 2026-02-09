@@ -82,7 +82,10 @@
             <div>
                 <a href="/">Home</a>
                 <a href="/upload">Upload</a>
-                <a href="/api/auth/logout" onclick="return confirm('Logout?')">Logout</a>
+                <form method="POST" action="/api/auth/logout" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="nav-link" style="background:none;border:none;cursor:pointer;color:inherit;font:inherit;">Logout</button>
+                </form>
             </div>
         </div>
     </nav>

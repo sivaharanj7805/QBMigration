@@ -163,10 +163,13 @@ def generate_report(session_id):
         c.setFont("Helvetica-Bold", 12)
         c.drawString(70, height - 280, "Summary")
 
+        # CRITICAL FIX: Report actual scan results, not hardcoded values.
+        # TODO: Store scan results from /scan in DB keyed by session_id and
+        # retrieve here. For now, clearly mark as "pending actual scan".
         c.setFont("Helvetica", 10)
-        c.drawString(70, height - 300, "Readiness Score: 100%")
-        c.drawString(70, height - 315, "Estimated Migration Time: ~15 minutes")
-        c.drawString(70, height - 330, "Issues Found: 0")
+        c.drawString(70, height - 300, "Readiness Score: Pending full scan")
+        c.drawString(70, height - 315, "Estimated Migration Time: Calculated after scan")
+        c.drawString(70, height - 330, "Issues Found: Run /scan endpoint first")
 
         # Footer
         c.setFillColor(HexColor("#9CA3AF"))
