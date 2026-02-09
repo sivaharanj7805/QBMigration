@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
@@ -135,6 +136,8 @@ class EncryptionManager:
                     encryption_algorithm=serialization.NoEncryption(),
                 )
             )
+        # Restrict private key file to owner read/write only (0o600)
+        os.chmod(self.private_key_path, stat.S_IRUSR | stat.S_IWUSR)
 
         # Save public key
         with open(self.public_key_path, "wb") as f:
@@ -496,7 +499,7 @@ class EncryptionManager:
             # GCM expects ciphertext + tag concatenated
             ciphertext_with_tag = ciphertext + tag
 
-            plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, None)
+            plaintext = aesgcm.decrypt(iv, ciphertext_with_tag, b"forensicbridge-v1")
 
             return plaintext
 
@@ -596,7 +599,7 @@ class EncryptionManager:
 
             # Encrypt
             aesgcm = AESGCM(aes_key)
-            ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, None)
+            ciphertext_with_tag = aesgcm.encrypt(iv, plaintext, b"forensicbridge-v1")
 
             # Split ciphertext and tag
             ciphertext = ciphertext_with_tag[:-16]

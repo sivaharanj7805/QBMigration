@@ -64,7 +64,7 @@ ACCESS_TOKEN = os.getenv("QBO_ACCESS_TOKEN", "")  # Optional for initial setup
 
 # Validate critical credentials
 if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
-    logger.info("WARNING: QBO credentials not configured. Set environment variables.")
+    logger.warning("QBO credentials not configured. Set environment variables.")
 
 # ============================================================================
 # ENVIRONMENT & REGION CONFIGURATION

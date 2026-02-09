@@ -34,6 +34,7 @@ USAGE:
 """
 
 import html
+import json
 import logging
 import multiprocessing as mp
 import re
@@ -46,13 +47,21 @@ from decimal import (
     Context,
     Decimal,
     InvalidOperation,
-    getcontext,
     localcontext,
 )
 from typing import Any, DefaultDict, Dict, List, Optional, Set, Tuple
 
 # Type alias for QBO entity payloads
 QBOEntity = Dict[str, Any]
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """JSON encoder that handles Decimal objects for financial data."""
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return str(obj)
+        return super().default(obj)
+
 
 # MEDIUM FIX: Set proper decimal context for QB rounding
 # QuickBooks uses specific rounding rules that we must match exactly
@@ -73,9 +82,11 @@ QB_DECIMAL_CONTEXT = Context(
     traps=[InvalidOperation],  # Trap only invalid operations
 )
 
-# Set as default context
-getcontext().prec = 28
-getcontext().rounding = ROUND_HALF_UP
+# NOTE: Do not mutate the global decimal context (getcontext()) here.
+# It is not thread-safe: worker threads inherit DefaultContext, not the
+# main thread's context.  All code that needs QB rounding must use
+#     with localcontext(QB_DECIMAL_CONTEXT):
+# which is already done in to_decimal() and related helpers.
 
 # FIX #13: Don't override global logging configuration
 # Let the application configure logging instead

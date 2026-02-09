@@ -1113,7 +1113,9 @@ class PremiumMigrationVerifier:
         total_failed = upload_result.get("failed", 0)
 
         if total_failed > 0:
-            failure_rate = total_failed / (total_uploaded + total_failed) * 100
+            # FIX MIGRATION-MED-12: Guard against division by zero
+            total_attempted = total_uploaded + total_failed
+            failure_rate = (total_failed / total_attempted * 100) if total_attempted > 0 else 0
             if failure_rate > 5:  # More than 5% failure rate
                 issues.append(
                     f"High failure rate: {failure_rate:.1f}% ({total_failed} failed)"
@@ -1276,14 +1278,21 @@ class PremiumMigrationVerifier:
         qbo_data = trial_balance.get("qbo", {})
 
         # Balance sheet match based on debit/credit match
+        # FIX H-21: Trial balance values are stored as str(); convert to Decimal
+        # before arithmetic to avoid TypeError on str - str.
         if qbd_data and qbo_data:
-            debit_var = abs(qbd_data.get("debits", 0) - qbo_data.get("debits", 0))
-            credit_var = abs(qbd_data.get("credits", 0) - qbo_data.get("credits", 0))
-            total = max(qbd_data.get("debits", 1), 1)  # Avoid division by zero
-            balance_sheet_match = max(0, 100 - (debit_var / total * 100))
-            pl_match = max(
-                0, 100 - (credit_var / max(qbd_data.get("credits", 1), 1) * 100)
-            )
+            qbd_debits_val = self._safe_decimal(qbd_data.get("debits", 0))
+            qbo_debits_val = self._safe_decimal(qbo_data.get("debits", 0))
+            qbd_credits_val = self._safe_decimal(qbd_data.get("credits", 0))
+            qbo_credits_val = self._safe_decimal(qbo_data.get("credits", 0))
+
+            debit_var = abs(qbd_debits_val - qbo_debits_val)
+            credit_var = abs(qbd_credits_val - qbo_credits_val)
+            total = max(qbd_debits_val, Decimal("1"))  # Avoid division by zero
+            balance_sheet_match = float(max(Decimal("0"), Decimal("100") - (debit_var / total * Decimal("100"))))
+            pl_match = float(max(
+                Decimal("0"), Decimal("100") - (credit_var / max(qbd_credits_val, Decimal("1")) * Decimal("100"))
+            ))
         else:
             balance_sheet_match = 0.0
             pl_match = 0.0

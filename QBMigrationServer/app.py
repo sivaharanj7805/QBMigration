@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -386,8 +387,29 @@ def auto_migrate_database(app):
                 ("verification_results", "TEXT"),
             ]
             # PRODUCTION FIX: Track migration errors instead of silently swallowing them
+            # H-10 FIX: Whitelist column names to prevent SQL injection via f-string
+            _VALID_COLUMN_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+            _VALID_TYPE_RE = re.compile(
+                r"^[A-Z][A-Z0-9_()',. ]{0,80}$"
+            )
             migration_errors = []
             for col_name, col_type in migration_columns:
+                if not _VALID_COLUMN_RE.match(col_name):
+                    migration_errors.append(
+                        f"{col_name}: rejected by column name whitelist"
+                    )
+                    app.logger.error(
+                        f"Schema migration blocked: invalid column name '{col_name}'"
+                    )
+                    continue
+                if not _VALID_TYPE_RE.match(col_type):
+                    migration_errors.append(
+                        f"{col_name}: rejected by type whitelist"
+                    )
+                    app.logger.error(
+                        f"Schema migration blocked: invalid type '{col_type}' for column '{col_name}'"
+                    )
+                    continue
                 try:
                     conn.execute(
                         text(
@@ -450,8 +472,10 @@ def auto_migrate_database(app):
                 " migration_credit tables)"
             )
     except Exception as e:
-        # Log but don't crash - columns might already exist or other non-fatal issue
-        app.logger.warning(f"Schema migration note: {str(e)}")
+        # H-11 FIX: Log as error, re-raise in production to prevent silent data loss
+        app.logger.error(f"Schema migration failed: {str(e)}", exc_info=True)
+        if os.getenv("FLASK_ENV", "development") == "production":
+            raise
 
 
 def create_app(config_name="development"):  # noqa: C901
@@ -820,8 +844,9 @@ def create_app(config_name="development"):  # noqa: C901
         # Prevent MIME type sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
 
-        # XSS Protection (legacy but still useful for older browsers)
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # XSS Protection - set to 0 to disable (1; mode=block is deprecated
+        # and can introduce vulnerabilities in legacy browsers)
+        response.headers["X-XSS-Protection"] = "0"
 
         # Referrer Policy - Don't leak URLs to third parties
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -1026,55 +1051,13 @@ def create_app(config_name="development"):  # noqa: C901
     # Root endpoint
     @app.route("/")
     def index():
-        """Root endpoint - basic server info"""
+        """Root endpoint - minimal server info only"""
         return (
             jsonify(
                 {
-                    "message": "ForensicBridge Migration Server",
-                    "status": "running",
+                    "name": "ForensicBridge Migration Server",
                     "version": "4.3.0",
-                    "environment": os.getenv("FLASK_ENV", "development"),
-                    "features": {
-                        "aws_enabled": bool(app.config.get("AWS_S3_BUCKET")),
-                        "rate_limiting": app.config.get("RATELIMIT_ENABLED", False),
-                        "auto_cleanup": app.config.get("AUTO_CLEANUP_ENABLED", False),
-                    },
-                    "endpoints": {
-                        "health": "/health",
-                        "legal": {
-                            "eula": "/legal/eula",
-                            "privacy": "/legal/privacy",
-                            "security": "/legal/security",
-                        },
-                        "auth": {
-                            "register": "/api/auth/register",
-                            "login": "/api/auth/login",
-                            "logout": "/api/auth/logout",
-                            "me": "/api/auth/me",
-                            "verify": "/api/auth/verify/<token>",
-                        },
-                        "qbo": {
-                            "connect": "/api/qbo/connect",
-                            "callback": "/api/qbo/callback",
-                            "disconnect": "/api/qbo/disconnect",
-                            "status": "/api/qbo/status",
-                        },
-                        "upload": "/api/upload",
-                        "migrations": {
-                            "list": "/api/migrations",
-                            "get": "/api/migrations/<id>",
-                            "status": "/api/migrations/<id>/status",
-                            "start": "/api/migrations/<id>/start",
-                            "cancel": "/api/migrations/<id>/cancel",
-                            "retry": "/api/migrations/<id>/retry",
-                        },
-                        "webhooks": {
-                            "started": "/api/webhooks/migration-started",
-                            "progress": "/api/webhooks/migration-progress",
-                            "completed": "/api/webhooks/migration-completed",
-                            "failed": "/api/webhooks/migration-failed",
-                        },
-                    },
+                    "status": "running",
                 }
             ),
             200,

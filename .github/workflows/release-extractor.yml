@@ -34,11 +34,15 @@ jobs:
     - name: Get version from tag or input
       id: version
       shell: pwsh
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        INPUT_VERSION: ${{ github.event.inputs.version }}
+        REF_NAME: ${{ github.ref_name }}
       run: |
-        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-          $version = "${{ github.event.inputs.version }}"
+        if ($env:EVENT_NAME -eq "workflow_dispatch") {
+          $version = $env:INPUT_VERSION
         } else {
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          $version = $env:REF_NAME.TrimStart('v')
         }
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
         echo "Building version: $version"
@@ -99,7 +103,7 @@ jobs:
         Copy-Item QBMigrationServer/static/extractor/ForensicBridge_Bootstrap.ps1 ./publish/ -Force -ErrorAction SilentlyContinue
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
       with:
         name: QBExtractor v${{ steps.version.outputs.VERSION }}
         tag_name: v${{ steps.version.outputs.VERSION }}

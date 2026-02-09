@@ -27,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 from flask import Blueprint, Response, jsonify, redirect, request, send_file
+from api.auth import require_auth
+from extensions import limiter
 from utils.auth import admin_required
 
 logger = logging.getLogger(__name__)
@@ -430,6 +432,7 @@ def check_github_release_exists():
 
 
 @extractor_bp.route("/download", methods=["GET"])
+@limiter.limit("10 per minute")
 def download_extractor():
     """
     Download the ForensicBridge extractor.
@@ -519,6 +522,7 @@ def download_extractor():
 
 
 @extractor_bp.route("/download-exe", methods=["GET"])
+@limiter.limit("10 per minute")
 def download_extractor_exe():
     """
     Download the ForensicBridge extractor .exe directly.
@@ -567,6 +571,7 @@ def download_extractor_exe():
 
 
 @extractor_bp.route("/bootstrap", methods=["GET"])
+@limiter.limit("10 per minute")
 def download_bootstrap():
     """Download the bootstrap installer batch file."""
     if os.path.isfile(BOOTSTRAP_BAT):
@@ -587,6 +592,7 @@ def download_bootstrap():
 
 
 @extractor_bp.route("/bootstrap-ps1", methods=["GET"])
+@limiter.limit("10 per minute")
 def download_bootstrap_ps1():
     """Download the PowerShell bootstrap installer script."""
     if os.path.isfile(BOOTSTRAP_PS1):
@@ -697,6 +703,7 @@ def extractor_info():
 
 
 @extractor_bp.route("/github-download", methods=["GET"])
+@limiter.limit("10 per minute")
 def github_download():
     """Direct redirect to GitHub releases download."""
     return redirect(GITHUB_RELEASE_URL, code=302)
@@ -727,8 +734,9 @@ def security_info():
 
 
 @extractor_bp.route("/status", methods=["GET"])
+@require_auth
 def extractor_status():
-    """Check the current status of all download options."""
+    """Check the current status of all download options. Requires authentication."""
     extractor_path = find_extractor_path()
     cache_valid = is_cache_valid()
     cache_metadata = get_cache_metadata()
@@ -742,12 +750,10 @@ def extractor_status():
         {
             "local_installer": {
                 "available": extractor_path is not None,
-                "path": extractor_path,
                 "size": os.path.getsize(extractor_path) if extractor_path else None,
             },
             "cached_installer": {
                 "available": cache_valid,
-                "path": cache_path if cache_valid else None,
                 "size": (
                     os.path.getsize(cache_path)
                     if cache_valid and os.path.exists(cache_path)
@@ -763,7 +769,6 @@ def extractor_status():
             },
             "zip_package": {
                 "available": zip_path is not None,
-                "path": zip_path,
                 "size": os.path.getsize(zip_path) if zip_path else None,
                 "sha256": (
                     zip_metadata.get("sha256", "")[:16] + "..."
@@ -774,11 +779,9 @@ def extractor_status():
             },
             "bootstrap_bat": {
                 "available": os.path.isfile(BOOTSTRAP_BAT),
-                "path": BOOTSTRAP_BAT if os.path.isfile(BOOTSTRAP_BAT) else None,
             },
             "bootstrap_ps1": {
                 "available": os.path.isfile(BOOTSTRAP_PS1),
-                "path": BOOTSTRAP_PS1 if os.path.isfile(BOOTSTRAP_PS1) else None,
             },
             "github_release": {
                 "available": github_available,
@@ -797,7 +800,6 @@ def extractor_status():
                     else "/api/extractor/download"
                 )
             ),
-            "cache_dir": CACHE_DIR,
         }
     )
 
@@ -1012,6 +1014,7 @@ def extractor_docs():
 
 
 @extractor_bp.route("/download-zip", methods=["GET"])
+@limiter.limit("10 per minute")
 def download_zip():
     """
     Download the full QBExtractor deployment package (zip).

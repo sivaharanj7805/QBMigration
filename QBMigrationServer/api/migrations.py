@@ -357,7 +357,13 @@ def get_migration(migration_id):
         # Use to_dict if available
         if hasattr(migration, "to_dict") and callable(migration.to_dict):
             migration_data = migration.to_dict()
+            # UPLOAD-MED-03 FIX: Strip internal S3 infrastructure details
+            # from API responses to avoid exposing bucket names and keys.
+            for _s3_key in ("s3_uri", "s3_bucket", "s3_key"):
+                migration_data.pop(_s3_key, None)
         else:
+            # UPLOAD-MED-03 FIX: Replaced s3_uri with a boolean has_file flag
+            # to avoid leaking internal S3 infrastructure details.
             migration_data = {
                 "id": migration.id,
                 "migration_id": migration.migration_id,
@@ -368,7 +374,7 @@ def get_migration(migration_id):
                 "created_at": (
                     migration.created_at.isoformat() if migration.created_at else None
                 ),
-                "s3_uri": migration.s3_uri,
+                "has_file": bool(migration.s3_uri),
             }
 
         return jsonify({"success": True, "migration": migration_data}), 200
@@ -465,16 +471,11 @@ def start_migration(migration_id):  # noqa: C901
         user_id = _get_current_user_id()
         user = db.session.get(User, user_id)
 
-        # SECURITY FIX P0-02: Use SELECT FOR UPDATE on credit check to prevent
-        # race condition where concurrent requests both pass the check
-        available_credits = (
-            MigrationCredit.query.filter_by(
-                user_id=user_id, status="available", payment_status="paid"
-            )
-            .with_for_update()
-            .all()
-        )
-        total_remaining = len(available_credits)
+        # C-04 FIX: Preliminary credit check (non-locking, for fast-fail UX only).
+        # The authoritative atomic check+consume happens later with SELECT FOR UPDATE.
+        total_remaining = MigrationCredit.query.filter_by(
+            user_id=user_id, status="available", payment_status="paid"
+        ).count()
 
         if total_remaining <= 0:
             return (
@@ -670,8 +671,10 @@ def start_migration(migration_id):  # noqa: C901
                 migration.aws_instance_id = instance_id
             db.session.commit()
 
-        # Consume one migration credit
-        # SECURITY FIX: Only consume credits that are actually paid
+        # C-04 FIX: Atomic credit check + consumption using SELECT FOR UPDATE.
+        # This is the authoritative credit gate — the earlier count() is only
+        # a non-locking fast-fail for UX.  The row lock here prevents the
+        # TOCTOU double-spend race between concurrent requests.
         available_credit = (
             MigrationCredit.query.filter_by(
                 user_id=user_id, status="available", payment_status="paid"
@@ -679,11 +682,42 @@ def start_migration(migration_id):  # noqa: C901
             .with_for_update()
             .first()
         )
-        if available_credit:
-            available_credit.status = "used"
-            available_credit.used_at = datetime.now(timezone.utc)
-            available_credit.migration_id = migration.id
-            db.session.commit()
+        if not available_credit:
+            # Another request consumed the last credit between the early
+            # check and here.  Terminate the EC2 instance we just launched
+            # and fail the migration.
+            logger.error(
+                f"Credit consumed by concurrent request for migration {migration_id}; "
+                f"terminating instance {instance_id}"
+            )
+            try:
+                aws_manager.cleanup_migration(
+                    migration_id=migration_id, instance_id=instance_id
+                )
+            except Exception as cleanup_err:
+                logger.warning(f"Cleanup after credit race failed: {cleanup_err}")
+            if hasattr(migration, "mark_as_failed") and callable(
+                migration.mark_as_failed
+            ):
+                migration.mark_as_failed(
+                    "No migration credits available", "CREDIT_EXHAUSTED"
+                )
+            else:
+                migration.status = "failed"
+                db.session.commit()
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "No migration credits available. Please purchase credits first.",
+                    }
+                ),
+                402,
+            )
+        available_credit.status = "used"
+        available_credit.used_at = datetime.now(timezone.utc)
+        available_credit.migration_id = migration.id
+        db.session.commit()
 
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
 
@@ -747,10 +781,11 @@ def cancel_migration(migration_id):
         return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
 
     try:
-        # Get migration
+        # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
+        # cancel/retry races on the same migration row.
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_current_user_id()
-        ).first()
+        ).with_for_update().first()
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404
@@ -841,10 +876,11 @@ def retry_migration(migration_id):
         return jsonify({"success": False, "error": "Invalid migration ID format"}), 400
 
     try:
-        # Get migration
+        # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
+        # cancel/retry races on the same migration row.
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_current_user_id()
-        ).first()
+        ).with_for_update().first()
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404

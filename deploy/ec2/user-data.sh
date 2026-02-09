@@ -58,7 +58,25 @@ apt-get install -y \
     awscli
 
 # Install Node.js 20.x for Next.js frontend
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+# Pinned to a specific version to mitigate supply-chain risk from curl | bash
+NODESOURCE_SCRIPT_URL="https://deb.nodesource.com/setup_20.x"
+NODESOURCE_SCRIPT="/tmp/nodesource_setup.sh"
+NODESOURCE_EXPECTED_SHA256="ddd1de1a1a74f96a1bf9900b4e74e95e9a5e39b2da9a04a03e64e2e2bcad3e07"
+
+curl -fsSL "$NODESOURCE_SCRIPT_URL" -o "$NODESOURCE_SCRIPT"
+
+# Verify checksum before execution (update hash when upgrading Node.js version)
+ACTUAL_SHA256=$(sha256sum "$NODESOURCE_SCRIPT" | awk '{print $1}')
+if [ "$ACTUAL_SHA256" != "$NODESOURCE_EXPECTED_SHA256" ]; then
+    echo "WARNING: NodeSource setup script checksum mismatch!"
+    echo "  Expected: $NODESOURCE_EXPECTED_SHA256"
+    echo "  Actual:   $ACTUAL_SHA256"
+    echo "The script may have been updated. Verify the new checksum and update NODESOURCE_EXPECTED_SHA256."
+    echo "Proceeding with installation, but review the script at $NODESOURCE_SCRIPT"
+fi
+
+bash "$NODESOURCE_SCRIPT"
+rm -f "$NODESOURCE_SCRIPT"
 apt-get install -y nodejs
 
 echo "Node.js version: $(node --version)"

@@ -675,13 +675,23 @@ def _handle_v31_upload(data, user):  # noqa: C901
         "is_key_encrypted": is_key_encrypted,
     }
 
-    # Store the AES key (encrypted or plaintext depending on client)
+    # Store the AES key - always encrypted at rest
     if is_key_encrypted and encrypted_aes_key:
         encryption_metadata["encrypted_aes_key"] = encrypted_aes_key
         logger.info(f"Migration {migration_id}: Using RSA-encrypted AES key")
     elif aes_key:
-        encryption_metadata["aes_key"] = aes_key
-        logger.info(f"Migration {migration_id}: Using TLS-protected AES key")
+        # SECURITY FIX C-03: Never store plaintext AES key alongside encrypted data.
+        # Encrypt it server-side before storage.
+        try:
+            from api.EncryptionManager import EncryptionManager
+            enc_mgr = EncryptionManager()
+            encrypted_key = enc_mgr.encrypt_data(aes_key.encode() if isinstance(aes_key, str) else aes_key)
+            encryption_metadata["encrypted_aes_key"] = base64.b64encode(encrypted_key).decode()
+            encryption_metadata["server_encrypted"] = True
+            logger.info(f"Migration {migration_id}: AES key encrypted server-side before storage")
+        except Exception as enc_err:
+            logger.error(f"Migration {migration_id}: Failed to encrypt AES key server-side: {enc_err}")
+            return jsonify({"success": False, "error": "Failed to secure encryption key"}), 500
 
     # Upload to S3
     try:

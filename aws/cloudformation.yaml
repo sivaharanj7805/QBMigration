@@ -428,7 +428,9 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt MigrationEncryptionKey.Arn
+            BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -627,11 +629,12 @@ Resources:
           fi
 
           DB_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.database_password')
+          REDIS_TOKEN=$(aws secretsmanager get-secret-value --secret-id forensicbridge/${Environment}/redis --query SecretString --output text --region ${AWS::Region} | jq -r '.auth_token')
 
           # Set environment variables (never write password to disk)
           export FLASK_ENV=production
           export DATABASE_URL="postgresql://forensicbridge:$DB_PASSWORD@${Database.Endpoint.Address}:5432/forensicbridge"
-          export REDIS_URL="redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
+          export REDIS_URL="rediss://:$REDIS_TOKEN@${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
           export AWS_S3_BUCKET="${MigrationBucket}"
           export SECRETS_MANAGER_NAME="forensicbridge/production"
 
@@ -644,7 +647,7 @@ Resources:
           # Create env file with non-sensitive config only
           cat > /opt/forensicbridge/.env <<EOF
           FLASK_ENV=production
-          REDIS_URL=redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379
+          # REDIS_URL set at runtime via load_secrets.sh (contains auth token)
           AWS_S3_BUCKET=${MigrationBucket}
           SECRETS_MANAGER_NAME=forensicbridge/production
           AWS_REGION=${AWS::Region}
@@ -698,15 +701,11 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
-        - !If
-          - HasCertificate
-          - Type: redirect
-            RedirectConfig:
-              Protocol: HTTPS
-              Port: '443'
-              StatusCode: HTTP_301
-          - Type: forward
-            TargetGroupArn: !Ref ALBTargetGroup
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
 
   ALBHTTPSListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -927,7 +926,9 @@ Resources:
                   - logs:PutLogEvents
                   - logs:DescribeLogGroups
                   - logs:DescribeLogStreams
-                Resource: '*'
+                Resource:
+                  - !GetAtt VPCFlowLogGroup.Arn
+                  - !Sub '${VPCFlowLogGroup.Arn}:*'
 
   VPCFlowLogGroup:
     Type: AWS::Logs::LogGroup
@@ -954,7 +955,9 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt MigrationEncryptionKey.Arn
+            BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -1055,9 +1058,10 @@ Resources:
               exit 1
             fi
             DB_PASSWORD=$(echo "$SECRET_JSON" | jq -r '.database_password')
+            REDIS_TOKEN=$(aws secretsmanager get-secret-value --secret-id forensicbridge/${Environment}/redis --query SecretString --output text --region ${AWS::Region} | jq -r '.auth_token')
             export FLASK_ENV=production
             export DATABASE_URL="postgresql://forensicbridge:$DB_PASSWORD@${Database.Endpoint.Address}:5432/forensicbridge"
-            export REDIS_URL="redis://${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
+            export REDIS_URL="rediss://:$REDIS_TOKEN@${RedisReplicationGroup.PrimaryEndPoint.Address}:6379"
             export AWS_S3_BUCKET="${MigrationBucket}"
             export SECRETS_MANAGER_NAME="forensicbridge/production"
             exec "$@"

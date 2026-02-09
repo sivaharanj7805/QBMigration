@@ -495,56 +495,24 @@ namespace QBDesktopExtractor
             data.Items = SafeExtract("Items", () => ExtractItems());
             data.Classes = SafeExtract("Classes", () => ExtractClasses());
 
-            Console.WriteLine("[ 9/25] Payment Methods");
-            data.PaymentMethods = ExtractPaymentMethods();
-
-            Console.WriteLine("[10/25] Terms");
-            data.Terms = ExtractTerms();
-
-            Console.WriteLine("[11/25] Sales Tax Codes");
-            data.SalesTaxCodes = ExtractSalesTaxCodes();
-
-            Console.WriteLine("[12/25] Customer Types");
-            data.CustomerTypes = ExtractCustomerTypes();
-
-            Console.WriteLine("[13/25] Vendor Types");
-            data.VendorTypes = ExtractVendorTypes();
-
-            Console.WriteLine("[14/25] Job Types");
-            data.JobTypes = ExtractJobTypes();
-
-            Console.WriteLine("[15/25] Currencies");
-            data.Currencies = ExtractCurrencies();
-
-            Console.WriteLine("[16/25] Customer Messages");
-            data.CustomerMessages = ExtractCustomerMessages();
-
-            Console.WriteLine("[17/25] Date-Driven Terms");
-            data.DateDrivenTerms = ExtractDateDrivenTerms();
-
-            Console.WriteLine("[18/25] Inventory Sites");
-            data.InventorySites = ExtractInventorySites();
-
-            Console.WriteLine("[19/25] Payroll Item Wages");
-            data.PayrollItemWages = ExtractPayrollItemWages();
-
-            Console.WriteLine("[20/25] Payroll Item Non-Wages");
-            data.PayrollItemNonWages = ExtractPayrollItemNonWages();
-
-            Console.WriteLine("[21/25] Workers Comp Codes");
-            data.WorkersCompCodes = ExtractWorkersCompCodes();
-
-            Console.WriteLine("[22/25] Price Levels");
-            data.PriceLevels = ExtractPriceLevels();
-
-            Console.WriteLine("[23/25] Sales Reps");
-            data.SalesReps = ExtractSalesReps();
-
-            Console.WriteLine("[24/25] Ship Methods");
-            data.ShipMethods = ExtractShipMethods();
-
-            Console.WriteLine("[25/25] Sales Tax Groups");
-            data.SalesTaxGroups = ExtractSalesTaxGroups();
+            // FIX C-17: Wrap remaining list entities with SafeExtract for consistent failure isolation
+            data.PaymentMethods = SafeExtract("PaymentMethods", () => ExtractPaymentMethods());
+            data.Terms = SafeExtract("Terms", () => ExtractTerms());
+            data.SalesTaxCodes = SafeExtract("SalesTaxCodes", () => ExtractSalesTaxCodes());
+            data.CustomerTypes = SafeExtract("CustomerTypes", () => ExtractCustomerTypes());
+            data.VendorTypes = SafeExtract("VendorTypes", () => ExtractVendorTypes());
+            data.JobTypes = SafeExtract("JobTypes", () => ExtractJobTypes());
+            data.Currencies = SafeExtract("Currencies", () => ExtractCurrencies());
+            data.CustomerMessages = SafeExtract("CustomerMessages", () => ExtractCustomerMessages());
+            data.DateDrivenTerms = SafeExtract("DateDrivenTerms", () => ExtractDateDrivenTerms());
+            data.InventorySites = SafeExtract("InventorySites", () => ExtractInventorySites());
+            data.PayrollItemWages = SafeExtract("PayrollItemWages", () => ExtractPayrollItemWages());
+            data.PayrollItemNonWages = SafeExtract("PayrollItemNonWages", () => ExtractPayrollItemNonWages());
+            data.WorkersCompCodes = SafeExtract("WorkersCompCodes", () => ExtractWorkersCompCodes());
+            data.PriceLevels = SafeExtract("PriceLevels", () => ExtractPriceLevels());
+            data.SalesReps = SafeExtract("SalesReps", () => ExtractSalesReps());
+            data.ShipMethods = SafeExtract("ShipMethods", () => ExtractShipMethods());
+            data.SalesTaxGroups = SafeExtract("SalesTaxGroups", () => ExtractSalesTaxGroups());
 
             Console.WriteLine("✓ All list entities extracted sequentially\n");
 
@@ -553,95 +521,76 @@ namespace QBDesktopExtractor
             // ============================================================
             // Transactions MUST be sequential due to LinkedTxn relationships
             Console.WriteLine("\nSEQUENTIAL MODE: Extracting transaction entities...");
-            // Extract transactions
-            Console.WriteLine("[26/55] Invoices");
-            data.Invoices = ExtractInvoices();
+            // FIX C-17: Wrap all transaction extractions with SafeExtract for consistent failure isolation
+            data.Invoices = SafeExtract("Invoices", () => ExtractInvoices());
+            data.SalesReceipts = SafeExtract("SalesReceipts", () => ExtractSalesReceipts());
+            data.Estimates = SafeExtract("Estimates", () => ExtractEstimates());
+            data.PurchaseOrders = SafeExtract("PurchaseOrders", () => ExtractPurchaseOrders());
+            data.SalesOrders = SafeExtract("SalesOrders", () => ExtractSalesOrders());
+            data.Bills = SafeExtract("Bills", () => ExtractBills());
+            data.BillPayments = SafeExtract("BillPayments", () => ExtractBillPayments());
+            data.BillPaymentCreditCards = SafeExtract("BillPaymentCreditCards", () => ExtractBillPaymentCreditCards());
+            data.VendorCredits = SafeExtract("VendorCredits", () => ExtractVendorCredits());
+            data.ReceivePayments = SafeExtract("ReceivePayments", () => ExtractReceivePayments());
+            data.ARRefundCreditCards = SafeExtract("ARRefundCreditCards", () => ExtractARRefundCreditCards());
+            data.Checks = SafeExtract("Checks", () => ExtractChecks());
+            data.JournalEntries = SafeExtract("JournalEntries", () => ExtractJournalEntries());
+            data.SalesTaxPayments = SafeExtract("SalesTaxPayments", () => ExtractSalesTaxPayments());
+            data.CreditCardCharges = SafeExtract("CreditCardCharges", () => ExtractCreditCardCharges());
+            data.CreditCardCredits = SafeExtract("CreditCardCredits", () => ExtractCreditCardCredits());
+            data.Charges = SafeExtract("Charges", () => ExtractCharges());
+            data.CreditMemos = SafeExtract("CreditMemos", () => ExtractCreditMemos());
+            data.Deposits = SafeExtract("Deposits", () => ExtractDeposits());
+            data.InventoryAdjustments = SafeExtract("InventoryAdjustments", () => ExtractInventoryAdjustments());
+            data.ItemReceipts = SafeExtract("ItemReceipts", () => ExtractItemReceipts());
+            data.BuildAssemblies = SafeExtract("BuildAssemblies", () => ExtractBuildAssemblies());
+            data.Transfers = SafeExtract("Transfers", () => ExtractTransfers());
+            data.InventoryTransfers = SafeExtract("InventoryTransfers", () => ExtractInventoryTransfers());
+            data.DataExtensions = SafeExtract("DataExtensions", () => ExtractDataExtensions());
 
-            Console.WriteLine("[27/55] Sales Receipts");
-            data.SalesReceipts = ExtractSalesReceipts();
+            // Non-list entities: use try/catch for consistent failure isolation
+            // (SafeExtract<T> requires List<T>, these return single objects)
+            try { data.Preferences = ExtractPreferences(); }
+            catch (Exception ex)
+            {
+                _totalErrors++;
+                RunSummary.TotalEntitiesFailed++;
+                RunSummary.Errors.Add($"Preferences: {ex.Message}");
+                _logger?.Log(LogLevel.Error, "Failed to extract Preferences: {0}", ex.Message);
+                if (!ContinueOnEntityError) throw;
+            }
 
-            Console.WriteLine("[28/55] Estimates");
-            data.Estimates = ExtractEstimates();
+            try { data.DeletedRecords = ExtractDeletedRecords(); }
+            catch (Exception ex)
+            {
+                _totalErrors++;
+                RunSummary.TotalEntitiesFailed++;
+                RunSummary.Errors.Add($"DeletedRecords: {ex.Message}");
+                _logger?.Log(LogLevel.Error, "Failed to extract DeletedRecords: {0}", ex.Message);
+                if (!ContinueOnEntityError) throw;
+            }
 
-            Console.WriteLine("[29/55] Purchase Orders");
-            data.PurchaseOrders = ExtractPurchaseOrders();
+            try { data.ReportVerification = ExtractReportVerification(); }
+            catch (Exception ex)
+            {
+                _totalErrors++;
+                RunSummary.TotalEntitiesFailed++;
+                RunSummary.Errors.Add($"ReportVerification: {ex.Message}");
+                _logger?.Log(LogLevel.Error, "Failed to extract ReportVerification: {0}", ex.Message);
+                if (!ContinueOnEntityError) throw;
+            }
 
-            Console.WriteLine("[30/55] Sales Orders");
-            data.SalesOrders = ExtractSalesOrders();
+            try { data.CompanyActivity = ExtractCompanyActivity(); }
+            catch (Exception ex)
+            {
+                _totalErrors++;
+                RunSummary.TotalEntitiesFailed++;
+                RunSummary.Errors.Add($"CompanyActivity: {ex.Message}");
+                _logger?.Log(LogLevel.Error, "Failed to extract CompanyActivity: {0}", ex.Message);
+                if (!ContinueOnEntityError) throw;
+            }
 
-            Console.WriteLine("[31/55] Bills");
-            data.Bills = ExtractBills();
-
-            Console.WriteLine("[32/55] Bill Payments (Check)");
-            data.BillPayments = ExtractBillPayments();
-
-            Console.WriteLine("[33/55] Bill Payments (Credit Card)");
-            data.BillPaymentCreditCards = ExtractBillPaymentCreditCards();
-
-            Console.WriteLine("[34/55] Vendor Credits");
-            data.VendorCredits = ExtractVendorCredits();
-
-            Console.WriteLine("[35/55] Receive Payments");
-            data.ReceivePayments = ExtractReceivePayments();
-
-            Console.WriteLine("[36/55] AR Refund Credit Cards");
-            data.ARRefundCreditCards = ExtractARRefundCreditCards();
-
-            Console.WriteLine("[37/55] Checks");
-            data.Checks = ExtractChecks();
-
-            Console.WriteLine("[38/55] Journal Entries");
-            data.JournalEntries = ExtractJournalEntries();
-
-            Console.WriteLine("[39/55] Sales Tax Payments");
-            data.SalesTaxPayments = ExtractSalesTaxPayments();
-
-            Console.WriteLine("[40/55] Credit Card Charges");
-            data.CreditCardCharges = ExtractCreditCardCharges();
-
-            Console.WriteLine("[41/55] Credit Card Credits");
-            data.CreditCardCredits = ExtractCreditCardCredits();
-
-            Console.WriteLine("[42/55] Charges");
-            data.Charges = ExtractCharges();
-
-            Console.WriteLine("[43/55] Credit Memos");
-            data.CreditMemos = ExtractCreditMemos();
-
-            Console.WriteLine("[44/55] Deposits");
-            data.Deposits = ExtractDeposits();
-
-            Console.WriteLine("[45/55] Inventory Adjustments");
-            data.InventoryAdjustments = ExtractInventoryAdjustments();
-
-            Console.WriteLine("[46/55] Item Receipts");
-            data.ItemReceipts = ExtractItemReceipts();
-
-            Console.WriteLine("[47/55] Build Assemblies");
-            data.BuildAssemblies = ExtractBuildAssemblies();
-
-            Console.WriteLine("[48/55] Transfers");
-            data.Transfers = ExtractTransfers();
-
-            Console.WriteLine("[49/55] Inventory Transfers");
-            data.InventoryTransfers = ExtractInventoryTransfers();
-
-            Console.WriteLine("[50/55] Preferences");
-            data.Preferences = ExtractPreferences();
-
-            Console.WriteLine("[51/55] Data Extensions (Custom Fields)");
-            data.DataExtensions = ExtractDataExtensions();
-
-            Console.WriteLine("[52/55] Deleted Records");
-            data.DeletedRecords = ExtractDeletedRecords();
-
-            Console.WriteLine("[53/55] Report Verification");
-            data.ReportVerification = ExtractReportVerification();
-
-            Console.WriteLine("[54/55] Company Activity");
-            data.CompanyActivity = ExtractCompanyActivity();
-
-            Console.WriteLine("[55/55] Extraction Complete!");
+            Console.WriteLine("Extraction Complete!");
             Console.WriteLine();
 
             // Complete run summary

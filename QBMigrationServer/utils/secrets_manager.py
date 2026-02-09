@@ -15,6 +15,7 @@ Usage:
 import json
 import logging
 import os
+import secrets as stdlib_secrets
 import threading
 import time
 from typing import Any, Dict, Optional
@@ -194,9 +195,25 @@ def _get_env_secrets() -> Dict[str, Any]:
         "webhook_secret",
     ]
 
+    is_production = os.getenv("FLASK_ENV") == "production"
+
+    # Resolve SECRET_KEY: require explicit value in production, random fallback in dev
+    secret_key_env = os.getenv("SECRET_KEY", "")
+    if not secret_key_env:
+        if is_production:
+            raise SecretsManagerError(
+                "SECRET_KEY environment variable must be set in production"
+            )
+        else:
+            secret_key_env = stdlib_secrets.token_hex(32)
+            logger.warning(
+                "SECRET_KEY not set; generated random ephemeral key for development. "
+                "Sessions will not persist across restarts."
+            )
+
     secrets = {
         # Flask
-        "flask_secret_key": os.getenv("SECRET_KEY", ""),
+        "flask_secret_key": secret_key_env,
         "flask_env": os.getenv("FLASK_ENV", "development"),
         # Database
         "database_url": os.getenv("DATABASE_URL", ""),
@@ -218,7 +235,6 @@ def _get_env_secrets() -> Dict[str, Any]:
     }
 
     # Validate required secrets
-    is_production = os.getenv("FLASK_ENV") == "production"
     required = PRODUCTION_REQUIRED_SECRETS if is_production else REQUIRED_SECRETS
 
     missing = [k for k in required if not secrets.get(k)]

@@ -106,7 +106,7 @@ services:
     # AUDIT FIX HIGH-18: Docker Compose variable substitution enforces password is set;
     # password complexity (min 16 chars) should be enforced via .env validation or CI checks.
     # Generate a strong password with: openssl rand -base64 24
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required (min 16 chars) - generate with openssl rand -base64 24}
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD required (min 16 chars) - generate with openssl rand -base64 24}
     healthcheck:
       # SECURITY FIX: Don't expose password in process list - use shell to hide it
       test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]

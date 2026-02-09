@@ -10,6 +10,7 @@ Endpoints:
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -22,7 +23,7 @@ from models.database import db
 from models.license import LICENSE_TIERS, License, LicenseActivation
 
 # FIX #53: Import PII redaction for secure logging
-from utils.pii_redaction import hash_email
+from utils.pii_redaction import hash_email, hash_ip
 
 license_bp = Blueprint("license", __name__, url_prefix="/api/license")
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def log_activation(license_obj, action, fingerprint, success, error=None, notes=
         license_id=license_obj.id,
         action=action,
         hardware_fingerprint=fingerprint,
-        ip_address=request.remote_addr,
+        ip_address=hash_ip(request.remote_addr),
         user_agent=request.headers.get("User-Agent", "")[:255],
         success=success,
         error_message=error,
@@ -166,6 +167,14 @@ def validate_license():
                 jsonify({"valid": False, "error": "Hardware fingerprint required"}),
                 400,
             )
+
+        # C-08: Format validation for license key
+        if not re.match(r'^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$', license_key):
+            return jsonify({"valid": False, "error": "Invalid license key format"}), 400
+
+        # C-08: Format validation for hardware fingerprint
+        if not re.match(r'^[a-zA-Z0-9+/=\-]{8,128}$', hardware_fingerprint):
+            return jsonify({"valid": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -255,6 +264,14 @@ def activate_license():
                 jsonify({"success": False, "error": "Hardware fingerprint required"}),
                 400,
             )
+
+        # C-08: Format validation for license key
+        if not re.match(r'^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$', license_key):
+            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+
+        # C-08: Format validation for hardware fingerprint
+        if not re.match(r'^[a-zA-Z0-9+/=\-]{8,128}$', hardware_fingerprint):
+            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -359,6 +376,14 @@ def get_usage():
                 400,
             )
 
+        # C-08: Format validation for license key
+        if not re.match(r'^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$', license_key):
+            return jsonify({"error": "Invalid license key format"}), 400
+
+        # C-08: Format validation for hardware fingerprint
+        if not re.match(r'^[a-zA-Z0-9+/=\-]{8,128}$', hardware_fingerprint):
+            return jsonify({"error": "Invalid hardware fingerprint format"}), 400
+
         # Find and validate license
         license_obj = License.find_by_key(license_key)
 
@@ -427,6 +452,14 @@ def use_migration():
                 ),
                 400,
             )
+
+        # C-08: Format validation for license key
+        if not re.match(r'^FB-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$', license_key):
+            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+
+        # C-08: Format validation for hardware fingerprint
+        if not re.match(r'^[a-zA-Z0-9+/=\-]{8,128}$', hardware_fingerprint):
+            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
 
         # Find and validate license
         license_obj = License.find_by_key(license_key)

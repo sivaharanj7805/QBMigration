@@ -18,6 +18,9 @@ from models.user import User
 # automatically apply to payment endpoints.
 from api.auth import require_auth
 
+# H-32 FIX: Import limiter to rate-limit checkout and payment endpoints
+from extensions import limiter
+
 logger = logging.getLogger(__name__)
 
 payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
@@ -43,6 +46,7 @@ def _get_current_user():
 
 @payments_bp.route("/create-checkout", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent checkout session abuse
 def create_checkout():
     """
     Create a Stripe Checkout session for purchasing a migration credit.
@@ -96,7 +100,18 @@ def create_checkout():
             db.session.commit()
 
         # Build URLs
-        base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+        # DASHBOARD-LOW-2 FIX: Warn if FRONTEND_URL is not configured in non-dev modes
+        base_url = os.getenv("FRONTEND_URL")
+        if not base_url:
+            env = os.getenv("FLASK_ENV", "development")
+            if env != "development":
+                logger.warning(
+                    "FRONTEND_URL is not configured in %s mode. "
+                    "Checkout redirect URLs will use http://localhost:3000 which is "
+                    "almost certainly wrong. Set FRONTEND_URL to the correct origin.",
+                    env,
+                )
+            base_url = "http://localhost:3000"
         success_url = f"{base_url}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = f"{base_url}/select-tier?cancelled=true"
 
@@ -356,6 +371,7 @@ def handle_failed_payment(payment_intent):
 
 @payments_bp.route("/credits", methods=["GET"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent credit-check abuse
 def get_credits():
     """
     Get all migration credits for the current user.
@@ -400,6 +416,7 @@ def get_credits():
 
 @payments_bp.route("/verify-session/<session_id>", methods=["GET"])
 @require_auth
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent verify session abuse
 def verify_session(session_id):
     """
     Verify a checkout session after redirect.

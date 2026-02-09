@@ -66,6 +66,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     FLASK_APP=QBMigrationServer/app.py \
     FLASK_ENV=production \
+    FLASK_DEBUG=0 \
     PORT=5000
 
 # Health check
@@ -90,7 +91,7 @@ ENV GUNICORN_WORKERS=4 \
 # preventing memory leaks from accumulating. --max-requests-jitter adds
 # randomness to avoid all workers restarting simultaneously.
 CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads "${GUNICORN_THREADS}" \
-     --worker-class gthread --timeout 120 --keep-alive 5 \
+     --worker-class "${GUNICORN_WORKER_CLASS}" --timeout 120 --keep-alive 5 \
      --max-requests 1000 --max-requests-jitter 100 \
      --access-logfile - --error-logfile - \
      "QBMigrationServer.app:create_app()"

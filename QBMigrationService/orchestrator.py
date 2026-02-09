@@ -232,10 +232,10 @@ class MigrationOrchestrator:
             )
         except Exception:
             # AUDIT FIX MED-21: Ensure QBO client session is closed on exception
-            if hasattr(self, "qbo_client") and self.qbo_client:
+            if hasattr(self, "_qbo_client") and self._qbo_client:
                 try:
-                    if hasattr(self.qbo_client, "session") and self.qbo_client.session:
-                        self.qbo_client.session.close()
+                    if hasattr(self._qbo_client, "session") and self._qbo_client.session:
+                        self._qbo_client.session.close()
                 except Exception:
                     pass
             raise
@@ -1380,7 +1380,15 @@ class MigrationOrchestrator:
                 f"Batch request failed for {api_entity_type} "
                 f"({len(batch_items)} items): {e} — retrying individually"
             )
+            # Track already-created source_ids to avoid duplicates during fallback
+            already_created = {sid for sid, _ in success_mappings}
             for source_id, entity_data in batch_items:
+                if source_id in already_created:
+                    logger.info(
+                        f"Skipping already-created {api_entity_type} "
+                        f"({source_id}) during sequential fallback"
+                    )
+                    continue
                 try:
                     result = qbo_client.create_entity(
                         api_entity_type, entity_data, oauth_manager=oauth_manager
@@ -1388,6 +1396,7 @@ class MigrationOrchestrator:
                     if result and "Id" in result:
                         qbo_id = result["Id"]
                         success_mappings.append((source_id, qbo_id))
+                        already_created.add(source_id)
                         qbo_client.record_created(
                             api_entity_type,
                             source_id or f"fallback_{len(success_mappings)}",

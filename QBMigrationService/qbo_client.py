@@ -50,6 +50,15 @@ class PremiumQBOClient:
         minor_version: int = 65,
         qbo_plan: Optional[str] = None,
     ):
+        # FIX MIGRATION-MED-13: Validate base_url early to prevent silent
+        # "None/<endpoint>" URLs that produce confusing connection errors.
+        if not base_url:
+            raise ValueError(
+                "base_url is required and cannot be None or empty. "
+                "Provide the QBO API base URL, e.g. "
+                "'https://quickbooks.api.intuit.com/v3/company/1234567890'."
+            )
+
         # FIX #17, #18: Don't store mutable headers - create per-request
         self._base_access_token = access_token
         self.base_url = base_url
@@ -719,6 +728,10 @@ class PremiumQBOClient:
                     new_token = oauth_manager.get_access_token()
                     if new_token:
                         self._base_access_token = new_token
+                    # FIX H-22: Clear any session-level cached Authorization
+                    # header so the recursive call builds a fresh header from
+                    # the refreshed token instead of reusing a stale one.
+                    self.session.headers.pop("Authorization", None)
                     return self._make_request(
                         method,
                         endpoint,

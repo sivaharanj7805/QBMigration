@@ -98,6 +98,7 @@ def get_presigned_url():
                 "Bucket": bucket,
                 "Key": s3_key,
                 "ContentType": content_type,
+                "ServerSideEncryption": "aws:kms",
             },
             ExpiresIn=3600,  # 1 hour
             HttpMethod="PUT",
@@ -243,8 +244,18 @@ def init_multipart_upload():
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
 
+    # SECURITY FIX C-01: Sanitize session_id and file_name to prevent path traversal
+    import re as _re
+
+    if not _re.match(r"^[a-zA-Z0-9\-]{1,100}$", session_id):
+        return jsonify({"error": "Invalid session_id format"}), 400
+
+    safe_file_name = _re.sub(r"[^a-zA-Z0-9._\-]", "_", file_name)[:255]
+    if ".." in safe_file_name or safe_file_name.startswith("/"):
+        return jsonify({"error": "Invalid file_name"}), 400
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    s3_key = f"migrations/{session_id}/{timestamp}_{file_name}"
+    s3_key = f"migrations/{session_id}/{timestamp}_{safe_file_name}"
     bucket = os.getenv("AWS_S3_BUCKET", "forensicbridge-migrations")
 
     try:
@@ -252,7 +263,10 @@ def init_multipart_upload():
 
         # Create multipart upload
         response = s3.create_multipart_upload(
-            Bucket=bucket, Key=s3_key, ContentType="application/octet-stream"
+            Bucket=bucket,
+            Key=s3_key,
+            ContentType="application/octet-stream",
+            ServerSideEncryption="aws:kms",
         )
 
         upload_id = response["UploadId"]
@@ -297,11 +311,24 @@ def get_part_upload_url():
     Get pre-signed URL for a multipart upload part
     """
     data = request.get_json()
+    user_id = request.current_user["user_id"]
 
     upload_id = data.get("upload_id")
     part_number = data.get("part_number")
-    s3_key = data.get("s3_key")
+    migration_id = data.get("migration_id")
 
+    if not migration_id:
+        return jsonify({"error": "migration_id required"}), 400
+
+    # SECURITY FIX C-02a: Look up migration to get trusted s3_key instead of accepting user input
+    migration = Migration.query.filter_by(
+        migration_id=migration_id, user_id=user_id
+    ).first()
+
+    if not migration:
+        return jsonify({"error": "Migration not found"}), 404
+
+    s3_key = migration.s3_key
     bucket = os.getenv("AWS_S3_BUCKET", "forensicbridge-migrations")
 
     try:
@@ -341,11 +368,26 @@ def complete_multipart_upload():
     Complete multipart upload
     """
     data = request.get_json()
+    user_id = request.current_user["user_id"]
 
     upload_id = data.get("upload_id")
     s3_key = data.get("s3_key")
     parts = data.get("parts", [])  # [{"PartNumber": 1, "ETag": "..."}]
     migration_id = data.get("migration_id")
+
+    if not migration_id:
+        return jsonify({"error": "migration_id required"}), 400
+
+    # SECURITY FIX C-02b: Verify s3_key matches migration record before executing S3 operation
+    migration = Migration.query.filter_by(
+        migration_id=migration_id, user_id=user_id
+    ).first()
+
+    if not migration:
+        return jsonify({"error": "Migration not found"}), 404
+
+    if s3_key != migration.s3_key:
+        return jsonify({"error": "S3 key mismatch"}), 403
 
     bucket = os.getenv("AWS_S3_BUCKET", "forensicbridge-migrations")
 
@@ -355,22 +397,17 @@ def complete_multipart_upload():
         # Complete the multipart upload
         s3.complete_multipart_upload(
             Bucket=bucket,
-            Key=s3_key,
+            Key=migration.s3_key,
             UploadId=upload_id,
             MultipartUpload={"Parts": parts},
         )
 
         # Update migration status
-        # SECURITY FIX: Add user_id filter to prevent unauthorized access to other users' migrations
-        if migration_id:
-            migration = Migration.query.filter_by(
-                migration_id=migration_id,
-                user_id=request.current_user["user_id"],  # CRITICAL: Verify ownership
-            ).first()
-            if migration:
-                migration.mark_as_uploaded(
-                    s3_uri=f"s3://{bucket}/{s3_key}", s3_bucket=bucket, s3_key=s3_key
-                )
+        migration.mark_as_uploaded(
+            s3_uri=f"s3://{bucket}/{migration.s3_key}",
+            s3_bucket=bucket,
+            s3_key=migration.s3_key,
+        )
 
         return jsonify({"success": True, "message": "Upload complete"})
 

@@ -18,6 +18,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 from api.auth import require_auth
+from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request, send_file
 from models.database import db
 from models.migration import Migration
@@ -680,6 +681,7 @@ def get_trial_balance(migration_id):
 
 @dashboard_bp.route("/api/migrations/<migration_id>/audit-certificate", methods=["GET"])
 @require_auth
+@limiter.limit("5 per minute")
 def download_audit_certificate(migration_id):
     """
     Download PDF audit certificate for completed migration.
@@ -814,6 +816,10 @@ def preview_audit_certificate(migration_id):
     """
     Get audit certificate preview data (for thumbnail card).
     """
+    # H-04 FIX: Validate migration_id format before it reaches the DB query
+    if not re.match(r'^[a-zA-Z0-9\-]{1,64}$', migration_id):
+        return jsonify({"error": "Invalid migration ID format"}), 400
+
     try:
         migration = Migration.query.filter_by(
             migration_id=migration_id, user_id=_get_user_id()
@@ -858,6 +864,7 @@ def preview_audit_certificate(migration_id):
 
 @dashboard_bp.route("/api/migrations/<migration_id>/export-caseware", methods=["POST"])
 @require_auth
+@limiter.limit("5 per minute")
 def export_caseware_bundle(migration_id):  # noqa: C901
     """
     Generate Caseware Audit Bundle for a completed migration.
@@ -1066,120 +1073,10 @@ def export_caseware_bundle(migration_id):  # noqa: C901
             )
 
         except ImportError as ie:
+            # C-14 FIX: Never write unencrypted financial data as fallback.
+            # Return an error instead of generating an unencrypted zip bundle.
             logger.warning(f"CasewareExporter not available: {str(ie)}")
-            # Generate basic CSV files if exporter not available
-            import csv
-
-            # FIX #33: Initialize locale-aware lead sheet mapper for fallback
-            if LeadSheetMapper:
-                mapper = LeadSheetMapper()
-                # Try to detect from migration metadata if available
-                company_data = {}
-                try:
-                    if migration.encrypted_data_s3_uri:
-                        # Could extract company data from S3, but for now use defaults
-                        pass
-                except AttributeError:
-                    pass
-                mapper.detect_accounting_standard(company_data)
-                logger.info(
-                    f"Caseware fallback using {mapper.detected_standard} lead sheet codes"
-                )
-            else:
-                mapper = None
-
-            # Generate basic Audit_TB.csv
-            tb_path = os.path.join(bundle_dir, "Audit_TB.csv")
-            with open(tb_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["# Caseware Audit Trial Balance"])
-                writer.writerow([f"# Company: {migration.company_name}"])
-                writer.writerow(
-                    [f"# Generated: {datetime.now(timezone.utc).isoformat()}"]
-                )
-                if mapper:
-                    writer.writerow(
-                        [f"# Accounting Standard: {mapper.detected_standard}"]
-                    )
-                writer.writerow([])
-                writer.writerow(
-                    [
-                        "Account_Number",
-                        "Account_Description",
-                        "Type",
-                        "Lead_Sheet_Code",
-                        "Balance",
-                    ]
-                )
-
-                # FIX #33: Use locale-aware lead sheet codes
-                if mapper:
-                    cash_code = mapper.get_lead_sheet_code("Bank")
-                    ar_code = mapper.get_lead_sheet_code("Accounts Receivable")
-                else:
-                    # Fallback to US GAAP
-                    cash_code = "A1"
-                    ar_code = "A2"
-
-                writer.writerow(["1000", "Cash", "A", cash_code, "125000.00"])
-                writer.writerow(
-                    ["1100", "Accounts Receivable", "A", ar_code, "45000.00"]
-                )
-
-            # Generate basic Audit_GL.csv
-            gl_path = os.path.join(bundle_dir, "Audit_GL.csv")
-            with open(gl_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["# Caseware Audit General Ledger"])
-                writer.writerow([f"# Company: {migration.company_name}"])
-                writer.writerow([])
-                writer.writerow(
-                    [
-                        "Account_Number",
-                        "Date",
-                        "Reference",
-                        "Description",
-                        "Debit",
-                        "Credit",
-                    ]
-                )
-
-            # Create zip
-            import zipfile
-
-            zip_path = os.path.join(bundle_dir, f"{migration_id}_caseware_bundle.zip")
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(tb_path, "Audit_TB.csv")
-                zipf.write(gl_path, "Audit_GL.csv")
-
-            # FIX #65: Delete unencrypted CSV files immediately after zipping
-            # Prevents plaintext financial data from persisting on disk
-            try:
-                if os.path.exists(tb_path):
-                    os.remove(tb_path)
-                if os.path.exists(gl_path):
-                    os.remove(gl_path)
-                logger.info(f"Deleted temporary CSV files for migration {migration_id}")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to delete temporary CSV files: {cleanup_error}")
-
-            migration.caseware_bundle_path = zip_path
-            migration.caseware_bundle_ready = True
-            migration.destination = "caseware"
-            db.session.commit()
-
-            return (
-                jsonify(
-                    {
-                        "success": True,
-                        "message": "Basic Caseware bundle generated",
-                        "bundle_id": f"cw_{migration_id}",
-                        "files": ["Audit_TB.csv", "Audit_GL.csv"],
-                        "download_url": f"/api/migrations/{migration_id}/caseware-bundle",
-                    }
-                ),
-                200,
-            )
+            return jsonify({"error": "Caseware export not available. Please contact support."}), 503
 
     except Exception as e:
         logger.exception(f"Failed to export Caseware bundle for {migration_id}")
@@ -1192,6 +1089,7 @@ def export_caseware_bundle(migration_id):  # noqa: C901
 
 @dashboard_bp.route("/api/migrations/<migration_id>/caseware-bundle", methods=["GET"])
 @require_auth
+@limiter.limit("5 per minute")
 def download_caseware_bundle(migration_id):  # noqa: C901
     """
     Download the generated Caseware Audit Bundle (.zip).

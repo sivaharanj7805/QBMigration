@@ -116,25 +116,9 @@ export function sanitizeHtml(html: string | null | undefined): string {
         }
     }
 
-    // Fallback: Basic HTML sanitization
-    // Remove script tags and event handlers
-    let sanitized = html
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
-        .replace(/on\w+\s*=\s*[^\s>]*/gi, '')
-        .replace(/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/gi, '') // AUDIT FIX: Catch obfuscated javascript:
-        .replace(/vbscript:/gi, '')
-        .replace(/data\s*:/gi, ''); // AUDIT FIX: Catch obfuscated data:
-
-    // Remove dangerous tags
-    const dangerousTags = ['iframe', 'object', 'embed', 'form', 'input', 'base', 'link', 'meta'];
-    dangerousTags.forEach(tag => {
-        const openTag = new RegExp(`<${tag}[^>]*>`, 'gi');
-        const closeTag = new RegExp(`</${tag}>`, 'gi');
-        sanitized = sanitized.replace(openTag, '').replace(closeTag, '');
-    });
-
-    return sanitized;
+    // Fallback: When DOMPurify is not available, escape all HTML.
+    // Regex-based sanitization is inherently bypassable, so escaping is safer.
+    return escapeHtml(html);
 }
 
 /**

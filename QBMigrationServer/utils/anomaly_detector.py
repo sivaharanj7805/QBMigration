@@ -20,6 +20,7 @@ from typing import Dict, List, Tuple
 
 from models.database import db
 from sqlalchemy import text
+from utils.pii_redaction import hash_ip
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def detect_impossible_travel(user_id: int, current_ip: str) -> Tuple[bool, str]:
                     return (
                         True,
                         f"Impossible travel: IP changed from"
-                        f" {prev_ip} to {current_ip}"
+                        f" {hash_ip(prev_ip)} to {hash_ip(current_ip)}"
                         f" in {time_diff.seconds // 60} minutes",
                     )
 

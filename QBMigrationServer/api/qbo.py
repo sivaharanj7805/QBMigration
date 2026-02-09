@@ -9,6 +9,7 @@ Handles OAuth2 flow for connecting to QuickBooks Online:
 """
 
 import logging
+import os
 import re
 import secrets
 import urllib.parse
@@ -19,6 +20,9 @@ from flask import Blueprint, current_app, jsonify, redirect, request, session
 from flask_login import current_user, login_required
 from models.database import db
 
+# H-32 FIX: Import limiter to rate-limit QBO OAuth and token refresh endpoints
+from extensions import limiter
+
 qbo_bp = Blueprint("qbo", __name__, url_prefix="/api/qbo")
 logger = logging.getLogger(__name__)
 
@@ -28,8 +32,32 @@ INTUIT_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
 INTUIT_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
 
 
+def _get_frontend_url():
+    """
+    DASHBOARD-LOW-2 FIX: Get FRONTEND_URL with safety checks for non-development modes.
+
+    In production/staging, FRONTEND_URL must be explicitly configured.
+    Falling back to localhost in those environments is a misconfiguration
+    that could cause OAuth redirects to fail silently.
+    """
+    url = current_app.config.get("FRONTEND_URL") or os.getenv("FRONTEND_URL")
+    if url:
+        return url
+
+    env = os.getenv("FLASK_ENV", "development")
+    if env != "development":
+        logger.warning(
+            "FRONTEND_URL is not configured in %s mode. "
+            "OAuth redirects will fall back to http://localhost:3000 which is "
+            "almost certainly wrong. Set FRONTEND_URL to the correct origin.",
+            env,
+        )
+    return "http://localhost:3000"
+
+
 @qbo_bp.route("/connect")
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent OAuth initiation abuse
 def connect_qbo():
     """
     Initiate OAuth flow with QuickBooks Online
@@ -82,6 +110,7 @@ def connect_qbo():
 
 @qbo_bp.route("/callback")
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent OAuth callback abuse
 def qbo_callback():
     """
     Handle OAuth callback from QuickBooks
@@ -98,9 +127,7 @@ def qbo_callback():
         # Check for errors
         if error:
             logger.warning(f"QBO OAuth error: {error}")
-            frontend_url = current_app.config.get(
-                "FRONTEND_URL", "http://localhost:3000"
-            )
+            frontend_url = _get_frontend_url()
             # CRITICAL FIX: Use whitelist-based sanitization to prevent XSS and information disclosure
             from utils.error_sanitizer import (
                 get_qbo_user_message,
@@ -174,7 +201,7 @@ def qbo_callback():
         )
 
         # Redirect to frontend with success
-        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        frontend_url = _get_frontend_url()
         return redirect(f"{frontend_url}/settings?qbo=connected")
 
     except Exception as e:
@@ -281,6 +308,7 @@ def revoke_qbo_tokens(user, reason: str = "user_disconnect"):
     "/disconnect", methods=["POST"]
 )  # MED-14 FIX: Remove GET method for state-changing operation
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent disconnect abuse
 def disconnect_qbo():
     """
     Disconnect from QuickBooks Online
@@ -376,6 +404,7 @@ def qbo_status():
 
 @qbo_bp.route("/refresh", methods=["POST"])
 @login_required
+@limiter.limit("10 per minute")  # H-32 FIX: Prevent token refresh abuse
 def refresh_qbo_token():
     """
     Refresh expired QBO access token

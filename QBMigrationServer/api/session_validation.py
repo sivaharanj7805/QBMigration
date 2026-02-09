@@ -11,6 +11,7 @@ Security Features:
 """
 
 import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -19,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 from models.database import db
 from models.project import Project
+from utils.pii_redaction import hash_ip
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +169,7 @@ def validate_session():
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
     device_name = data.get("device_name", "").strip()
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
 
     if not session_id:
         return jsonify({"valid": False, "error": "Session ID is required"}), 400
@@ -355,7 +357,7 @@ def activate_session():  # noqa: C901
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
     device_name = data.get("device_name", "Unknown Device").strip()
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
     user_agent = request.headers.get("User-Agent", "")
 
     if not session_id or not device_fingerprint:
@@ -425,7 +427,7 @@ def activate_session():  # noqa: C901
         existing = None
         active_count = 0
         for row in locked_activations:
-            if row.device_fingerprint == fingerprint_hash:
+            if hmac.compare_digest(row.device_fingerprint or "", fingerprint_hash or ""):
                 existing = db.session.get(SessionActivation, row.id)
             if row.status == "active":
                 active_count += 1
@@ -568,7 +570,7 @@ def start_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    ip_address = request.remote_addr
+    ip_address = hash_ip(request.remote_addr)
 
     if not session_id or not device_fingerprint:
         return (
@@ -744,8 +746,17 @@ def complete_extraction():
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
     extraction_token = data.get("extraction_token", "").strip()
-    transaction_count = data.get("transaction_count", 0)
-    ip_address = request.remote_addr
+    transaction_count = data.get("transaction_count")
+    if transaction_count is not None:
+        try:
+            transaction_count = int(transaction_count)
+            if transaction_count < 0 or transaction_count > 10000000:
+                return jsonify({"error": "Invalid transaction count"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid transaction count format"}), 400
+    else:
+        transaction_count = 0
+    ip_address = hash_ip(request.remote_addr)
 
     if not session_id or not device_fingerprint:
         return (

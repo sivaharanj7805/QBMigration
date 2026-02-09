@@ -13,6 +13,7 @@ FIX 100/100: Implements proper SAML signature validation using python3-saml.
 
 import base64
 import datetime
+import hmac
 import logging
 import os
 import secrets
@@ -23,7 +24,10 @@ from typing import Any, Dict, Optional
 
 import defusedxml.ElementTree as SafeET
 from flask import Blueprint, current_app, jsonify, redirect, request, session
-from flask_login import login_required
+from flask_login import current_user, login_required
+
+from utils.auth import admin_required
+from utils.pii_redaction import hash_email
 
 # SAML signature validation - required for production
 try:
@@ -505,7 +509,7 @@ def assertion_consumer_service():
                 }
 
                 logger.info(
-                    f"SAML authentication successful for org '{org_id}', user: {name_id}"
+                    f"SAML authentication successful for org '{org_id}', user: {hash_email(name_id) if name_id else 'unknown'}"
                 )
 
             except OneLogin_Saml2_Error as e:
@@ -513,15 +517,16 @@ def assertion_consumer_service():
                 return jsonify({"error": "SAML processing failed"}), 401
         else:
             # Fallback for development/testing without certificate
-            # SECURITY: Only allowed in non-production environments
-            if os.getenv("FLASK_ENV") == "production":
+            # SECURITY: Default-deny. Only skip validation if explicitly opted out
+            # AND not in production.
+            if not (os.getenv("SKIP_SAML_VALIDATION") == "true" and os.getenv("FLASK_ENV") != "production"):
                 logger.error(
-                    "SAML validation unavailable in production - certificate required"
+                    "SAML validation unavailable - certificate required"
                 )
                 return jsonify({"error": "SAML not properly configured"}), 500
 
             logger.warning(
-                f"SAML validation skipped for org '{org_id}' (development mode)"
+                f"SAML validation skipped for org '{org_id}' (SKIP_SAML_VALIDATION=true)"
             )
 
             # Basic XML parsing for development only
@@ -544,12 +549,20 @@ def assertion_consumer_service():
                 "_dev_mode": True,  # Flag for audit trail
             }
 
-        session["sso_user"] = sso_user
+        # SECURITY FIX (C-06): Regenerate session to prevent session fixation
+        # Save relay_state before clearing the session
+        saved_relay_state = session.get("sso_relay_state", "/")
+        sso_data = sso_user
+        old_keys = list(session.keys())
+        for key in old_keys:
+            session.pop(key, None)
+        session["sso_user"] = sso_data
+        session.modified = True
 
         logger.info(f"SSO authentication successful for org '{org_id}'")
 
         # SECURITY FIX: Validate stored relay_state before redirect
-        safe_redirect = validate_relay_state(session.get("sso_relay_state", "/"))
+        safe_redirect = validate_relay_state(saved_relay_state)
         return redirect(safe_redirect)
 
     except Exception as e:
@@ -573,9 +586,9 @@ def oauth_callback():
     if not code:
         return jsonify({"error": "Missing authorization code"}), 400
 
-    # Validate state
+    # Validate state (H-26: use constant-time comparison to prevent timing attacks)
     stored_state = session.get("sso_state")
-    if state != stored_state:
+    if not hmac.compare_digest(str(state or ''), str(stored_state or '')):
         logger.warning("SSO state mismatch - possible CSRF")
         return jsonify({"error": "Invalid state"}), 400
 
@@ -595,12 +608,19 @@ def oauth_callback():
             "authenticated_at": datetime.datetime.now(timezone.utc).isoformat(),
         }
 
-        session["sso_user"] = sso_user
+        # SECURITY FIX (C-06): Regenerate session to prevent session fixation
+        saved_relay_state = session.get("sso_relay_state", "/")
+        sso_data = sso_user
+        old_keys = list(session.keys())
+        for key in old_keys:
+            session.pop(key, None)
+        session["sso_user"] = sso_data
+        session.modified = True
 
         logger.info(f"OAuth callback successful for org '{org_id}'")
 
         # SECURITY FIX: Validate stored relay_state before redirect
-        safe_redirect = validate_relay_state(session.get("sso_relay_state", "/"))
+        safe_redirect = validate_relay_state(saved_relay_state)
         return redirect(safe_redirect)
 
     except Exception as e:
@@ -662,6 +682,7 @@ def sp_metadata():
 
 @sso_bp.route("/configure", methods=["POST"])
 @login_required
+@admin_required
 def configure_provider():
     """
     Configure SSO provider for an organization (admin endpoint)

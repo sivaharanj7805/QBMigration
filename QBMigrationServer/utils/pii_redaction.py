@@ -5,8 +5,12 @@ to comply with GDPR, PIPEDA, and other privacy regulations.
 """
 
 import hashlib
+import os
 import re
 from typing import Optional
+
+# Application-level salt to prevent rainbow-table reversal of PII hashes
+_PII_SALT = os.getenv("PII_HASH_SALT", "forensicbridge-default-salt-change-in-production")
 
 
 def hash_email(email: str) -> str:
@@ -28,7 +32,7 @@ def hash_email(email: str) -> str:
 
     # AUDIT FIX P2-01: Increased hash length from 12 (48-bit) to 32 (128-bit)
     # to prevent birthday-paradox collisions at scale
-    email_hash = hashlib.sha256(email.lower().encode()).hexdigest()[:32]
+    email_hash = hashlib.sha256((_PII_SALT + email.lower()).encode()).hexdigest()[:32]
     return f"usr_{email_hash}"
 
 
@@ -76,7 +80,7 @@ def hash_ip(ip_address: str) -> str:
     if not ip_address:
         return "unknown"
 
-    ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:16]
+    ip_hash = hashlib.sha256((_PII_SALT + ip_address).encode()).hexdigest()[:16]
     return f"ip_{ip_hash}"
 
 

@@ -78,7 +78,7 @@ def verify_webhook_signature(migration_id, signature, timestamp):
 
     except Exception as e:
         logger.exception(f"Signature verification failed: {str(e)}")
-        return False, str(e)
+        return False, "Signature verification failed"
 
 
 @webhooks_bp.route("/api/webhooks/migration-started", methods=["POST"])
@@ -133,7 +133,7 @@ def migration_started():
             logger.warning(f"Invalid webhook signature for {migration_id}: {error}")
             return (
                 jsonify(
-                    {"success": False, "error": f"Webhook verification failed: {error}"}
+                    {"success": False, "error": "Webhook verification failed"}
                 ),
                 401,
             )
@@ -263,7 +263,7 @@ def migration_progress():
         if not is_valid:
             logger.warning(f"Invalid webhook signature for {migration_id}: {error}")
             return (
-                jsonify({"success": False, "error": f"Verification failed: {error}"}),
+                jsonify({"success": False, "error": "Webhook verification failed"}),
                 401,
             )
 
@@ -379,7 +379,7 @@ def migration_completed():
         is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
         if not is_valid:
             return (
-                jsonify({"success": False, "error": f"Verification failed: {error}"}),
+                jsonify({"success": False, "error": "Webhook verification failed"}),
                 401,
             )
 
@@ -520,7 +520,7 @@ def migration_failed():
         is_valid, error = verify_webhook_signature(migration_id, signature, timestamp)
         if not is_valid:
             return (
-                jsonify({"success": False, "error": f"Verification failed: {error}"}),
+                jsonify({"success": False, "error": "Webhook verification failed"}),
                 401,
             )
 

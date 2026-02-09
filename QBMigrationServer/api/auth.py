@@ -34,6 +34,41 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
+# H-03 FIX: In-memory JWT blocklist for logout revocation.
+# Stores (jti, expiry_timestamp) tuples. Entries are cleaned up on each add.
+# Falls back to this if Redis is unavailable.
+import threading
+import time as _time
+
+_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp
+_jwt_blocklist_lock = threading.Lock()
+
+
+def _blocklist_add(jti: str, exp_timestamp: float) -> None:
+    """Add a JWT ID to the blocklist. Automatically prunes expired entries."""
+    now = _time.time()
+    with _jwt_blocklist_lock:
+        # Prune expired entries
+        expired = [k for k, v in _jwt_blocklist.items() if v < now]
+        for k in expired:
+            del _jwt_blocklist[k]
+        _jwt_blocklist[jti] = exp_timestamp
+
+
+def _blocklist_check(jti: str) -> bool:
+    """Check if a JWT ID is in the blocklist (i.e., revoked)."""
+    now = _time.time()
+    with _jwt_blocklist_lock:
+        exp = _jwt_blocklist.get(jti)
+        if exp is None:
+            return False
+        if exp < now:
+            # Expired entry, remove and allow
+            del _jwt_blocklist[jti]
+            return False
+        return True
+
+
 # SESSION BINDING: User-Agent validation for session security
 def _get_user_agent_fingerprint() -> str:
     """
@@ -520,10 +555,11 @@ def _get_jwt_verification_key():
     return current_app.config["SECRET_KEY"]
 
 
-def create_token(user_id: int, email: str, expires_hours: int = 24) -> str:
+def create_token(user_id: int, email: str, expires_hours: int = 1) -> str:
     """Create a JWT token for a user with unique JTI for revocation support.
 
     MED-03 FIX: Uses configurable algorithm (HS256 default, RS256 ready).
+    H-03 FIX: Reduced default expiry from 24h to 1h to limit JWT reuse window.
     """
     import secrets as _secrets
 
@@ -551,6 +587,10 @@ def decode_token(token: str) -> Optional[dict]:
         if not all(a in _SAFE_JWT_ALGORITHMS for a in allowed):
             return None
         payload = jwt.decode(token, _get_jwt_verification_key(), algorithms=allowed)
+        # H-03 FIX: Check if token has been revoked via logout
+        jti = payload.get("jti")
+        if jti and _blocklist_check(jti):
+            return None
         return payload
     except jwt.ExpiredSignatureError:
         return None
@@ -631,6 +671,9 @@ def validate_password(password: str) -> Tuple[bool, str]:
 
     LOW-01 FIX: Added special character requirement for stronger entropy.
     """
+    # H-05 FIX: Enforce max password length to prevent Argon2 DoS
+    if len(password) > 128:
+        return False, "Password must not exceed 128 characters"
     if len(password) < 12:
         return False, "Password must be at least 12 characters"
     if not re.search(r"[A-Z]", password):
@@ -748,8 +791,15 @@ def register():
             return jsonify({"success": False, "error": sanitized_error}), 400
 
         # Save to database
+        # H-06 FIX: Catch IntegrityError to handle TOCTOU race on duplicate email
+        from sqlalchemy.exc import IntegrityError
+
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({"success": False, "error": "Email already registered"}), 409
 
         # SECURITY FIX: Regenerate session ID to prevent session fixation
         session.clear()
@@ -878,9 +928,20 @@ def login():
         # User exists - check if locked and verify password
         is_locked = user.is_locked()
 
-        # FIX #37: Always verify password even if account is locked
-        # This prevents timing attacks that could distinguish locked vs non-existent accounts
-        password_valid = user.check_password(password) if not is_locked else False
+        # H-07 FIX: Always run Argon2 verification to prevent timing attacks
+        # that could distinguish locked vs non-existent accounts
+        if not is_locked:
+            password_valid = user.check_password(password)
+        else:
+            # Constant-time: always verify against a fake hash to prevent timing attacks
+            try:
+                import argon2
+                argon2.PasswordHasher().verify(
+                    "$argon2id$v=19$m=65536,t=3,p=4$fake$fake", password
+                )
+            except Exception:
+                pass
+            password_valid = False
 
     # FIX #37: Consistent error handling regardless of user existence
     if not user or is_locked or not password_valid:
@@ -1119,6 +1180,12 @@ def logout():
     """
     user_id = request.current_user.get("user_id")
 
+    # H-03 FIX: Add current JWT to blocklist so it cannot be reused after logout
+    jti = request.current_user.get("jti")
+    exp = request.current_user.get("exp")
+    if jti and exp:
+        _blocklist_add(jti, float(exp))
+
     # Revoke QBO tokens if user has them (CRITICAL for 100/100 OAuth score)
     if user_id:
         try:
@@ -1263,6 +1330,7 @@ def get_available_tiers():
 
 
 @auth_bp.route("/select-tier", methods=["POST"])
+@limiter.limit("3 per hour")  # C-09 FIX: Rate limit to prevent free credit farming
 @require_auth
 def select_tier():
     """
@@ -1385,6 +1453,20 @@ def select_tier():
 
         payment_status = "paid"
     else:
+        # C-09 FIX: Prevent free credit farming — reject if user already has active free-tier credits
+        existing_free = MigrationCredit.query.filter_by(
+            user_id=user_id, price_cents=0, status="available"
+        ).first()
+        if existing_free:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "You already have an active free-tier credit.",
+                    }
+                ),
+                409,
+            )
         payment_status = "paid"  # Free tier
         payment_intent_id = None
 
@@ -1426,6 +1508,7 @@ def select_tier():
 
 
 @auth_bp.route("/upgrade-tier", methods=["POST"])
+@limiter.limit("3 per hour")  # C-09 FIX: Rate limit to prevent free credit farming
 @require_auth
 def upgrade_tier():
     """
@@ -1541,6 +1624,20 @@ def upgrade_tier():
 
         payment_status = "paid"
     else:
+        # C-09 FIX: Prevent free credit farming — reject if user already has active free-tier credits
+        existing_free = MigrationCredit.query.filter_by(
+            user_id=user_id, price_cents=0, status="available"
+        ).first()
+        if existing_free:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "You already have an active free-tier credit.",
+                    }
+                ),
+                409,
+            )
         payment_status = "paid"
         payment_intent_id = None
 
