@@ -181,14 +181,18 @@ class ApiClient {
             ...options.headers,
         };
 
-        // SECURITY: Add CSRF token for mutation requests
-        // AUDIT FIX: Warn in development if CSRF token missing for mutations
-        const csrfToken = getCsrfToken();
+        // FIX F-01: Auto-fetch CSRF token before mutations if missing
+        let csrfToken = getCsrfToken();
         if (method !== 'GET' && method !== 'HEAD') {
+            if (!csrfToken) {
+                // Attempt to fetch CSRF token before proceeding with mutation
+                const { fetchCsrfToken } = await import('./auth');
+                csrfToken = await fetchCsrfToken();
+            }
             if (csrfToken) {
                 (headers as Record<string, string>)['X-CSRF-Token'] = csrfToken;
             } else if (process.env.NODE_ENV === 'development') {
-                console.warn(`[API] CSRF token missing for ${method} ${endpoint}`);
+                console.warn(`[API] CSRF token unavailable for ${method} ${endpoint}`);
             }
         }
 
@@ -428,7 +432,8 @@ class ApiClient {
             page: number;
             per_page: number;
             total_pages: number;
-        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, undefined, undefined, signal);
+        // M-22 FIX: Pass MigrationListSchema for runtime Zod validation of pagination data
+        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, MigrationListSchema, undefined, signal);
     }
 
     async getMigration(migrationId: string, signal?: AbortSignal) {

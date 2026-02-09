@@ -39,8 +39,38 @@ let csrfRefreshPromise: Promise<string | null> | null = null;
 // AUDIT FIX HIGH-11: Session duration enforcement
 const SESSION_MAX_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours absolute max
 const SESSION_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes inactivity
-let sessionStartTime: number | null = null;
-let lastActivityTime: number | null = null;
+
+// FIX F-02: Use functions to access sessionStorage instead of module-level variables
+// This prevents cross-user state bleed in SSR or shared module contexts
+function getSessionStartTime(): number | null {
+    if (typeof window === 'undefined') return null;
+    const val = sessionStorage.getItem('fb_session_start');
+    return val ? parseInt(val, 10) : null;
+}
+
+function setSessionStartTime(time: number | null): void {
+    if (typeof window === 'undefined') return;
+    if (time === null) {
+        sessionStorage.removeItem('fb_session_start');
+    } else {
+        sessionStorage.setItem('fb_session_start', String(time));
+    }
+}
+
+function getLastActivityTime(): number | null {
+    if (typeof window === 'undefined') return null;
+    const val = sessionStorage.getItem('fb_last_activity');
+    return val ? parseInt(val, 10) : null;
+}
+
+function setLastActivityTime(time: number | null): void {
+    if (typeof window === 'undefined') return;
+    if (time === null) {
+        sessionStorage.removeItem('fb_last_activity');
+    } else {
+        sessionStorage.setItem('fb_last_activity', String(time));
+    }
+}
 
 /**
  * SECURITY: Check if CSRF token is expired or expiring soon
@@ -160,9 +190,9 @@ export function setAuthState(user: User, csrfTokenValue?: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('isLoggedIn', 'true');
-    // AUDIT FIX HIGH-11: Track session start time for max duration enforcement
-    sessionStartTime = Date.now();
-    lastActivityTime = Date.now();
+    // FIX F-02: Use sessionStorage-backed functions for session timers
+    setSessionStartTime(Date.now());
+    setLastActivityTime(Date.now());
     if (csrfTokenValue) {
         setCsrfToken(csrfTokenValue);
     }
@@ -177,9 +207,9 @@ export function clearAuth(): void {
     localStorage.removeItem('isLoggedIn');
     csrfToken = null;
     csrfTokenExpiry = null;
-    // AUDIT FIX HIGH-11: Clear session timers
-    sessionStartTime = null;
-    lastActivityTime = null;
+    // FIX F-02: Clear sessionStorage-backed session timers
+    setSessionStartTime(null);
+    setLastActivityTime(null);
 }
 
 /**
@@ -313,18 +343,20 @@ export async function validateSession(): Promise<boolean> {
  * AUDIT FIX HIGH-11: Update last activity timestamp for inactivity tracking
  */
 export function updateActivityTime(): void {
-    lastActivityTime = Date.now();
+    setLastActivityTime(Date.now());
 }
 
 /**
- * AUDIT FIX HIGH-11: Check if session is expired due to absolute duration or inactivity
+ * FIX F-02: Check session expiry using sessionStorage-backed timers
  */
 export function isSessionExpired(): boolean {
-    if (!sessionStartTime || !lastActivityTime) return false; // No session yet
+    const sessionStart = getSessionStartTime();
+    const lastActivity = getLastActivityTime();
+    if (!sessionStart || !lastActivity) return false; // No session yet
     const now = Date.now();
     // Check absolute session duration (8 hours)
-    if (now - sessionStartTime > SESSION_MAX_DURATION_MS) return true;
+    if (now - sessionStart > SESSION_MAX_DURATION_MS) return true;
     // Check inactivity timeout (30 minutes)
-    if (now - lastActivityTime > SESSION_INACTIVITY_TIMEOUT_MS) return true;
+    if (now - lastActivity > SESSION_INACTIVITY_TIMEOUT_MS) return true;
     return false;
 }

@@ -69,8 +69,9 @@ ENV PYTHONUNBUFFERED=1 \
     PORT=5000
 
 # Health check
+# L-11 FIX: Use explicit port for reliability (PORT defaults to 5000 above)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/api/health || exit 1
+    CMD curl -f http://localhost:5000/api/health || exit 1
 
 # Switch to non-root user
 USER qbmigration
@@ -85,8 +86,12 @@ ENV GUNICORN_WORKERS=4 \
     GUNICORN_WORKER_CLASS=gthread
 
 # Run with gunicorn for production
+# L-12 FIX: Added --max-requests to recycle workers after 1000 requests,
+# preventing memory leaks from accumulating. --max-requests-jitter adds
+# randomness to avoid all workers restarting simultaneously.
 CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads "${GUNICORN_THREADS}" \
-     --worker-class "${GUNICORN_WORKER_CLASS}" --timeout 120 --keep-alive 5 \
+     --worker-class gthread --timeout 120 --keep-alive 5 \
+     --max-requests 1000 --max-requests-jitter 100 \
      --access-logfile - --error-logfile - \
      "QBMigrationServer.app:create_app()"
 

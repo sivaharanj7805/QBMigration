@@ -386,6 +386,9 @@ class Migration(db.Model):
                     if results:
                         self.verification_results = json.dumps(results)
 
+                    # FIX M-03: Flush to DB then commit atomically
+                    # Caller (webhook handler) can catch ValueError knowing DB is consistent
+                    db.session.flush()
                     db.session.commit()
                     raise ValueError(error_msg)
 
@@ -403,6 +406,7 @@ class Migration(db.Model):
                 self.set_error_message(error_msg)
                 self.error_code = "TRIAL_BALANCE_MISSING"
                 self.completed_at = datetime.now(timezone.utc)
+                db.session.flush()
                 db.session.commit()
                 raise ValueError(error_msg)
 

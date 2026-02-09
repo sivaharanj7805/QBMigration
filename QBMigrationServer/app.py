@@ -781,11 +781,15 @@ def create_app(config_name="development"):  # noqa: C901
         """Add comprehensive security headers to all responses."""
         # Content Security Policy - Prevents XSS attacks
         # Configurable via environment for different deployment scenarios
+        # CRIT-04 FIX: Removed 'unsafe-inline' from script-src to prevent XSS.
+        # Stripe.js and reCAPTCHA load as external scripts (no inline needed).
+        # Kept 'unsafe-inline' in style-src only (required by many CSS frameworks;
+        # style injection is significantly lower risk than script injection).
         csp_policy = os.getenv(
             "CSP_POLICY",
             (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' https://js.stripe.com"
+                "script-src 'self' https://js.stripe.com"
                 " https://www.google.com https://www.gstatic.com; "
                 "style-src 'self' 'unsafe-inline'"
                 " https://fonts.googleapis.com; "
@@ -1315,7 +1319,7 @@ def create_app(config_name="development"):  # noqa: C901
         app.logger.info(f"{request.method} {sanitized_path} -> {response.status_code}")
         return response
 
-    # Database session management
+    # FIX B-08: Database session management with proper cleanup
     @app.teardown_appcontext
     def shutdown_session(exception=None):
         """Remove database sessions after each request"""
@@ -1323,9 +1327,16 @@ def create_app(config_name="development"):  # noqa: C901
             if exception:
                 app.logger.error(f"Exception during request: {str(exception)}")
                 db.session.rollback()
-            db.session.remove()
+            else:
+                # Commit any pending changes from successful requests
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
+        finally:
+            db.session.remove()
 
     # FIX #34: Sanitized error handlers for production security
     @app.errorhandler(400)

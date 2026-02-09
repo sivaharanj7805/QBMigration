@@ -25,8 +25,14 @@ class Config:
             SECRET_KEY = "dev-secret-key-CHANGE-IN-PRODUCTION-" + secrets.token_hex(16)
             logger.info("⚠️  WARNING: Using generated SECRET_KEY for development")
 
-    if len(SECRET_KEY) < 32:
-        raise ValueError("SECRET_KEY must be at least 32 characters!")
+    # M-21 FIX: Increased minimum from 32 to 64 characters.
+    # 32 chars = ~192 bits effective entropy (alphanumeric), which is below
+    # the 256-bit standard for HMAC-SHA256 JWT signing.
+    if len(SECRET_KEY) < 64:
+        raise ValueError(
+            "SECRET_KEY must be at least 64 characters for adequate JWT signing entropy. "
+            'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'
+        )
 
     DEBUG = False
     TESTING = False
@@ -218,12 +224,23 @@ class Config:
 
     # Encryption
     BACKUP_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
-    # MED-02 FIX: Separate encryption key for QBO tokens and MFA secrets.
-    # Falls back to BACKUP_ENCRYPTION_KEY for backwards compatibility, but
-    # production deployments should set a dedicated QBO_ENCRYPTION_KEY.
-    QBO_ENCRYPTION_KEY = os.getenv("QBO_ENCRYPTION_KEY") or os.getenv(
-        "BACKUP_ENCRYPTION_KEY"
-    )
+    # HIGH-05 FIX: Enforce domain-separated encryption keys.
+    # QBO_ENCRYPTION_KEY MUST be separate from BACKUP_ENCRYPTION_KEY to prevent
+    # a backup key compromise from also exposing QBO OAuth tokens.
+    # In production, require a dedicated QBO_ENCRYPTION_KEY.
+    QBO_ENCRYPTION_KEY = os.getenv("QBO_ENCRYPTION_KEY")
+    if not QBO_ENCRYPTION_KEY and os.getenv("FLASK_ENV") == "production":
+        import warnings
+
+        warnings.warn(
+            "QBO_ENCRYPTION_KEY not set in production — falling back to "
+            "BACKUP_ENCRYPTION_KEY. Set a dedicated QBO_ENCRYPTION_KEY for "
+            "proper cryptographic domain separation.",
+            stacklevel=2,
+        )
+        QBO_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
+    elif not QBO_ENCRYPTION_KEY:
+        QBO_ENCRYPTION_KEY = os.getenv("BACKUP_ENCRYPTION_KEY")
     ENCRYPTION_KEY_VERSION = os.getenv("ENCRYPTION_KEY_VERSION", "v1")
 
     # ============================================================================

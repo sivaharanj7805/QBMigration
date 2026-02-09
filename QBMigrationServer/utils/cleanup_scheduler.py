@@ -127,8 +127,8 @@ class CleanupScheduler:
             if cleanup_results.get("s3_deleted"):
                 migration.mark_s3_deleted()
 
-            # Mark cleanup as completed if all successful
-            if all(cleanup_results.values()):
+            # L-02 FIX: Explicitly check truthiness — values may be non-bool
+            if cleanup_results and all(bool(v) for v in cleanup_results.values()):
                 migration.mark_cleanup_completed()
                 logger.info(f"Cleanup completed for migration {migration.migration_id}")
             else:

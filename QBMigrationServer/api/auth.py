@@ -1149,7 +1149,6 @@ def logout():
     response = jsonify({"success": True, "message": "Logged out successfully"})
 
     # Mirror cookie attributes used during login for proper deletion across browsers
-    is_production = os.getenv("FLASK_ENV") == "production"
     cookie_samesite = "None" if is_production else "Lax"
     cookie_secure = True if is_production else False
 

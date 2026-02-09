@@ -577,17 +577,27 @@ class MultiAZDeployment:
             logger.error(f"Failed to get subnets: {str(e)}")
             return []
 
-    def launch_in_zone(self, zone: str, launch_params: dict) -> str:
+    def launch_in_zone(
+        self, zone: str, launch_params: dict, _tried_zones: set = None
+    ) -> str:
         """
         Launch an EC2 instance in a specific availability zone.
 
         Args:
             zone: Target availability zone
             launch_params: Standard EC2 run_instances parameters
+            _tried_zones: Internal tracker for zones already attempted (prevents infinite recursion)
 
         Returns:
             Instance ID
         """
+        # CRIT-07 FIX: Track tried zones to prevent infinite recursion.
+        # Previously, zone A→B→A→B... could recurse forever if both zones
+        # had InsufficientInstanceCapacity.
+        if _tried_zones is None:
+            _tried_zones = set()
+        _tried_zones.add(zone)
+
         # Ensure zone is valid
         if zone not in ALLOWED_AVAILABILITY_ZONES:
             raise ValueError(
@@ -605,12 +615,20 @@ class MultiAZDeployment:
             return instance_id
 
         except ClientError as e:
-            # If zone is at capacity, try another zone
+            # If zone is at capacity, try another zone we haven't tried yet
             if "InsufficientInstanceCapacity" in str(e):
                 logger.warning(f"Zone {zone} at capacity, trying alternate zone")
-                alternate_zones = [z for z in ALLOWED_AVAILABILITY_ZONES if z != zone]
+                alternate_zones = [
+                    z for z in ALLOWED_AVAILABILITY_ZONES
+                    if z != zone and z not in _tried_zones
+                ]
                 if alternate_zones:
-                    return self.launch_in_zone(alternate_zones[0], launch_params)
+                    return self.launch_in_zone(
+                        alternate_zones[0], launch_params, _tried_zones
+                    )
+                logger.error(
+                    f"All zones exhausted ({_tried_zones}), no capacity available"
+                )
             raise
 
     def get_zone_health(self) -> Dict[str, dict]:

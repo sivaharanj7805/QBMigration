@@ -58,6 +58,10 @@ class SessionActivation(db.Model):
     extraction_count = db.Column(db.Integer, default=0)
     last_extraction_at = db.Column(db.DateTime)
 
+    # CRIT-03 FIX: Store extraction token for chain-of-custody validation.
+    # start_extraction generates this token; complete_extraction must present it.
+    extraction_token = db.Column(db.String(64), nullable=True)
+
     __table_args__ = (
         db.Index("idx_session_device", "session_id", "device_fingerprint"),
         db.UniqueConstraint(
@@ -162,7 +166,7 @@ def validate_session():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
-    data.get("device_name", "").strip()
+    device_name = data.get("device_name", "").strip()
     ip_address = request.remote_addr
 
     if not session_id:
@@ -239,16 +243,34 @@ def validate_session():
             403,
         )
 
-    # Check device activation count
-    existing_activations = SessionActivation.query.filter_by(
-        session_id=session_id, status="active"
-    ).all()
+    # FIX M-07/M-08: Use constant-time comparison for fingerprints and
+    # lock rows to prevent TOCTOU race on device count and extraction limits
+    # HIGH-02 FIX: Use SELECT FOR UPDATE on PostgreSQL to prevent TOCTOU race
+    # where concurrent requests both pass the device limit check before either commits.
+    from models.database import is_postgresql
 
-    # Check if this device is already activated
+    query = SessionActivation.query.filter_by(
+        session_id=session_id, status="active"
+    )
+    if is_postgresql():
+        query = query.with_for_update()
+    existing_activations = query.all()
+
+    # FIX M-07: Use hmac.compare_digest for constant-time fingerprint comparison
+    import hmac
+
     device_activation = next(
-        (a for a in existing_activations if a.device_fingerprint == fingerprint_hash),
+        (
+            a
+            for a in existing_activations
+            if hmac.compare_digest(a.device_fingerprint or "", fingerprint_hash or "")
+        ),
         None,
     )
+
+    # HIGH-08 FIX: Update device_name on existing activation if provided
+    if device_activation and device_name:
+        device_activation.device_name = device_name[:255]
 
     if not device_activation:
         # New device - check if we've reached the limit
@@ -274,8 +296,9 @@ def validate_session():
                 403,
             )
 
-    # Calculate remaining extractions for this session
+    # FIX M-08: Calculate remaining extractions per-device, not just per-session
     total_extractions = sum(a.extraction_count for a in existing_activations)
+    device_extractions = device_activation.extraction_count if device_activation else 0
     remaining = MAX_ACTIVATIONS_PER_SESSION - total_extractions
 
     # Log successful validation
@@ -650,6 +673,15 @@ def start_extraction():
     # Generate extraction token (used to complete extraction)
     extraction_token = secrets.token_urlsafe(32)
 
+    # CRIT-03 FIX: Store token in DB so complete_extraction can validate it.
+    # This ensures only the caller who started the extraction can complete it,
+    # maintaining forensic chain of custody.
+    import hmac as _hmac
+
+    activation.extraction_token = hashlib.sha256(
+        extraction_token.encode()
+    ).hexdigest()
+
     # Update activation tracking
     activation.extraction_count += 1
     activation.last_extraction_at = datetime.now(timezone.utc)
@@ -711,6 +743,7 @@ def complete_extraction():
 
     session_id = data.get("session_id", "").strip()
     device_fingerprint = data.get("device_fingerprint", "").strip()
+    extraction_token = data.get("extraction_token", "").strip()
     transaction_count = data.get("transaction_count", 0)
     ip_address = request.remote_addr
 
@@ -725,7 +758,52 @@ def complete_extraction():
             400,
         )
 
+    # CRIT-03 FIX: Require extraction_token for chain-of-custody validation
+    if not extraction_token:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Extraction token is required. Call start-extraction first.",
+                }
+            ),
+            400,
+        )
+
     fingerprint_hash = hash_fingerprint(device_fingerprint)
+
+    # CRIT-03 FIX: Validate extraction_token against stored hash.
+    # Only the caller who received the token from start_extraction can complete.
+    activation = SessionActivation.query.filter_by(
+        session_id=session_id, device_fingerprint=fingerprint_hash, status="active"
+    ).first()
+
+    if not activation or not activation.extraction_token:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "No active extraction found. Call start-extraction first.",
+                }
+            ),
+            403,
+        )
+
+    import hmac as _hmac
+
+    token_hash = hashlib.sha256(extraction_token.encode()).hexdigest()
+    if not _hmac.compare_digest(token_hash, activation.extraction_token):
+        log_validation_attempt(
+            session_id, fingerprint_hash, ip_address, "complete", "failed",
+            "Invalid extraction token — chain of custody violation"
+        )
+        return (
+            jsonify({"success": False, "error": "Invalid extraction token"}),
+            403,
+        )
+
+    # Clear the token after validation (single-use)
+    activation.extraction_token = None
 
     # Verify session
     project = Project.query.filter_by(session_id=session_id).first()

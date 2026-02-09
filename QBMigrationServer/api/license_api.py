@@ -326,6 +326,7 @@ def activate_license():
 
 
 @license_bp.route("/usage", methods=["POST"])
+@limiter.limit("30 per minute")  # HIGH-07 FIX: Rate limit to prevent license key brute-force
 def get_usage():
     """
     Get license usage/remaining migrations
@@ -393,6 +394,7 @@ def get_usage():
 
 
 @license_bp.route("/use-migration", methods=["POST"])
+@limiter.limit("10 per minute")  # HIGH-07 FIX: Strict rate limit on migration consumption
 def use_migration():
     """
     Consume one migration from the license

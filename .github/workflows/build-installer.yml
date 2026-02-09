@@ -55,10 +55,10 @@ jobs:
         dotnet restore QBDesktopReader/QBDesktopReader.csproj
 
     # 6. Build QBDesktopReader (produces QBExtractor.exe)
+    # HIGH-12 FIX: Removed continue-on-error to prevent releasing broken binaries
     - name: Build QBDesktopReader
       run: |
         dotnet build QBDesktopReader/QBDesktopReader.csproj --configuration Release --no-restore
-      continue-on-error: true
 
     # 7. Publish QBExtractor as self-contained single-file exe
     - name: Publish QBExtractor
@@ -71,7 +71,6 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true `
           -p:EnableCompressionInSingleFile=true `
           --output QBDesktopReader/publish
-      continue-on-error: true
 
     # 8. Verify QBExtractor output
     - name: Verify QBExtractor Build
@@ -92,27 +91,30 @@ jobs:
 
     # 9. Code sign QBExtractor (ADV-01: Code signing for .exe files)
     - name: Sign QBExtractor
-      if: steps.verify_extractor.outputs.extractor_built == 'true' && env.CODE_SIGNING_CERT != ''
+      if: steps.verify_extractor.outputs.extractor_built == 'true' && secrets.CODE_SIGNING_CERT_BASE64 != ''
       env:
         CODE_SIGNING_CERT: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
         CODE_SIGNING_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
       run: |
-        # Decode certificate from GitHub Secrets
-        $certBytes = [Convert]::FromBase64String($env:CODE_SIGNING_CERT)
         $certPath = "$env:RUNNER_TEMP\code_signing.pfx"
-        [IO.File]::WriteAllBytes($certPath, $certBytes)
+        try {
+          # Decode certificate from GitHub Secrets
+          $certBytes = [Convert]::FromBase64String($env:CODE_SIGNING_CERT)
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
 
-        # Sign QBExtractor.exe with Authenticode
-        & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
-          /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-          /d "ForensicBridge QBExtractor" `
-          "QBDesktopReader/publish/QBExtractor.exe"
+          # Sign QBExtractor.exe with Authenticode
+          & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
+            /tr https://timestamp.digicert.com /td sha256 /fd sha256 `
+            /d "ForensicBridge QBExtractor" `
+            "QBDesktopReader/publish/QBExtractor.exe"
 
-        # Verify signature
-        & signtool verify /pa "QBDesktopReader/publish/QBExtractor.exe"
-
-        # Secure cleanup
-        Remove-Item $certPath -Force
+          # Verify signature
+          & signtool verify /pa "QBDesktopReader/publish/QBExtractor.exe"
+        }
+        finally {
+          # Secure cleanup even on failure
+          if (Test-Path $certPath) { Remove-Item $certPath -Force }
+        }
 
     # 10. Upload QBExtractor artifact
     - name: Upload QBExtractor Artifact
@@ -204,34 +206,38 @@ jobs:
 
     # 11. Code sign installer and launcher (ADV-01: Code signing for .exe files)
     - name: Sign Installer and Launcher
-      if: env.CODE_SIGNING_CERT != ''
+      if: secrets.CODE_SIGNING_CERT_BASE64 != ''
       env:
         CODE_SIGNING_CERT: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
         CODE_SIGNING_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
       run: |
-        $certBytes = [Convert]::FromBase64String($env:CODE_SIGNING_CERT)
         $certPath = "$env:RUNNER_TEMP\code_signing.pfx"
-        [IO.File]::WriteAllBytes($certPath, $certBytes)
+        try {
+          $certBytes = [Convert]::FromBase64String($env:CODE_SIGNING_CERT)
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
 
-        # Sign installer
-        if (Test-Path "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe") {
-          & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
-            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-            /d "ForensicBridge Setup" `
-            "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe"
-          & signtool verify /pa "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe"
+          # Sign installer
+          if (Test-Path "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe") {
+            & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
+              /tr https://timestamp.digicert.com /td sha256 /fd sha256 `
+              /d "ForensicBridge Setup" `
+              "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe"
+            & signtool verify /pa "ForensicBridgeInstaller/Output/ForensicBridge-Setup.exe"
+          }
+
+          # Sign standalone launcher
+          if (Test-Path "ForensicBridgeInstaller/standalone/ForensicBridge.exe") {
+            & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
+              /tr https://timestamp.digicert.com /td sha256 /fd sha256 `
+              /d "ForensicBridge Launcher" `
+              "ForensicBridgeInstaller/standalone/ForensicBridge.exe"
+            & signtool verify /pa "ForensicBridgeInstaller/standalone/ForensicBridge.exe"
+          }
         }
-
-        # Sign standalone launcher
-        if (Test-Path "ForensicBridgeInstaller/standalone/ForensicBridge.exe") {
-          & signtool sign /f $certPath /p $env:CODE_SIGNING_PASSWORD `
-            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
-            /d "ForensicBridge Launcher" `
-            "ForensicBridgeInstaller/standalone/ForensicBridge.exe"
-          & signtool verify /pa "ForensicBridgeInstaller/standalone/ForensicBridge.exe"
+        finally {
+          # Secure cleanup even on failure
+          if (Test-Path $certPath) { Remove-Item $certPath -Force }
         }
-
-        Remove-Item $certPath -Force
 
     # 12. Upload artifacts
     - name: Upload Setup Installer Artifact

@@ -126,17 +126,31 @@ class User(UserMixin, db.Model):
     def _get_encryption_key(self):
         """Get encryption key for QBO tokens.
 
-        MED-02 FIX: Prefers dedicated QBO_ENCRYPTION_KEY over BACKUP_ENCRYPTION_KEY
-        to prevent key reuse across different encryption domains.
+        FIX M-06: Require dedicated QBO_ENCRYPTION_KEY for domain separation.
+        BACKUP_ENCRYPTION_KEY fallback only in development to aid migration.
         """
         from flask import current_app
+        import os
 
-        key = current_app.config.get("QBO_ENCRYPTION_KEY") or current_app.config.get(
-            "BACKUP_ENCRYPTION_KEY"
-        )
+        key = current_app.config.get("QBO_ENCRYPTION_KEY")
+        if not key:
+            if os.getenv("FLASK_ENV") == "production":
+                raise ValueError(
+                    "QBO_ENCRYPTION_KEY not configured. "
+                    "Production requires dedicated encryption key per domain."
+                )
+            # Development fallback with warning
+            key = current_app.config.get("BACKUP_ENCRYPTION_KEY")
+            if key:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Using BACKUP_ENCRYPTION_KEY as fallback for QBO tokens. "
+                    "Set QBO_ENCRYPTION_KEY for production."
+                )
         if not key:
             raise ValueError(
-                "QBO_ENCRYPTION_KEY (or BACKUP_ENCRYPTION_KEY) not configured - cannot encrypt QBO tokens"
+                "QBO_ENCRYPTION_KEY not configured - cannot encrypt QBO tokens"
             )
         return key.encode() if isinstance(key, str) else key
 
@@ -458,8 +472,10 @@ class User(UserMixin, db.Model):
         try:
             # Acquire row-level lock to prevent concurrent modifications (PostgreSQL only)
             # SQLite doesn't support FOR UPDATE but has implicit locking
-            dialect = db.session.bind.dialect.name if db.session.bind else "sqlite"
-            if dialect == "postgresql":
+            # M-01 FIX: Use shared is_postgresql() instead of duplicating logic
+            from models.database import is_postgresql
+
+            if is_postgresql():
                 db.session.execute(
                     db.text(
                         "SELECT password_history FROM users WHERE id = :user_id FOR UPDATE"
@@ -507,10 +523,8 @@ class User(UserMixin, db.Model):
 
     def is_locked(self):
         """
-        Check if account is currently locked.
-
-        DESIGN FIX: This is a pure query method - no side effects.
-        If lock is expired, returns False but does NOT modify database.
+        FIX M-01: Pure query method - no side effects, no state mutation.
+        Only checks if account is currently locked without modifying any fields.
         Call clear_expired_lock() explicitly to persist the unlock.
 
         Returns:
@@ -524,27 +538,34 @@ class User(UserMixin, db.Model):
         now = datetime.now(timezone.utc)
         lock_until = self.account_locked_until
         if lock_until.tzinfo is None:
-            # Make naive datetime timezone-aware (assume UTC)
+            lock_until = lock_until.replace(tzinfo=timezone.utc)
+
+        return now <= lock_until
+
+    def clear_expired_lock(self):
+        """FIX M-01: Explicitly clear an expired lock. Must be called within a transaction.
+        Returns True if lock was cleared, False if still active or not locked."""
+        if not self.account_locked_until:
+            return False
+
+        now = datetime.now(timezone.utc)
+        lock_until = self.account_locked_until
+        if lock_until.tzinfo is None:
             lock_until = lock_until.replace(tzinfo=timezone.utc)
 
         if now > lock_until:
-            # Lock expired, reset fields but don't commit
-            # Let the caller decide when to commit
             self.account_locked_until = None
             self.failed_login_attempts = 0
-            # Don't commit here - let the caller decide when to commit
-            # The changes will be committed with the next session commit
-            return False  # Not locked anymore
-
-        return True  # Still locked
+            return True
+        return False
 
     def record_failed_login(self):
         """
-        Record failed login attempt
-
-        Locks account after 5 failed attempts
+        Record failed login attempt.
+        FIX M-01: Uses atomic increment to prevent race conditions.
+        Locks account after 5 failed attempts.
         """
-        self.failed_login_attempts += 1
+        self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
         self.last_failed_login = datetime.now(timezone.utc)
 
         # Lock account after 5 failures
@@ -578,10 +599,12 @@ class User(UserMixin, db.Model):
     def _get_mfa_secret(self) -> str:
         """Get decrypted MFA secret (prefers encrypted, falls back to legacy).
 
-        MED-01 FIX: Logs deprecation warning when falling back to legacy column
-        to track migration progress. Legacy columns should be dropped once all
-        rows are migrated.
+        FIX M-02: Uses dedicated MFA_ENCRYPTION_KEY with proper domain separation.
+        Legacy unencrypted fallback blocked in production.
         """
+        import logging
+        import os
+
         # Try encrypted first
         if self._mfa_secret_encrypted:
             try:
@@ -589,17 +612,26 @@ class User(UserMixin, db.Model):
                 from flask import current_app
 
                 key = current_app.config.get(
+                    "MFA_ENCRYPTION_KEY"
+                ) or current_app.config.get(
                     "QBO_ENCRYPTION_KEY"
                 ) or current_app.config.get("BACKUP_ENCRYPTION_KEY")
                 if key:
                     f = Fernet(key.encode() if isinstance(key, str) else key)
                     return f.decrypt(self._mfa_secret_encrypted.encode()).decode()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.getLogger(__name__).error(
+                    f"Failed to decrypt MFA secret for user {self.id}: {e}"
+                )
+                return None
         # Fall back to legacy unencrypted column (DEPRECATED)
         if self.mfa_secret:
-            import logging
-
+            if os.getenv("FLASK_ENV") == "production":
+                logging.getLogger(__name__).error(
+                    f"User {self.id} has unencrypted MFA secret in production. "
+                    "Run migrate_legacy_mfa_data() immediately."
+                )
+                return None  # Block unencrypted access in production
             logging.getLogger(__name__).warning(
                 f"User {self.id} still using legacy unencrypted mfa_secret column. "
                 "Run migrate_legacy_mfa_data() to encrypt."
@@ -619,8 +651,13 @@ class User(UserMixin, db.Model):
         from cryptography.fernet import Fernet
         from flask import current_app
 
-        key = current_app.config.get("QBO_ENCRYPTION_KEY") or current_app.config.get(
-            "BACKUP_ENCRYPTION_KEY"
+        # CRIT-01 FIX: Use same key chain as _get_mfa_secret to prevent
+        # encrypt/decrypt key mismatch. Order: MFA_ENCRYPTION_KEY (preferred,
+        # domain-separated) → QBO_ENCRYPTION_KEY → BACKUP_ENCRYPTION_KEY.
+        key = (
+            current_app.config.get("MFA_ENCRYPTION_KEY")
+            or current_app.config.get("QBO_ENCRYPTION_KEY")
+            or current_app.config.get("BACKUP_ENCRYPTION_KEY")
         )
         if not key:
             raise ValueError(

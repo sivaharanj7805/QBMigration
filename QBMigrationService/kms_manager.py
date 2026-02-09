@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Dict, Tuple
 
@@ -69,6 +70,14 @@ class AWSKMSManager:
             )
 
         self.region = region or os.environ.get("AWS_REGION", "us-east-1")
+
+        # ADV-02: Validate tenant_id to prevent alias injection
+        if tenant_id:
+            if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", tenant_id):
+                raise ValueError(
+                    "Invalid tenant_id: must be 1-64 alphanumeric, "
+                    "hyphen, or underscore characters"
+                )
         self.tenant_id = tenant_id
 
         # ADV-02: Per-tenant key isolation
@@ -185,12 +194,21 @@ class AWSKMSManager:
             params = {"KeyId": self.key_id, "KeySpec": "AES_256"}  # 256-bit AES key
 
             # ADV-02: Inject tenant_id into encryption context for key isolation
-            if context:
-                if self.tenant_id and "tenant_id" not in context:
-                    context["tenant_id"] = self.tenant_id
-                params["EncryptionContext"] = context
-            elif self.tenant_id:
-                params["EncryptionContext"] = {"tenant_id": self.tenant_id}
+            # Always enforce instance tenant_id to prevent cross-tenant access
+            encryption_context = context.copy() if context else {}
+            if self.tenant_id:
+                if (
+                    "tenant_id" in encryption_context
+                    and encryption_context["tenant_id"] != self.tenant_id
+                ):
+                    logger.warning(
+                        "Caller-provided tenant_id in encryption context "
+                        "overridden for security"
+                    )
+                encryption_context["tenant_id"] = self.tenant_id
+
+            if encryption_context:
+                params["EncryptionContext"] = encryption_context
 
             response = self.kms_client.generate_data_key(**params)
 

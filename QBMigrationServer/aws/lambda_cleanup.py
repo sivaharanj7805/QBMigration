@@ -86,7 +86,8 @@ def cleanup_orphaned_instances():
         for reservation in response["Reservations"]:
             for instance in reservation["Instances"]:
                 instance_id = instance["InstanceId"]
-                launch_time = instance["LaunchTime"].replace(tzinfo=None)
+                # CRIT-02 FIX: Keep timezone-aware datetime from AWS
+                launch_time = instance["LaunchTime"]
 
                 # Check if instance is too old
                 if launch_time < cutoff_time:
@@ -134,7 +135,8 @@ def cleanup_old_s3_files():
 
             for obj in page["Contents"]:
                 key = obj["Key"]
-                last_modified = obj["LastModified"].replace(tzinfo=None)
+                # CRIT-02 FIX: Keep timezone-aware datetime from AWS
+                last_modified = obj["LastModified"]
 
                 # Check if file is too old
                 if last_modified < cutoff_time:
