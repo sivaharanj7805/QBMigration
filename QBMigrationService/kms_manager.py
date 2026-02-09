@@ -402,8 +402,12 @@ class KMSFallbackManager:
             import os as _os
 
             self.local_key = _os.urandom(32)
-            with open(key_path, "wb") as f:
-                f.write(self.local_key)
+            # HIGH-03 FIX: Write key with restrictive 0600 permissions
+            fd = _os.open(key_path, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+            try:
+                _os.write(fd, self.local_key)
+            finally:
+                _os.close(fd)
             logger.warning(
                 "Generated local master key. " "For production, use AWS KMS instead."
             )

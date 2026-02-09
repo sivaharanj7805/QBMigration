@@ -21,6 +21,7 @@ import datetime
 import os
 import sys
 from datetime import timezone
+from unittest.mock import MagicMock, patch
 
 import jwt
 import pytest
@@ -131,10 +132,19 @@ class TestGetTiers:
 class TestSelectTier:
     """Tests for POST /api/auth/select-tier"""
 
-    def test_select_tier_success(self, authenticated_client, db_session, test_user):
-        """Selecting a valid tier returns success and creates migration credits."""
+    @patch("stripe.PaymentIntent.retrieve")
+    def test_select_tier_success(
+        self, mock_retrieve, authenticated_client, db_session, test_user
+    ):
+        """Selecting a valid tier with verified payment returns success."""
+        mock_intent = MagicMock()
+        mock_intent.status = "succeeded"
+        mock_intent.amount = 49700  # starter price
+        mock_retrieve.return_value = mock_intent
+
         response = authenticated_client.post(
-            "/api/auth/select-tier", json={"tier_id": "starter"}
+            "/api/auth/select-tier",
+            json={"tier_id": "starter", "payment_intent_id": "pi_test_123"},
         )
         assert response.status_code == 200
         data = response.get_json()
@@ -142,17 +152,23 @@ class TestSelectTier:
         assert "tier" in data
         assert data["tier"] == "starter"
 
+    @patch("stripe.PaymentIntent.retrieve")
     def test_select_tier_creates_migration_credit(
-        self, authenticated_client, db_session, test_user
+        self, mock_retrieve, authenticated_client, db_session, test_user
     ):
-        """Selecting a tier creates a MigrationCredit record."""
+        """Selecting a tier with verified payment creates a MigrationCredit record."""
+        mock_intent = MagicMock()
+        mock_intent.status = "succeeded"
+        mock_intent.amount = 49700
+        mock_retrieve.return_value = mock_intent
+
         authenticated_client.post(
             "/api/auth/select-tier",
-            json={"tier_id": "business", "payment_intent_id": "pi_test_123"},
+            json={"tier_id": "starter", "payment_intent_id": "pi_test_credit"},
         )
         credits = MigrationCredit.query.filter_by(
             user_id=test_user.id,
-            tier_type="business",
+            tier_type="starter",
             status="available",
             payment_status="paid",
         ).all()
@@ -295,6 +311,13 @@ class TestResetPassword:
         from api.auth import _generate_password_reset_token
 
         token = _generate_password_reset_token(test_user.id, test_user.email)
+
+        # HIGH-02 FIX: Store the JTI in the user record (mimics forgot-password flow)
+        token_payload = jwt.decode(
+            token, app.config["SECRET_KEY"], algorithms=["HS256"]
+        )
+        test_user.password_reset_jti = token_payload.get("jti")
+        db_session.commit()
 
         response = client.post(
             "/api/auth/reset-password",

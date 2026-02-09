@@ -81,6 +81,8 @@ class User(UserMixin, db.Model):
     )
     password_history = db.Column(db.Text)  # JSON array of previous password hashes
     must_change_password = db.Column(db.Boolean, default=False)
+    # HIGH-02 FIX: Track last used password reset token JTI to prevent reuse
+    password_reset_jti = db.Column(db.String(64), nullable=True)
 
     # Security - Multi-Factor Authentication
     mfa_enabled = db.Column(db.Boolean, default=False)

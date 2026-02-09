@@ -141,13 +141,13 @@ class TestLiveStatusAPI(TestDashboardAPI):
         assert "TRANSFORMATION" in phase_names
         assert "VERIFICATION" in phase_names
 
-    def test_live_status_not_found_returns_404(self, authenticated_client):
-        """Test that non-existent migration returns 404"""
+    def test_live_status_not_found_returns_400(self, authenticated_client):
+        """Test that invalid migration ID format returns 400"""
         response = authenticated_client.get(
             "/api/migrations/nonexistent_id/live-status"
         )
-
-        assert response.status_code == 404
+        # UUID validation rejects non-UUID strings with 400
+        assert response.status_code == 400
 
     def test_live_status_includes_elapsed_time(
         self, authenticated_client, sample_migration
@@ -309,10 +309,10 @@ class TestTrialBalanceAPI(TestDashboardAPI):
         assert data["forensic_status"] in ["PENDING", "NOT_AVAILABLE"]
 
     def test_trial_balance_not_found(self, authenticated_client):
-        """Test 404 for non-existent migration"""
+        """Test 400 for non-UUID migration ID"""
         response = authenticated_client.get("/api/migrations/nonexistent/trial-balance")
-
-        assert response.status_code == 404
+        # UUID validation rejects non-UUID strings with 400
+        assert response.status_code == 400
 
 
 class TestAuditCertificateAPI(TestDashboardAPI):

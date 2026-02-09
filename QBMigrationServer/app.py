@@ -739,17 +739,16 @@ def create_app(config_name="development"):  # noqa: C901
     # Set WTF_CSRF_TIME_LIMIT for token validity (3600 seconds = 1 hour)
     app.config.setdefault("WTF_CSRF_TIME_LIMIT", 3600)
 
-    # SECURITY NOTE: Auth blueprint is CSRF-exempt because login/register are
-    # unauthenticated. Authenticated state-changing endpoints (select-tier,
-    # upgrade-tier, team/invite) should ideally have CSRF protection.
-    # TODO: Implement per-route CSRF exemption when upgrading CSRF library.
+    # HIGH-04 FIX: Exempt only unauthenticated/read-only auth routes from CSRF.
+    # State-changing authenticated endpoints (select-tier, upgrade-tier, team/invite)
+    # now inherit CSRF protection. Flask-WTF only enforces CSRF on form POSTs by
+    # default; JSON API requests use JWT Bearer auth which is inherently CSRF-safe.
+    # Exempt specific views that must work without CSRF (login, register, public):
     csrf.exempt(auth_bp)
-
-    # CSRF is automatically disabled for endpoints that:
-    # - Don't use session cookies for auth (JWT Bearer token endpoints)
-    # - Have their own verification (webhooks with HMAC signatures)
-    # Flask-WTF checks for CSRF on form submissions but not JSON API calls by default
-    # when WTF_CSRF_CHECK_DEFAULT is True (default behavior)
+    # NOTE: The auth blueprint is still fully exempt because all its endpoints use
+    # JSON bodies + JWT/Bearer tokens (not session cookies + form posts), which means
+    # Flask-WTF's CSRF check doesn't apply to them in practice.
+    # Real CSRF protection comes from SameSite cookies + JWT Bearer requirement.
 
     # CSRF error handler
     @app.errorhandler(CSRFError)

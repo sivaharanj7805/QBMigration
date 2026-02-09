@@ -80,8 +80,10 @@ USER qbmigration
 EXPOSE 5000
 
 # AUDIT FIX P3-06: Configurable Gunicorn workers via environment variables
+# HIGH-07 FIX: Worker class configurable via env (default gthread, .env.example recommends gevent)
 ENV GUNICORN_WORKERS=4 \
-    GUNICORN_THREADS=2
+    GUNICORN_THREADS=2 \
+    GUNICORN_WORKER_CLASS=gthread
 
 # Run with gunicorn for production
 # L-12 FIX: Added --max-requests to recycle workers after 1000 requests,
