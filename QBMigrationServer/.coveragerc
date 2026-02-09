@@ -83,7 +83,7 @@ omit =
     api/settings.py
 
 # Context for coverage (useful for parallel runs)
-dynamic_context = test_function
+# dynamic_context = test_function
 
 [report]
 # Minimum coverage percentage

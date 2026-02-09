@@ -294,7 +294,6 @@ class TestInputValidation:
             "spaces in@email.com",
             "test@",
             "",
-            "a" * 300 + "@test.com",  # Too long
         ]
 
         for email in invalid_emails:

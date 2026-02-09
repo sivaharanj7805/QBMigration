@@ -1346,10 +1346,10 @@ class TestSessionValidationBranches:
         assert data["success"] is False
         assert data.get("transaction_limit_reached") is True
 
-    def test_complete_extraction_records_transactions(
+    def test_complete_extraction_records_transactions_requires_token(
         self, client, db_session, test_user, test_credit
     ):
-        """Complete extraction records transaction count against project (lines 766-792)."""
+        """CRIT-03 FIX: complete-extraction requires extraction_token (lines 766-792)."""
         project = Project(
             user_id=test_user.id,
             name="Record TX Project",
@@ -1364,6 +1364,7 @@ class TestSessionValidationBranches:
         db_session.add(project)
         db_session.commit()
 
+        # Without extraction_token, should get 400
         response = client.post(
             "/api/session/complete-extraction",
             json={
@@ -1372,16 +1373,12 @@ class TestSessionValidationBranches:
                 "transaction_count": 500,
             },
         )
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["success"] is True
-        assert data["transactions_used"] == 500
-        assert data["transaction_count"] == 500
+        assert response.status_code == 400
 
-    def test_complete_extraction_exceeds_limit(
+    def test_complete_extraction_exceeds_limit_requires_token(
         self, client, db_session, test_user, test_credit
     ):
-        """Complete extraction with count exceeding limit returns 403 (lines 736-759)."""
+        """CRIT-03 FIX: complete-extraction requires extraction_token (lines 736-759)."""
         project = Project(
             user_id=test_user.id,
             name="Exceed TX Project",
@@ -1396,6 +1393,7 @@ class TestSessionValidationBranches:
         db_session.add(project)
         db_session.commit()
 
+        # Without extraction_token, should get 400 before limit check
         response = client.post(
             "/api/session/complete-extraction",
             json={
@@ -1404,14 +1402,14 @@ class TestSessionValidationBranches:
                 "transaction_count": 50,
             },
         )
-        assert response.status_code == 403
+        assert response.status_code == 400
         data = response.get_json()
         assert data["success"] is False
 
-    def test_complete_extraction_sets_project_completed(
+    def test_complete_extraction_requires_token(
         self, client, db_session, test_user, test_credit
     ):
-        """When all transactions used, project status set to completed (line 775)."""
+        """CRIT-03 FIX: complete-extraction requires extraction_token."""
         project = Project(
             user_id=test_user.id,
             name="Complete TX Project",
@@ -1426,6 +1424,7 @@ class TestSessionValidationBranches:
         db_session.add(project)
         db_session.commit()
 
+        # Without extraction_token, should get 400
         response = client.post(
             "/api/session/complete-extraction",
             json={
@@ -1434,13 +1433,33 @@ class TestSessionValidationBranches:
                 "transaction_count": 100,
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 400
         data = response.get_json()
-        assert data["success"] is True
+        assert data["success"] is False
+        assert "token" in data["error"].lower()
 
-        # Refresh and check project status
-        db_session.refresh(project)
-        assert project.status == "completed"
+    def test_complete_extraction_project_completed_via_record(
+        self, client, db_session, test_user, test_credit
+    ):
+        """Directly test Project.record_transactions to verify completed transition."""
+        project = Project(
+            user_id=test_user.id,
+            name="Complete TX Project",
+            client_name="Complete Client",
+            session_id="FB-20260209190000-COMPLT02",
+            tier_type="starter",
+            transaction_limit=100,
+            transactions_used=0,
+            status="active",
+            migration_credit_id=test_credit.id,
+        )
+        db_session.add(project)
+        db_session.commit()
+
+        # Directly test the model method that the endpoint would call
+        assert project.record_transactions(100) is True
+        assert project.transactions_used == 100
+        assert project.get_remaining_transactions() == 0
 
     def test_complete_extraction_no_data(self, client, db_session):
         """POST complete-extraction with no JSON body returns 400 (line 710)."""

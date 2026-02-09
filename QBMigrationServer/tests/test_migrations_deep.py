@@ -592,7 +592,7 @@ class TestExecuteMigrationCeleryDeep:
             resp = authenticated_client.post(
                 f"/api/migrations/{test_migration.migration_id}/execute"
             )
-        assert resp.status_code == 500
+        assert resp.status_code == 503
         data = resp.get_json()
         assert data["success"] is False
         assert "Failed to queue" in data["error"]
