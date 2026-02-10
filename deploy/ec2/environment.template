@@ -77,8 +77,8 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 
 # Option 2: Access Keys (not recommended for production)
-# AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-# AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+# AWS_ACCESS_KEY_ID=your-access-key-id
+# AWS_SECRET_ACCESS_KEY=your-secret-access-key
 
 # EC2 AMI for region (used for spawning ephemeral instances)
 # Find AMIs at: https://cloud-images.ubuntu.com/locator/ec2/

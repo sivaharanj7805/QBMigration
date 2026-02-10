@@ -44,17 +44,17 @@ def require_admin_auth(f):
 
         if not admin_api_key:
             logger.error("ADMIN_API_KEY not configured - admin endpoints disabled")
-            return jsonify({"error": "Admin endpoints not configured"}), 503
+            return jsonify({"success": False, "error": "Admin endpoints not configured"}), 503
 
         if not api_key:
             logger.warning(
                 f"Detailed health check attempted without auth from {request.remote_addr}"
             )
-            return jsonify({"error": "Admin authentication required"}), 401
+            return jsonify({"success": False, "error": "Admin authentication required"}), 401
 
         if not hmac.compare_digest(api_key, admin_api_key):
             logger.warning(f"Invalid admin API key from {request.remote_addr}")
-            return jsonify({"error": "Invalid credentials"}), 403
+            return jsonify({"success": False, "error": "Invalid credentials"}), 403
 
         return f(*args, **kwargs)
 

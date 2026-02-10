@@ -1,13 +1,30 @@
 """
 End-to-end test for the enhanced migration tracking system.
 Tests: registration, tier endpoints, credits API, and /me endpoint.
+
+NOTE: These tests require a running server at localhost:5000.
+They are marked as integration tests and skipped when server is unavailable.
 """
 
 import time
 
+import pytest
 import requests
 
 API_URL = "http://localhost:5000"
+
+# Check if server is available at module load time
+_SERVER_AVAILABLE = False
+try:
+    requests.get(f"{API_URL}/health", timeout=2)
+    _SERVER_AVAILABLE = True
+except Exception:
+    pass
+
+pytestmark = pytest.mark.skipif(
+    not _SERVER_AVAILABLE,
+    reason="Integration test requires running server at localhost:5000",
+)
 
 
 def test_health():

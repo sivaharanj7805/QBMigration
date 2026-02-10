@@ -129,7 +129,7 @@ class OAuthManager:
             try:
                 import boto3
 
-                kms = boto3.client("kms")
+                kms = boto3.client("kms", region_name=os.getenv("AWS_REGION", "ca-central-1"))
 
                 # Generate data key
                 response = kms.generate_data_key(

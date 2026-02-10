@@ -27,8 +27,9 @@ class Config:
             logger.info("⚠️  WARNING: Using fixed dev SECRET_KEY - set SECRET_KEY env var for production")
 
     # M-21 FIX: Increased minimum from 32 to 64 characters.
-    # 32 chars = ~192 bits effective entropy (alphanumeric), which is below
-    # the 256-bit standard for HMAC-SHA256 JWT signing.
+    # token_hex(32) produces 32 random bytes = 64 hex characters = 256 bits entropy,
+    # which meets the 256-bit standard for HMAC-SHA256 JWT signing.
+    # A SECRET_KEY under 64 characters could be a weak user-chosen string.
     if is_production() and len(SECRET_KEY) < 64:
         raise ValueError(
             "SECRET_KEY must be at least 64 characters for adequate JWT signing entropy. "
@@ -326,8 +327,8 @@ class Config:
         else:
             # Development only - generate ephemeral secret with warning
             WEBHOOK_SECRET = secrets.token_hex(32)
-            print(
-                "⚠️  WARNING: Using generated WEBHOOK_SECRET for development. "
+            logger.warning(
+                "Using generated WEBHOOK_SECRET for development. "
                 "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence."
             )
 
@@ -433,8 +434,8 @@ class Config:
         else:
             # Development only - generate ephemeral secret with warning
             LICENSE_SECRET_KEY = secrets.token_hex(32)
-            print(
-                "WARNING: Using generated LICENSE_SECRET_KEY for development. "
+            logger.warning(
+                "Using generated LICENSE_SECRET_KEY for development. "
                 "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence."
             )
     LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv("LICENSE_TOKEN_EXPIRY_HOURS", "24"))
@@ -647,8 +648,8 @@ class ProductionConfig(Config):
             )
 
         # Validate SECRET_KEY strength
-        if len(os.getenv("SECRET_KEY", "")) < 32:
-            raise ValueError("SECRET_KEY must be at least 32 characters in production!")
+        if len(os.getenv("SECRET_KEY", "")) < 64:
+            raise ValueError("SECRET_KEY must be at least 64 characters in production!")
 
 
 config = {
@@ -698,8 +699,8 @@ def validate_config():
 
     # Validate SECRET_KEY length
     secret_key = os.getenv("SECRET_KEY", "")
-    if len(secret_key) < 32:
-        raise RuntimeError("SECRET_KEY must be at least 32 characters")
+    if len(secret_key) < 64:
+        raise RuntimeError("SECRET_KEY must be at least 64 characters")
 
     # Validate BACKUP_ENCRYPTION_KEY format if set
     backup_key = os.getenv("BACKUP_ENCRYPTION_KEY")

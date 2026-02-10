@@ -9,9 +9,8 @@ class TestRootEndpoint:
         assert response.status_code == 200
         data = response.get_json()
         assert data["status"] == "running"
-        assert data["message"] == "ForensicBridge Migration Server"
-        assert "endpoints" in data
-        assert "features" in data
+        assert data["name"] == "ForensicBridge Migration Server"
+        assert "version" in data
 
     def test_index_has_version(self, client):
         response = client.get("/")

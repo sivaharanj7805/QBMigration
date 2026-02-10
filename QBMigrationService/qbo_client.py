@@ -922,6 +922,66 @@ class PremiumQBOClient:
             logger.error(f"Failed to delete {entity_type} {qbo_id}: {e}")
             return False
 
+    def update_entity(
+        self,
+        entity_type: str,
+        qbo_id: str,
+        updates: Dict,
+        oauth_manager: Optional[Any] = None,
+    ) -> Dict:
+        """
+        Update an entity in QuickBooks Online using sparse update.
+
+        QBO requires POST (not PUT/PATCH) with the entity's current SyncToken.
+        Uses sparse=true so only the changed fields need to be sent.
+
+        Args:
+            entity_type: Type of entity (Customer, Vendor, Account, etc.)
+            qbo_id: The QBO entity ID to update
+            updates: Dict of fields to update (e.g. {"Active": False})
+            oauth_manager: Optional OAuth manager for token refresh
+
+        Returns:
+            Updated entity data from QBO
+
+        Raises:
+            Exception: If update fails, including SyncToken conflicts
+        """
+        sync_token = self.get_synctoken(entity_type, qbo_id)
+
+        update_data = {
+            "Id": qbo_id,
+            "SyncToken": sync_token,
+            "sparse": True,
+            **updates,
+        }
+
+        endpoint = entity_type.lower()
+
+        response = self._make_request(
+            "POST", endpoint, update_data, oauth_manager=oauth_manager
+        )
+
+        # Check for fault response
+        if "Fault" in response:
+            fault = response.get("Fault", {})
+            errors = fault.get("Error", [])
+            error_msg = "; ".join(
+                e.get("Message", "Unknown error") for e in errors
+            )
+            raise Exception(
+                f"Failed to update {entity_type} {qbo_id}: {error_msg}"
+            )
+
+        # Extract updated entity and refresh SyncToken
+        updated = response.get(entity_type, {})
+        new_sync_token = updated.get("SyncToken")
+        if new_sync_token:
+            self.update_synctoken(entity_type, qbo_id, new_sync_token)
+
+        logger.info(f"Updated {entity_type} {qbo_id}")
+        return response
+
     def create_entity(
         self, entity_type: str, entity_data: Dict, oauth_manager: Optional[Any] = None
     ) -> Dict:

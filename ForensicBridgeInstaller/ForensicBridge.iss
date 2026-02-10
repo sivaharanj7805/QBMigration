@@ -1,4 +1,6 @@
-; ForensicBridge Windows Installer
+; ForensicBridge Windows Installer — CANONICAL VERSION
+; This is the authoritative installer script. The previous copy in
+; QBDesktopReader/ForensicBridge.iss was a stale duplicate and has been removed.
 ; Created with Inno Setup 6.x
 
 #define MyAppName "ForensicBridge"

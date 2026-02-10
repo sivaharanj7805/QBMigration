@@ -58,14 +58,10 @@ namespace QBMigrationLauncher
             SESSION_PATH = Path.Combine(appDataPath, "session.dat");
 
             // FIX #11: Configure HttpClient with connection pooling to prevent socket exhaustion
-            var handler = new SocketsHttpHandler
+            // Note: net48 does not have SocketsHttpHandler; use HttpClientHandler instead
+            var handler = new HttpClientHandler
             {
-                // Connection pooling settings
-                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                MaxConnectionsPerServer = 10,
-                // Enable keep-alive
-                EnableMultipleHttp2Connections = true
+                MaxConnectionsPerServer = 10
             };
             _httpClient = new HttpClient(handler)
             {
@@ -549,10 +545,9 @@ namespace QBMigrationLauncher
             _apiBaseUrl = Environment.GetEnvironmentVariable("FORENSICBRIDGE_API_URL")
                           ?? "https://api.forensicbridge.ca";
 
-            var handler = new SocketsHttpHandler
+            // Note: net48 does not have SocketsHttpHandler; use HttpClientHandler instead
+            var handler = new HttpClientHandler
             {
-                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
                 MaxConnectionsPerServer = 10
             };
             _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };

@@ -2,8 +2,9 @@
 ForensicBridge Expansion Roadmap
 ================================
 
-Addresses the NOT MET gap identified in M&A technical due diligence audit:
-"No Sage/Xero/FreshBooks code found"
+STATUS: ROADMAP ONLY — These are stub/skeleton implementations.
+None of the connectors below are functional. They define the interface
+and architecture for future platform expansion.
 
 This module contains stub implementations and architecture for expanding
 ForensicBridge to support additional accounting platforms beyond QuickBooks.

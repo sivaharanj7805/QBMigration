@@ -41,15 +41,66 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
-# H-03 FIX: In-memory JWT blocklist for logout revocation.
-# Stores (jti, expiry_timestamp) tuples. Entries are cleaned up on each add.
-# Falls back to this if Redis is unavailable.
-_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp
+# H-03 FIX: JWT blocklist for logout revocation.
+# Primary: Redis (shared across all workers/processes)
+# Fallback: In-memory dict (per-process, used if Redis unavailable)
+_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp (fallback only)
 _jwt_blocklist_lock = threading.Lock()
 
 
+_redis_conn = None
+_redis_last_attempt = 0.0
+_REDIS_RETRY_INTERVAL = 30.0  # Don't retry Redis connection more than every 30s
+
+
+def _get_redis():
+    """Get Redis connection for JWT blocklist. Returns None if unavailable.
+
+    Creates its own connection from REDIS_URL/RATELIMIT_STORAGE_URL env vars.
+    Caches the connection and avoids hammering Redis if it's down.
+    """
+    global _redis_conn, _redis_last_attempt
+
+    # Return cached connection if it's still alive
+    if _redis_conn is not None:
+        try:
+            _redis_conn.ping()
+            return _redis_conn
+        except Exception:
+            _redis_conn = None
+
+    # Don't retry too frequently if Redis is down
+    now = _time.time()
+    if now - _redis_last_attempt < _REDIS_RETRY_INTERVAL:
+        return None
+
+    _redis_last_attempt = now
+    try:
+        import redis as _redis_mod
+        redis_url = os.environ.get("REDIS_URL") or os.environ.get("RATELIMIT_STORAGE_URL")
+        if redis_url and redis_url != "memory://":
+            _redis_conn = _redis_mod.from_url(redis_url, decode_responses=True, socket_connect_timeout=3)
+            _redis_conn.ping()
+            return _redis_conn
+    except Exception:
+        _redis_conn = None
+    return None
+
+
 def _blocklist_add(jti: str, exp_timestamp: float) -> None:
-    """Add a JWT ID to the blocklist. Automatically prunes expired entries."""
+    """Add a JWT ID to the blocklist. Uses Redis if available, falls back to in-memory."""
+    ttl = max(int(exp_timestamp - _time.time()), 1)
+
+    # Try Redis first (shared across all workers)
+    redis = _get_redis()
+    if redis:
+        try:
+            redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
+            return
+        except Exception:
+            pass  # Fall through to in-memory
+
+    # Fallback: in-memory (per-process only)
     now = _time.time()
     with _jwt_blocklist_lock:
         # Prune expired entries
@@ -61,6 +112,16 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
 
 def _blocklist_check(jti: str) -> bool:
     """Check if a JWT ID is in the blocklist (i.e., revoked)."""
+    # Try Redis first
+    redis = _get_redis()
+    if redis:
+        try:
+            if redis.exists(f"jwt_blocklist:{jti}"):
+                return True
+        except Exception:
+            pass  # Fall through to in-memory
+
+    # Fallback: in-memory check
     now = _time.time()
     with _jwt_blocklist_lock:
         exp = _jwt_blocklist.get(jti)
@@ -202,6 +263,31 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                     ),
                     401,
                 )
+
+            # HIGH-08 FIX: Verify user still exists and is active in database.
+            # Cache the check in the session for 60s to avoid a DB hit on every request.
+            _USER_VERIFY_TTL = 60  # seconds
+            last_verified = session.get("_user_verified_at", 0)
+            now_ts = _time.time()
+            if now_ts - last_verified > _USER_VERIFY_TTL:
+                session_user = db.session.get(User, session["user_id"])
+                if session_user is None or not session_user.is_active:
+                    logger.warning(
+                        "Session auth failed: user %s no longer exists or is inactive",
+                        session["user_id"],
+                    )
+                    session.clear()
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Session expired. Please log in again.",
+                                "session_invalid": True,
+                            }
+                        ),
+                        401,
+                    )
+                session["_user_verified_at"] = now_ts
 
             request.current_user = {  # type: ignore[attr-defined]
                 "user_id": session["user_id"],
@@ -722,6 +808,16 @@ def register():
         last_name = data.get("last_name", "").strip()
         # Support both 'company_name' and 'company' from frontend
         company = data.get("company_name", data.get("company", "")).strip()
+
+        # MED-19 FIX: Enforce input length limits before further processing
+        MAX_NAME_LENGTH = 200
+        MAX_COMPANY_LENGTH = 300
+        if len(first_name) > MAX_NAME_LENGTH:
+            return jsonify({"success": False, "error": f"First name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+        if len(last_name) > MAX_NAME_LENGTH:
+            return jsonify({"success": False, "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+        if len(company) > MAX_COMPANY_LENGTH:
+            return jsonify({"success": False, "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters"}), 400
 
         # Sanitize inputs - remove potentially dangerous characters
         first_name = sanitize(first_name, 100)
@@ -1883,10 +1979,10 @@ def forgot_password():
             pass
 
     # Ensure constant response time to prevent timing attacks
-    elapsed = time.time() - start_time
+    elapsed = _time.time() - start_time
     min_response_time = 0.3  # 300ms minimum
     if elapsed < min_response_time:
-        time.sleep(min_response_time - elapsed)
+        _time.sleep(min_response_time - elapsed)
 
     return (
         jsonify(
@@ -2388,10 +2484,10 @@ def check_captcha_requirement():
 
     # HIGH FIX: Ensure constant response timing to prevent email enumeration
     # Response should take the same time regardless of whether user exists
-    elapsed = time.time() - start_time
+    elapsed = _time.time() - start_time
     min_response_time = 0.1  # 100ms minimum response time
     if elapsed < min_response_time:
-        time.sleep(min_response_time - elapsed)
+        _time.sleep(min_response_time - elapsed)
 
     # HIGH FIX: Do NOT return failed_attempts - this reveals if user exists
     # Attackers could enumerate emails by checking which ones have > 0 attempts

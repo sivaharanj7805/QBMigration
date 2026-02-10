@@ -243,7 +243,7 @@ class TestMasterEndToEnd:
         from qbo_client import PremiumQBOClient
 
         db_path = str(tmp_migration_dir["transformed"] / "migration.db")
-        client = PremiumQBOClient(access_token="test_token", db_path=db_path)
+        client = PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
         # Mock the API request
         created_entities = {}
@@ -440,7 +440,7 @@ class TestBatchPerformance:
         from qbo_client import PremiumQBOClient
 
         db_path = str(tmp_path / "perf_test.db")
-        client = PremiumQBOClient(access_token="test", db_path=db_path)
+        client = PremiumQBOClient(access_token="test", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
         # Create 100 entities
         entities = [{"DisplayName": f"Customer {i}"} for i in range(100)]

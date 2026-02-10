@@ -59,7 +59,7 @@ jobs:
     - name: Install security tools
       run: |
         python -m pip install --upgrade pip
-        pip install bandit safety
+        pip install bandit safety pip-audit
 
     - name: Run Bandit security scan
       run: |
@@ -74,6 +74,12 @@ jobs:
           --exclude QBMigrationServer/tests,QBMigrationService/tests \
           --skip B101,B110 \
           -ll -ii
+
+    - name: Run dependency vulnerability scan
+      run: |
+        pip install -r QBMigrationServer/requirements.txt -r QBMigrationService/requirements.txt
+        pip-audit --desc --fix --dry-run || true
+        safety check --full-report || true
 
     - name: Upload Bandit Report
       uses: actions/upload-artifact@v4

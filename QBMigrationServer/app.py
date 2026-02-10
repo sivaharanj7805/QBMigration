@@ -573,22 +573,18 @@ def create_app(config_name="development"):  # noqa: C901
         aws_region = app.config.get("AWS_REGION", "ca-central-1")
         ami_id = app.config.get("AWS_EC2_AMI_ID", "")
 
-        # Mapping of regions to known AMI prefixes for validation
-        REGION_AMI_PREFIXES = {
-            "us-east-1": "ami-",
-            "us-west-2": "ami-",
-            "ca-central-1": "ami-",
-            "eu-west-1": "ami-",
-            "eu-central-1": "ami-",
-            "ap-southeast-1": "ami-",
-            "ap-northeast-1": "ami-",
+        # PIPEDA: Only Canadian AWS regions are permitted for data residency compliance
+        ALLOWED_REGIONS = {
+            "ca-central-1",  # Montreal
+            "ca-west-1",     # Calgary
         }
 
-        # Validate region is supported
-        if aws_region not in REGION_AMI_PREFIXES:
-            logger.warning(
-                f"AWS region '{aws_region}' is not in the pre-validated list. "
-                f"Ensure your AMI ID is valid for this region."
+        # Validate region is Canadian (PIPEDA requirement)
+        if aws_region not in ALLOWED_REGIONS:
+            raise ValueError(
+                f"CRITICAL PIPEDA VIOLATION: AWS region '{aws_region}' is not a Canadian region. "
+                f"Canadian data residency requires ca-central-1 (Montreal) or ca-west-1 (Calgary). "
+                f"Set AWS_REGION to a Canadian region to comply with PIPEDA."
             )
 
         # CRITICAL: Hardcoded AMI from config.py default is for US region
@@ -1236,8 +1232,8 @@ def create_app(config_name="development"):  # noqa: C901
                 state = sa_inspect(_cu)
                 if state.detached:
                     db.session.add(_cu)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to re-merge detached user into session: %s", e)
 
     # SECURITY FIX: HTTPS redirect for production
     @app.before_request
@@ -1311,12 +1307,9 @@ def create_app(config_name="development"):  # noqa: C901
             if exception:
                 app.logger.error(f"Exception during request: {str(exception)}")
                 db.session.rollback()
-            else:
-                # Commit any pending changes from successful requests
-                try:
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
+            # NOTE: No auto-commit here.  View functions must explicitly call
+            # db.session.commit().  Auto-committing in teardown risks persisting
+            # dirty/partial ORM state that was never intended to be saved.
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
         finally:

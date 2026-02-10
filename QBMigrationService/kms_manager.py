@@ -69,7 +69,7 @@ class AWSKMSManager:
                 "Install with: pip install boto3"
             )
 
-        self.region = region or os.environ.get("AWS_REGION", "us-east-1")
+        self.region = region or os.environ.get("AWS_REGION", "ca-central-1")
 
         # ADV-02: Validate tenant_id to prevent alias injection
         if tenant_id:

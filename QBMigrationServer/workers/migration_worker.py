@@ -76,7 +76,7 @@ def process_migration(self, db_id):
             # Run migration from S3
             result = orchestrator.run_migration_from_s3(
                 s3_uri=migration.s3_uri,
-                aws_region=app.config.get("AWS_REGION", "us-east-1"),
+                aws_region=app.config.get("AWS_REGION", "ca-central-1"),
             )
 
             if result["success"]:

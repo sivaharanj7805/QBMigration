@@ -1,3 +1,10 @@
+> **DISCLAIMER (2026-02-10):** The 100/100 scores below represent aspirational targets,
+> not verified actuals. A comprehensive independent audit conducted on 2026-02-10
+> identified **68 total issues** across the codebase, including **5 CRITICAL**,
+> **18 HIGH**, and **22 MEDIUM** severity findings. Many of the "All Issues Resolved"
+> claims in this document have not been independently verified. Treat this scorecard
+> as a remediation roadmap, not a certification of production readiness.
+
 # Component Scorecard — Backend, Frontend, Middleware
 
 ## ForensicBridge / QBMigration Platform

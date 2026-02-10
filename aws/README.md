@@ -18,7 +18,7 @@ aws cloudformation create-stack `
   --template-body file://cloudformation.yaml `
   --parameters ParameterKey=DBPassword,ParameterValue=$DB_PASSWORD `
   --capabilities CAPABILITY_IAM `
-  --region us-east-1
+  --region ca-central-1
 
 # Wait for completion (~15 minutes)
 aws cloudformation wait stack-create-complete --stack-name forensicbridge-prod

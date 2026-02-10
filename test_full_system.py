@@ -19,7 +19,7 @@ import sys
 
 BASE_URL = "http://localhost:5000"
 TEST_EMAIL = f"test_{int(time.time())}@example.com"
-TEST_PASSWORD = "Test1234!"
+TEST_PASSWORD = "TestPassword123!@#"
 MIGRATION_ID = None
 SESSION = requests.Session()
 

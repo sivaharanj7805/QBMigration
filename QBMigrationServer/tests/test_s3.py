@@ -1,4 +1,16 @@
+# WARNING: This is an integration test that makes REAL AWS S3 calls.
+# It requires valid AWS credentials and will upload/delete objects in the
+# configured S3 bucket. Do NOT run in CI without proper IAM scoping or mocks.
+#
+# Run manually with: pytest tests/test_s3.py -m integration
 import os
+import pytest
+
+# Guard: Skip entire module at collection time if no AWS credentials
+collect_ignore_glob = []
+if not os.environ.get('AWS_ACCESS_KEY_ID'):
+    pytest.skip("Skipped: requires AWS credentials (set AWS_ACCESS_KEY_ID to run)", allow_module_level=True)
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -6,6 +18,8 @@ load_dotenv()
 import sys
 
 sys.path.insert(0, "QBMigrationServer")
+
+os.environ.setdefault("AWS_EC2_AMI_ID", "ami-placeholder-for-test")
 
 # Import Flask app FIRST
 from app import create_app

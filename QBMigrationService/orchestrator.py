@@ -1416,7 +1416,7 @@ class MigrationOrchestrator:
         return success_mappings, fail_count
 
     def run_migration_from_s3(
-        self, s3_uri: str, aws_region: str = "us-east-1"
+        self, s3_uri: str, aws_region: str = "ca-central-1"
     ) -> Dict[str, Any]:
         """
         Run migration from S3-stored data.

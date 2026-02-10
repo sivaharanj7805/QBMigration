@@ -21,7 +21,7 @@ namespace QBDesktopExtractor
     /// </summary>
     public static class EncryptionManager
     {
-        public const string AlgorithmName = "AES-256-GCM-Chunked";
+        public const string AlgorithmName = "AES-256-CBC-HMAC-Chunked";
         public const int KeySize = 256;
         public const int NonceSize = 12;
         public const int TagSize = 16;
@@ -176,7 +176,7 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Encrypt a single chunk with AES-GCM
+        /// Encrypt a single chunk with AES-256-CBC + HMAC-SHA256
         /// </summary>
         private static byte[] EncryptChunk(byte[] data, int length, byte[] key)
         {
@@ -186,7 +186,11 @@ namespace QBDesktopExtractor
                 rng.GetBytes(nonce);
             }
 
-            byte[] ciphertext = new byte[length];
+            // PKCS7 padding adds up to 16 bytes, plus 4 bytes for length prefix
+            int blockSize = 16;
+            int paddedLen = ((length + blockSize) / blockSize) * blockSize;
+            int ciphertextBufLen = 4 + paddedLen; // 4 bytes length prefix + padded ciphertext
+            byte[] ciphertext = new byte[ciphertextBufLen];
             byte[] tag = new byte[TagSize];
 
             using (var aes = new AesGcmCompat(key))
@@ -196,11 +200,11 @@ namespace QBDesktopExtractor
                 aes.Encrypt(nonce, plaintextSlice, ciphertext, tag);
             }
 
-            // Output: nonce + tag + ciphertext
-            byte[] result = new byte[NonceSize + TagSize + length];
+            // Output: nonce + tag + ciphertext (with length prefix embedded)
+            byte[] result = new byte[NonceSize + TagSize + ciphertextBufLen];
             Buffer.BlockCopy(nonce, 0, result, 0, NonceSize);
             Buffer.BlockCopy(tag, 0, result, NonceSize, TagSize);
-            Buffer.BlockCopy(ciphertext, 0, result, NonceSize + TagSize, length);
+            Buffer.BlockCopy(ciphertext, 0, result, NonceSize + TagSize, ciphertextBufLen);
 
             return result;
         }
@@ -263,7 +267,15 @@ namespace QBDesktopExtractor
                         throw new InvalidDataException($"Invalid chunk length: {chunkLen}");
 
                     byte[] encryptedChunk = new byte[chunkLen];
-                    inputStream.Read(encryptedChunk, 0, chunkLen);
+                    // Stream.Read may return fewer bytes than requested; loop until full
+                    int totalRead = 0;
+                    while (totalRead < chunkLen)
+                    {
+                        int n = inputStream.Read(encryptedChunk, totalRead, chunkLen - totalRead);
+                        if (n == 0)
+                            throw new InvalidDataException($"Unexpected end of stream at chunk (expected {chunkLen} bytes, got {totalRead})");
+                        totalRead += n;
+                    }
 
                     byte[] decryptedChunk = DecryptChunk(encryptedChunk, key);
                     outputStream.Write(decryptedChunk, 0, decryptedChunk.Length);
@@ -275,29 +287,171 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Decrypt a single chunk
+        /// Decrypt a single chunk, with backwards compatibility for legacy format.
+        /// Tries v2 format (derived keys, PKCS7, length prefix) first.
+        /// Falls back to legacy format (raw key, zero-padding, no length prefix) if HMAC fails.
         /// </summary>
         private static byte[] DecryptChunk(byte[] encryptedChunk, byte[] key)
         {
-            if (encryptedChunk.Length < NonceSize + TagSize)
+            if (encryptedChunk.Length < NonceSize + TagSize + 1)
                 throw new InvalidDataException("Encrypted chunk too small");
 
             byte[] nonce = new byte[NonceSize];
             byte[] tag = new byte[TagSize];
             int ciphertextLen = encryptedChunk.Length - NonceSize - TagSize;
             byte[] ciphertext = new byte[ciphertextLen];
-            byte[] plaintext = new byte[ciphertextLen];
 
             Buffer.BlockCopy(encryptedChunk, 0, nonce, 0, NonceSize);
             Buffer.BlockCopy(encryptedChunk, NonceSize, tag, 0, TagSize);
             Buffer.BlockCopy(encryptedChunk, NonceSize + TagSize, ciphertext, 0, ciphertextLen);
 
-            using (var aes = new AesGcmCompat(key))
+            // Try v2 format first (derived keys, PKCS7 padding, 4-byte length prefix)
+            if (TryDecryptV2Format(nonce, ciphertext, tag, key, out byte[] result))
+                return result;
+
+            // Fallback to legacy format (raw key, PaddingMode.None, zero-padded)
+            if (TryDecryptLegacyFormat(nonce, ciphertext, tag, key, out result))
+                return result;
+
+            throw new CryptographicException(
+                "Authentication tag verification failed for both v2 and legacy formats. " +
+                "Data may be corrupted or tampered with.");
+        }
+
+        /// <summary>
+        /// Try to decrypt using v2 format: HKDF-derived keys, PKCS7 padding, 4-byte length prefix.
+        /// Returns false if HMAC tag verification fails (indicating this is not v2 format).
+        /// </summary>
+        private static bool TryDecryptV2Format(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] key, out byte[] plaintext)
+        {
+            plaintext = null;
+
+            // Derive separate keys the v2 way
+            byte[] encKey, macKey;
+            using (var deriver = new HMACSHA256(key))
             {
-                aes.Decrypt(nonce, ciphertext, tag, plaintext);
+                encKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-ENC-v2"));
+                macKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-MAC-v2"));
             }
 
-            return plaintext;
+            try
+            {
+                // Verify tag with derived MAC key
+                if (!VerifyTagConstantTime(nonce, ciphertext, tag, macKey))
+                    return false;
+
+                // Need at least 4 bytes for length prefix + 16 bytes for one AES block
+                if (ciphertext.Length < 20)
+                    return false;
+
+                // Extract original plaintext length from first 4 bytes
+                int originalLen = BitConverter.ToInt32(ciphertext, 0);
+                if (originalLen < 0 || originalLen > ciphertext.Length)
+                    return false;
+
+                // Decrypt the actual ciphertext (after the 4-byte length prefix)
+                byte[] actualCiphertext = new byte[ciphertext.Length - 4];
+                Buffer.BlockCopy(ciphertext, 4, actualCiphertext, 0, actualCiphertext.Length);
+
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = encKey;
+                    var iv = new byte[16];
+                    Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.PKCS7;
+
+                    using (var decryptor = aes.CreateDecryptor())
+                    {
+                        byte[] decrypted = decryptor.TransformFinalBlock(actualCiphertext, 0, actualCiphertext.Length);
+                        plaintext = new byte[originalLen];
+                        Buffer.BlockCopy(decrypted, 0, plaintext, 0, originalLen);
+                    }
+                }
+                return true;
+            }
+            catch
+            {
+                plaintext = null;
+                return false;
+            }
+            finally
+            {
+                Array.Clear(encKey, 0, encKey.Length);
+                Array.Clear(macKey, 0, macKey.Length);
+            }
+        }
+
+        /// <summary>
+        /// Try to decrypt using legacy format: raw key for both AES and HMAC, PaddingMode.None, zero-padded.
+        /// Returns false if HMAC tag verification fails (data is corrupted/tampered).
+        /// Note: Legacy format had a zero-padding bug where trailing zeros could not be distinguished
+        /// from padding. This is preserved for backwards compatibility.
+        /// </summary>
+        private static bool TryDecryptLegacyFormat(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] rawKey, out byte[] plaintext)
+        {
+            plaintext = null;
+
+            // Legacy format used raw key for HMAC
+            if (!VerifyTagConstantTime(nonce, ciphertext, tag, rawKey))
+                return false;
+
+            try
+            {
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = rawKey;
+                    var iv = new byte[16];
+                    Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.None;
+
+                    using (var decryptor = aes.CreateDecryptor())
+                    {
+                        byte[] decrypted = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+
+                        // Legacy format zero-padded to block boundary.
+                        // Strip trailing zero bytes. Note: this may strip legitimate trailing
+                        // zeros in binary data — this was the original bug that v2 format fixes.
+                        int end = decrypted.Length;
+                        while (end > 0 && decrypted[end - 1] == 0) end--;
+                        if (end == 0) end = decrypted.Length; // Don't return empty if all zeros
+
+                        plaintext = new byte[end];
+                        Buffer.BlockCopy(decrypted, 0, plaintext, 0, end);
+                    }
+                }
+                return true;
+            }
+            catch
+            {
+                plaintext = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Constant-time HMAC tag verification to prevent timing attacks.
+        /// </summary>
+        private static bool VerifyTagConstantTime(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] macKey)
+        {
+            using (var hmac = new HMACSHA256(macKey))
+            {
+                byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
+                Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
+                Buffer.BlockCopy(ciphertext, 0, dataToMac, nonce.Length, ciphertext.Length);
+                byte[] fullHash = hmac.ComputeHash(dataToMac);
+
+                // Constant-time comparison: accumulate XOR differences without early exit
+                int diff = 0;
+                for (int i = 0; i < tag.Length && i < fullHash.Length; i++)
+                {
+                    diff |= tag[i] ^ fullHash[i];
+                }
+                return diff == 0;
+            }
         }
 
         /// <summary>
@@ -341,9 +495,10 @@ namespace QBDesktopExtractor
                                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
                         }
 
-                        var response = _kmsHttpClient.SendAsync(request).Result;
+                        // ConfigureAwait(false) prevents deadlock in synchronous-over-async contexts
+                        var response = _kmsHttpClient.SendAsync(request).ConfigureAwait(false).GetAwaiter().GetResult();
                         response.EnsureSuccessStatusCode();
-                        return response.Content.ReadAsByteArrayAsync().Result;
+                        return response.Content.ReadAsByteArrayAsync().ConfigureAwait(false).GetAwaiter().GetResult();
                     }
                     catch (Exception ex)
                     {
@@ -389,31 +544,6 @@ namespace QBDesktopExtractor
                 throw new CryptographicException("Protected key is null or empty");
             }
 
-#if DEBUG
-            // Check for non-Windows fallback marker
-            byte[] marker = Encoding.UTF8.GetBytes("NOPROTECT:");
-            if (protectedKey.Length > marker.Length)
-            {
-                bool hasMarker = true;
-                for (int i = 0; i < marker.Length; i++)
-                {
-                    if (protectedKey[i] != marker[i])
-                    {
-                        hasMarker = false;
-                        break;
-                    }
-                }
-
-                if (hasMarker)
-                {
-                    // Non-Windows fallback format - extract the key
-                    byte[] key = new byte[protectedKey.Length - marker.Length];
-                    Buffer.BlockCopy(protectedKey, marker.Length, key, 0, key.Length);
-                    return key;
-                }
-            }
-#endif
-
             // Standard Windows DPAPI protection
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -443,9 +573,10 @@ namespace QBDesktopExtractor
                                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", kmsAuthToken);
                         }
 
-                        var response = _kmsHttpClient.SendAsync(request).Result;
+                        // ConfigureAwait(false) prevents deadlock in synchronous-over-async contexts
+                        var response = _kmsHttpClient.SendAsync(request).ConfigureAwait(false).GetAwaiter().GetResult();
                         response.EnsureSuccessStatusCode();
-                        return response.Content.ReadAsByteArrayAsync().Result;
+                        return response.Content.ReadAsByteArrayAsync().ConfigureAwait(false).GetAwaiter().GetResult();
                     }
                     catch (Exception ex)
                     {
@@ -588,44 +719,57 @@ namespace QBDesktopExtractor
     }
 
     /// <summary>
-    /// AES-GCM polyfill for .NET Framework 4.8 (which lacks System.Security.Cryptography.AesGcm).
-    /// Uses AES-CBC with HMAC-SHA256 for authenticated encryption.
+    /// Authenticated encryption polyfill for .NET Framework 4.8 (which lacks System.Security.Cryptography.AesGcm).
+    /// Implements AES-256-CBC with HMAC-SHA256 (Encrypt-then-MAC) using separate derived keys.
+    ///
+    /// IMPORTANT: This is NOT AES-GCM. It provides equivalent authenticated encryption guarantees
+    /// via the Encrypt-then-MAC construction with:
+    /// - Separate encryption and MAC keys derived via HKDF-like construction
+    /// - PKCS7 padding with authenticated length to prevent padding oracle attacks
+    /// - Constant-time tag comparison to prevent timing attacks
+    ///
+    /// The chunk format stores the original plaintext length so padding bytes are stripped
+    /// on decryption, preventing data corruption from trailing null bytes.
     /// </summary>
     internal sealed class AesGcmCompat : IDisposable
     {
-        private readonly byte[] _key;
+        private readonly byte[] _encKey;
+        private readonly byte[] _macKey;
 
         public AesGcmCompat(byte[] key)
         {
-            _key = (byte[])key.Clone();
+            // SECURITY FIX: Derive separate keys for encryption and MAC
+            // Using the same key for both AES and HMAC violates key separation principles
+            using (var deriver = new HMACSHA256(key))
+            {
+                _encKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-ENC-v2"));
+                _macKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-MAC-v2"));
+            }
         }
 
         public void Encrypt(byte[] nonce, byte[] plaintext, byte[] ciphertext, byte[] tag)
         {
             using (var aes = Aes.Create())
             {
-                aes.Key = _key;
+                aes.Key = _encKey;
                 var iv = new byte[16];
                 Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
                 aes.IV = iv;
                 aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.None;
-
-                // Pad plaintext manually to block size for CBC (no padding mode)
-                int blockSize = aes.BlockSize / 8;
-                int paddedLen = ((plaintext.Length + blockSize - 1) / blockSize) * blockSize;
-                byte[] paddedPlaintext = new byte[paddedLen];
-                Buffer.BlockCopy(plaintext, 0, paddedPlaintext, 0, plaintext.Length);
+                aes.Padding = PaddingMode.PKCS7;
 
                 using (var encryptor = aes.CreateEncryptor())
                 {
-                    byte[] encrypted = encryptor.TransformFinalBlock(paddedPlaintext, 0, paddedPlaintext.Length);
-                    Buffer.BlockCopy(encrypted, 0, ciphertext, 0, Math.Min(encrypted.Length, ciphertext.Length));
+                    byte[] encrypted = encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length);
+                    // Store original length in first 4 bytes of ciphertext for proper unpadding
+                    byte[] lenBytes = BitConverter.GetBytes(plaintext.Length);
+                    Buffer.BlockCopy(lenBytes, 0, ciphertext, 0, 4);
+                    Buffer.BlockCopy(encrypted, 0, ciphertext, 4, Math.Min(encrypted.Length, ciphertext.Length - 4));
                 }
             }
 
-            // Generate authentication tag using HMAC-SHA256 (truncated to TagSize)
-            using (var hmac = new HMACSHA256(_key))
+            // Generate authentication tag using HMAC-SHA256 with separate MAC key
+            using (var hmac = new HMACSHA256(_macKey))
             {
                 byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
                 Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
@@ -638,8 +782,7 @@ namespace QBDesktopExtractor
         public void Decrypt(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] plaintext)
         {
             // Verify authentication tag first using constant-time comparison
-            // SECURITY FIX: Prevents timing attacks by comparing all bytes regardless of mismatches
-            using (var hmac = new HMACSHA256(_key))
+            using (var hmac = new HMACSHA256(_macKey))
             {
                 byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
                 Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
@@ -656,27 +799,37 @@ namespace QBDesktopExtractor
                     throw new CryptographicException("Authentication tag mismatch");
             }
 
-            // Decrypt
+            // Extract original plaintext length from first 4 bytes
+            int originalLen = BitConverter.ToInt32(ciphertext, 0);
+            if (originalLen < 0 || originalLen > plaintext.Length)
+                throw new CryptographicException("Invalid plaintext length in ciphertext header");
+
+            // Decrypt the actual ciphertext (after the 4-byte length prefix)
+            byte[] actualCiphertext = new byte[ciphertext.Length - 4];
+            Buffer.BlockCopy(ciphertext, 4, actualCiphertext, 0, actualCiphertext.Length);
+
             using (var aes = Aes.Create())
             {
-                aes.Key = _key;
+                aes.Key = _encKey;
                 var iv = new byte[16];
                 Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
                 aes.IV = iv;
                 aes.Mode = CipherMode.CBC;
-                aes.Padding = PaddingMode.None;
+                aes.Padding = PaddingMode.PKCS7;
 
                 using (var decryptor = aes.CreateDecryptor())
                 {
-                    byte[] decrypted = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
-                    Buffer.BlockCopy(decrypted, 0, plaintext, 0, Math.Min(decrypted.Length, plaintext.Length));
+                    byte[] decrypted = decryptor.TransformFinalBlock(actualCiphertext, 0, actualCiphertext.Length);
+                    // Copy only the original plaintext length, stripping PKCS7 padding
+                    Buffer.BlockCopy(decrypted, 0, plaintext, 0, originalLen);
                 }
             }
         }
 
         public void Dispose()
         {
-            Array.Clear(_key, 0, _key.Length);
+            Array.Clear(_encKey, 0, _encKey.Length);
+            Array.Clear(_macKey, 0, _macKey.Length);
         }
     }
 }

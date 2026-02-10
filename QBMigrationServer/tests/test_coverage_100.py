@@ -1005,26 +1005,20 @@ class TestLicenseAPI:
             assert secret is not None
 
     def test_license_create_endpoint(self, client, app, db_session, test_user):
-        """Lines 493-532: license creation (admin only)."""
+        """Lines 493-532: license creation (admin only).
+
+        Note: test_user has role='admin', so admin_required passes via is_admin().
+        """
         from api.auth import create_token
         token = create_token(test_user.id, test_user.email)
 
-        # Without admin: should get 403
+        # test_user has role=admin, so this should succeed (not 403)
         response = client.post(
             "/api/license/create",
             json={"tier": "professional", "user_email": "cust@test.com"},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert response.status_code == 403
-
-        # With admin: should get 201 or 400/500
-        with patch.dict(os.environ, {"ADMIN_EMAILS": test_user.email}):
-            response = client.post(
-                "/api/license/create",
-                json={"tier": "professional", "user_email": "cust@test.com", "order_id": "ORD-1"},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            assert response.status_code in [201, 400, 500]
+        assert response.status_code in [201, 400, 500]
 
     def test_license_validate_endpoint(self, client, app, db_session):
         """Lines 245, 270: license validation endpoint."""
@@ -1049,26 +1043,20 @@ class TestLicenseAPI:
         assert response.status_code in [200, 400, 404]
 
     def test_license_deactivate_endpoint(self, client, app, db_session, test_user):
-        """Lines 535-580: license deactivation (admin only)."""
+        """Lines 535-580: license deactivation (admin only).
+
+        Note: test_user has role='admin', so admin_required passes via is_admin().
+        """
         from api.auth import create_token
         token = create_token(test_user.id, test_user.email)
 
-        # Without admin: should get 403
+        # test_user has role=admin, so admin check passes; nonexistent key → 400/404
         response = client.post(
             "/api/license/deactivate",
             json={"license_key": "nonexistent-key"},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert response.status_code == 403
-
-        # With admin: should get 404 (nonexistent key)
-        with patch.dict(os.environ, {"ADMIN_EMAILS": test_user.email}):
-            response = client.post(
-                "/api/license/deactivate",
-                json={"license_key": "nonexistent-key"},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            assert response.status_code in [400, 404, 500]
+        assert response.status_code in [400, 404, 500]
 
     def test_license_usage_check(self, client, app, db_session):
         """Lines 328-393: license usage check (POST with license_key)."""

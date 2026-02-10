@@ -55,7 +55,7 @@ class CleanupScheduler:
     def _initialize_aws_manager(self):
         """Initialize AWS manager if not already done"""
         if not self.aws_manager:
-            region = self.app.config.get("AWS_REGION", "us-east-1")
+            region = self.app.config.get("AWS_REGION", "ca-central-1")
             self.aws_manager = AWSMigrationManager(region=region)
 
     def _find_migrations_needing_cleanup(self):

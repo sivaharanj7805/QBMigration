@@ -54,16 +54,21 @@ class TestExtractorInfo:
 
 
 class TestExtractorStatus:
-    """Tests for GET /api/extractor/status"""
+    """Tests for GET /api/extractor/status (requires authentication)"""
 
-    def test_status_returns_200(self, client):
-        """Status endpoint should return 200."""
-        response = client.get("/api/extractor/status")
+    def test_status_returns_200(self, authenticated_client):
+        """Status endpoint should return 200 when authenticated."""
+        response = authenticated_client.get("/api/extractor/status")
         assert response.status_code == 200
 
-    def test_status_returns_all_sources(self, client):
-        """Status endpoint must report on all download sources."""
+    def test_status_requires_auth(self, client):
+        """Status endpoint should return 401 without authentication."""
         response = client.get("/api/extractor/status")
+        assert response.status_code == 401
+
+    def test_status_returns_all_sources(self, authenticated_client):
+        """Status endpoint must report on all download sources."""
+        response = authenticated_client.get("/api/extractor/status")
         data = response.get_json()
 
         expected_sources = [
@@ -78,9 +83,9 @@ class TestExtractorStatus:
         for source in expected_sources:
             assert source in data, f"Missing source '{source}' in status response"
 
-    def test_status_sources_have_available_field(self, client):
+    def test_status_sources_have_available_field(self, authenticated_client):
         """Each source in status should have an 'available' boolean."""
-        response = client.get("/api/extractor/status")
+        response = authenticated_client.get("/api/extractor/status")
         data = response.get_json()
 
         sources_with_available = [
@@ -97,15 +102,15 @@ class TestExtractorStatus:
                 "available" in data[source]
             ), f"Source '{source}' missing 'available' field"
 
-    def test_status_has_recommended_download(self, client):
+    def test_status_has_recommended_download(self, authenticated_client):
         """Status endpoint should include a recommended download URL."""
-        response = client.get("/api/extractor/status")
+        response = authenticated_client.get("/api/extractor/status")
         data = response.get_json()
         assert "recommended_download" in data
 
-    def test_status_fallback_always_available(self, client):
+    def test_status_fallback_always_available(self, authenticated_client):
         """Fallback generator should always be available."""
-        response = client.get("/api/extractor/status")
+        response = authenticated_client.get("/api/extractor/status")
         data = response.get_json()
         assert data["fallback_generator"]["available"] is True
 

@@ -272,9 +272,13 @@ export async function authFetch(
     }
 
     // SECURITY: Add CSRF token for non-GET requests
+    // Auto-refresh expired CSRF token before mutation to prevent 403 rejections
     const method = (options.method || 'GET').toUpperCase();
-    if (method !== 'GET' && method !== 'HEAD' && csrfToken) {
-        headers.set('X-CSRF-Token', csrfToken);
+    if (method !== 'GET' && method !== 'HEAD') {
+        const token = await ensureValidCsrfToken();
+        if (token) {
+            headers.set('X-CSRF-Token', token);
+        }
     }
 
     try {

@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from api.auth import require_auth
+from extensions import limiter
 from flask import Blueprint, jsonify, request
 from models import Migration, db
 from utils.pii_redaction import hash_ip
@@ -169,6 +170,7 @@ def upload_qb_export():
 
 
 @file_upload_bp.route("/supported-exports", methods=["GET"])
+@limiter.limit("30/minute")
 def get_supported_exports():
     """Get list of supported QuickBooks export types"""
     return jsonify(
@@ -224,6 +226,7 @@ def get_supported_exports():
 
 
 @file_upload_bp.route("/export-guide/<entity_type>", methods=["GET"])
+@limiter.limit("30/minute")
 def get_export_guide(entity_type):
     """Get specific export instructions for an entity type"""
 
