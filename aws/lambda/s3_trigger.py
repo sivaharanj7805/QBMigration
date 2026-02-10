@@ -50,7 +50,7 @@ def trigger_migration_processing(session_id: str, bucket: str, key: str):
     # Option 1: Publish to SNS topic
     sns_topic = os.getenv("MIGRATION_SNS_TOPIC")
     if sns_topic:
-        sns = boto3.client("sns")
+        sns = boto3.client("sns", region_name=os.getenv("AWS_REGION", "ca-central-1"))
         sns.publish(
             TopicArn=sns_topic,
             Message=json.dumps(

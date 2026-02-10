@@ -57,7 +57,7 @@ Primary Region: ca-central-1 (Montreal)
 │   └── Isolated Subnets: Database replicas
 ├── RDS PostgreSQL: Multi-AZ
 ├── ElastiCache Redis: Multi-AZ
-├── S3: Cross-region replication to us-east-1
+├── S3: Cross-region replication to ca-west-1
 └── CloudFront: Global CDN
 ```
 
@@ -66,8 +66,8 @@ Primary Region: ca-central-1 (Montreal)
 | Component | Backup Method | Frequency | Retention | Location |
 |-----------|---------------|-----------|-----------|----------|
 | PostgreSQL | Automated snapshots | Continuous | 35 days | ca-central-1 |
-| PostgreSQL | Cross-region | Daily | 7 days | us-east-1 |
-| S3 Data | Cross-region replication | Real-time | 90 days | us-east-1 |
+| PostgreSQL | Cross-region | Daily | 7 days | ca-west-1 |
+| S3 Data | Cross-region replication | Real-time | 90 days | ca-west-1 |
 | Application Config | Git + S3 | On change | Unlimited | Multi-region |
 | Secrets | AWS Secrets Manager | Versioned | 30 versions | Multi-region |
 
@@ -128,7 +128,7 @@ Primary Region: ca-central-1 (Montreal)
 4. Begin customer communication
 
 #### Phase 2: Failover (15-60 minutes)
-1. Activate DR region (us-east-1):
+1. Activate DR region (ca-west-1):
    ```bash
    # Promote RDS read replica to master
    aws rds promote-read-replica \
@@ -364,7 +364,7 @@ We will publish a post-incident report within 48 hours."
 
 ### Appendix B: AWS Resources
 
-| Resource | Primary (ca-central-1) | DR (us-east-1) |
+| Resource | Primary (ca-central-1) | DR (ca-west-1) |
 |----------|------------------------|----------------|
 | RDS Instance | forensicbridge-prod | forensicbridge-dr-replica |
 | S3 Bucket | forensicbridge-migrations | forensicbridge-migrations-dr |

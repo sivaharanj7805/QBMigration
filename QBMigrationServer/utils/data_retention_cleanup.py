@@ -174,7 +174,7 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
                 "dry_run": dry_run,
             }
 
-        s3 = boto3.client("s3")
+        s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "ca-central-1"))
 
         # List objects in uploads/ prefix (temporary upload location)
         paginator = s3.get_paginator("list_objects_v2")

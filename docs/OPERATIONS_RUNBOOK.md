@@ -582,7 +582,7 @@ aws health describe-events \
     "services": ["S3"],
     "regions": ["ca-central-1"],
     "eventStatusCodes": ["open","upcoming"]
-  }' --region us-east-1
+  }' --region us-east-1  # NOTE: AWS Health API is a global service; must use us-east-1 as API endpoint (no data leaves Canada)
 
 # 4. Check VPC endpoint (if using Gateway endpoint for S3)
 aws ec2 describe-vpc-endpoints \
@@ -657,7 +657,7 @@ echo | openssl s_client -servername api.forensicbridge.ca -connect api.forensicb
 aws cloudfront get-distribution \
   --id DISTRIBUTION_ID \
   --query 'Distribution.DistributionConfig.ViewerCertificate' \
-  --region us-east-1
+  --region us-east-1  # NOTE: CloudFront API is a global service; must use us-east-1 as API endpoint (no data leaves Canada)
 ```
 
 **Resolution:**

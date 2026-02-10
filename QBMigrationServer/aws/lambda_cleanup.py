@@ -10,9 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 
-# Initialize AWS clients
-ec2 = boto3.client("ec2")
-s3 = boto3.client("s3")
+# Initialize AWS clients - PIPEDA: Must use ca-central-1 for Canadian data residency
+AWS_REGION = os.environ.get("AWS_REGION", "ca-central-1")
+ec2 = boto3.client("ec2", region_name=AWS_REGION)
+s3 = boto3.client("s3", region_name=AWS_REGION)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
