@@ -145,8 +145,8 @@ def _validate_relay_url(relay_state: str) -> str:
                 server_parsed = urllib.parse.urlparse(server_url)
                 if server_parsed.netloc:
                     allowed_domains.append(server_parsed.netloc.lower())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to parse server URL for allowed domains: %s", exc)
 
         # Always allow forensicbridge domains
         allowed_domains.extend(

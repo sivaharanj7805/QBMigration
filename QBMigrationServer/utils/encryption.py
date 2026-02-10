@@ -47,8 +47,8 @@ class EncryptionManager:
                         from utils.secrets_manager import get_secret
 
                         key_password = get_secret("rsa_key_password")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("AWS Secrets Manager lookup for RSA key password failed: %s", exc)
 
                 # CRITICAL SECURITY FIX: File-based password fallback REMOVED
                 # Never read secrets from plaintext files - use env vars or Secrets Manager only
@@ -87,8 +87,8 @@ class EncryptionManager:
                 from utils.secrets_manager import get_secret
 
                 key_password = get_secret("rsa_key_password")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("AWS Secrets Manager lookup for RSA key password failed: %s", exc)
 
         if not key_password:
             # FIX 100/100: Require RSA_KEY_PASSWORD in ALL environments

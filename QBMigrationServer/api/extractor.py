@@ -318,8 +318,8 @@ def is_cache_valid():
             if actual_hash != expected_hash:
                 logger.warning("Cache hash mismatch, invalidating cache")
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Cache hash verification failed: %s", exc)
 
     return True
 

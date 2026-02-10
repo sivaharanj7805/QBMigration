@@ -432,9 +432,9 @@ class QBDataTransformer:
 
         logger.info("\n" + "=" * 60)
         logger.info("PARALLEL TRANSFORMATION COMPLETE!")
-        logger.info(f"✅ Processed: {self.stats['total_processed']}")
-        logger.info(f"⚠️  Skipped: {self.stats['total_skipped']}")
-        logger.info(f"📋 Manual Review: {len(self.manual_review)}")
+        logger.info(f"[OK] Processed: {self.stats['total_processed']}")
+        logger.info(f"[WARN] Skipped: {self.stats['total_skipped']}")
+        logger.info(f"Manual Review: {len(self.manual_review)}")
         logger.info("=" * 60)
 
         return result
@@ -813,7 +813,7 @@ class QBDataTransformer:
             if entity_type not in qb_data:
                 continue
 
-            logger.info(f"\n🔄 Processing {entity_type}...")
+            logger.info(f"\nProcessing {entity_type}...")
 
             entities = qb_data[entity_type]
             if not isinstance(entities, list):
@@ -848,11 +848,11 @@ class QBDataTransformer:
                             "error": str(e),
                         }
                     )
-                    logger.error(f"❌ Error: {e}")
+                    logger.error(f"[FAIL] Error: {e}")
 
             if transformed:
                 result["entities"][entity_type] = transformed
-                logger.info(f"✅ Transformed {len(transformed)} {entity_type}(s)")
+                logger.info(f"[OK] Transformed {len(transformed)} {entity_type}(s)")
 
         # Generate summary
         result["summary"] = self._generate_summary()
@@ -873,9 +873,9 @@ class QBDataTransformer:
 
         logger.info("\n" + "=" * 60)
         logger.info("TRANSFORMATION COMPLETE!")
-        logger.info(f"✅ Processed: {self.stats['total_processed']}")
-        logger.info(f"⚠️  Skipped: {self.stats['total_skipped']}")
-        logger.info(f"📋 Manual Review: {len(self.manual_review)}")
+        logger.info(f"[OK] Processed: {self.stats['total_processed']}")
+        logger.info(f"[WARN] Skipped: {self.stats['total_skipped']}")
+        logger.info(f"Manual Review: {len(self.manual_review)}")
         logger.info("=" * 60)
 
         return result
@@ -3978,7 +3978,7 @@ class QBDataTransformer:
         Returns:
             Dict with file paths and statistics
         """
-        logger.info("🏛️ CASEWARE MODE ACTIVATED")
+        logger.info("CASEWARE MODE ACTIVATED")
         logger.info("Generating Audit-Ready CSV Bundle...")
 
         from caseware_exporter import CasewareExporter
@@ -3994,5 +3994,5 @@ class QBDataTransformer:
             qb_data, as_of_date=as_of_date, start_date=start_date, end_date=end_date
         )
 
-        logger.info("🏛️ CASEWARE MODE COMPLETE")
+        logger.info("CASEWARE MODE COMPLETE")
         return result

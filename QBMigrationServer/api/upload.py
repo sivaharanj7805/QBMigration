@@ -1874,8 +1874,8 @@ def abort_chunked_upload():
                     if s3_key:
                         try:
                             aws.delete_from_s3(s3_key)
-                        except Exception:
-                            pass  # Best effort
+                        except Exception as exc:
+                            logger.debug("Best-effort S3 cleanup failed for %s: %s", s3_key, exc)
             except Exception as e:
                 logger.warning(
                     f"Cleanup failed for aborted upload {upload_id}: {str(e)}"

@@ -363,11 +363,11 @@ def verify_test_environment():
     if not os.getenv("BACKUP_ENCRYPTION_KEY"):
         logger.warning("BACKUP_ENCRYPTION_KEY not set - encryption tests may fail")
 
-    logger.info("✅ Test environment verification passed")
+    logger.info("[OK] Test environment verification passed")
 
     yield
 
-    logger.info("✅ All tests completed")
+    logger.info("[OK] All tests completed")
 
 
 # ============================================================================
