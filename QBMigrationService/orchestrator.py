@@ -616,6 +616,21 @@ class MigrationOrchestrator:
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
+            # AUDIT FIX CRIT-01: Attempt rollback of partially-created QBO entities
+            rollback_result = None
+            if hasattr(self, "_created_entity_ids") and any(
+                ids for ids in self._created_entity_ids.values()
+            ):
+                try:
+                    logger.info(f"Migration {migration_id}: Attempting rollback of partial entities...")
+                    rollback_result = self.rollback_migration(
+                        qbo_client=qbo_client, oauth_manager=oauth_manager
+                    )
+                    logger.info(f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}")
+                except Exception as rollback_err:
+                    logger.error(f"Migration {migration_id}: Rollback failed: {rollback_err}")
+                    rollback_result = {"rollback_error": str(rollback_err)}
+
             # Preserve partial progress and manual_review even on failure
             error_result = {
                 "success": False,
@@ -624,6 +639,10 @@ class MigrationOrchestrator:
                 "duration_seconds": duration,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
             }
+
+            if rollback_result:
+                error_result["rollback"] = rollback_result
+
             # Include manual_review if transformer was initialized before crash
             try:
                 if transformer and hasattr(transformer, "manual_review"):

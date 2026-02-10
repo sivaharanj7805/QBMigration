@@ -884,7 +884,7 @@ For technical support: support@forensicbridge.com
             )
             result["files"]["general_ledger"] = gl_file
             logger.info(
-                f"✅ General Ledger: {self.stats['transactions_exported']} transactions"
+                f"General Ledger: {self.stats['transactions_exported']} transactions"
             )
 
         if progress_callback:

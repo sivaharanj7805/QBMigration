@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Shield, Terminal } from "lucide-react";
+import { authFetch } from "@/lib/auth";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 interface LogEntry {
     timestamp: string;
@@ -31,15 +34,13 @@ const demoLogs: LogEntry[] = [
 ];
 
 /**
- * Fetch real forensic log entries from the migration API.
- * Falls back to demo data if the fetch fails or no migrationId is provided.
+ * AUDIT FIX CRIT-02/CRIT-03: Fetch real forensic logs using authFetch (httpOnly cookies)
+ * instead of reading localStorage auth_token (XSS-vulnerable).
+ * Uses API_URL from env instead of relative URL.
  */
 async function fetchForensicLogs(migrationId: string): Promise<LogEntry[]> {
     try {
-        const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
-        const res = await fetch(`/api/migrations/${migrationId}/forensic-logs`, {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        const res = await authFetch(`${API_URL}/api/migrations/${migrationId}/forensic-logs`);
         if (!res.ok) return [];
         const data = await res.json();
         if (data.success && Array.isArray(data.logs)) {
@@ -57,16 +58,19 @@ async function fetchForensicLogs(migrationId: string): Promise<LogEntry[]> {
 
 export function ForensicIntegrityPulse({ isLive = false, migrationId }: ForensicIntegrityPulseProps) {
     const [logs, setLogs] = useState<LogEntry[]>([]);
-    const [logIndex, setLogIndex] = useState(0);
     const terminalRef = useRef<HTMLDivElement>(null);
+    // Track whether we have real API data (to avoid overwriting with demos)
+    const hasRealData = useRef(false);
 
     // Fetch real forensic logs from API when live and migrationId is available
     useEffect(() => {
         if (isLive && migrationId) {
             fetchForensicLogs(migrationId).then((realLogs) => {
                 if (realLogs.length > 0) {
+                    hasRealData.current = true;
                     setLogs(realLogs);
                 } else {
+                    hasRealData.current = false;
                     // Fall back to demo logs if API returns empty
                     setLogs(demoLogs.slice(0, 5).map(log => ({
                         ...log,
@@ -75,6 +79,7 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
                 }
             });
         } else if (!isLive) {
+            hasRealData.current = false;
             // Show static demo logs when not live
             setLogs(demoLogs.slice(0, 5).map(log => ({
                 ...log,
@@ -83,32 +88,31 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
         }
     }, [isLive, migrationId]);
 
-    // Separate effect for live streaming - always returns cleanup function
-    // FIX: Removed logIndex from dependency array to prevent infinite loop
-    // Use a ref to track the current index instead
-    const logIndexRef = useRef(logIndex);
-    logIndexRef.current = logIndex;
-
+    // AUDIT FIX CRIT-02: Live mode polls the API for real logs instead of
+    // unconditionally injecting fabricated demo data every 800ms.
+    // Only falls back to demo cycling when no real API data is available.
     useEffect(() => {
         if (!isLive) {
-            return; // No interval to clean up when not live
+            return;
         }
 
         const interval = setInterval(() => {
-            const currentIndex = logIndexRef.current;
-            const newLog = {
-                ...demoLogs[currentIndex % demoLogs.length],
-                timestamp: new Date().toISOString()
-            };
-            setLogs(prev => [...prev.slice(-15), newLog]);
-            setLogIndex(prev => prev + 1);
-        }, 800);
+            if (migrationId) {
+                // Poll API for real forensic logs
+                fetchForensicLogs(migrationId).then((realLogs) => {
+                    if (realLogs.length > 0) {
+                        hasRealData.current = true;
+                        setLogs(realLogs);
+                    }
+                    // If API returns empty and we had no real data, leave demo logs as-is
+                });
+            }
+        }, 3000); // Poll every 3 seconds (not 800ms demo spam)
 
-        // FIX: Always return cleanup function when isLive is true
         return () => {
             clearInterval(interval);
         };
-    }, [isLive]); // FIX: Removed logIndex from dependency array
+    }, [isLive, migrationId]);
 
     // Auto-scroll to bottom
     useEffect(() => {

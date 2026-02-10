@@ -1094,6 +1094,69 @@ Resources:
           Value: !Sub forensicbridge-${Environment}-server
           PropagateAtLaunch: true
 
+  # ============================================================================
+  # LAMBDA CLEANUP FUNCTION WITH DLQ
+  # ============================================================================
+  CleanupDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub forensicbridge-${Environment}-cleanup-dlq
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CleanupLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:TerminateInstances
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt MigrationBucket.Arn
+                  - !Sub '${MigrationBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt CleanupDLQ.Arn
+
+  CleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub qb-migration-${Environment}-cleanup
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      DeadLetterConfig:
+        TargetArn: !GetAtt CleanupDLQ.Arn
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          S3_BUCKET: !Ref MigrationBucket
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              """Placeholder - deploy actual cleanup logic separately."""
+              return {"statusCode": 200}
+
 # ============================================================================
 # OUTPUTS
 # ============================================================================

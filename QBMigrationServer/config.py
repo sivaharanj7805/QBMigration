@@ -87,7 +87,7 @@ class Config:
                 import warnings
 
                 warnings.warn(
-                    "⚠️  SECURITY WARNING: Using AWS access keys in production. "
+                    "SECURITY WARNING: Using AWS access keys in production. "
                     "Consider using IAM roles instead for better security.",
                     UserWarning,
                 )

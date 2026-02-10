@@ -1953,7 +1953,7 @@ class PremiumQBOClient:
                 }
 
                 logger.info(
-                    f"    ✓ {entity_type}: {succeeded_count} succeeded, {failed_count} failed"
+                    f"    {entity_type}: {succeeded_count} succeeded, {failed_count} failed"
                 )
 
             except Exception as e:

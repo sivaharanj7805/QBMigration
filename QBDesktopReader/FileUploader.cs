@@ -801,7 +801,9 @@ namespace QBDesktopExtractor
 
             long delayMs = baseDelay;
 
-            if (_config.Advanced.EnableExponentialBackoff)
+            // FIX HIGH: Always use exponential backoff (1s, 2s, 4s, 8s pattern).
+            // Previously gated behind EnableExponentialBackoff config flag, which
+            // allowed fixed-delay retries that cause thundering herd problems.
             {
                 // Overflow protection: cap exponent to prevent overflow
                 // For baseDelay=100 and exponent=20, result is ~104M which fits in int

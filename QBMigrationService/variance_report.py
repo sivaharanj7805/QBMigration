@@ -115,8 +115,16 @@ class VarianceReportGenerator:
             # Convert to string first to preserve precision (avoid float intermediary)
             return Decimal(str(value))
         except Exception:
+            # AUDIT FIX CRIT-09: Refuse to silently default non-empty financial values
+            # to zero — doing so could mask discrepancies and produce a false PASS
+            str_val = str(value).strip()
+            if str_val:
+                raise ValueError(
+                    f"Cannot convert financial value '{value}' to Decimal. "
+                    "Refusing to silently default to zero."
+                )
             logger.warning(
-                f"Failed to convert '{value}' to Decimal, using default '{default}'"
+                f"Empty/whitespace value converted to default '{default}'"
             )
             return Decimal(default)
 

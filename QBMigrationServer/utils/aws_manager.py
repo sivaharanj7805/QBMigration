@@ -513,7 +513,7 @@ class AWSMigrationManager:
             instance_id = response["Instances"][0]["InstanceId"]
 
             logger.info(
-                f"✓ Created EC2 instance: {instance_id} for migration {migration_id}"
+                f"Created EC2 instance: {instance_id} for migration {migration_id}"
             )
 
             # Publish metric
@@ -877,7 +877,7 @@ exit $EXIT_CODE
             cleanup_success = all([instance_terminated, s3_deleted, secret_deleted])
             if cleanup_success:
                 logger.info(
-                    f"✓ Complete cleanup successful for migration {migration_id}"
+                    f"Complete cleanup successful for migration {migration_id}"
                 )
             else:
                 logger.warning(

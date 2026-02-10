@@ -353,7 +353,7 @@ if __name__ == "__main__":
         validation = validate_required_secrets(required)
 
         for key, present in validation.items():
-            status = "✅" if present else "❌"
+            status = "OK" if present else "MISSING"
             logger.info(f"  {status} {key}")
 
     except SecretsManagerError as e:

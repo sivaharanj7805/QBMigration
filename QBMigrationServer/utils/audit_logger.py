@@ -55,6 +55,7 @@ Version: 1.0.0
 """
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -63,6 +64,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
+
+# AUDIT FIX HIGH: HMAC key for audit log tamper protection
+# In production, this should be set via environment variable
+AUDIT_HMAC_KEY = os.getenv("AUDIT_HMAC_KEY", "").encode("utf-8")
 
 # Configure audit logger
 AUDIT_LOG_FILE = os.path.join(
@@ -292,8 +297,16 @@ class AuditLogger:
         if ctx.get("correlation_id") and not event.correlation_id:
             event.correlation_id = ctx["correlation_id"]
 
-        # Log to audit file (JSON format)
-        self.logger.info(event.to_json())
+        # AUDIT FIX HIGH: Add HMAC signature for tamper detection
+        event_json = event.to_json()
+        if AUDIT_HMAC_KEY:
+            sig = hmac.new(AUDIT_HMAC_KEY, event_json.encode("utf-8"), hashlib.sha256).hexdigest()
+            log_line = json.dumps({"payload": json.loads(event_json), "hmac_sha256": sig})
+        else:
+            log_line = event_json
+
+        # Log to audit file (JSON format with HMAC if configured)
+        self.logger.info(log_line)
 
         # Also log summary to app logger (sanitize user-controlled fields to prevent log injection)
         self.app_logger.info(

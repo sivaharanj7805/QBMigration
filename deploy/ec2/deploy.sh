@@ -69,6 +69,25 @@ if [ ! -f /etc/qbmigration/environment ]; then
     exit 1
 fi
 
+# Check SSL certificate expiry (if DOMAIN is set and openssl is available)
+SSL_DOMAIN="${DOMAIN:-}"
+if [ -n "$SSL_DOMAIN" ] && command -v openssl &>/dev/null; then
+    EXPIRY_DATE=$(echo | openssl s_client -servername "$SSL_DOMAIN" -connect "$SSL_DOMAIN:443" 2>/dev/null \
+        | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+    if [ -n "$EXPIRY_DATE" ]; then
+        EXPIRY_EPOCH=$(date -d "$EXPIRY_DATE" +%s 2>/dev/null)
+        NOW_EPOCH=$(date +%s)
+        DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+        if [ "$DAYS_LEFT" -lt 30 ]; then
+            echo "WARNING: SSL certificate for $SSL_DOMAIN expires in $DAYS_LEFT days ($EXPIRY_DATE)"
+        else
+            echo "SSL certificate for $SSL_DOMAIN: OK ($DAYS_LEFT days remaining)"
+        fi
+    else
+        echo "WARNING: Could not retrieve SSL certificate for $SSL_DOMAIN"
+    fi
+fi
+
 # =============================================================================
 # Create backup
 # =============================================================================

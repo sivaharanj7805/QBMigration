@@ -200,11 +200,12 @@ def verify_aws_configuration(app):
 
 def auto_migrate_database(app):
     """
-    Auto-migrate database schema on startup.
+    LEGACY auto-migrate database schema on startup.
     Adds any missing columns to ensure code and database are in sync.
 
-    NOTE: This should be replaced with Alembic migrations for production.
-    Uses advisory lock to prevent concurrent DDL from Gunicorn workers.
+    AUDIT FIX HIGH: Skips when Flask-Migrate (Alembic) is managing the schema,
+    detected by the presence of the alembic_version table. New schema changes
+    should use: flask db migrate -m "description" && flask db upgrade
     """
     # Skip for SQLite (used in testing) - tables are created fresh via db.create_all()
     db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
@@ -214,6 +215,21 @@ def auto_migrate_database(app):
 
     try:
         with db.engine.connect() as conn:
+            # AUDIT FIX HIGH: Skip if Alembic is managing the schema
+            try:
+                result = conn.execute(text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_name = 'alembic_version'"
+                ))
+                if result.scalar():
+                    app.logger.info(
+                        "Alembic migration table detected - skipping legacy auto_migrate_database. "
+                        "Use 'flask db upgrade' for schema changes."
+                    )
+                    return
+            except Exception:
+                pass  # Table doesn't exist yet, continue with legacy migration
+
             # Use PostgreSQL advisory lock to prevent concurrent DDL from Gunicorn workers
             db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
             if "postgresql" in db_url:

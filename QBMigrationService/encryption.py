@@ -149,12 +149,14 @@ class EncryptionManager:
         if isinstance(tag, str):
             tag = base64.b64decode(tag)
         if isinstance(encrypted_data, str):
-            # Could be base64 or raw string
+            # AUDIT FIX CRIT-11: Reject invalid base64 instead of silently
+            # falling back to UTF-8 encode (which produces garbage ciphertext)
             try:
                 encrypted_data = base64.b64decode(encrypted_data)
-            except Exception:
-                # Assume it's already bytes-like
-                encrypted_data = encrypted_data.encode("utf-8")
+            except Exception as b64_err:
+                raise ValueError(
+                    f"encrypted_data is a string but not valid base64: {b64_err}"
+                )
 
         # Decrypt using the core decrypt_data method
         plaintext_bytes = EncryptionManager.decrypt_data(
@@ -321,7 +323,7 @@ class EncryptionManager:
                 f"HASH MISMATCH: Expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
             )
             raise ValueError(
-                f"❌ HASH VERIFICATION FAILED - DATA INTEGRITY COMPROMISED\n"
+                f"HASH VERIFICATION FAILED - DATA INTEGRITY COMPROMISED\n"
                 f"   Expected: {expected_hash}\n"
                 f"   Actual:   {actual_hash}\n"
                 f"\n"
@@ -377,8 +379,9 @@ class EncryptionManager:
                     encrypted
                 )
                 return plaintext
-            except Exception:
-                # Fall through to legacy formats
+            except Exception as json_err:
+                # AUDIT FIX CRIT-11: Log JSON decryption failure before trying legacy
+                logger.warning(f"JSON-format decryption failed, trying legacy formats: {json_err}")
                 pass
 
         # Try legacy colon-separated formats
@@ -402,7 +405,7 @@ class EncryptionManager:
             elif len(parts) == 3:
                 # CBC mode (from .NET Framework version) - LEGACY ONLY
                 logger.info(
-                    "⚠️  WARNING: Legacy CBC encryption detected. Upgrade to GCM."
+                    "WARNING: Legacy CBC encryption detected. Upgrade to GCM."
                 )
 
                 iv = base64.b64decode(parts[0])
@@ -640,7 +643,6 @@ class EncryptionManager:
             # Decode ciphertext in memory (still needed for GCM)
             # Note: We can't stream GCM decryption due to authentication tag verification
             ciphertext = base64.b64decode(ciphertext_b64)
-            len(ciphertext)
 
             # Decrypt
             plaintext_bytes = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
@@ -654,7 +656,7 @@ class EncryptionManager:
                 actual_hash = hashlib.sha256(plaintext_bytes).hexdigest()
                 if actual_hash != expected_hash:
                     raise ValueError(
-                        f"❌ HASH VERIFICATION FAILED\n"
+                        f"HASH VERIFICATION FAILED\n"
                         f"   Expected: {expected_hash}\n"
                         f"   Actual:   {actual_hash}"
                     )
@@ -680,7 +682,7 @@ class EncryptionManager:
                 pass
 
             logger.info(
-                f"✅ Streamed decryption complete: {os.path.basename(output_path)}"
+                f"Streamed decryption complete: {os.path.basename(output_path)}"
             )
             logger.info(f"   Size: {len(plaintext_bytes) / 1024 / 1024:.1f} MB")
 
