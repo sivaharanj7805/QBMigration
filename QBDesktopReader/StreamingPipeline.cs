@@ -165,9 +165,20 @@ namespace QBDesktopExtractor
                     {
                         try
                         {
-                            // Use chmod via UnixFileMode (.NET 7+) or fallback to Process
-                            var dirInfoUnix = new DirectoryInfo(baseDir);
-                            dirInfoUnix.UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+                            // net48 does not have UnixFileMode; shell out to chmod instead
+                            var chmod = new System.Diagnostics.Process
+                            {
+                                StartInfo = new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = "chmod",
+                                    Arguments = "700 " + baseDir,
+                                    UseShellExecute = false,
+                                    CreateNoWindow = true,
+                                    RedirectStandardError = true
+                                }
+                            };
+                            chmod.Start();
+                            chmod.WaitForExit(5000);
                             _logger?.Log(LogLevel.Debug, "Set Unix permissions 700 on temp directory");
                         }
                         catch (Exception ex)

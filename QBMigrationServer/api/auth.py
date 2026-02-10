@@ -1979,10 +1979,10 @@ def forgot_password():
             pass
 
     # Ensure constant response time to prevent timing attacks
-    elapsed = time.time() - start_time
+    elapsed = _time.time() - start_time
     min_response_time = 0.3  # 300ms minimum
     if elapsed < min_response_time:
-        time.sleep(min_response_time - elapsed)
+        _time.sleep(min_response_time - elapsed)
 
     return (
         jsonify(
@@ -2484,10 +2484,10 @@ def check_captcha_requirement():
 
     # HIGH FIX: Ensure constant response timing to prevent email enumeration
     # Response should take the same time regardless of whether user exists
-    elapsed = time.time() - start_time
+    elapsed = _time.time() - start_time
     min_response_time = 0.1  # 100ms minimum response time
     if elapsed < min_response_time:
-        time.sleep(min_response_time - elapsed)
+        _time.sleep(min_response_time - elapsed)
 
     # HIGH FIX: Do NOT return failed_attempts - this reveals if user exists
     # Attackers could enumerate emails by checking which ones have > 0 attempts

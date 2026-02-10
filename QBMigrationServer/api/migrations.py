@@ -597,7 +597,7 @@ def _provision_aws_instance(migration_id, migration, qbo_credentials):
     # Initialize AWS manager
     logger.info(f"Starting AWS migration for {migration_id}...")
     aws_manager = AWSMigrationManager(
-        region=current_app.config.get("AWS_REGION", "us-east-1")
+        region=current_app.config.get("AWS_REGION", "ca-central-1")
     )
 
     # Get webhook secret
@@ -704,7 +704,7 @@ def _consume_migration_credit(user_id, migration_id, migration, aws_manager, ins
         )
     available_credit.status = "used"
     available_credit.used_at = datetime.now(timezone.utc)
-    available_credit.migration_id = migration.id
+    available_credit.migration_id = migration.migration_id
     db.session.commit()
     return None
 

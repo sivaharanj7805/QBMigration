@@ -39,6 +39,20 @@ logger = logging.getLogger(__name__)
 # name ('forensicbridge_tasks' vs 'qbmigration') and minimal configuration.
 from QBMigrationServer.celery_worker import celery  # noqa: E402
 
+# Cache the Flask app instance to avoid creating a new app + DB pool on every
+# status update call.  Thread-safe: create_app() is idempotent and the GIL
+# protects the one-time assignment.
+_cached_app = None
+
+
+def _get_app():
+    """Return a cached Flask app instance for use in Celery task helpers."""
+    global _cached_app
+    if _cached_app is None:
+        from app import create_app
+        _cached_app = create_app()
+    return _cached_app
+
 
 def update_migration_status(
     migration_id: str,
@@ -63,11 +77,10 @@ def update_migration_status(
         message: Current step/status message
         error: Error message (will be encrypted)
     """
-    from app import create_app
     from models.database import db
     from models.migration import Migration
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         # FIX: Use filter_by with migration_id (UUID string), not query.get (primary key)
         migration = Migration.query.filter_by(migration_id=migration_id).first()
@@ -283,13 +296,12 @@ def cleanup_migration_async(self, migration_id: str, instance_id: Optional[str] 
     """
     from datetime import datetime, timezone
 
-    from app import create_app
     from models.database import db
     from models.migration import Migration
 
     logger.info(f"Starting async cleanup for migration {migration_id}")
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         try:
             from utils.aws_manager import AWSMigrationManager
@@ -341,14 +353,13 @@ def cleanup_orphaned_resources():
     """
     from datetime import datetime, timedelta, timezone
 
-    from app import create_app
     from models.database import db
     from models.migration import Migration
     from sqlalchemy import or_
 
     logger.info("Starting orphaned resource cleanup")
 
-    app = create_app()
+    app = _get_app()
     with app.app_context():
         try:
             from utils.aws_manager import AWSMigrationManager

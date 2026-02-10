@@ -267,7 +267,15 @@ namespace QBDesktopExtractor
                         throw new InvalidDataException($"Invalid chunk length: {chunkLen}");
 
                     byte[] encryptedChunk = new byte[chunkLen];
-                    inputStream.Read(encryptedChunk, 0, chunkLen);
+                    // Stream.Read may return fewer bytes than requested; loop until full
+                    int totalRead = 0;
+                    while (totalRead < chunkLen)
+                    {
+                        int n = inputStream.Read(encryptedChunk, totalRead, chunkLen - totalRead);
+                        if (n == 0)
+                            throw new InvalidDataException($"Unexpected end of stream at chunk (expected {chunkLen} bytes, got {totalRead})");
+                        totalRead += n;
+                    }
 
                     byte[] decryptedChunk = DecryptChunk(encryptedChunk, key);
                     outputStream.Write(decryptedChunk, 0, decryptedChunk.Length);

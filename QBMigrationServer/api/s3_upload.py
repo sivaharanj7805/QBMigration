@@ -30,7 +30,7 @@ s3_config = Config(
 def get_s3_client():
     """Get configured S3 client"""
     return boto3.client(
-        "s3", region_name=os.getenv("AWS_REGION", "us-east-1"), config=s3_config
+        "s3", region_name=os.getenv("AWS_REGION", "ca-central-1"), config=s3_config
     )
 
 

@@ -34,7 +34,7 @@ class AWSMigrationManager:
     - v3.1 encryption metadata support
     """
 
-    def __init__(self, region="us-east-1"):
+    def __init__(self, region="ca-central-1"):
         """Initialize AWS clients"""
         self.region = region
 

@@ -53,6 +53,19 @@ def sanitize_migration_id(migration_id: str) -> str:
 
 
 # ============================================================================
+# ENVIRONMENT & REGION CONFIGURATION
+# ============================================================================
+
+# Environment (sandbox or production)
+# NOTE: Must be defined before credential validation which references it
+ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
+if ENVIRONMENT not in ("sandbox", "production"):
+    logger.warning(
+        f"Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
+    )
+    ENVIRONMENT = "sandbox"
+
+# ============================================================================
 # QUICKBOOKS ONLINE API CREDENTIALS
 # ============================================================================
 
@@ -70,18 +83,6 @@ if "YOUR_" in CLIENT_ID or "YOUR_" in CLIENT_SECRET:
             "Set QBO_CLIENT_ID and QBO_CLIENT_SECRET environment variables."
         )
     logger.warning("QBO credentials not configured. Set environment variables.")
-
-# ============================================================================
-# ENVIRONMENT & REGION CONFIGURATION
-# ============================================================================
-
-# Environment (sandbox or production)
-ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
-if ENVIRONMENT not in ("sandbox", "production"):
-    logger.warning(
-        f"Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
-    )
-    ENVIRONMENT = "sandbox"
 
 # Region support (US, CA, UK, AU, IN)
 REGION = os.getenv("QBO_REGION", "US").upper()

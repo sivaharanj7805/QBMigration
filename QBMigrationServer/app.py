@@ -1311,12 +1311,9 @@ def create_app(config_name="development"):  # noqa: C901
             if exception:
                 app.logger.error(f"Exception during request: {str(exception)}")
                 db.session.rollback()
-            else:
-                # Commit any pending changes from successful requests
-                try:
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
+            # NOTE: No auto-commit here.  View functions must explicitly call
+            # db.session.commit().  Auto-committing in teardown risks persisting
+            # dirty/partial ORM state that was never intended to be saved.
         except Exception as e:
             app.logger.error(f"Error during session teardown: {str(e)}")
         finally:
