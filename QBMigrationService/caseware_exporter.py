@@ -790,8 +790,8 @@ For technical support: support@forensicbridge.com
         try:
             with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
-        except IOError:
-            pass  # Metadata file is optional
+        except IOError as e:
+            logger.debug(f"Optional metadata file write failed: {e}")
 
         logger.info(f"Import instructions exported: {output_file}")
         return str(output_file)
@@ -895,7 +895,45 @@ For technical support: support@forensicbridge.com
         result["files"]["mapping"] = mapping_file
 
         if progress_callback:
-            progress_callback(3, 3, "Mapping file exported")
+            progress_callback(3, 4, "Mapping file exported")
+
+        # 4. Generate AiDA-ready data package for Caseware AI assistant
+        try:
+            from aida_integration import get_aida_service
+
+            aida_service = get_aida_service()
+            merkle_root = qb_data.get("merkle_root", "")
+            fiscal_year_end = end_date or as_of_date or ""
+            aida_package = aida_service.prepare_aida_package(
+                extracted_data=qb_data,
+                merkle_root=merkle_root,
+                company_name=self.company_name,
+                fiscal_year_end=fiscal_year_end,
+            )
+
+            # Write AiDA JSON package
+            aida_json_path = self.output_dir / "AiDA_DataPackage.json"
+            with open(aida_json_path, "w", encoding="utf-8") as f:
+                f.write(aida_service.export_for_aida(aida_package))
+            result["files"]["aida_package"] = str(aida_json_path)
+
+            # Write AiDA anomaly CSV
+            aida_csv_path = self.output_dir / "AiDA_Anomalies.csv"
+            with open(aida_csv_path, "w", encoding="utf-8-sig") as f:
+                f.write(aida_service.export_aida_summary_csv(aida_package))
+            result["files"]["aida_anomalies"] = str(aida_csv_path)
+
+            logger.info(
+                f"AiDA package generated: {len(aida_package.transactions)} transactions, "
+                f"confidence: {aida_package.verification_confidence.value}"
+            )
+        except ImportError:
+            logger.warning("AiDA integration module not available - skipping AiDA package")
+        except Exception as e:
+            logger.warning(f"AiDA package generation failed (non-fatal): {e}")
+
+        if progress_callback:
+            progress_callback(4, 4, "AiDA package exported")
 
         # 4. Generate summary
         result["statistics"] = {
@@ -916,11 +954,11 @@ For technical support: support@forensicbridge.com
 
         logger.info("=" * 60)
         logger.info("CASEWARE AUDIT BUNDLE COMPLETE!")
-        logger.info(f"📊 Accounts: {self.stats['accounts_exported']}")
-        logger.info(f"📝 Transactions: {self.stats['transactions_exported']}")
-        logger.info(f"🔐 Hashes: {self.stats['hashes_generated']}")
+        logger.info(f"Accounts: {self.stats['accounts_exported']}")
+        logger.info(f"Transactions: {self.stats['transactions_exported']}")
+        logger.info(f"Hashes: {self.stats['hashes_generated']}")
         logger.info(
-            f"💰 TB Balance: Debits={self.stats['total_debits']:.2f}, Credits={self.stats['total_credits']:.2f}"
+            f"TB Balance: Debits={self.stats['total_debits']:.2f}, Credits={self.stats['total_credits']:.2f}"
         )
         logger.info("=" * 60)
 
@@ -1358,7 +1396,7 @@ def add_caseware_mode_to_transformer():
         Returns:
             Dict with file paths and statistics
         """
-        logger.info("🏛️ CASEWARE MODE ACTIVATED")
+        logger.info("CASEWARE MODE ACTIVATED")
 
         # Get company data for locale detection
         company_data = qb_data.get("company", {})
@@ -1410,13 +1448,13 @@ if __name__ == "__main__":
         with open(input_file, "r", encoding=encoding) as f:
             qb_data = json.load(f)
     except UnicodeDecodeError as e:
-        logger.info(f"❌ Encoding error: {e}. Try specifying encoding explicitly.")
+        logger.info(f"[FAIL] Encoding error: {e}. Try specifying encoding explicitly.")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        logger.info(f"❌ Invalid JSON: {e}")
+        logger.info(f"[FAIL] Invalid JSON: {e}")
         sys.exit(1)
     except IOError as e:
-        logger.info(f"❌ Cannot read file: {e}")
+        logger.info(f"[FAIL] Cannot read file: {e}")
         sys.exit(1)
 
     # FIX #33: Generate bundle with company data for locale detection
@@ -1425,5 +1463,5 @@ if __name__ == "__main__":
     exporter = CasewareExporter(output_dir, company_name, company_data)
     result = exporter.generate_audit_bundle(qb_data)
 
-    logger.info(f"\n✅ Caseware Audit Bundle generated in: {output_dir}")
+    logger.info(f"\n[OK] Caseware Audit Bundle generated in: {output_dir}")
     logger.info(f"   Files: {list(result['files'].keys())}")

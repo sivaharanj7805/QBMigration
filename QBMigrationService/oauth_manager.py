@@ -142,11 +142,11 @@ class OAuthManager:
                 # Store encrypted key for future use
                 self.encrypted_data_key = response["CiphertextBlob"]
 
-                logger.info("✅ Using AWS KMS for token encryption")
+                logger.info("[OK] Using AWS KMS for token encryption")
                 return key, None
 
             except Exception as e:
-                logger.info(f"⚠️  AWS KMS failed: {e}")
+                logger.info(f"[WARN] AWS KMS failed: {e}")
                 logger.info("   Falling back to derived key")
 
         # Try Azure Key Vault
@@ -169,11 +169,11 @@ class OAuthManager:
 
                 self.encrypted_data_key = result.ciphertext
 
-                logger.info("✅ Using Azure Key Vault for token encryption")
+                logger.info("[OK] Using Azure Key Vault for token encryption")
                 return key, None
 
             except Exception as e:
-                logger.info(f"⚠️  Azure Key Vault failed: {e}")
+                logger.info(f"[WARN] Azure Key Vault failed: {e}")
                 logger.info("   Falling back to derived key")
 
         # SECURITY FIX: Default to 'production' (fail-safe) when environment is not set
@@ -231,12 +231,12 @@ class OAuthManager:
             if expiry_str:
                 self.token_expiry = datetime.fromisoformat(expiry_str)
 
-            logger.info("✓ OAuth tokens loaded and decrypted")
+            logger.info("[OK] OAuth tokens loaded and decrypted")
 
         except FileNotFoundError:
             pass
         except Exception as e:
-            logger.info(f"⚠️  Could not load cached tokens: {e}")
+            logger.info(f"[WARN] Could not load cached tokens: {e}")
             logger.info("   Will request new tokens on first API call")
 
     def save_tokens(self):
@@ -292,10 +292,10 @@ class OAuthManager:
             # Atomic rename
             temp_file.replace(self.token_file)
 
-            logger.info("✓ OAuth tokens encrypted and saved securely")
+            logger.info("[OK] OAuth tokens encrypted and saved securely")
 
         except Exception as e:
-            logger.info(f"⚠️  Failed to save tokens: {e}")
+            logger.info(f"[WARN] Failed to save tokens: {e}")
             if temp_file.exists():
                 temp_file.unlink()
 
@@ -366,7 +366,7 @@ class OAuthManager:
                     # ✅ Save encrypted
                     self.save_tokens()
 
-                    logger.info(f"✓ Access token refreshed (expires in {expires_in}s)")
+                    logger.info(f"[OK] Access token refreshed (expires in {expires_in}s)")
 
                     # Verify scopes
                     self.verify_scopes()
@@ -474,7 +474,7 @@ class OAuthManager:
                 result = response.json()
 
                 if not result.get("active", False):
-                    logger.info("  ⚠️  Token is not active")
+                    logger.info("  [WARN] Token is not active")
                     if fail_on_missing:
                         raise Exception("OAuth token is not active")
                     return False
@@ -483,11 +483,11 @@ class OAuthManager:
                 actual_scopes = scope_string.split() if scope_string else []
 
                 if required_scope in actual_scopes:
-                    logger.info(f"  ✓ Token has required scope: {required_scope}")
+                    logger.info(f"  [OK] Token has required scope: {required_scope}")
                     self.scopes = actual_scopes
                     return True
                 else:
-                    logger.info(f"  ⚠️  Token missing required scope: {required_scope}")
+                    logger.info(f"  [WARN] Token missing required scope: {required_scope}")
                     logger.info(
                         f"     Actual scopes: {', '.join(actual_scopes) if actual_scopes else 'none'}"
                     )
@@ -503,7 +503,7 @@ class OAuthManager:
                 if fail_on_missing:
                     raise Exception("Could not verify OAuth scopes")
 
-                logger.info("  ⚠️  Could not verify scopes (proceeding with caution)")
+                logger.info("  [WARN] Could not verify scopes (proceeding with caution)")
                 return True
 
         except requests.exceptions.RequestException as e:
@@ -545,7 +545,7 @@ class OAuthManager:
             )
 
             if response.status_code == 200:
-                logger.info("✓ Tokens revoked")
+                logger.info("[OK] Tokens revoked")
 
                 # ✅ SECURITY: Securely delete encrypted file
                 if self.token_file.exists():
@@ -563,7 +563,7 @@ class OAuthManager:
                 raise Exception(f"Revocation failed: {response.status_code}")
 
         except Exception as e:
-            logger.info(f"⚠️  Token revocation failed: {e}")
+            logger.info(f"[WARN] Token revocation failed: {e}")
             raise
 
     # ========================================================================
@@ -600,20 +600,20 @@ class OAuthManager:
                 result = response.json()
                 company_info = result.get("CompanyInfo", {})
 
-                logger.info(f"\n✓ Connected to: {company_info.get('CompanyName')}")
+                logger.info(f"\n[OK] Connected to: {company_info.get('CompanyName')}")
                 logger.info(f"  Legal Name: {company_info.get('LegalName', 'N/A')}")
                 logger.info(f"  Country: {company_info.get('Country', 'N/A')}")
 
                 return company_info
             else:
-                logger.info(f"⚠️  Could not fetch company info: {response.status_code}")
+                logger.info(f"[WARN] Could not fetch company info: {response.status_code}")
                 return None
 
         except requests.exceptions.Timeout:
-            logger.info("⚠️  Company info request timed out")
+            logger.info("[WARN] Company info request timed out")
             return None
         except Exception as e:
-            logger.info(f"⚠️  Could not fetch company info: {e}")
+            logger.info(f"[WARN] Could not fetch company info: {e}")
             return None
 
     # ========================================================================

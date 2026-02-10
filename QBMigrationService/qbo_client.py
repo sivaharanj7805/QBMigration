@@ -757,7 +757,8 @@ class PremiumQBOClient:
                         error_detail = "; ".join(
                             e.get("Detail", e.get("Message", "")) for e in errors
                         )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Failed to parse 400 error response as JSON: {e}")
                     error_detail = response.text[:500]
                 logger.error(f"QBO validation error (400): {error_detail}")
                 raise ValueError(f"QBO API validation error: {error_detail}")
@@ -1533,7 +1534,7 @@ class PremiumQBOClient:
         )
 
         if results["target_met"]:
-            logger.info(f"  ✓ TARGET MET: {target_throughput}/hour achieved!")
+            logger.info(f"  [OK] TARGET MET: {target_throughput}/hour achieved!")
         else:
             logger.warning(
                 f"  ✗ Target missed: {actual_throughput:.0f} < {target_throughput}/hour"
@@ -1802,8 +1803,8 @@ class PremiumQBOClient:
         """Cleanup: close session (fallback for non-context-manager usage)"""
         try:
             self.close()
-        except Exception:
-            # FIX SVC-04: Catch specific Exception instead of bare except
+        except Exception as e:
+            logger.debug(f"Exception during __del__ cleanup: {e}")
             pass
 
     def batch_upload(

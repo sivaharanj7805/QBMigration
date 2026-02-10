@@ -201,6 +201,9 @@ def auto_migrate_database(app):
     """
     Auto-migrate database schema on startup.
     Adds any missing columns to ensure code and database are in sync.
+
+    NOTE: This should be replaced with Alembic migrations for production.
+    Uses advisory lock to prevent concurrent DDL from Gunicorn workers.
     """
     # Skip for SQLite (used in testing) - tables are created fresh via db.create_all()
     db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
@@ -210,6 +213,18 @@ def auto_migrate_database(app):
 
     try:
         with db.engine.connect() as conn:
+            # Use PostgreSQL advisory lock to prevent concurrent DDL from Gunicorn workers
+            db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
+            if "postgresql" in db_url:
+                # Lock ID 12345 is arbitrary but unique to this migration
+                lock_result = conn.execute(text("SELECT pg_try_advisory_lock(12345)"))
+                got_lock = lock_result.scalar()
+                if not got_lock:
+                    app.logger.info(
+                        "Schema migration skipped - another worker holds the advisory lock"
+                    )
+                    return
+
             # Add all potentially missing columns to users table
             conn.execute(text("""
                 ALTER TABLE users
@@ -467,6 +482,11 @@ def auto_migrate_database(app):
             """))
 
             conn.commit()
+
+            # Release advisory lock if PostgreSQL
+            if "postgresql" in db_url:
+                conn.execute(text("SELECT pg_advisory_unlock(12345)"))
+
             app.logger.info(
                 "Database schema verified/updated successfully"
                 " (including migrations, whitelabel_settings,"
@@ -941,15 +961,23 @@ def create_app(config_name="development"):  # noqa: C901
             except Exception as e:
                 app.logger.error(f"JWT header auth failed: {str(e)}")
 
-        # FIX: Also try auth_token cookie as fallback for cross-origin scenarios
+        # Cookie-based JWT fallback: only allowed for GET/HEAD/OPTIONS requests
+        # to prevent CSRF attacks. State-changing methods (POST/PUT/DELETE) MUST
+        # use the Authorization header with a Bearer token.
         auth_cookie = req.cookies.get("auth_token")
         if auth_cookie:
-            try:
-                payload = decode_token(auth_cookie)
-                if payload and "user_id" in payload:
-                    return db.session.get(User, int(payload["user_id"]))
-            except Exception as e:
-                app.logger.error(f"JWT cookie auth failed: {str(e)}")
+            if req.method in ("GET", "HEAD", "OPTIONS"):
+                try:
+                    payload = decode_token(auth_cookie)
+                    if payload and "user_id" in payload:
+                        return db.session.get(User, int(payload["user_id"]))
+                except Exception as e:
+                    app.logger.error(f"JWT cookie auth failed: {str(e)}")
+            else:
+                app.logger.warning(
+                    f"Cookie auth rejected for {req.method} {req.path} - "
+                    f"use Authorization header for state-changing requests"
+                )
 
         return None
 

@@ -230,14 +230,15 @@ class MigrationOrchestrator:
             return self._run_migration_impl(
                 encrypted_data, encryption_metadata, company_name
             )
-        except Exception:
-            # AUDIT FIX MED-21: Ensure QBO client session is closed on exception
+        except Exception as e:
+            # Ensure QBO client session is closed on exception
+            logger.error(f"Migration failed: {e}")
             if hasattr(self, "_qbo_client") and self._qbo_client:
                 try:
                     if hasattr(self._qbo_client, "session") and self._qbo_client.session:
                         self._qbo_client.session.close()
-                except Exception:
-                    pass
+                except Exception as cleanup_err:
+                    logger.debug(f"QBO session cleanup error: {cleanup_err}")
             raise
         finally:
             # Always restore signal handler and cancel alarm
@@ -631,8 +632,8 @@ class MigrationOrchestrator:
                     ts = dict(transformer.stats)
                     ts["by_entity_type"] = dict(ts.get("by_entity_type", {}))
                     error_result["transformer_stats"] = ts
-            except Exception:
-                pass  # Don't let diagnostic collection mask the real error
+            except Exception as diag_err:
+                logger.debug(f"Diagnostic collection failed (non-fatal): {diag_err}")
             return error_result
 
     def _migrate_entity(

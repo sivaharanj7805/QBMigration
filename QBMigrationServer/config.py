@@ -23,8 +23,13 @@ class Config:
         if is_production():
             raise ValueError("SECRET_KEY must be set in production!")
         else:
-            SECRET_KEY = "dev-only-secret-key-CHANGE-IN-PRODUCTION"
-            logger.info("⚠️  WARNING: Using fixed dev SECRET_KEY - set SECRET_KEY env var for production")
+            import secrets
+
+            SECRET_KEY = secrets.token_hex(32)
+            logger.warning(
+                "No SECRET_KEY set - generated random key for this session. "
+                "Set SECRET_KEY env var for stable sessions across restarts."
+            )
 
     # M-21 FIX: Increased minimum from 32 to 64 characters.
     # token_hex(32) produces 32 random bytes = 64 hex characters = 256 bits entropy,
@@ -134,8 +139,6 @@ class Config:
         SECURITY: Validate AWS_REGION matches AWS_EC2_AMI_ID region
         Prevents data sovereignty violations (Canadian data in US region)
         """
-        import warnings
-
         region = cls.AWS_REGION
         ami_id = cls.AWS_EC2_AMI_ID
 
@@ -144,12 +147,11 @@ class Config:
         known_us_east_amis = ["ami-0c55b159cbfafe1f0", "ami-0d5eff06f840b0e53"]
 
         if region == "ca-central-1" and ami_id in known_us_east_amis:
-            warnings.warn(
-                f"⚠️  DATA SOVEREIGNTY WARNING: AWS_REGION is set to '{region}' "
+            raise ValueError(
+                f"DATA SOVEREIGNTY VIOLATION: AWS_REGION is set to '{region}' "
                 f"but AWS_EC2_AMI_ID '{ami_id}' appears to be a US region AMI. "
                 f"This violates PIPEDA Canadian data residency requirements. "
-                f"Update AWS_EC2_AMI_ID to a ca-central-1 AMI.",
-                UserWarning,
+                f"Update AWS_EC2_AMI_ID to a ca-central-1 AMI."
             )
 
         # Additional validation: Region format
@@ -270,6 +272,12 @@ class Config:
         os.getenv("MIGRATION_METADATA_RETENTION_DAYS", "2555")
     )  # 7 years per legal docs
     USER_DATA_RETENTION_DAYS = int(os.getenv("USER_DATA_RETENTION_DAYS", "365"))
+
+    # Per-jurisdiction retention periods (days)
+    # CRA IC05-1R1: 6 years from end of last tax year to which records relate
+    CRA_RETENTION_DAYS = int(os.getenv("CRA_RETENTION_DAYS", "2190"))  # ~6 years
+    # IRS Rev. Proc. 98-25: 7 years for most records
+    IRS_RETENTION_DAYS = int(os.getenv("IRS_RETENTION_DAYS", "2555"))  # ~7 years
 
     # ============================================================================
     # BACKUPS

@@ -14,7 +14,7 @@ interface ForensicIntegrityPulseProps {
     migrationId?: string;
 }
 
-// Demo log entries that simulate real activity
+// Fallback demo log entries shown when no live migration data is available
 const demoLogs: LogEntry[] = [
     { timestamp: "", type: "hash", message: "SHA-256 HASH: Customer #1847 → 0x7e2f8a9c...3b" },
     { timestamp: "", type: "verified", message: "[VERIFIED] Invoice #4521: Hash Match ✓" },
@@ -30,22 +30,58 @@ const demoLogs: LogEntry[] = [
     { timestamp: "", type: "hash", message: "SHA-256 HASH: Credit Memo #891 → 0xf4d2b6a8...2c" },
 ];
 
+/**
+ * Fetch real forensic log entries from the migration API.
+ * Falls back to demo data if the fetch fails or no migrationId is provided.
+ */
+async function fetchForensicLogs(migrationId: string): Promise<LogEntry[]> {
+    try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+        const res = await fetch(`/api/migrations/${migrationId}/forensic-logs`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return [];
+        const data = await res.json();
+        if (data.success && Array.isArray(data.logs)) {
+            return data.logs.map((log: { timestamp: string; type: string; message: string }) => ({
+                timestamp: log.timestamp,
+                type: (["verified", "hash", "transform", "redact", "info"].includes(log.type) ? log.type : "info") as LogEntry["type"],
+                message: log.message,
+            }));
+        }
+        return [];
+    } catch {
+        return [];
+    }
+}
+
 export function ForensicIntegrityPulse({ isLive = false, migrationId }: ForensicIntegrityPulseProps) {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [logIndex, setLogIndex] = useState(0);
     const terminalRef = useRef<HTMLDivElement>(null);
 
-    // FIX: Properly handle interval cleanup to prevent memory leaks
-    // Separating static logs initialization from live streaming to avoid cleanup issues
+    // Fetch real forensic logs from API when live and migrationId is available
     useEffect(() => {
-        if (!isLive) {
-            // Show static logs when not live
+        if (isLive && migrationId) {
+            fetchForensicLogs(migrationId).then((realLogs) => {
+                if (realLogs.length > 0) {
+                    setLogs(realLogs);
+                } else {
+                    // Fall back to demo logs if API returns empty
+                    setLogs(demoLogs.slice(0, 5).map(log => ({
+                        ...log,
+                        timestamp: new Date().toISOString()
+                    })));
+                }
+            });
+        } else if (!isLive) {
+            // Show static demo logs when not live
             setLogs(demoLogs.slice(0, 5).map(log => ({
                 ...log,
                 timestamp: new Date().toISOString()
             })));
         }
-    }, [isLive]);
+    }, [isLive, migrationId]);
 
     // Separate effect for live streaming - always returns cleanup function
     // FIX: Removed logIndex from dependency array to prevent infinite loop

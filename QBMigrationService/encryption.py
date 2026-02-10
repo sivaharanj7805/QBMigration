@@ -299,7 +299,7 @@ class EncryptionManager:
 
             # Allow legacy data but warn loudly
             logger.warning(warning_msg)
-            logger.info(f"⚠️  {warning_msg}")
+            logger.info(f"[WARN] {warning_msg}")
 
             # Calculate hash of current data for logging/debugging
             current_hash = hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
@@ -336,7 +336,7 @@ class EncryptionManager:
             )
 
         logger.info(f"Hash verification passed: {actual_hash[:16]}...")
-        logger.info("✅ Hash verification PASSED - Data integrity confirmed")
+        logger.info("[OK] Hash verification PASSED - Data integrity confirmed")
         return True
 
     @staticmethod
@@ -352,7 +352,7 @@ class EncryptionManager:
         )
 
         if expected_hash:
-            logger.info("⚠️  WARNING: Hash present but not verified by caller")
+            logger.info("[WARN] WARNING: Hash present but not verified by caller")
             logger.info("   Use decrypt_from_json_with_verification() for security")
 
         return plaintext
@@ -505,14 +505,15 @@ class EncryptionManager:
                 if isinstance(data, bytes):
                     del mutable_data
 
-            except Exception:
+            except Exception as e:
                 # If all else fails, at least overwrite with zeros
+                logger.debug(f"Primary memory zeroing failed, attempting fallback: {e}")
                 try:
                     if isinstance(data, bytearray):
                         for i in range(len(data)):
                             data[i] = 0
-                except Exception:
-                    pass  # Best effort - don't crash
+                except Exception as e2:
+                    logger.debug(f"Fallback memory zeroing failed (best effort): {e2}")
 
         elif isinstance(data, str):
             # Strings are immutable in Python, but we can try to clear
@@ -520,8 +521,8 @@ class EncryptionManager:
             try:
                 # Convert to bytes and clear that
                 EncryptionManager.secure_zero_memory(data.encode("utf-8"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"String memory zeroing failed (best effort): {e}")
 
     @staticmethod
     def secure_delete(filepath: str, passes: int = 7) -> bool:
@@ -564,11 +565,11 @@ class EncryptionManager:
 
             # Delete the file
             os.remove(filepath)
-            logger.info(f"✅ Securely deleted: {os.path.basename(filepath)}")
+            logger.info(f"[OK] Securely deleted: {os.path.basename(filepath)}")
             return True
 
         except Exception as e:
-            logger.info(f"⚠️  Failed to securely delete {filepath}: {e}")
+            logger.info(f"[WARN] Failed to securely delete {filepath}: {e}")
             return False
 
     @staticmethod
@@ -657,7 +658,7 @@ class EncryptionManager:
                         f"   Expected: {expected_hash}\n"
                         f"   Actual:   {actual_hash}"
                     )
-                logger.info("✅ Hash verification PASSED")
+                logger.info("[OK] Hash verification PASSED")
 
             # Write to disk in chunks to avoid RAM bloat
             with open(output_path, "wb") as f:

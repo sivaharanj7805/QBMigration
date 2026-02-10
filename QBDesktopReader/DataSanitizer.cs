@@ -290,6 +290,99 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
+        /// Sanitize/redact a Social Security Number (SSN) from extracted data.
+        /// Replaces with masked format: ***-**-XXXX (last 4 digits preserved for matching).
+        /// </summary>
+        public SanitizeResult SanitizeSSN(string value, string entityType, string entityId, string fieldName = "SSN")
+        {
+            if (string.IsNullOrEmpty(value))
+                return new SanitizeResult { Value = value };
+
+            var result = new SanitizeResult
+            {
+                OriginalValue = value,
+                OriginalLength = value.Length
+            };
+
+            // Match SSN patterns: XXX-XX-XXXX, XXXXXXXXX, XXX XX XXXX
+            string digits = Regex.Replace(value, @"[^\d]", "");
+            if (digits.Length == 9)
+            {
+                string masked = $"***-**-{digits.Substring(5, 4)}";
+                result.Value = masked;
+                result.WasModified = true;
+                result.Changes = new List<string> { "SSN redacted (last 4 preserved)" };
+
+                RecordAction(entityType, entityId, fieldName, value, masked,
+                    result.Changes, SanitizationSeverity.Critical);
+            }
+            else
+            {
+                // Not a valid SSN pattern, return as-is
+                result.Value = value;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Sanitize/redact a credit card number from extracted data.
+        /// Replaces with masked format: ****-****-****-XXXX (last 4 digits preserved).
+        /// </summary>
+        public SanitizeResult SanitizeCreditCard(string value, string entityType, string entityId, string fieldName = "CreditCard")
+        {
+            if (string.IsNullOrEmpty(value))
+                return new SanitizeResult { Value = value };
+
+            var result = new SanitizeResult
+            {
+                OriginalValue = value,
+                OriginalLength = value.Length
+            };
+
+            // Strip non-digit characters
+            string digits = Regex.Replace(value, @"[^\d]", "");
+
+            // Valid card numbers are 13-19 digits (Visa, MC, Amex, etc.)
+            if (digits.Length >= 13 && digits.Length <= 19)
+            {
+                string lastFour = digits.Substring(digits.Length - 4);
+                string masked = $"****-****-****-{lastFour}";
+                result.Value = masked;
+                result.WasModified = true;
+                result.Changes = new List<string> { "Credit card number redacted (last 4 preserved)" };
+
+                RecordAction(entityType, entityId, fieldName, value, masked,
+                    result.Changes, SanitizationSeverity.Critical);
+            }
+            else
+            {
+                result.Value = value;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Scan a free-text field for embedded SSN or credit card patterns and redact them.
+        /// Used on memo/description fields that may inadvertently contain PII.
+        /// </summary>
+        public string RedactEmbeddedPII(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            // Redact SSN patterns (XXX-XX-XXXX)
+            text = Regex.Replace(text, @"\b(\d{3})-(\d{2})-(\d{4})\b", "***-**-$3");
+
+            // Redact credit card patterns (13-19 consecutive digits, with optional separators)
+            text = Regex.Replace(text, @"\b(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{4})[\s\-]?(\d{1,7})\b",
+                m => $"****-****-****-{m.Groups[4].Value}");
+
+            return text;
+        }
+
+        /// <summary>
         /// Sanitize an address field
         /// </summary>
         public SanitizeResult SanitizeAddress(string value, string entityType, string entityId, string fieldName = "Address")
@@ -432,6 +525,14 @@ namespace QBDesktopExtractor
                     var phoneResult = SanitizePhone(customer.Phone, "Customer", customer.ListID);
                     customer.Phone = phoneResult.Phone;
 
+                    // PII: Redact SSN if present in customer data
+                    if (!string.IsNullOrEmpty(customer.SSN))
+                        customer.SSN = SanitizeSSN(customer.SSN, "Customer", customer.ListID).Value;
+
+                    // PII: Redact credit card if present
+                    if (!string.IsNullOrEmpty(customer.CreditCardNumber))
+                        customer.CreditCardNumber = SanitizeCreditCard(customer.CreditCardNumber, "Customer", customer.ListID).Value;
+
                     // Bill Address
                     customer.BillAddressAddr1 = SanitizeAddress(customer.BillAddressAddr1, "Customer", customer.ListID, "Line1").Value;
                     customer.BillAddressAddr2 = SanitizeAddress(customer.BillAddressAddr2, "Customer", customer.ListID, "Line2").Value;
@@ -510,6 +611,10 @@ namespace QBDesktopExtractor
                     invoice.RefNumber = SanitizeRefNumber(invoice.RefNumber, "Invoice", invoice.TxnID, "DocNumber").Value;
                     invoice.Memo = SanitizeMemo(invoice.Memo, "Invoice", invoice.TxnID, "PrivateNote").Value;
                     invoice.CustomerMsgRef = SanitizeMemo(invoice.CustomerMsgRef, "Invoice", invoice.TxnID, "CustomerMemo").Value;
+
+                    // PII: Scan memo fields for embedded SSN/CC numbers
+                    invoice.Memo = RedactEmbeddedPII(invoice.Memo);
+                    invoice.CustomerMsgRef = RedactEmbeddedPII(invoice.CustomerMsgRef);
 
                     if (invoice.Lines != null)
                     {

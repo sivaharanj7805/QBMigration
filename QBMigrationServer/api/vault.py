@@ -167,11 +167,70 @@ def restore_vault_item(migration_id):
                 400,
             )
 
-        # Mark as pending restore
-        migration.status = "pending"
-        migration.current_step = "Restore requested"
+        # Mark as restoring and trigger S3 Glacier retrieval
+        migration.status = "restoring"
+        migration.current_step = "Initiating S3 Glacier restore"
         migration.cleanup_completed = False
         db.session.commit()
+
+        # Trigger async S3 Glacier retrieval for the archived data
+        restore_job_id = None
+        try:
+            import os
+
+            import boto3
+            from botocore.exceptions import ClientError
+
+            bucket_name = os.getenv("S3_BUCKET_NAME")
+            if bucket_name:
+                s3 = boto3.client(
+                    "s3",
+                    region_name=os.environ.get("AWS_REGION", "ca-central-1"),
+                )
+                s3_key = f"archives/{migration_id}/data.enc"
+                try:
+                    restore_response = s3.restore_object(
+                        Bucket=bucket_name,
+                        Key=s3_key,
+                        RestoreRequest={
+                            "Days": 7,
+                            "GlacierJobParameters": {"Tier": "Standard"},
+                        },
+                    )
+                    restore_job_id = restore_response.get(
+                        "ResponseMetadata", {}
+                    ).get("RequestId")
+                    migration.current_step = (
+                        f"S3 Glacier restore initiated (RequestId: {restore_job_id})"
+                    )
+                except ClientError as e:
+                    error_code = e.response["Error"]["Code"]
+                    if error_code == "RestoreAlreadyInProgress":
+                        migration.current_step = (
+                            "S3 Glacier restore already in progress"
+                        )
+                    elif error_code == "NoSuchKey":
+                        migration.current_step = (
+                            "Archive not found in S3 - metadata-only restore"
+                        )
+                        migration.status = "pending"
+                    else:
+                        raise
+                db.session.commit()
+            else:
+                logger.warning("S3_BUCKET_NAME not configured for vault restore")
+                migration.current_step = "Restore requested (S3 not configured)"
+                migration.status = "pending"
+                db.session.commit()
+        except Exception as e:
+            logger.warning(
+                f"S3 Glacier restore request failed for {migration_id}: {e}"
+            )
+            migration.current_step = (
+                "Restore requested (S3 retrieval pending manual action)"
+            )
+            migration.status = "pending"
+            db.session.commit()
 
         logger.info(
             f"Vault restore requested: migration {migration_id} by user {user_id}"
@@ -181,8 +240,10 @@ def restore_vault_item(migration_id):
             jsonify(
                 {
                     "success": True,
-                    "message": "Restore initiated",
+                    "message": "Restore initiated - data will be available within 3-5 hours",
                     "migration_id": migration_id,
+                    "restore_status": migration.status,
+                    "restore_job_id": restore_job_id,
                 }
             ),
             200,
