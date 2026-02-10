@@ -96,8 +96,8 @@ class TestStartMigration:
         response = authenticated_client.post(
             "/api/migrations/00000000-0000-0000-0000-000000000000/start"
         )
-        # May return 404 or 500 depending on User import resolution
-        assert response.status_code in (404, 500)
+        # 402 if no credits, 404 if migration not found
+        assert response.status_code in (402, 404)
 
     def test_start_migration_unauthenticated(self, client):
         response = client.post(

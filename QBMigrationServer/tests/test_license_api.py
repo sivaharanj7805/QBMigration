@@ -17,7 +17,7 @@ class TestValidateLicense:
     def test_validate_missing_license_key(self, client, db_session):
         response = client.post(
             "/api/license/validate",
-            json={"hardware_fingerprint": "test-fp"},
+            json={"hardware_fingerprint": "test-fp-1234"},
         )
         assert response.status_code == 400
         data = response.get_json()
@@ -78,7 +78,7 @@ class TestValidateLicense:
             "/api/license/validate",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         # find_by_key filters out revoked, so 404
@@ -97,7 +97,7 @@ class TestValidateLicense:
             "/api/license/validate",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 403
@@ -137,7 +137,7 @@ class TestValidateLicense:
             "/api/license/validate",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 403
@@ -157,7 +157,7 @@ class TestActivateLicense:
     def test_activate_missing_key(self, client, db_session):
         response = client.post(
             "/api/license/activate",
-            json={"hardware_fingerprint": "test-fp"},
+            json={"hardware_fingerprint": "test-fp-1234"},
         )
         assert response.status_code == 400
 
@@ -173,7 +173,7 @@ class TestActivateLicense:
             "/api/license/activate",
             json={
                 "license_key": "FB-FAKE-FAKE-FAKE-FAKE",
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 404
@@ -210,7 +210,7 @@ class TestActivateLicense:
             "/api/license/activate",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         # find_by_key filters revoked - 404
@@ -229,7 +229,7 @@ class TestActivateLicense:
             "/api/license/activate",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 403
@@ -279,7 +279,7 @@ class TestLicenseUsage:
             "/api/license/usage",
             json={
                 "license_key": "FB-FAKE-FAKE-FAKE-FAKE",
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 404
@@ -296,7 +296,7 @@ class TestLicenseUsage:
             "/api/license/usage",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 200
@@ -328,7 +328,7 @@ class TestUseMigration:
             "/api/license/use-migration",
             json={
                 "license_key": "FB-FAKE-FAKE-FAKE-FAKE",
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
             },
         )
         assert response.status_code == 404
@@ -345,7 +345,7 @@ class TestUseMigration:
             "/api/license/use-migration",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
                 "migration_id": "test-migration-123",
             },
         )
@@ -368,7 +368,7 @@ class TestUseMigration:
             "/api/license/use-migration",
             json={
                 "license_key": key,
-                "hardware_fingerprint": "test-fp",
+                "hardware_fingerprint": "test-fp-1234",
                 "migration_id": "test-migration-456",
             },
         )

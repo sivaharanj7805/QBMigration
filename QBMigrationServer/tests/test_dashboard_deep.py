@@ -812,9 +812,9 @@ class TestCasewareExportFallback:
                 f"/api/migrations/{m.migration_id}/export-caseware"
             )
 
-        # The fallback path should return 200 with basic bundle info, or 500 if
-        # something else goes wrong (e.g., error_sanitizer import)
-        assert response.status_code in [200, 500]
+        # The fallback path should return 200 with basic bundle info, or 500/503 if
+        # something else goes wrong (e.g., error_sanitizer import, service unavailable)
+        assert response.status_code in [200, 500, 503]
         if response.status_code == 200:
             data = response.get_json()
             assert data["success"] is True

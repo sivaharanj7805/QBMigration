@@ -45,7 +45,7 @@ ANOMALY_THRESHOLDS = {
 # Known IP ranges for common VPNs and proxies (basic list)
 SUSPICIOUS_IP_RANGES = [
     "10.8.0.",  # OpenVPN default
-    # Removed 192.168.* -- standard RFC 1918 private space, false positive for all corporate/home networks
+    "192.168.",  # RFC 1918 private space (unexpected for production API traffic)
 ]
 
 

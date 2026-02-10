@@ -427,33 +427,25 @@ class TestDeleteMigration:
 
 
 class TestStartMigration:
-    """POST /api/migrations/<migration_id>/start
-
-    NOTE: start_migration has a known bug where ``from models.user import User``
-    on line 599 shadows the module-level User import, causing
-    UnboundLocalError on line 466 (``db.session.get(User, user_id)``).
-    Tests that reach line 466 therefore receive 500 and exercise the
-    exception handler (lines 703-716) rather than the intended logic.
-    """
+    """POST /api/migrations/<migration_id>/start"""
 
     def test_start_invalid_uuid(self, authenticated_client, db_session):
-        """Invalid UUID returns 400 (covers UUID validation lines 460-461)."""
+        """Invalid UUID returns 400 (covers UUID validation)."""
         resp = authenticated_client.post(f"/api/migrations/{BAD_UUID}/start")
         assert resp.status_code == 400
 
     def test_start_not_found(self, authenticated_client, db_session, test_user):
-        """Non-existent UUID exercises exception handler -> 500."""
+        """Non-existent UUID returns 404."""
         _create_credit(db_session, test_user)
         resp = authenticated_client.post(f"/api/migrations/{FAKE_UUID}/start")
-        # 500 due to known UnboundLocalError bug (line 466)
-        assert resp.status_code == 500
+        assert resp.status_code == 404
         data = resp.get_json()
         assert data["success"] is False
 
     def test_start_wrong_status(
         self, authenticated_client, db_session, test_migration, test_user
     ):
-        """Starting a pending migration exercises exception handler."""
+        """Starting a pending (not uploaded) migration returns 400."""
         _create_credit(db_session, test_user)
         test_migration.status = "pending"
         db_session.commit()
@@ -461,11 +453,10 @@ class TestStartMigration:
         resp = authenticated_client.post(
             f"/api/migrations/{test_migration.migration_id}/start"
         )
-        # 500 due to known UnboundLocalError bug (line 466)
-        assert resp.status_code == 500
+        assert resp.status_code == 400
 
     def test_start_no_credits(self, authenticated_client, db_session, test_migration):
-        """No credits scenario exercises exception handler."""
+        """No credits returns 402."""
         test_migration.status = "uploaded"
         test_migration.s3_uri = "s3://bucket/key"
         db_session.commit()
@@ -473,13 +464,12 @@ class TestStartMigration:
         resp = authenticated_client.post(
             f"/api/migrations/{test_migration.migration_id}/start"
         )
-        # 500 due to known UnboundLocalError bug (line 466)
-        assert resp.status_code == 500
+        assert resp.status_code == 402
 
     def test_start_exercises_exception_handler(
         self, authenticated_client, db_session, test_migration, test_user
     ):
-        """Verifies exception handler returns proper JSON on error."""
+        """Start with uploaded status but missing credentials returns 400."""
         _create_credit(db_session, test_user)
         test_migration.status = "uploaded"
         test_migration.s3_uri = "s3://bucket/key"
@@ -489,8 +479,7 @@ class TestStartMigration:
             f"/api/migrations/{test_migration.migration_id}/start",
             json={},
         )
-        # 500 due to known UnboundLocalError bug (line 466)
-        assert resp.status_code == 500
+        assert resp.status_code == 400
         data = resp.get_json()
         assert data["success"] is False
         assert "error" in data
@@ -504,7 +493,7 @@ class TestStartMigration:
         test_migration,
         test_user,
     ):
-        """EC2 creation path exercises exception handler -> 500."""
+        """EC2 creation with invalid encrypted credentials returns 400."""
         _create_credit(db_session, test_user)
         test_migration.status = "uploaded"
         test_migration.s3_uri = "s3://bucket/key"
@@ -519,8 +508,7 @@ class TestStartMigration:
             f"/api/migrations/{test_migration.migration_id}/start",
             json={"encrypted_credentials": "blob"},
         )
-        # 500 due to known UnboundLocalError bug (line 466)
-        assert resp.status_code == 500
+        assert resp.status_code == 400
         data = resp.get_json()
         assert data["success"] is False
 
@@ -549,8 +537,8 @@ class TestProcessMigration:
         resp = authenticated_client.post(
             f"/api/migrations/{test_migration.migration_id}/process"
         )
-        # Delegates to start_migration which hits the UnboundLocalError bug
-        assert resp.status_code == 500
+        # Delegates to start_migration; status "pending" != "uploaded" → 400
+        assert resp.status_code == 400
 
 
 # ===================================================================

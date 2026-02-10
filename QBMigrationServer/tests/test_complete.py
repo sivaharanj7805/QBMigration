@@ -978,7 +978,7 @@ def test_root_endpoint(client):
 
     assert response.status_code == 200
     data = json.loads(response.data)
-    assert "message" in data or "endpoints" in data
+    assert "name" in data or "status" in data
 
 
 # ============================================================================
