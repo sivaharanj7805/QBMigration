@@ -1,0 +1,26 @@
+# ForensicBridge Code Owners
+# These owners are automatically requested for review on PRs.
+
+# Default - require review on all changes
+* @forensicbridge/engineering-leads
+
+# Security-critical files require security team review
+QBMigrationServer/utils/encryption.py @forensicbridge/security
+QBMigrationServer/api/auth.py @forensicbridge/security
+QBMigrationServer/utils/secrets_manager.py @forensicbridge/security
+QBMigrationServer/config.py @forensicbridge/security
+QBDesktopReader/EncryptionManager.cs @forensicbridge/security
+QBMigrationService/security.py @forensicbridge/security
+QBMigrationService/encryption.py @forensicbridge/security
+QBMigrationService/kms_manager.py @forensicbridge/security
+
+# Infrastructure and deployment
+deploy/ @forensicbridge/devops
+aws/ @forensicbridge/devops
+.github/workflows/ @forensicbridge/devops
+Dockerfile @forensicbridge/devops
+docker-compose.yml @forensicbridge/devops
+
+# Legal/compliance documents
+AcquisitionDocuments/ @forensicbridge/legal
+docs/SOC2_COMPLIANCE_CONTROLS.md @forensicbridge/compliance

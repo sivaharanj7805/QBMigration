@@ -27,7 +27,7 @@ ARCHIVE_DIR = os.environ.get("ARCHIVE_DIR", "./archives")
 # CRITICAL FIX: Fail-closed if API key is not configured or is the insecure default
 # This prevents accidental production deployments with weak credentials
 _api_key = os.environ.get("ARCHIVE_API_KEY", "")
-if not _api_key or _api_key == "dev-key-changeme":
+if not _api_key or _api_key in ("dev-key-changeme", "changeme", "dev", "test"):
     _is_production = _get_env() == "production"
     if _is_production:
         raise RuntimeError(
@@ -39,7 +39,8 @@ if not _api_key or _api_key == "dev-key-changeme":
             "ARCHIVE_API_KEY not configured - using insecure default for development. "
             "Set ARCHIVE_API_KEY environment variable for production."
         )
-        _api_key = "dev-key-changeme"  # Only allowed in development
+        import secrets as _secrets
+        _api_key = _secrets.token_urlsafe(32)  # Random dev key, not predictable
 
 API_KEY = _api_key
 

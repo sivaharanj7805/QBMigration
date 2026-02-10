@@ -41,15 +41,38 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
-# H-03 FIX: In-memory JWT blocklist for logout revocation.
-# Stores (jti, expiry_timestamp) tuples. Entries are cleaned up on each add.
-# Falls back to this if Redis is unavailable.
-_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp
+# H-03 FIX: JWT blocklist for logout revocation.
+# Primary: Redis (shared across all workers/processes)
+# Fallback: In-memory dict (per-process, used if Redis unavailable)
+_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp (fallback only)
 _jwt_blocklist_lock = threading.Lock()
 
 
+def _get_redis():
+    """Get Redis connection for JWT blocklist. Returns None if unavailable."""
+    try:
+        from extensions import redis_client
+        if redis_client and redis_client.ping():
+            return redis_client
+    except Exception:
+        pass
+    return None
+
+
 def _blocklist_add(jti: str, exp_timestamp: float) -> None:
-    """Add a JWT ID to the blocklist. Automatically prunes expired entries."""
+    """Add a JWT ID to the blocklist. Uses Redis if available, falls back to in-memory."""
+    ttl = max(int(exp_timestamp - _time.time()), 1)
+
+    # Try Redis first (shared across all workers)
+    redis = _get_redis()
+    if redis:
+        try:
+            redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
+            return
+        except Exception:
+            pass  # Fall through to in-memory
+
+    # Fallback: in-memory (per-process only)
     now = _time.time()
     with _jwt_blocklist_lock:
         # Prune expired entries
@@ -61,6 +84,16 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
 
 def _blocklist_check(jti: str) -> bool:
     """Check if a JWT ID is in the blocklist (i.e., revoked)."""
+    # Try Redis first
+    redis = _get_redis()
+    if redis:
+        try:
+            if redis.exists(f"jwt_blocklist:{jti}"):
+                return True
+        except Exception:
+            pass  # Fall through to in-memory
+
+    # Fallback: in-memory check
     now = _time.time()
     with _jwt_blocklist_lock:
         exp = _jwt_blocklist.get(jti)
@@ -191,6 +224,25 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
             is_valid, error_msg = _validate_session_binding()
             if not is_valid:
                 # Session may be hijacked - invalidate it
+                session.clear()
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Session expired. Please log in again.",
+                            "session_invalid": True,
+                        }
+                    ),
+                    401,
+                )
+
+            # HIGH-08 FIX: Verify user still exists and is active in database
+            session_user = db.session.get(User, session["user_id"])
+            if session_user is None or not session_user.is_active:
+                logger.warning(
+                    "Session auth failed: user %s no longer exists or is inactive",
+                    session["user_id"],
+                )
                 session.clear()
                 return (
                     jsonify(
@@ -722,6 +774,16 @@ def register():
         last_name = data.get("last_name", "").strip()
         # Support both 'company_name' and 'company' from frontend
         company = data.get("company_name", data.get("company", "")).strip()
+
+        # MED-19 FIX: Enforce input length limits before further processing
+        MAX_NAME_LENGTH = 200
+        MAX_COMPANY_LENGTH = 300
+        if len(first_name) > MAX_NAME_LENGTH:
+            return jsonify({"success": False, "error": f"First name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+        if len(last_name) > MAX_NAME_LENGTH:
+            return jsonify({"success": False, "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+        if len(company) > MAX_COMPANY_LENGTH:
+            return jsonify({"success": False, "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters"}), 400
 
         # Sanitize inputs - remove potentially dangerous characters
         first_name = sanitize(first_name, 100)

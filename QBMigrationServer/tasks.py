@@ -401,8 +401,8 @@ def cleanup_orphaned_resources():
                             migration.set_error_message(
                                 "Migration timed out after 2 hours in processing state"
                             )
-                        except Exception:
-                            pass  # Error message encryption might fail
+                        except Exception as e:
+                            logger.warning("Error message encryption failed for migration %s: %s", migration.migration_id, e)
 
                     if migration.aws_instance_id:
                         aws_manager.terminate_instance(migration.aws_instance_id)

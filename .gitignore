@@ -96,3 +96,17 @@ QBMigrationServer/reports/
 *.tar.gz
 *.msi
 *.exe
+*.dll
+*.pdb
+*.nupkg
+**/bin/
+**/obj/
+
+# Word documents (use markdown instead, .docx contains metadata)
+*.docx
+
+# M&A / Confidential strategy documents
+AcquisitionDocuments/THOMSON_REUTERS_MA
+
+# Pre-commit hooks
+.pre-commit-config.yaml.bak

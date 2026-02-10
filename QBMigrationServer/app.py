@@ -1236,8 +1236,8 @@ def create_app(config_name="development"):  # noqa: C901
                 state = sa_inspect(_cu)
                 if state.detached:
                     db.session.add(_cu)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to re-merge detached user into session: %s", e)
 
     # SECURITY FIX: HTTPS redirect for production
     @app.before_request

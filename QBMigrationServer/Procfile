@@ -1,3 +1,4 @@
+# Legacy Procfile for Heroku/Railway deployment. Current deployment uses EC2 + Docker.
 # Production deployment commands
 # Used by Heroku, Dokku, and as reference for EC2/ECS deployment
 

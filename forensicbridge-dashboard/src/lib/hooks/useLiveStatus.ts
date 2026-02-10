@@ -64,9 +64,6 @@ export function useLiveStatus(migrationId: string) {
 
             // STOP POLLING: Terminal status reached
             if (isTerminalStatus(status)) {
-                if (process.env.NODE_ENV === 'development') {
-                    console.log(`[useLiveStatus] Stopped polling - terminal status: ${status}`);
-                }
                 return false;
             }
 
