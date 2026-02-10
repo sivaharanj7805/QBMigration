@@ -245,11 +245,25 @@ class DataRetentionManager:
         self._execute_deletion(job)
 
     def _execute_deletion(self, job):
-        """Execute file deletion for a job"""
+        """Execute file deletion for a job with path traversal prevention."""
         deleted_count = 0
         failed_count = 0
 
+        # SECURITY: Validate file paths to prevent arbitrary file deletion
+        allowed_base = os.environ.get(
+            "DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data"
+        )
+
         for file_path in job["file_paths"]:
+            # Path traversal prevention (matches Celery task protection)
+            real_path = os.path.realpath(file_path)
+            if not real_path.startswith(os.path.realpath(allowed_base)):
+                logger.error(
+                    f"Path traversal blocked: {file_path} is outside {allowed_base}"
+                )
+                failed_count += 1
+                continue
+
             if os.path.exists(file_path):
                 try:
                     EncryptionManager.secure_delete(file_path)
@@ -286,18 +300,31 @@ class DataRetentionManager:
             logger.info(f"  Failed: {failed_count} files")
 
     def delete_immediately(self, migration_id, file_paths):
-        """Delete files immediately (no delay)"""
+        """Delete files immediately (no delay) with path traversal prevention."""
         if not isinstance(file_paths, list):
             file_paths = [file_paths]
 
         deleted_count = 0
 
+        # SECURITY: Validate file paths to prevent arbitrary file deletion
+        allowed_base = os.environ.get(
+            "DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data"
+        )
+
         for file_path in file_paths:
+            # Path traversal prevention
+            real_path = os.path.realpath(file_path)
+            if not real_path.startswith(os.path.realpath(allowed_base)):
+                logger.error(
+                    f"Path traversal blocked: {file_path} is outside {allowed_base}"
+                )
+                continue
+
             if os.path.exists(file_path):
                 try:
                     EncryptionManager.secure_delete(file_path)
                     self.logger.log_deletion(migration_id, file_path)
-                    logger.info(f"[OK] Deleted: {os.path.basename(file_path)}")
+                    logger.info(f"Deleted: {os.path.basename(file_path)}")
                     deleted_count += 1
                 except Exception as e:
                     logger.error(f"Failed to delete {file_path}: {e}")

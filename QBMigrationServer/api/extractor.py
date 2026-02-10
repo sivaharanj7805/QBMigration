@@ -1091,6 +1091,7 @@ def zip_info():
 
 
 @extractor_bp.route("/zip/verify", methods=["POST"])
+@limiter.limit("30 per minute")
 def verify_zip():
     """
     Verify a downloaded zip file by its hash.

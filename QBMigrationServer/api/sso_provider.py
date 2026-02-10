@@ -26,6 +26,7 @@ import defusedxml.ElementTree as SafeET
 from flask import Blueprint, current_app, jsonify, redirect, request, session
 from flask_login import current_user, login_required
 
+from extensions import limiter
 from utils.auth import admin_required
 from utils.pii_redaction import hash_email
 
@@ -382,6 +383,7 @@ def list_providers():
 
 
 @sso_bp.route("/initiate", methods=["POST"])
+@limiter.limit("10 per minute")
 def initiate_sso():
     """
     Initiate SSO login flow
@@ -614,6 +616,7 @@ def _establish_sso_session(sso_user):
 
 
 @sso_bp.route("/acs", methods=["POST"])
+@limiter.limit("20 per minute")
 def assertion_consumer_service():
     """
     SAML Assertion Consumer Service (ACS) endpoint
@@ -717,6 +720,7 @@ def oauth_callback():
 
 
 @sso_bp.route("/logout", methods=["POST"])
+@limiter.limit("10 per minute")
 @require_sso
 def sso_logout():
     """
@@ -769,6 +773,7 @@ def sp_metadata():
 
 
 @sso_bp.route("/configure", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 @admin_required
 def configure_provider():

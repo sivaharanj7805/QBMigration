@@ -17,6 +17,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from extensions import limiter
 from flask import Blueprint, jsonify, request
 from models.database import db
 from models.project import Project
@@ -138,6 +139,7 @@ def hash_fingerprint(fingerprint):
 
 
 @session_validation_bp.route("/validate", methods=["POST"])
+@limiter.limit("20 per minute")
 def validate_session():
     """
     Validate a session code before allowing extraction.
@@ -524,6 +526,7 @@ def _generate_session_tokens(activation, active_count, project):
 
 
 @session_validation_bp.route("/activate", methods=["POST"])
+@limiter.limit("10 per minute")
 def activate_session():
     """
     Activate a session on a new device.
@@ -762,6 +765,7 @@ def _generate_extraction_credentials(
 
 
 @session_validation_bp.route("/start-extraction", methods=["POST"])
+@limiter.limit("10 per minute")
 def start_extraction():
     """
     Called when the extractor starts an extraction.
@@ -948,6 +952,7 @@ def _update_extraction_status(session_id, fingerprint_hash, ip_address,
 
 
 @session_validation_bp.route("/complete-extraction", methods=["POST"])
+@limiter.limit("10 per minute")
 def complete_extraction():
     """
     Called when extraction completes successfully.

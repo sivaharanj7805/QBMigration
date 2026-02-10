@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import boto3
 from api.auth import require_auth
 from botocore.config import Config
+from extensions import limiter
 from flask import Blueprint, jsonify, request
 from models import Migration, db
 from utils.anomaly_detector import check_upload_anomalies, log_anomaly
@@ -36,6 +37,7 @@ def get_s3_client():
 
 @s3_upload_bp.route("/presigned-url", methods=["POST"])
 @require_auth
+@limiter.limit("20 per minute")
 def get_presigned_url():
     """
     Get a pre-signed URL for direct S3 upload
@@ -139,6 +141,7 @@ def get_presigned_url():
 
 @s3_upload_bp.route("/complete", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def complete_upload():
     """
     Mark upload as complete and trigger processing
@@ -225,6 +228,7 @@ def complete_upload():
 
 @s3_upload_bp.route("/multipart/init", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def init_multipart_upload():
     """
     Initialize multipart upload for large files (>100MB)
@@ -297,6 +301,7 @@ def init_multipart_upload():
 
 @s3_upload_bp.route("/multipart/part-url", methods=["POST"])
 @require_auth
+@limiter.limit("120 per minute")
 def get_part_upload_url():
     """
     Get pre-signed URL for a multipart upload part
@@ -352,6 +357,7 @@ def get_part_upload_url():
 
 @s3_upload_bp.route("/multipart/complete", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def complete_multipart_upload():
     """
     Complete multipart upload

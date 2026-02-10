@@ -44,6 +44,7 @@ from extensions import limiter  # noqa: E402
 from flask import Flask, jsonify, redirect, request  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 from flask_login import LoginManager  # noqa: E402
+from flask_migrate import Migrate  # noqa: E402
 from flask_wtf.csrf import CSRFError, CSRFProtect  # noqa: E402
 from models.database import db, init_db  # noqa: E402
 from models.user import User  # noqa: E402
@@ -674,7 +675,13 @@ def create_app(config_name="development"):  # noqa: C901
         app.logger.error(f"Failed to initialize database: {str(e)}")
         raise
 
+    # Initialize Flask-Migrate for versioned database migrations
+    # Run `flask db upgrade` to apply pending migrations (replaces ad-hoc DDL)
+    Migrate(app, db, directory="migrations")
+
     # Auto-migrate database schema (add missing columns)
+    # NOTE: This is a legacy fallback that ensures new columns exist.
+    # New schema changes should use Flask-Migrate: `flask db migrate -m "description"`
     with app.app_context():
         auto_migrate_database(app)
 
