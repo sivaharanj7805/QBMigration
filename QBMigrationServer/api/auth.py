@@ -48,14 +48,42 @@ _jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp (fallback only)
 _jwt_blocklist_lock = threading.Lock()
 
 
+_redis_conn = None
+_redis_last_attempt = 0.0
+_REDIS_RETRY_INTERVAL = 30.0  # Don't retry Redis connection more than every 30s
+
+
 def _get_redis():
-    """Get Redis connection for JWT blocklist. Returns None if unavailable."""
+    """Get Redis connection for JWT blocklist. Returns None if unavailable.
+
+    Creates its own connection from REDIS_URL/RATELIMIT_STORAGE_URL env vars.
+    Caches the connection and avoids hammering Redis if it's down.
+    """
+    global _redis_conn, _redis_last_attempt
+
+    # Return cached connection if it's still alive
+    if _redis_conn is not None:
+        try:
+            _redis_conn.ping()
+            return _redis_conn
+        except Exception:
+            _redis_conn = None
+
+    # Don't retry too frequently if Redis is down
+    now = _time.time()
+    if now - _redis_last_attempt < _REDIS_RETRY_INTERVAL:
+        return None
+
+    _redis_last_attempt = now
     try:
-        from extensions import redis_client
-        if redis_client and redis_client.ping():
-            return redis_client
+        import redis as _redis_mod
+        redis_url = os.environ.get("REDIS_URL") or os.environ.get("RATELIMIT_STORAGE_URL")
+        if redis_url and redis_url != "memory://":
+            _redis_conn = _redis_mod.from_url(redis_url, decode_responses=True, socket_connect_timeout=3)
+            _redis_conn.ping()
+            return _redis_conn
     except Exception:
-        pass
+        _redis_conn = None
     return None
 
 
@@ -236,24 +264,30 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                     401,
                 )
 
-            # HIGH-08 FIX: Verify user still exists and is active in database
-            session_user = db.session.get(User, session["user_id"])
-            if session_user is None or not session_user.is_active:
-                logger.warning(
-                    "Session auth failed: user %s no longer exists or is inactive",
-                    session["user_id"],
-                )
-                session.clear()
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "Session expired. Please log in again.",
-                            "session_invalid": True,
-                        }
-                    ),
-                    401,
-                )
+            # HIGH-08 FIX: Verify user still exists and is active in database.
+            # Cache the check in the session for 60s to avoid a DB hit on every request.
+            _USER_VERIFY_TTL = 60  # seconds
+            last_verified = session.get("_user_verified_at", 0)
+            now_ts = _time.time()
+            if now_ts - last_verified > _USER_VERIFY_TTL:
+                session_user = db.session.get(User, session["user_id"])
+                if session_user is None or not session_user.is_active:
+                    logger.warning(
+                        "Session auth failed: user %s no longer exists or is inactive",
+                        session["user_id"],
+                    )
+                    session.clear()
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "Session expired. Please log in again.",
+                                "session_invalid": True,
+                            }
+                        ),
+                        401,
+                    )
+                session["_user_verified_at"] = now_ts
 
             request.current_user = {  # type: ignore[attr-defined]
                 "user_id": session["user_id"],

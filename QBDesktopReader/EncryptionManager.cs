@@ -279,38 +279,171 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Decrypt a single chunk
+        /// Decrypt a single chunk, with backwards compatibility for legacy format.
+        /// Tries v2 format (derived keys, PKCS7, length prefix) first.
+        /// Falls back to legacy format (raw key, zero-padding, no length prefix) if HMAC fails.
         /// </summary>
         private static byte[] DecryptChunk(byte[] encryptedChunk, byte[] key)
         {
-            if (encryptedChunk.Length < NonceSize + TagSize + 4)
+            if (encryptedChunk.Length < NonceSize + TagSize + 1)
                 throw new InvalidDataException("Encrypted chunk too small");
 
             byte[] nonce = new byte[NonceSize];
             byte[] tag = new byte[TagSize];
             int ciphertextLen = encryptedChunk.Length - NonceSize - TagSize;
             byte[] ciphertext = new byte[ciphertextLen];
-            // Allocate enough for PKCS7-padded output minus the 4-byte length prefix
-            byte[] plaintext = new byte[ciphertextLen - 4];
 
             Buffer.BlockCopy(encryptedChunk, 0, nonce, 0, NonceSize);
             Buffer.BlockCopy(encryptedChunk, NonceSize, tag, 0, TagSize);
             Buffer.BlockCopy(encryptedChunk, NonceSize + TagSize, ciphertext, 0, ciphertextLen);
 
-            using (var aes = new AesGcmCompat(key))
+            // Try v2 format first (derived keys, PKCS7 padding, 4-byte length prefix)
+            if (TryDecryptV2Format(nonce, ciphertext, tag, key, out byte[] result))
+                return result;
+
+            // Fallback to legacy format (raw key, PaddingMode.None, zero-padded)
+            if (TryDecryptLegacyFormat(nonce, ciphertext, tag, key, out result))
+                return result;
+
+            throw new CryptographicException(
+                "Authentication tag verification failed for both v2 and legacy formats. " +
+                "Data may be corrupted or tampered with.");
+        }
+
+        /// <summary>
+        /// Try to decrypt using v2 format: HKDF-derived keys, PKCS7 padding, 4-byte length prefix.
+        /// Returns false if HMAC tag verification fails (indicating this is not v2 format).
+        /// </summary>
+        private static bool TryDecryptV2Format(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] key, out byte[] plaintext)
+        {
+            plaintext = null;
+
+            // Derive separate keys the v2 way
+            byte[] encKey, macKey;
+            using (var deriver = new HMACSHA256(key))
             {
-                aes.Decrypt(nonce, ciphertext, tag, plaintext);
+                encKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-ENC-v2"));
+                macKey = deriver.ComputeHash(Encoding.UTF8.GetBytes("AesGcmCompat-MAC-v2"));
             }
 
-            // The AesGcmCompat.Decrypt already strips padding using the embedded length prefix
-            // Extract original length to return correctly sized array
-            int originalLen = BitConverter.ToInt32(ciphertext, 0);
-            if (originalLen < 0 || originalLen > plaintext.Length)
-                throw new InvalidDataException($"Invalid original length in chunk: {originalLen}");
+            try
+            {
+                // Verify tag with derived MAC key
+                if (!VerifyTagConstantTime(nonce, ciphertext, tag, macKey))
+                    return false;
 
-            byte[] result = new byte[originalLen];
-            Buffer.BlockCopy(plaintext, 0, result, 0, originalLen);
-            return result;
+                // Need at least 4 bytes for length prefix + 16 bytes for one AES block
+                if (ciphertext.Length < 20)
+                    return false;
+
+                // Extract original plaintext length from first 4 bytes
+                int originalLen = BitConverter.ToInt32(ciphertext, 0);
+                if (originalLen < 0 || originalLen > ciphertext.Length)
+                    return false;
+
+                // Decrypt the actual ciphertext (after the 4-byte length prefix)
+                byte[] actualCiphertext = new byte[ciphertext.Length - 4];
+                Buffer.BlockCopy(ciphertext, 4, actualCiphertext, 0, actualCiphertext.Length);
+
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = encKey;
+                    var iv = new byte[16];
+                    Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.PKCS7;
+
+                    using (var decryptor = aes.CreateDecryptor())
+                    {
+                        byte[] decrypted = decryptor.TransformFinalBlock(actualCiphertext, 0, actualCiphertext.Length);
+                        plaintext = new byte[originalLen];
+                        Buffer.BlockCopy(decrypted, 0, plaintext, 0, originalLen);
+                    }
+                }
+                return true;
+            }
+            catch
+            {
+                plaintext = null;
+                return false;
+            }
+            finally
+            {
+                Array.Clear(encKey, 0, encKey.Length);
+                Array.Clear(macKey, 0, macKey.Length);
+            }
+        }
+
+        /// <summary>
+        /// Try to decrypt using legacy format: raw key for both AES and HMAC, PaddingMode.None, zero-padded.
+        /// Returns false if HMAC tag verification fails (data is corrupted/tampered).
+        /// Note: Legacy format had a zero-padding bug where trailing zeros could not be distinguished
+        /// from padding. This is preserved for backwards compatibility.
+        /// </summary>
+        private static bool TryDecryptLegacyFormat(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] rawKey, out byte[] plaintext)
+        {
+            plaintext = null;
+
+            // Legacy format used raw key for HMAC
+            if (!VerifyTagConstantTime(nonce, ciphertext, tag, rawKey))
+                return false;
+
+            try
+            {
+                using (var aes = Aes.Create())
+                {
+                    aes.Key = rawKey;
+                    var iv = new byte[16];
+                    Buffer.BlockCopy(nonce, 0, iv, 0, Math.Min(nonce.Length, 16));
+                    aes.IV = iv;
+                    aes.Mode = CipherMode.CBC;
+                    aes.Padding = PaddingMode.None;
+
+                    using (var decryptor = aes.CreateDecryptor())
+                    {
+                        byte[] decrypted = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
+
+                        // Legacy format zero-padded to block boundary.
+                        // Strip trailing zero bytes. Note: this may strip legitimate trailing
+                        // zeros in binary data — this was the original bug that v2 format fixes.
+                        int end = decrypted.Length;
+                        while (end > 0 && decrypted[end - 1] == 0) end--;
+                        if (end == 0) end = decrypted.Length; // Don't return empty if all zeros
+
+                        plaintext = new byte[end];
+                        Buffer.BlockCopy(decrypted, 0, plaintext, 0, end);
+                    }
+                }
+                return true;
+            }
+            catch
+            {
+                plaintext = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Constant-time HMAC tag verification to prevent timing attacks.
+        /// </summary>
+        private static bool VerifyTagConstantTime(byte[] nonce, byte[] ciphertext, byte[] tag, byte[] macKey)
+        {
+            using (var hmac = new HMACSHA256(macKey))
+            {
+                byte[] dataToMac = new byte[nonce.Length + ciphertext.Length];
+                Buffer.BlockCopy(nonce, 0, dataToMac, 0, nonce.Length);
+                Buffer.BlockCopy(ciphertext, 0, dataToMac, nonce.Length, ciphertext.Length);
+                byte[] fullHash = hmac.ComputeHash(dataToMac);
+
+                // Constant-time comparison: accumulate XOR differences without early exit
+                int diff = 0;
+                for (int i = 0; i < tag.Length && i < fullHash.Length; i++)
+                {
+                    diff |= tag[i] ^ fullHash[i];
+                }
+                return diff == 0;
+            }
         }
 
         /// <summary>

@@ -14,7 +14,7 @@ class TestValidateConfig:
 
         key = Fernet.generate_key().decode()
         env = {
-            "SECRET_KEY": "a" * 32,
+            "SECRET_KEY": "a" * 64,
             "DATABASE_URL": "postgresql://localhost/test",
             "FLASK_ENV": "development",
             "BACKUP_ENCRYPTION_KEY": key,
@@ -59,7 +59,7 @@ class TestValidateConfig:
             },
             clear=False,
         ):
-            with pytest.raises(RuntimeError, match="at least 32 characters"):
+            with pytest.raises(RuntimeError, match="at least 64 characters"):
                 validate_config()
 
     def test_validate_config_production_missing_vars(self):
@@ -68,7 +68,7 @@ class TestValidateConfig:
         with patch.dict(
             "os.environ",
             {
-                "SECRET_KEY": "a" * 32,
+                "SECRET_KEY": "a" * 64,
                 "DATABASE_URL": "postgresql://localhost/test",
                 "FLASK_ENV": "production",
             },
@@ -83,7 +83,7 @@ class TestValidateConfig:
         with patch.dict(
             "os.environ",
             {
-                "SECRET_KEY": "a" * 32,
+                "SECRET_KEY": "a" * 64,
                 "DATABASE_URL": "postgresql://localhost/test",
                 "FLASK_ENV": "development",
                 "BACKUP_ENCRYPTION_KEY": "not-a-valid-fernet-key",
@@ -100,7 +100,7 @@ class TestValidateConfig:
         with patch.dict(
             "os.environ",
             {
-                "SECRET_KEY": "a" * 32,
+                "SECRET_KEY": "a" * 64,
                 "DATABASE_URL": "postgresql://localhost/test",
                 "FLASK_ENV": "development",
                 "BACKUP_ENCRYPTION_KEY": key,
@@ -117,7 +117,7 @@ class TestValidateConfig:
         with patch.dict(
             "os.environ",
             {
-                "SECRET_KEY": "a" * 32,
+                "SECRET_KEY": "a" * 64,
                 "DATABASE_URL": "postgresql://localhost/test",
                 "FLASK_ENV": "development",
                 "BACKUP_ENCRYPTION_KEY": backup_key,
