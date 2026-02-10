@@ -33,7 +33,7 @@ class TestPremiumQBOClientInit:
     def test_client_initialization_default_values(self, tmp_path):
         """Test client initializes with correct defaults"""
         db_path = str(tmp_path / "test.db")
-        client = PremiumQBOClient(access_token="test_token", db_path=db_path)
+        client = PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
         assert client._base_access_token == "test_token"
         assert client.minor_version == 65
@@ -42,7 +42,7 @@ class TestPremiumQBOClientInit:
     def test_client_creates_database(self, tmp_path):
         """Test client creates SQLite database on init"""
         db_path = str(tmp_path / "test_migration.db")
-        _ = PremiumQBOClient(access_token="test_token", db_path=db_path)
+        _ = PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
         assert os.path.exists(db_path)
 
@@ -50,7 +50,8 @@ class TestPremiumQBOClientInit:
         """Test client accepts QBO plan for worker calculation"""
         db_path = str(tmp_path / "test.db")
         client = PremiumQBOClient(
-            access_token="test_token", db_path=db_path, qbo_plan="Plus"
+            access_token="test_token", db_path=db_path, qbo_plan="Plus",
+            base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123",
         )
 
         # Plus plan should have more workers than Simple Start
@@ -64,7 +65,7 @@ class TestBatchProcessing:
     def mock_client(self, tmp_path):
         """Create a mock QBO client"""
         db_path = str(tmp_path / "test.db")
-        client = PremiumQBOClient(access_token="test_token", db_path=db_path)
+        client = PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
         return client
 
     def test_batch_create_parallel_splits_into_batches_of_30(self, mock_client):
@@ -144,7 +145,7 @@ class TestRateLimiting:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_rate_limit_respects_delay(self, client):
         """Test that rate limiting adds delays between requests"""
@@ -171,7 +172,7 @@ class TestThreadSafety:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_concurrent_batch_id_generation_unique(self, client):
         """Test that batch IDs are unique across threads"""
@@ -221,7 +222,7 @@ class TestEntityCreation:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_create_entity_makes_post_request(self, client):
         """Test that create_entity makes a POST request"""
@@ -260,7 +261,7 @@ class TestErrorHandling:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_failed_items_are_tracked(self, client):
         """Test that failed items are stored in failed_items list"""
@@ -298,7 +299,7 @@ class TestIdempotency:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_idempotency_key_generated_for_batch(self, client):
         """Test that idempotency keys are generated for batches"""
@@ -323,7 +324,7 @@ class TestOAuthManagement:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_update_access_token(self, client):
         """Test that access token can be updated directly"""
@@ -366,7 +367,7 @@ class TestMigrationSummary:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_get_migration_summary_returns_structure(self, client):
         """Test that migration summary returns expected structure"""
@@ -426,7 +427,7 @@ class TestPerformance:
     @pytest.fixture
     def client(self, tmp_path):
         db_path = str(tmp_path / "test.db")
-        return PremiumQBOClient(access_token="test_token", db_path=db_path)
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
 
     def test_batch_processing_1000_entities(self, client):
         """Benchmark: Process 1000 entities"""
@@ -442,6 +443,67 @@ class TestPerformance:
             # Should complete quickly with mocked API
             assert results["total"] == 1000
             assert duration < 10  # 10 seconds max for mocked processing
+
+
+class TestUpdateEntity:
+    """Tests for entity update (sparse update with SyncToken)"""
+
+    @pytest.fixture
+    def client(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        return PremiumQBOClient(access_token="test_token", db_path=db_path, base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
+
+    def test_update_entity_sends_sparse_post(self, client):
+        """Test that update_entity sends a sparse POST with SyncToken"""
+        with patch.object(client, "_make_request") as mock_request:
+            mock_request.return_value = {
+                "Customer": {"Id": "42", "SyncToken": "1", "Active": False}
+            }
+            with patch.object(client, "get_synctoken", return_value="0"):
+                client.update_entity("Customer", "42", {"Active": False})
+
+            mock_request.assert_called_once()
+            args, kwargs = mock_request.call_args
+            assert args[0] == "POST"
+            assert args[1] == "customer"
+            data = args[2]
+            assert data["Id"] == "42"
+            assert data["SyncToken"] == "0"
+            assert data["sparse"] is True
+            assert data["Active"] is False
+
+    def test_update_entity_refreshes_synctoken(self, client):
+        """Test that update_entity updates SyncToken cache after success"""
+        with patch.object(client, "_make_request") as mock_request:
+            mock_request.return_value = {
+                "Customer": {"Id": "42", "SyncToken": "3"}
+            }
+            with patch.object(client, "get_synctoken", return_value="2"):
+                with patch.object(client, "update_synctoken") as mock_update:
+                    client.update_entity("Customer", "42", {"Active": False})
+                    mock_update.assert_called_once_with("Customer", "42", "3")
+
+    def test_update_entity_raises_on_fault(self, client):
+        """Test that update_entity raises on QBO fault response"""
+        with patch.object(client, "_make_request") as mock_request:
+            mock_request.return_value = {
+                "Fault": {
+                    "Error": [{"Message": "Stale object", "Detail": "SyncToken mismatch"}]
+                }
+            }
+            with patch.object(client, "get_synctoken", return_value="0"):
+                with pytest.raises(Exception, match="Stale object"):
+                    client.update_entity("Customer", "42", {"Active": False})
+
+    def test_update_entity_deactivation_for_rollback(self, client):
+        """Test the rollback use case: deactivating an entity"""
+        with patch.object(client, "_make_request") as mock_request:
+            mock_request.return_value = {
+                "Account": {"Id": "99", "SyncToken": "1", "Active": False}
+            }
+            with patch.object(client, "get_synctoken", return_value="0"):
+                result = client.update_entity("Account", "99", {"Active": False})
+                assert result["Account"]["Active"] is False
 
 
 if __name__ == "__main__":

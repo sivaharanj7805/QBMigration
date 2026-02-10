@@ -244,7 +244,7 @@ class TestConcurrentApiRequests:
         try:
             from qbo_client import PremiumQBOClient
 
-            client = PremiumQBOClient(access_token="test", db_path=":memory:")
+            client = PremiumQBOClient(access_token="test", db_path=":memory:", base_url="https://sandbox-quickbooks.api.intuit.com/v3/company/test123")
         except ImportError:
             pytest.skip("PremiumQBOClient not available")
 
