@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Users, Mail, UserPlus, Crown, User, X, Loader2 } from 'lucide-react';
 import { authFetch } from '@/lib/auth';
 
@@ -187,15 +187,23 @@ export function TeamManagement() {
                 </div>
             )}
 
-            {/* Invite Modal */}
+            {/* AUDIT FIX LOW-5: Invite Modal with keyboard trap */}
             {showInviteModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                <div
+                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+                    onClick={(e) => { if (e.target === e.currentTarget) setShowInviteModal(false); }}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setShowInviteModal(false); }}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="invite-modal-title"
+                >
                     <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold">Invite Team Member</h3>
+                            <h3 id="invite-modal-title" className="text-lg font-semibold">Invite Team Member</h3>
                             <button
                                 onClick={() => setShowInviteModal(false)}
                                 className="p-1 hover:bg-gray-100 rounded"
+                                aria-label="Close invite dialog"
                             >
                                 <X className="w-5 h-5" />
                             </button>
