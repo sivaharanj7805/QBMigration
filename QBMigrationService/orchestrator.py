@@ -30,6 +30,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
+# AUDIT FIX MUST-01: Redis advisory lock to prevent concurrent migrations
+# to the same QBO realm_id. Without this, two users migrating to the same
+# company could create duplicate Customers/Vendors (creates don't use SyncToken).
+try:
+    import redis as _redis_mod
+except ImportError:
+    _redis_mod = None
+
 # FIX #35: TYPE_CHECKING for forward references without circular imports
 if TYPE_CHECKING:
     from data_transformer import QBDataTransformer
@@ -166,6 +174,80 @@ class MigrationOrchestrator:
         self._transformer = None
         self._verifier = None
 
+    # AUDIT FIX MUST-01: Realm lock timeout (2 hours matches migration timeout)
+    _REALM_LOCK_TTL_SECONDS = 7200
+    _REALM_LOCK_KEY_PREFIX = "migration_lock:realm:"
+
+    def _acquire_realm_lock(self) -> bool:
+        """Acquire a distributed Redis lock for this QBO realm_id.
+
+        Prevents concurrent migrations to the same QBO company, which would
+        create duplicate entities (creates don't use SyncToken for conflict
+        detection). Returns True if lock acquired, False if another migration
+        is already running against this realm.
+        """
+        if _redis_mod is None:
+            logger.warning(
+                "redis package not installed — realm lock unavailable. "
+                "Concurrent migration protection is disabled."
+            )
+            return True  # Degrade gracefully — don't block if Redis unavailable
+
+        redis_url = os.environ.get("REDIS_URL")
+        if not redis_url:
+            logger.warning("REDIS_URL not set — realm lock unavailable.")
+            return True
+
+        lock_key = f"{self._REALM_LOCK_KEY_PREFIX}{self.realm_id}"
+        lock_value = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
+
+        try:
+            conn = _redis_mod.from_url(redis_url, socket_connect_timeout=5)
+            # SET NX = acquire only if not already held
+            acquired = conn.set(
+                lock_key, lock_value,
+                nx=True,
+                ex=self._REALM_LOCK_TTL_SECONDS,
+            )
+            if acquired:
+                self._realm_lock_conn = conn
+                self._realm_lock_key = lock_key
+                self._realm_lock_value = lock_value
+                logger.info(f"Acquired realm lock for {self.realm_id}")
+                return True
+            else:
+                holder = conn.get(lock_key)
+                logger.error(
+                    f"Realm {self.realm_id} is locked by another migration "
+                    f"(holder={holder}). Cannot start concurrent migration."
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to acquire realm lock (Redis error): {e}")
+            return True  # Degrade gracefully
+
+    def _release_realm_lock(self) -> None:
+        """Release the distributed realm lock using atomic Lua script."""
+        conn = getattr(self, "_realm_lock_conn", None)
+        key = getattr(self, "_realm_lock_key", None)
+        value = getattr(self, "_realm_lock_value", None)
+        if not conn or not key or not value:
+            return
+
+        # Atomic delete-if-owner to prevent releasing someone else's lock
+        lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        try:
+            conn.eval(lua_script, 1, key, value)
+            logger.info(f"Released realm lock for {self.realm_id}")
+        except Exception as e:
+            logger.warning(f"Failed to release realm lock: {e}")
+
     def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback."""
         logger.info(f"[{percent}%] {message}")
@@ -273,6 +355,15 @@ class MigrationOrchestrator:
         """
         import signal
 
+        # AUDIT FIX MUST-01: Acquire distributed lock to prevent concurrent
+        # migrations to the same QBO company (realm_id). Without this, two
+        # users could create duplicate Customers/Vendors simultaneously.
+        if not self._acquire_realm_lock():
+            raise RuntimeError(
+                f"Another migration is already running for QBO company {self.realm_id}. "
+                f"Please wait for it to complete before starting a new one."
+            )
+
         # FIX #12: Add timeout protection to prevent infinite migrations
         def _migration_timeout_handler(signum, frame):
             raise TimeoutError(
@@ -304,6 +395,8 @@ class MigrationOrchestrator:
                     logger.debug(f"QBO session cleanup error: {cleanup_err}")
             raise
         finally:
+            # Always release the realm lock so the next migration can proceed
+            self._release_realm_lock()
             # Always restore signal handler and cancel alarm
             if hasattr(signal, "SIGALRM"):
                 signal.alarm(0)

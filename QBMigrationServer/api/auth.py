@@ -684,6 +684,9 @@ def create_token(user_id: int, email: str, expires_hours: int = 1) -> str:
         + datetime.timedelta(hours=expires_hours),
         "iat": datetime.datetime.now(timezone.utc),
         "jti": _secrets.token_hex(16),  # Unique token ID for revocation tracking
+        # AUDIT FIX: Add issuer and audience claims for defense-in-depth
+        "iss": "forensicbridge",
+        "aud": "forensicbridge-dashboard",
     }
     algorithm = current_app.config.get("JWT_ALGORITHM", "HS256")
     return jwt.encode(payload, _get_jwt_signing_key(), algorithm=algorithm)
@@ -700,7 +703,22 @@ def decode_token(token: str) -> Optional[dict]:
         # Reject any algorithm not in the safe set
         if not all(a in _SAFE_JWT_ALGORITHMS for a in allowed):
             return None
-        payload = jwt.decode(token, _get_jwt_verification_key(), algorithms=allowed)
+        payload = jwt.decode(
+            token,
+            _get_jwt_verification_key(),
+            algorithms=allowed,
+            # AUDIT FIX: Validate issuer and audience for defense-in-depth.
+            # Tokens without these claims (pre-upgrade) are still accepted
+            # because options.require is not set — only validated if present.
+            issuer="forensicbridge",
+            audience="forensicbridge-dashboard",
+            options={"verify_aud": False, "verify_iss": False},
+        )
+        # Validate issuer/audience if present (new tokens have them)
+        if payload.get("iss") and payload["iss"] != "forensicbridge":
+            return None
+        if payload.get("aud") and payload["aud"] != "forensicbridge-dashboard":
+            return None
         # H-03 FIX: Check if token has been revoked via logout
         jti = payload.get("jti")
         if jti and _blocklist_check(jti):

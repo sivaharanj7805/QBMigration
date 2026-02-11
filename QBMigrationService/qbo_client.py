@@ -47,7 +47,7 @@ class PremiumQBOClient:
         access_token: Optional[str] = None,
         db_path: Optional[str] = None,
         base_url: str = None,
-        minor_version: int = 65,
+        minor_version: int = 75,
         qbo_plan: Optional[str] = None,
     ):
         # FIX MIGRATION-MED-13: Validate base_url early to prevent silent
@@ -1480,10 +1480,11 @@ class PremiumQBOClient:
         $25M FEATURE: Optimized batch processing for enterprise migrations.
         Targets 500,000 rows in under 60 minutes.
 
-        2026 Intuit Batch Limits:
+        2026 Intuit Batch Limits (updated Oct 2025):
         - 30 Payloads per batch request
-        - 40 Batch requests per minute per Realm ID
+        - 120 Batch requests per minute per Realm ID (up from 40)
         - 10 requests per second throttling
+        NOTE: Rate limiter uses 100/min as conservative safety margin.
 
         Strategy:
         1. Use maximum batch size (30 items)

@@ -214,16 +214,33 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
     except Exception as e:
         logger.exception(f"Failed to process {webhook_type} webhook: {str(e)}")
         db.session.rollback()
-        # AUDIT FIX P12-L1: Log failed webhooks for dead letter review
+        # AUDIT FIX MUST-06: Enqueue failed webhooks to PostgreSQL dead letter queue
+        # instead of only logging them. This enables replay from the admin dashboard.
+        import traceback as _tb
         try:
+            from models.dead_letter import DeadLetterWebhook
+            DeadLetterWebhook.enqueue(
+                source="migration",
+                event_type=webhook_type,
+                payload=request.get_data(as_text=True)[:10000],
+                error_message=str(e),
+                event_id=request.headers.get("X-Webhook-Id"),
+                migration_id=request.headers.get("X-Migration-Id"),
+                headers=json.dumps({
+                    k: v for k, v in request.headers
+                    if k.startswith("X-") and "signature" not in k.lower()
+                }),
+                error_traceback=_tb.format_exc(),
+            )
+        except Exception as dlq_err:
+            # Fallback to log-only if DLQ insert fails (e.g., DB down)
             logger.error(
-                f"DEAD_LETTER: webhook_type={webhook_type} "
+                f"DEAD_LETTER (DLQ insert failed: {dlq_err}): "
+                f"webhook_type={webhook_type} "
                 f"migration_id={request.headers.get('X-Migration-Id', 'unknown')} "
                 f"webhook_id={request.headers.get('X-Webhook-Id', 'unknown')} "
                 f"error={str(e)[:200]}"
             )
-        except Exception:
-            pass
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 

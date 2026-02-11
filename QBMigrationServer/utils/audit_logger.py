@@ -67,7 +67,10 @@ from typing import Any, Dict, Optional
 
 # AUDIT FIX HIGH: HMAC key for audit log tamper protection
 # In production, this should be set via environment variable
-AUDIT_HMAC_KEY = os.getenv("AUDIT_HMAC_KEY", "").encode("utf-8")
+_hmac_raw = os.getenv("AUDIT_HMAC_KEY", "")
+if not _hmac_raw and os.getenv("FLASK_ENV") == "production":
+    raise RuntimeError("AUDIT_HMAC_KEY must be set in production for tamper-proof audit logs")
+AUDIT_HMAC_KEY = _hmac_raw.encode("utf-8")
 
 # Configure audit logger
 AUDIT_LOG_FILE = os.path.join(

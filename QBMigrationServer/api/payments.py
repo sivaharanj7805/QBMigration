@@ -322,6 +322,23 @@ def stripe_webhook():
             customer = event["data"]["object"]
             logger.info(f"Stripe customer deleted: {customer.get('id')}")
 
+        # AUDIT FIX: Log subscription lifecycle events for observability.
+        # The billing model is credit-based (not subscription-based), so these
+        # events don't require active handling, but logging them provides audit
+        # trail if the billing model evolves to subscriptions in the future.
+        elif event["type"] in (
+            "customer.subscription.created",
+            "customer.subscription.updated",
+            "customer.subscription.deleted",
+            "customer.subscription.trial_will_end",
+            "invoice.paid",
+            "invoice.upcoming",
+        ):
+            logger.info(
+                f"Stripe subscription event received (no-op for credit model): "
+                f"type={event['type']} id={event['data']['object'].get('id', 'unknown')}"
+            )
+
     except Exception as handler_err:
         logger.exception(
             "Failed to handle Stripe event %s", event["type"]
