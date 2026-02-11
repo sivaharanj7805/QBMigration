@@ -543,6 +543,12 @@ namespace QBDesktopExtractor
         [JsonProperty("uploadTimeoutMinutes")]
         public int UploadTimeoutMinutes { get; set; } = 10;
 
+        // HIGH-5 FIX: SSL certificate pinning (SPKI SHA-256 hash, Base64-encoded)
+        // Set this to the Base64 SHA-256 hash of the server's public key to enable cert pinning.
+        // Null/empty = no pinning (TLS validation only). Update when server cert is rotated.
+        [JsonProperty("certificatePinSHA256")]
+        public string CertificatePinSHA256 { get; set; }
+
         // QBXML version control
         [JsonProperty("maxQBXMLVersion")]
         public double? MaxQBXMLVersion { get; set; } = null; // null = use max available

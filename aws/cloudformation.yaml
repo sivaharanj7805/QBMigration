@@ -991,6 +991,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: SecretRotationPolicy
           PolicyDocument:
@@ -1026,59 +1027,152 @@ Resources:
           - !Ref PrivateSubnet2
         SecurityGroupIds:
           - !Ref EC2SecurityGroup
+      Layers:
+        # AWS-provided psycopg2 layer for Lambda (Python 3.12, x86_64)
+        # If using a custom VPC, ensure the Secrets Manager VPC endpoint is configured
+        - !Sub 'arn:aws:lambda:${AWS::Region}:898466741470:layer:psycopg2-py312:1'
       Code:
         ZipFile: |
           import boto3
           import json
+          import logging
           import string
           import secrets
 
+          import psycopg2
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
           sm = boto3.client('secretsmanager')
+          rds = boto3.client('rds')
 
           def handler(event, context):
-              """Rotate secret by generating new password and updating the service."""
+              """Secrets Manager rotation handler (4-step)."""
               arn = event['SecretId']
               step = event['Step']
               token = event['ClientRequestToken']
 
-              if step == 'createSecret':
-                  # Generate a new 32-char password
-                  alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
-                  new_password = ''.join(secrets.choice(alphabet) for _ in range(32))
-
-                  current = json.loads(sm.get_secret_value(SecretId=arn)['SecretString'])
-                  current['password'] = new_password
-
-                  sm.put_secret_value(
-                      SecretId=arn,
-                      ClientRequestToken=token,
-                      SecretString=json.dumps(current),
-                      VersionStages=['AWSPENDING']
-                  )
-              elif step == 'setSecret':
-                  # Apply new password to RDS (if this is the DB secret)
-                  pending = json.loads(sm.get_secret_value(
-                      SecretId=arn, VersionStage='AWSPENDING'
-                  )['SecretString'])
-                  # The actual DB password update happens via RDS API or direct connection
-                  # For managed RDS, the hosted rotation Lambda handles this automatically
-                  pass
-              elif step == 'testSecret':
-                  # Verify new secret works (connection test)
-                  pass
-              elif step == 'finishSecret':
-                  sm.update_secret_version_stage(
-                      SecretId=arn,
-                      VersionStage='AWSCURRENT',
-                      MoveToVersionId=token,
-                      RemoveFromVersionId=_get_current_version(arn)
-                  )
-
-          def _get_current_version(arn):
+              # Verify the secret is in rotation
               metadata = sm.describe_secret(SecretId=arn)
-              for version, stages in metadata['VersionIdsToStages'].items():
+              versions = metadata.get('VersionIdsToStages', {})
+              if token not in versions:
+                  raise ValueError(f"Token {token} not found in secret versions")
+
+              if step == 'createSecret':
+                  _create_secret(arn, token)
+              elif step == 'setSecret':
+                  _set_secret(arn, token, metadata)
+              elif step == 'testSecret':
+                  _test_secret(arn, token)
+              elif step == 'finishSecret':
+                  _finish_secret(arn, token, metadata)
+              else:
+                  raise ValueError(f"Unknown step: {step}")
+
+          def _create_secret(arn, token):
+              """Generate new password and store as AWSPENDING."""
+              current = json.loads(
+                  sm.get_secret_value(SecretId=arn, VersionStage='AWSCURRENT')['SecretString']
+              )
+              # Generate a strong 32-char password (RDS-safe: no / @ " spaces)
+              alphabet = string.ascii_letters + string.digits + '!#$%^&*()-_=+'
+              current['password'] = ''.join(secrets.choice(alphabet) for _ in range(32))
+
+              sm.put_secret_value(
+                  SecretId=arn,
+                  ClientRequestToken=token,
+                  SecretString=json.dumps(current),
+                  VersionStages=['AWSPENDING']
+              )
+              logger.info("createSecret: Stored new AWSPENDING version for %s", arn)
+
+          def _set_secret(arn, token, metadata):
+              """Apply the pending password to the actual database or service."""
+              pending = json.loads(
+                  sm.get_secret_value(SecretId=arn, VersionStage='AWSPENDING')['SecretString']
+              )
+              secret_name = metadata.get('Name', '')
+
+              if '/db' in secret_name:
+                  # RDS PostgreSQL: change master password via RDS API
+                  # Extract DB instance identifier from secret metadata or tags
+                  db_instance_id = pending.get('dbInstanceIdentifier')
+                  if db_instance_id:
+                      rds.modify_db_instance(
+                          DBInstanceIdentifier=db_instance_id,
+                          MasterUserPassword=pending['password'],
+                          ApplyImmediately=True
+                      )
+                      logger.info("setSecret: Updated RDS instance %s", db_instance_id)
+                  else:
+                      # Fallback: direct SQL ALTER ROLE (works for any Postgres)
+                      current = json.loads(
+                          sm.get_secret_value(SecretId=arn, VersionStage='AWSCURRENT')['SecretString']
+                      )
+                      conn = psycopg2.connect(
+                          host=pending.get('host', 'localhost'),
+                          port=pending.get('port', 5432),
+                          user=current.get('username', 'forensicbridge'),
+                          password=current['password'],
+                          dbname=pending.get('dbname', 'forensicbridge'),
+                          connect_timeout=5
+                      )
+                      conn.autocommit = True
+                      with conn.cursor() as cur:
+                          cur.execute(
+                              "ALTER ROLE %s WITH PASSWORD %%s" % current.get('username', 'forensicbridge'),
+                              (pending['password'],)
+                          )
+                      conn.close()
+                      logger.info("setSecret: Updated password via SQL ALTER ROLE")
+              elif '/redis' in secret_name:
+                  # Redis auth token rotation would need ElastiCache API
+                  # or CONFIG SET requirepass — varies by deployment
+                  logger.info("setSecret: Redis rotation requires manual CONFIG SET or ElastiCache API")
+              else:
+                  logger.warning("setSecret: Unknown secret type for %s, skipping", secret_name)
+
+          def _test_secret(arn, token):
+              """Verify the pending password actually works."""
+              pending = json.loads(
+                  sm.get_secret_value(SecretId=arn, VersionStage='AWSPENDING')['SecretString']
+              )
+              metadata = sm.describe_secret(SecretId=arn)
+              secret_name = metadata.get('Name', '')
+
+              if '/db' in secret_name:
+                  conn = psycopg2.connect(
+                      host=pending.get('host', 'localhost'),
+                      port=pending.get('port', 5432),
+                      user=pending.get('username', 'forensicbridge'),
+                      password=pending['password'],
+                      dbname=pending.get('dbname', 'forensicbridge'),
+                      connect_timeout=5
+                  )
+                  conn.close()
+                  logger.info("testSecret: Successfully connected to DB with pending password")
+              else:
+                  logger.info("testSecret: Non-DB secret, skipping connection test")
+
+          def _finish_secret(arn, token, metadata):
+              """Promote AWSPENDING to AWSCURRENT."""
+              current_version = None
+              for version, stages in metadata.get('VersionIdsToStages', {}).items():
                   if 'AWSCURRENT' in stages:
-                      return version
+                      current_version = version
+                      if version == token:
+                          logger.info("finishSecret: Already current, nothing to do")
+                          return
+                      break
+
+              sm.update_secret_version_stage(
+                  SecretId=arn,
+                  VersionStage='AWSCURRENT',
+                  MoveToVersionId=token,
+                  RemoveFromVersionId=current_version
+              )
+              logger.info("finishSecret: Promoted %s to AWSCURRENT", token)
 
   SecretRotationLambdaPermission:
     Type: AWS::Lambda::Permission

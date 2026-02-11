@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -330,6 +331,10 @@ namespace QBDesktopExtractor
                 // Previously wrote plaintext JSON to disk then encrypted in a second pass,
                 // exposing unencrypted data on disk. Now uses a pipe so plaintext never
                 // touches the filesystem.
+                //
+                // Architecture:
+                //   [Serializer] --writes--> PipeWriteEnd --pipe--> PipeReadEnd --reads--> [Encryptor] --> EncryptedFile
+                //   (background)                                                            (foreground)
 
                 tempEncryptedFile = GenerateSecureTempPath("enc");
                 var serializeStart = DateTime.UtcNow;
@@ -344,43 +349,64 @@ namespace QBDesktopExtractor
                 // Use a temp file only for the ENCRYPTED output (never plaintext)
                 using (var encryptedOutputStream = new FileStream(tempEncryptedFile, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
                 {
-                    // Create a memory-efficient pipe: serialize JSON into a pipe stream,
-                    // then read from the pipe into the encryption stream.
-                    using (var pipeReadStream = new System.IO.Pipes.AnonymousPipeServerStream(
-                        System.IO.Pipes.PipeDirection.Out, HandleInheritability.None))
-                    using (var pipeWriteEnd = new System.IO.Pipes.AnonymousPipeClientStream(
-                        System.IO.Pipes.PipeDirection.In, pipeReadStream.ClientSafePipeHandle))
+                    // AnonymousPipeServerStream(Out) = the WRITE end of the pipe
+                    // AnonymousPipeClientStream(In)  = the READ end of the pipe
+                    using (var pipeWriteEnd = new AnonymousPipeServerStream(
+                        PipeDirection.Out, HandleInheritability.None))
+                    using (var pipeReadEnd = new AnonymousPipeClientStream(
+                        PipeDirection.In, pipeWriteEnd.ClientSafePipeHandle))
                     {
-                        // Producer: serialize JSON into the pipe (runs on background thread)
+                        // CRITICAL: Release the server's copy of the client handle immediately.
+                        // This allows pipeReadEnd to detect EOF when pipeWriteEnd is closed.
+                        // Must be called BEFORE any read/write operations begin.
+                        pipeWriteEnd.DisposeLocalCopyOfClientHandle();
+
+                        // Producer: serialize JSON into the write end of the pipe (background thread)
+                        Exception producerException = null;
                         var serializeTask = Task.Run(async () =>
                         {
                             try
                             {
-                                jsonSize = await StreamSerializeToStreamAsync(data, pipeReadStream, cancellationToken, progress);
+                                jsonSize = await StreamSerializeToStreamAsync(data, pipeWriteEnd, cancellationToken, progress);
+                            }
+                            catch (Exception ex)
+                            {
+                                producerException = ex;
+                                throw;
                             }
                             finally
                             {
-                                pipeReadStream.DisposeLocalCopyOfClientHandle();
-                                pipeReadStream.Close();
+                                // Close the write end so the consumer sees EOF
+                                pipeWriteEnd.Close();
                             }
                         }, cancellationToken);
 
-                        // Consumer: encrypt from pipe directly to encrypted output file
-                        encryptionResult = EncryptionManager.EncryptStreamToStream(
-                            pipeWriteEnd,
-                            encryptedOutputStream,
-                            sessionId: sessionId,
-                            companyId: data.Company?.CompanyName,
-                            progressCallback: (bytesRead, totalBytes) =>
-                            {
-                                if (bytesRead - lastProgressBytes >= 5 * 1024 * 1024)
+                        // Consumer: encrypt from pipe read end directly to encrypted output file.
+                        // Runs synchronously on the calling thread — pipe backpressure naturally
+                        // throttles the producer if encryption is slower than serialization.
+                        try
+                        {
+                            encryptionResult = EncryptionManager.EncryptStreamToStream(
+                                pipeReadEnd,
+                                encryptedOutputStream,
+                                sessionId: sessionId,
+                                companyId: data.Company?.CompanyName,
+                                progressCallback: (bytesRead, totalBytes) =>
                                 {
-                                    lastProgressBytes = bytesRead;
-                                    int percent = totalBytes > 0 ? (int)((bytesRead * 100) / totalBytes) : 0;
-                                    ReportProgress(progress, PipelineStage.Encrypting, percent,
-                                        $"Encrypting: {FormatBytes(bytesRead)}/{FormatBytes(totalBytes)}");
-                                }
-                            });
+                                    if (bytesRead - lastProgressBytes >= 5 * 1024 * 1024)
+                                    {
+                                        lastProgressBytes = bytesRead;
+                                        int percent = totalBytes > 0 ? (int)((bytesRead * 100) / totalBytes) : 0;
+                                        ReportProgress(progress, PipelineStage.Encrypting, percent,
+                                            $"Encrypting: {FormatBytes(bytesRead)}/{FormatBytes(totalBytes)}");
+                                    }
+                                });
+                        }
+                        catch (Exception ex) when (producerException != null)
+                        {
+                            // If consumer fails because producer broke the pipe, surface the producer error
+                            throw new AggregateException("Serialize-to-encrypt pipeline failed", producerException, ex);
+                        }
 
                         await serializeTask;
                     }
