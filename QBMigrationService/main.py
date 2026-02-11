@@ -12,7 +12,7 @@ Complete migration workflow:
 1. Load encrypted QB Desktop data
 2. **VERIFY SHA-256 HASH** (NEW - CRITICAL)
 3. Pre-migration security scan
-4. Transform data (31 entity types)
+4. Transform data (38 QBO entity types; extractor provides 22)
 5. Upload to QB Online
 6. Verify migration
 7. Secure deletion of all data

@@ -48,7 +48,7 @@ class MigrationOrchestrator:
 
     Handles:
     1. Decryption of uploaded data
-    2. Data transformation (31 entity types)
+    2. Data transformation (38 QBO entity types)
     3. QBO API operations with rate limiting
     4. Trial balance verification
     5. Progress reporting

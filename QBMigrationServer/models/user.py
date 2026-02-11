@@ -93,19 +93,35 @@ class User(UserMixin, db.Model):
     _backup_codes_encrypted = db.Column(
         "backup_codes_encrypted", db.Text, nullable=True
     )
-    # AUDIT FIX P5-L1: DEPRECATED LEGACY COLUMNS — scheduled for removal.
-    # These store UNENCRYPTED MFA data and MUST be dropped via Alembic migration
-    # after all rows are migrated to encrypted columns. See migrate_legacy_mfa_data().
-    # SECURITY: Never write new data to these columns.
-    # TODO: Create Alembic migration: op.drop_column('users', 'mfa_secret')
-    #                                  op.drop_column('users', 'backup_codes')
+    # MED-9 FIX: DEPRECATED LEGACY COLUMNS — Alembic migration 001_drop_legacy_mfa ready.
+    # Run: flask db upgrade  (after User.migrate_all_legacy_mfa() completes)
+    # Columns are write-blocked via @validates to prevent new plaintext data.
     mfa_secret = db.Column(
         db.String(32), nullable=True
-    )  # DEPRECATED: scheduled DROP
-    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: scheduled DROP
+    )  # DEPRECATED: drop via migration 001_drop_legacy_mfa
+    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: same migration
 
     # Security - Device Fingerprinting
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints
+
+    # MED-9 FIX: Block writes to deprecated legacy MFA columns at the ORM level.
+    # This prevents accidental plaintext writes while the migration is pending.
+    from sqlalchemy.orm import validates as _validates
+
+    @_validates('mfa_secret', 'backup_codes')
+    def _block_legacy_mfa_writes(self, key, value):
+        if value is not None:
+            import logging
+            logging.getLogger(__name__).error(
+                "SECURITY: Attempted write to deprecated column '%s'. "
+                "Use encrypted columns (_mfa_secret_encrypted, _backup_codes_encrypted) instead.",
+                key
+            )
+            raise ValueError(
+                f"Column '{key}' is deprecated and write-blocked. "
+                "Use encrypted MFA columns instead."
+            )
+        return value
 
     # Timestamps
     created_at = db.Column(
