@@ -165,8 +165,22 @@ def register_handlers(sio, secret_key):
 
     @sio.on("authenticate")
     def handle_authenticate(data):
-        """Authenticate WebSocket connection with JWT token"""
-        token = data.get("token")
+        """Authenticate WebSocket connection with JWT token.
+
+        SECURITY FIX: Token is read from the HTTP Authorization header set
+        during the WebSocket upgrade handshake (preferred, not visible in
+        message logs). Falls back to data["token"] for backward compatibility.
+        """
+        # Prefer token from upgrade request header (not in message body/logs)
+        token = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+        # Backward compatibility: fall back to message body
+        if not token:
+            token = data.get("token") if data else None
+
         if not token:
             emit("error", {"message": "No token provided"})
             return

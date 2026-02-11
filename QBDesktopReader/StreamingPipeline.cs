@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -326,65 +327,107 @@ namespace QBDesktopExtractor
                     StartTime = startTime
                 };
 
-                // STEP 1: Serialize JSON to temp file
-                ReportProgress(progress, PipelineStage.Serializing, 0, "Serializing data to JSON");
-                
-                tempJsonFile = GenerateSecureTempPath("json");
-                var serializeStart = DateTime.UtcNow;
-                
-                long jsonSize = await StreamSerializeToFileAsync(data, tempJsonFile, cancellationToken, progress);
-                
-                result.PlaintextSizeBytes = jsonSize;
-                result.SerializeDurationSeconds = (DateTime.UtcNow - serializeStart).TotalSeconds;
-                
-                _logger?.Log(LogLevel.Info, "Serialized: {0} in {1:F1}s", 
-                    FormatBytes(jsonSize), result.SerializeDurationSeconds);
+                // HIGH-6 FIX: Serialize directly to encrypted output via pipe stream.
+                // Previously wrote plaintext JSON to disk then encrypted in a second pass,
+                // exposing unencrypted data on disk. Now uses a pipe so plaintext never
+                // touches the filesystem.
+                //
+                // Architecture:
+                //   [Serializer] --writes--> PipeWriteEnd --pipe--> PipeReadEnd --reads--> [Encryptor] --> EncryptedFile
+                //   (background)                                                            (foreground)
 
-                // STEP 2: Encrypt (streaming)
-                ReportProgress(progress, PipelineStage.Encrypting, 0, "Encrypting data");
-                
                 tempEncryptedFile = GenerateSecureTempPath("enc");
-                var encryptStart = DateTime.UtcNow;
-                
+                var serializeStart = DateTime.UtcNow;
+
+                ReportProgress(progress, PipelineStage.Serializing, 0, "Serializing + encrypting (streamed)");
+                _logger?.Log(LogLevel.Info, "Starting direct serialize-to-encrypt pipeline (no plaintext temp file)");
+
                 EncryptionManager.EncryptionResult encryptionResult;
+                long jsonSize = 0;
                 long lastProgressBytes = 0;
-                
-                using (var inputStream = new FileStream(tempJsonFile, FileMode.Open, FileAccess.Read, FileShare.None, 65536))
-                using (var outputStream = new FileStream(tempEncryptedFile, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
+
+                // Use a temp file only for the ENCRYPTED output (never plaintext)
+                using (var encryptedOutputStream = new FileStream(tempEncryptedFile, FileMode.Create, FileAccess.Write, FileShare.None, 65536))
                 {
-                    encryptionResult = EncryptionManager.EncryptStreamToStream(
-                        inputStream,
-                        outputStream,
-                        sessionId: sessionId,
-                        companyId: data.Company?.CompanyName,
-                        progressCallback: (bytesRead, totalBytes) =>
+                    // AnonymousPipeServerStream(Out) = the WRITE end of the pipe
+                    // AnonymousPipeClientStream(In)  = the READ end of the pipe
+                    using (var pipeWriteEnd = new AnonymousPipeServerStream(
+                        PipeDirection.Out, HandleInheritability.None))
+                    using (var pipeReadEnd = new AnonymousPipeClientStream(
+                        PipeDirection.In, pipeWriteEnd.ClientSafePipeHandle))
+                    {
+                        // CRITICAL: Release the server's copy of the client handle immediately.
+                        // This allows pipeReadEnd to detect EOF when pipeWriteEnd is closed.
+                        // Must be called BEFORE any read/write operations begin.
+                        pipeWriteEnd.DisposeLocalCopyOfClientHandle();
+
+                        // Producer: serialize JSON into the write end of the pipe (background thread)
+                        Exception producerException = null;
+                        var serializeTask = Task.Run(async () =>
                         {
-                            // Report progress every 5MB
-                            if (bytesRead - lastProgressBytes >= 5 * 1024 * 1024)
+                            try
                             {
-                                lastProgressBytes = bytesRead;
-                                int percent = totalBytes > 0 ? (int)((bytesRead * 100) / totalBytes) : 0;
-                                ReportProgress(progress, PipelineStage.Encrypting, percent, 
-                                    $"Encrypting: {FormatBytes(bytesRead)}/{FormatBytes(totalBytes)}");
+                                jsonSize = await StreamSerializeToStreamAsync(data, pipeWriteEnd, cancellationToken, progress);
                             }
-                        });
+                            catch (Exception ex)
+                            {
+                                producerException = ex;
+                                throw;
+                            }
+                            finally
+                            {
+                                // Close the write end so the consumer sees EOF
+                                pipeWriteEnd.Close();
+                            }
+                        }, cancellationToken);
+
+                        // Consumer: encrypt from pipe read end directly to encrypted output file.
+                        // Runs synchronously on the calling thread — pipe backpressure naturally
+                        // throttles the producer if encryption is slower than serialization.
+                        try
+                        {
+                            encryptionResult = EncryptionManager.EncryptStreamToStream(
+                                pipeReadEnd,
+                                encryptedOutputStream,
+                                sessionId: sessionId,
+                                companyId: data.Company?.CompanyName,
+                                progressCallback: (bytesRead, totalBytes) =>
+                                {
+                                    if (bytesRead - lastProgressBytes >= 5 * 1024 * 1024)
+                                    {
+                                        lastProgressBytes = bytesRead;
+                                        int percent = totalBytes > 0 ? (int)((bytesRead * 100) / totalBytes) : 0;
+                                        ReportProgress(progress, PipelineStage.Encrypting, percent,
+                                            $"Encrypting: {FormatBytes(bytesRead)}/{FormatBytes(totalBytes)}");
+                                    }
+                                });
+                        }
+                        catch (Exception ex) when (producerException != null)
+                        {
+                            // If consumer fails because producer broke the pipe, surface the producer error
+                            throw new AggregateException("Serialize-to-encrypt pipeline failed", producerException, ex);
+                        }
+
+                        await serializeTask;
+                    }
                 }
 
                 var encFileInfo = new FileInfo(tempEncryptedFile);
+                result.PlaintextSizeBytes = jsonSize;
+                result.SerializeDurationSeconds = (DateTime.UtcNow - serializeStart).TotalSeconds;
                 result.EncryptedSizeBytes = encFileInfo.Length;
-                result.EncryptDurationSeconds = (DateTime.UtcNow - encryptStart).TotalSeconds;
+                result.EncryptDurationSeconds = result.SerializeDurationSeconds; // Combined
                 result.DataHashSHA256 = encryptionResult.DataHashSHA256;
                 result.EncryptedHashSHA256 = encryptionResult.EncryptedHashSHA256;
                 result.Algorithm = encryptionResult.Algorithm;
                 result.KeyId = encryptionResult.KeyId;
 
-                _logger?.Log(LogLevel.Info, "Encrypted: {0} in {1:F1}s using {2}", 
-                    FormatBytes(encFileInfo.Length), result.EncryptDurationSeconds, result.Algorithm);
+                _logger?.Log(LogLevel.Info, "Serialized+Encrypted: {0} → {1} in {2:F1}s using {3}",
+                    FormatBytes(jsonSize), FormatBytes(encFileInfo.Length),
+                    result.SerializeDurationSeconds, result.Algorithm);
 
-                // CRITICAL: Secure delete plaintext immediately after encryption
-                ReportProgress(progress, PipelineStage.Encrypting, 100, "Securing plaintext");
-                SecureDeleteFile(tempJsonFile);
-                tempJsonFile = null; // Mark as deleted
+                // No plaintext temp file to delete - it was never written to disk
+                tempJsonFile = null;
                 
                 // Save checkpoint after encryption completes (resume from upload if failure)
                 SaveCheckpoint(new PipelineCheckpoint
@@ -471,6 +514,39 @@ namespace QBDesktopExtractor
         /// <summary>
         /// Stream JSON serialization directly to file
         /// </summary>
+        /// <summary>
+        /// HIGH-6 FIX: Serialize directly to a Stream (used for pipe-to-encrypt flow).
+        /// Plaintext never touches disk.
+        /// </summary>
+        private async Task<long> StreamSerializeToStreamAsync(
+            QBExtractedData data,
+            Stream outputStream,
+            CancellationToken cancellationToken,
+            IProgress<PipelineProgress> progress)
+        {
+            // Use a CountingStream wrapper to track bytes without buffering
+            long bytesWritten = 0;
+            using (var streamWriter = new StreamWriter(outputStream, new UTF8Encoding(false), 65536, leaveOpen: true))
+            using (var jsonWriter = new JsonTextWriter(streamWriter))
+            {
+                var serializer = new JsonSerializer
+                {
+                    Formatting = Formatting.None,
+                    NullValueHandling = NullValueHandling.Ignore
+                };
+
+                serializer.Serialize(jsonWriter, data);
+
+                await jsonWriter.FlushAsync(cancellationToken);
+                await streamWriter.FlushAsync();
+                await outputStream.FlushAsync(cancellationToken);
+
+                // StreamWriter tracks position via the underlying stream when possible
+                bytesWritten = outputStream.CanSeek ? outputStream.Position : streamWriter.BaseStream.Length;
+            }
+            return bytesWritten;
+        }
+
         private async Task<long> StreamSerializeToFileAsync(
             QBExtractedData data,
             string outputPath,

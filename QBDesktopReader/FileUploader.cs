@@ -69,7 +69,33 @@ namespace QBDesktopExtractor
             // HIGH-24 FIX: Make timeout configurable via config, default to 10 minutes for large files
             // 30 minutes was too long and could mask network issues
             int timeoutMinutes = config.Advanced?.UploadTimeoutMinutes ?? 10;
-            _httpClient = new HttpClient
+
+            // HIGH-5 FIX: Add SSL certificate pinning to prevent MITM attacks.
+            // Pin to the expected server certificate's Subject Public Key Info (SPKI) hash.
+            var handler = new HttpClientHandler();
+            string pinnedHash = config.Advanced?.CertificatePinSHA256;
+            if (!string.IsNullOrEmpty(pinnedHash))
+            {
+                handler.ServerCertificateCustomValidationCallback = (message, cert, chain, sslErrors) =>
+                {
+                    if (cert == null) return false;
+                    // Compute SHA-256 of the certificate's public key
+                    using (var sha = System.Security.Cryptography.SHA256.Create())
+                    {
+                        byte[] pubKeyHash = sha.ComputeHash(cert.GetPublicKey());
+                        string certHash = Convert.ToBase64String(pubKeyHash);
+                        if (certHash == pinnedHash)
+                            return true;
+                    }
+                    _logger?.Log(LogLevel.Error,
+                        "SSL CERTIFICATE PIN MISMATCH: Expected pin {0}, connection rejected. " +
+                        "Update CertificatePinSHA256 in config if the server certificate was rotated.",
+                        pinnedHash);
+                    return false;
+                };
+            }
+
+            _httpClient = new HttpClient(handler)
             {
                 Timeout = TimeSpan.FromMinutes(Math.Min(timeoutMinutes, 30)) // Cap at 30 min max
             };

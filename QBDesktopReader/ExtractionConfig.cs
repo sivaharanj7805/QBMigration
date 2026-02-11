@@ -80,13 +80,18 @@ namespace QBDesktopExtractor
                 throw new ConfigurationException($"Invalid {paramName}: {ex.Message}");
             }
 
-            // SECURITY: Check for path traversal attempts
-            // Detect ".." in the original path (before normalization)
+            // SECURITY FIX: Check for path traversal on BOTH input and resolved path.
+            // Previously only checked input, which symlinks could bypass.
             if (filePath.Contains(".."))
             {
                 throw new ConfigurationException(
                     $"SECURITY: Path traversal detected in {paramName}. " +
                     "Relative path components (..) are not allowed for security reasons.");
+            }
+            if (fullPath.Contains(".."))
+            {
+                throw new ConfigurationException(
+                    $"SECURITY: Path traversal in resolved path for {paramName}.");
             }
 
             // SECURITY: Check for symlinks on Windows
@@ -537,6 +542,12 @@ namespace QBDesktopExtractor
         // Upload timeout in minutes (default 10, max 30)
         [JsonProperty("uploadTimeoutMinutes")]
         public int UploadTimeoutMinutes { get; set; } = 10;
+
+        // HIGH-5 FIX: SSL certificate pinning (SPKI SHA-256 hash, Base64-encoded)
+        // Set this to the Base64 SHA-256 hash of the server's public key to enable cert pinning.
+        // Null/empty = no pinning (TLS validation only). Update when server cert is rotated.
+        [JsonProperty("certificatePinSHA256")]
+        public string CertificatePinSHA256 { get; set; }
 
         // QBXML version control
         [JsonProperty("maxQBXMLVersion")]

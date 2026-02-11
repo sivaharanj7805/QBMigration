@@ -686,7 +686,18 @@ namespace QBDesktopExtractor
                     
                     if (_qbfcSessionManager != null)
                     {
-                        System.Runtime.InteropServices.Marshal.ReleaseComObject(_qbfcSessionManager);
+                        // FIX: Release COM object in loop until refcount reaches 0.
+                        // QBFC COM objects may have multiple internal references;
+                        // a single ReleaseComObject call can leave refs dangling.
+                        try
+                        {
+                            while (System.Runtime.InteropServices.Marshal.ReleaseComObject(_qbfcSessionManager) > 0) { }
+                        }
+                        catch (Exception comEx)
+                        {
+                            _logger?.Log(LogLevel.Warning,
+                                "COM release loop encountered error: {0}", comEx.Message);
+                        }
                         _qbfcSessionManager = null;
                     }
                 });

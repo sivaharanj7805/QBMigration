@@ -45,6 +45,14 @@ namespace QBDesktopExtractor
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _webSocket = new ClientWebSocket();
 
+            // SECURITY FIX: Send auth token via HTTP Authorization header during
+            // the WebSocket upgrade handshake instead of in the JSON message body.
+            // The header is encrypted by TLS and not visible in message-level logs.
+            if (!string.IsNullOrEmpty(_authToken))
+            {
+                _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {_authToken}");
+            }
+
             // Convert HTTP URL to WebSocket URL
             string wsUrl = _serverUrl
                 .Replace("https://", "wss://")
@@ -161,13 +169,27 @@ namespace QBDesktopExtractor
 
         private async Task AuthenticateAsync()
         {
+            // SECURITY FIX: The auth token is sent via the WebSocket upgrade
+            // request's Authorization header (set in ConnectAsync), keeping it
+            // out of JSON message bodies where it would be visible in logs,
+            // network traces, and browser DevTools. The JSON message only
+            // carries a truncated hash for log correlation.
             var authMessage = new JObject
             {
                 ["type"] = "authenticate",
-                ["token"] = _authToken
+                ["token_hash"] = ComputeTokenHash(_authToken)
             };
 
             await SendMessageAsync(authMessage);
+        }
+
+        private static string ComputeTokenHash(string token)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(token ?? ""));
+                return Convert.ToBase64String(hash, 0, 8); // Short hash for correlation
+            }
         }
 
         private async Task SendMessageAsync(JObject message)

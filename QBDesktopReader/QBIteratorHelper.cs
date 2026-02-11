@@ -261,8 +261,16 @@ namespace QBDesktopExtractor
         }
 
         /// <summary>
-        /// Execute a QBFC request with retry logic
-        /// Uses exponential backoff for retryable errors
+        /// Per-request timeout for individual QBFC COM calls.
+        /// If QuickBooks hangs on a single request, this prevents infinite wait.
+        /// Default: 5 minutes per request (iterator page).
+        /// </summary>
+        public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// Execute a QBFC request with retry logic and per-request timeout.
+        /// HIGH-15 FIX: Wraps the COM call in a timeout so a hung QuickBooks
+        /// process doesn't block the iterator forever.
         /// </summary>
         private IMsgSetResponse DoRequestsWithRetry(IMsgSetRequest request, string context)
         {
@@ -273,34 +281,79 @@ namespace QBDesktopExtractor
             {
                 try
                 {
-                    return _sessionManager.DoRequests(request);
+                    return DoRequestWithTimeout(request, context);
+                }
+                catch (TimeoutException tex)
+                {
+                    _logger?.Log(LogLevel.Error,
+                        "{0}: QuickBooks did not respond within {1}s. The QB process may be hung.",
+                        context, RequestTimeout.TotalSeconds);
+                    throw new TimeoutException(
+                        $"{context}: QuickBooks hung — no response in {RequestTimeout.TotalSeconds}s. " +
+                        "Check if QB Desktop is displaying a dialog or is unresponsive.", tex);
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
                     attempt++;
 
-                    // Check if error is retryable
                     bool isRetryable = IsRetryableError(ex);
-                    
+
                     if (!isRetryable || attempt >= RetryPolicy.MaxRetries)
                     {
-                        _logger?.Log(LogLevel.Error, "{0}: Failed after {1} attempts: {2}", 
+                        _logger?.Log(LogLevel.Error, "{0}: Failed after {1} attempts: {2}",
                             context, attempt, ex.Message);
                         throw;
                     }
 
-                    // Calculate delay with exponential backoff
                     int delay = CalculateRetryDelay(attempt);
-                    
-                    _logger?.Log(LogLevel.Warning, "{0}: Attempt {1} failed, retrying in {2}ms: {3}", 
+                    _logger?.Log(LogLevel.Warning, "{0}: Attempt {1} failed, retrying in {2}ms: {3}",
                         context, attempt, delay, ex.Message);
-                    
                     System.Threading.Thread.Sleep(delay);
                 }
             }
 
             throw lastException ?? new Exception($"{context}: Failed after {attempt} retries");
+        }
+
+        /// <summary>
+        /// HIGH-15 FIX: Execute a single QBFC request with a timeout wrapper.
+        /// QBFC COM calls are synchronous with no native timeout support.
+        /// This runs the call on a background thread with a deadline.
+        /// </summary>
+        private IMsgSetResponse DoRequestWithTimeout(IMsgSetRequest request, string context)
+        {
+            IMsgSetResponse response = null;
+            Exception bgException = null;
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    response = _sessionManager.DoRequests(request);
+                }
+                catch (Exception ex)
+                {
+                    bgException = ex;
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA); // QBFC requires STA
+            thread.IsBackground = true;
+            thread.Start();
+
+            bool completed = thread.Join(RequestTimeout);
+            if (!completed)
+            {
+                _logger?.Log(LogLevel.Error,
+                    "{0}: Request timed out after {1}s — QuickBooks may be unresponsive",
+                    context, RequestTimeout.TotalSeconds);
+                throw new TimeoutException($"QBFC request timed out after {RequestTimeout.TotalSeconds}s");
+            }
+
+            if (bgException != null)
+                throw bgException;
+
+            return response;
         }
 
         /// <summary>

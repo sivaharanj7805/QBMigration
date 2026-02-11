@@ -143,12 +143,22 @@ def setup_sentry(app):
             import sentry_sdk
             from sentry_sdk.integrations.flask import FlaskIntegration
 
+            def _before_send_transaction(event, hint):
+                """FIX: Filter sensitive endpoints from Sentry traces."""
+                url = event.get("request", {}).get("url", "")
+                # Don't trace auth, upload, or QBO endpoints to avoid PII leakage
+                sensitive_prefixes = ("/api/auth", "/api/upload", "/api/qbo", "/api/payments")
+                if any(url.startswith(p) or f"/{p.lstrip('/')}" in url for p in sensitive_prefixes):
+                    return None
+                return event
+
             sentry_sdk.init(
                 dsn=sentry_dsn,
                 integrations=[FlaskIntegration()],
                 environment=app.config.get("SENTRY_ENVIRONMENT", "development"),
                 traces_sample_rate=app.config.get("SENTRY_TRACES_SAMPLE_RATE", 0.1),
                 send_default_pii=False,
+                before_send_transaction=_before_send_transaction,
             )
 
             app.logger.info("Sentry error tracking initialized")

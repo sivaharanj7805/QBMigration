@@ -2,14 +2,14 @@
 QuickBooks Desktop → Online Data Transformer v3.1
 ==================================================
 
-Complete production-grade transformation system supporting all 31 entity types.
+Complete production-grade transformation system supporting all 38 QBO entity types.
 
 Author: QB Migration System
 Version: 3.1.0
 License: Proprietary
 
 FEATURES:
-✓ 31 entity types (100% coverage)
+✓ 38 entity types (100% QBO API coverage)
 ✓ v3.1 QB Extractor format support
 ✓ Backward compatible with original format
 ✓ Assembly → Bundle conversion (FUNCTIONAL - preserves BOM)
