@@ -78,19 +78,21 @@ class Config:
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
-    # SECURITY WARNING: Check if using access keys in production
+    # AUDIT FIX P5-M2: Enforce IAM roles in production — block access keys
     @staticmethod
     def warn_aws_credentials():
-        """Warn if using AWS access keys instead of IAM roles in production"""
+        """Block AWS access keys in production — require IAM roles"""
         if is_production():
             if os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_SECRET_ACCESS_KEY"):
-                import warnings
-
-                warnings.warn(
-                    "SECURITY WARNING: Using AWS access keys in production. "
-                    "Consider using IAM roles instead for better security.",
-                    UserWarning,
+                logger.error(
+                    "SECURITY: AWS access keys detected in production. "
+                    "Use IAM instance roles instead. Set ALLOW_AWS_KEYS=true to override."
                 )
+                if not os.getenv("ALLOW_AWS_KEYS"):
+                    raise EnvironmentError(
+                        "AWS access keys are not allowed in production. "
+                        "Use IAM roles or set ALLOW_AWS_KEYS=true to override."
+                    )
 
     AWS_REGION = os.getenv(
         "AWS_REGION", "ca-central-1"

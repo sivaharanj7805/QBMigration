@@ -1022,7 +1022,7 @@ class PremiumQBOClient:
             "POST", endpoint, entity_data, oauth_manager=oauth_manager
         )
 
-        # Check for fault response - CRITICAL FIX: Complete fault parsing
+        # AUDIT FIX P3-C1 / P11-H1 / P11-H2: Complete fault parsing with error-code-specific handling
         if "Fault" in response:
             fault = response.get("Fault", {})
             fault_type = fault.get("type", "Unknown")
@@ -1030,11 +1030,13 @@ class PremiumQBOClient:
 
             # Build comprehensive error message from all errors
             error_details = []
+            error_codes = set()
             for i, error in enumerate(errors if errors else [{}]):
                 error_code = error.get("code", "N/A")
                 error_message = error.get("Message", "Unknown error")
                 error_detail = error.get("Detail", "")
                 error_element = error.get("element", "")
+                error_codes.add(str(error_code))
 
                 detail_str = f"[{error_code}] {error_message}"
                 if error_detail:
@@ -1047,6 +1049,30 @@ class PremiumQBOClient:
             full_error_msg = (
                 "; ".join(error_details) if error_details else "Unknown error"
             )
+
+            # AUDIT FIX P3-C1: Fail-fast on scope violation (error 6000) — non-retryable
+            if "6000" in error_codes:
+                logger.error(
+                    f"QBO SCOPE VIOLATION (6000): {full_error_msg}. "
+                    f"Check OAuth scopes and realm permissions."
+                )
+                raise PermissionError(f"QBO scope violation (6000): {full_error_msg}")
+
+            # AUDIT FIX P11-H2: Distinguish error 5010 (invalid auth) from standard 401
+            if "5010" in error_codes:
+                logger.error(
+                    f"QBO AUTH ERROR (5010): {full_error_msg}. "
+                    f"Token may be invalid — different from expired (401)."
+                )
+                raise PermissionError(f"QBO authentication error (5010): {full_error_msg}")
+
+            # AUDIT FIX P11-M1: Handle error 6010 (invalid entity ID) — skip and log
+            if "6010" in error_codes:
+                logger.warning(
+                    f"QBO entity not found (6010): {full_error_msg}. Skipping entity."
+                )
+                return None
+
             raise Exception(f"QBO API {fault_type}: {full_error_msg}")
 
         # Return the created entity

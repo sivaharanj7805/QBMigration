@@ -30,8 +30,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    // MED-16 FIX: Use proper error logging instead of console.log
-    // In production, this would send to a logging service like Sentry
+    // AUDIT FIX P13-M1: Integrate with Sentry for production error reporting
+    if (typeof window !== 'undefined' && (window as Record<string, unknown>).Sentry) {
+      const Sentry = (window as Record<string, unknown>).Sentry as {
+        captureException: (err: Error, ctx?: Record<string, unknown>) => void;
+      };
+      Sentry.captureException(error, {
+        extra: { componentStack: errorInfo.componentStack },
+      });
+    }
+
     if (process.env.NODE_ENV === 'development') {
       console.error('ErrorBoundary caught an error:', error, errorInfo);
     }

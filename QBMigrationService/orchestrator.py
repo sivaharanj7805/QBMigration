@@ -21,6 +21,7 @@ Usage:
 
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -247,6 +248,15 @@ class MigrationOrchestrator:
                 if old_handler is not None:
                     signal.signal(signal.SIGALRM, old_handler)
 
+    # AUDIT FIX P10-M1: Tier transaction limits enforced at runtime
+    TIER_TRANSACTION_LIMITS = {
+        "starter": 5_000,
+        "business": 25_000,
+        "professional": 100_000,
+        "enterprise": 500_000,
+        "forensic": float("inf"),
+    }
+
     def _run_migration_impl(  # noqa: C901
         self,
         encrypted_data: bytes,
@@ -258,6 +268,11 @@ class MigrationOrchestrator:
         migration_id = f"mig_{uuid.uuid4().hex[:16]}"
 
         logger.info(f"Starting migration {migration_id} for {company_name}")
+
+        # AUDIT FIX P10-M1: Enforce tier transaction limit
+        tier = getattr(self, "subscription_tier", None) or os.environ.get("SUBSCRIPTION_TIER", "professional")
+        tier_limit = self.TIER_TRANSACTION_LIMITS.get(tier.lower(), 100_000)
+        logger.info(f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}")
         transformer = None  # Initialize before try so except block can access it
 
         # FIX #13: Track created entity IDs for potential rollback

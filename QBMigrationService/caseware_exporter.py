@@ -1038,14 +1038,18 @@ For technical support: support@forensicbridge.com
     # HELPER METHODS
     # ========================================================================
 
-    def _to_decimal(self, value: Any) -> Decimal:
-        """Convert value to Decimal with 2 decimal places."""
+    def _to_decimal(self, value: Any, quantize: bool = True) -> Decimal:
+        """Convert value to Decimal.
+
+        AUDIT FIX P4-L1: Optional quantize parameter to prevent rounding drift
+        during accumulation. Quantize only at final output.
+        """
         if value is None or value == "":
             return Decimal("0")
         try:
-            return Decimal(str(value)).quantize(Decimal("0.01"), ROUND_HALF_UP)
+            d = Decimal(str(value))
+            return d.quantize(Decimal("0.01"), ROUND_HALF_UP) if quantize else d
         except (ValueError, InvalidOperation, TypeError) as e:
-            # FIX #1: Specific exceptions instead of bare except
             logger.warning(f"Could not convert value to Decimal: {value}, error: {e}")
             return Decimal("0")
 

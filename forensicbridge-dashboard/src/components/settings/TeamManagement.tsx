@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, Mail, UserPlus, Crown, User, X, Loader2 } from 'lucide-react';
+import { Users, Mail, UserPlus, Crown, User, X, Loader2, RotateCcw } from 'lucide-react';
 import { authFetch } from '@/lib/auth';
 
 // API configuration
@@ -19,6 +19,7 @@ interface PendingInvite {
     email: string;
     role: string;
     status: string;
+    expires_at?: string;
 }
 
 export function TeamManagement() {
@@ -156,12 +157,36 @@ export function TeamManagement() {
                                 <p className="text-sm text-gray-500">{member.email}</p>
                             </div>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${member.role === 'Owner'
-                                ? 'bg-[var(--forensic-gold)]/10 text-[var(--forensic-gold)]'
-                                : 'bg-gray-200 text-gray-600'
-                            }`}>
-                            {member.role}
-                        </span>
+                        {/* AUDIT FIX P10-M2: Role change selector for non-Owner members */}
+                        {member.role === 'Owner' ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-[var(--forensic-gold)]/10 text-[var(--forensic-gold)]">
+                                {member.role}
+                            </span>
+                        ) : (
+                            <select
+                                value={member.role}
+                                onChange={async (e) => {
+                                    try {
+                                        await authFetch(`${API_URL}/api/auth/team/members/${member.id}/role`, {
+                                            method: 'PATCH',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ role: e.target.value }),
+                                        });
+                                        setTeamMembers(prev => prev.map(m =>
+                                            m.id === member.id ? { ...m, role: e.target.value } : m
+                                        ));
+                                        setSuccess(`Updated ${member.name}'s role to ${e.target.value}`);
+                                    } catch {
+                                        setError('Failed to update role');
+                                    }
+                                }}
+                                className="px-2 py-1 rounded-lg text-xs font-medium bg-gray-100 border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[var(--bridge-blue)]"
+                                aria-label={`Change role for ${member.name}`}
+                            >
+                                <option value="member">Member</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        )}
                     </div>
                 ))}
             </div>
@@ -180,7 +205,35 @@ export function TeamManagement() {
                                     <Mail className="w-4 h-4 text-amber-600" />
                                     <span className="text-sm">{invite.email}</span>
                                 </div>
-                                <span className="text-xs text-amber-600">Pending</span>
+                                <div className="flex items-center gap-2">
+                                    {/* AUDIT FIX P10-L2: Show invite expiration */}
+                                    {invite.expires_at && (
+                                        <span className="text-xs text-gray-400">
+                                            Expires {new Date(invite.expires_at).toLocaleDateString()}
+                                        </span>
+                                    )}
+                                    {/* AUDIT FIX P10-L1: Resend invite button */}
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await authFetch(`${API_URL}/api/auth/team/invite/resend`, {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ email: invite.email }),
+                                                });
+                                                setSuccess(`Invite resent to ${invite.email}`);
+                                            } catch {
+                                                setError('Failed to resend invite');
+                                            }
+                                        }}
+                                        className="p-1 hover:bg-amber-100 rounded"
+                                        title="Resend invite"
+                                        aria-label={`Resend invite to ${invite.email}`}
+                                    >
+                                        <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                                    </button>
+                                    <span className="text-xs text-amber-600">Pending</span>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -197,7 +250,8 @@ export function TeamManagement() {
                     aria-modal="true"
                     aria-labelledby="invite-modal-title"
                 >
-                    <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+                    {/* AUDIT FIX P7-L3: Mobile-optimized modal */}
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
                         <div className="flex items-center justify-between mb-4">
                             <h3 id="invite-modal-title" className="text-lg font-semibold">Invite Team Member</h3>
                             <button

@@ -207,24 +207,27 @@ def create_checkout():
                 safe_message = "Your card has expired. Please use a different card."
 
         return jsonify({"success": False, "error": safe_message}), 400
+    # AUDIT FIX P8-L1: Specific exception types for better error handling
+    except stripe.error.RateLimitError as e:
+        logger.warning("Stripe rate limit hit for user %s: %s", current_user.id, e)
+        return jsonify({"success": False, "error": "Payment service is busy. Please retry in a moment."}), 429
+    except stripe.error.APIConnectionError as e:
+        logger.error("Stripe connection error for user %s: %s", current_user.id, e)
+        return jsonify({"success": False, "error": "Cannot reach payment service. Please try again."}), 503
     except Exception as e:
         # FIX: Sanitize exception message before logging to avoid card details
-        # Remove potential card numbers, CVVs, and other sensitive payment info
         error_str = str(e)
-        # Redact card numbers (13-19 digits, optionally with spaces/dashes)
         error_str = re.sub(
             r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{1,7}\b",
             "[CARD_REDACTED]",
             error_str,
         )
-        # Redact CVV/CVC (3-4 digit codes)
         error_str = re.sub(
             r"\b(cvv|cvc|cvn|security[\s_]?code)[\s:=]*\d{3,4}\b",
             r"\1=[REDACTED]",
             error_str,
             flags=re.IGNORECASE,
         )
-        # Redact expiry dates in various formats (MM/YY, MM/YYYY, MMYY, etc.)
         error_str = re.sub(
             r"\b(exp|expir[ey]|expiration)[\s:=]*\d{2}[/\-]?\d{2,4}\b",
             r"\1=[REDACTED]",
@@ -270,6 +273,20 @@ def stripe_webhook():
         logger.error(f"SECURITY: Invalid Stripe signature from {request.remote_addr}")
         return jsonify({"error": "Invalid signature"}), 400
 
+    # AUDIT FIX P8.5-M3: Check for duplicate event ID to ensure idempotency
+    event_id = event.get("id", "")
+    redis_conn = None
+    try:
+        import redis as _redis
+        redis_conn = _redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
+        if redis_conn.get(f"stripe_event:{event_id}"):
+            logger.info(f"Duplicate Stripe event {event_id} — already processed")
+            return jsonify({"received": True, "duplicate": True})
+        # Mark as processing with 24h TTL
+        redis_conn.setex(f"stripe_event:{event_id}", 86400, "processing")
+    except Exception:
+        pass  # Redis unavailable — proceed without dedup
+
     # FIX B-05: Handle events with proper error propagation
     # Return 500 on critical failures so Stripe retries the webhook
     try:
@@ -285,11 +302,30 @@ def stripe_webhook():
             payment_intent = event["data"]["object"]
             handle_failed_payment(payment_intent)
 
+        # AUDIT FIX P8.5-M2: Handle charge.failed and customer.deleted events
+        elif event["type"] == "charge.failed":
+            charge = event["data"]["object"]
+            logger.warning(
+                f"Charge failed: {charge.get('id')} — "
+                f"reason: {charge.get('failure_message', 'unknown')}"
+            )
+
+        elif event["type"] == "customer.deleted":
+            customer = event["data"]["object"]
+            logger.info(f"Stripe customer deleted: {customer.get('id')}")
+
     except Exception as handler_err:
         logger.exception(
             "Failed to handle Stripe event %s", event["type"]
         )
         return jsonify({"received": False, "error": "Handler failed"}), 500
+
+    # Mark event as completed
+    if redis_conn:
+        try:
+            redis_conn.setex(f"stripe_event:{event_id}", 86400, "completed")
+        except Exception:
+            pass
 
     return jsonify({"received": True})
 

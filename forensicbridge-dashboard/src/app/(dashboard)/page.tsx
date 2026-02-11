@@ -384,7 +384,8 @@ export default function DashboardHome() {
     ];
 
     return (
-        <div className="space-y-8">
+        <div className={`space-y-8 ${loading ? 'opacity-70 pointer-events-none' : ''}`} aria-busy={loading}>
+            {/* AUDIT FIX P7-M2: Disable interaction during initial load */}
             {/* Header with API Status */}
             <div className="flex items-center justify-between">
                 <div>

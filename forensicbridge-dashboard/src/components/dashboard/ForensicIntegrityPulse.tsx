@@ -38,9 +38,10 @@ const demoLogs: LogEntry[] = [
  * instead of reading localStorage auth_token (XSS-vulnerable).
  * Uses API_URL from env instead of relative URL.
  */
-async function fetchForensicLogs(migrationId: string): Promise<LogEntry[]> {
+// AUDIT FIX P13-L1: Accept AbortSignal for cleanup on unmount
+async function fetchForensicLogs(migrationId: string, signal?: AbortSignal): Promise<LogEntry[]> {
     try {
-        const res = await authFetch(`${API_URL}/api/migrations/${migrationId}/forensic-logs`);
+        const res = await authFetch(`${API_URL}/api/migrations/${migrationId}/forensic-logs`, { signal });
         if (!res.ok) return [];
         const data = await res.json();
         if (data.success && Array.isArray(data.logs)) {
@@ -64,10 +65,12 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
     // Track whether we have real API data (to avoid overwriting with demos)
     const hasRealData = useRef(false);
 
-    // Fetch real forensic logs from API when live and migrationId is available
+    // AUDIT FIX P13-L1: AbortController for fetch cleanup on unmount
     useEffect(() => {
+        const controller = new AbortController();
         if (isLive && migrationId) {
-            fetchForensicLogs(migrationId).then((realLogs) => {
+            fetchForensicLogs(migrationId, controller.signal).then((realLogs) => {
+                if (controller.signal.aborted) return;
                 if (realLogs.length > 0) {
                     hasRealData.current = true;
                     setApiError(false);
@@ -75,7 +78,6 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
                 } else {
                     hasRealData.current = false;
                     setApiError(true);
-                    // Fall back to demo logs if API returns empty
                     setLogs(demoLogs.slice(0, 5).map(log => ({
                         ...log,
                         timestamp: new Date().toISOString()
@@ -84,12 +86,12 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
             });
         } else if (!isLive) {
             hasRealData.current = false;
-            // Show static demo logs when not live
             setLogs(demoLogs.slice(0, 5).map(log => ({
                 ...log,
                 timestamp: new Date().toISOString()
             })));
         }
+        return () => controller.abort();
     }, [isLive, migrationId]);
 
     // AUDIT FIX CRIT-02: Live mode polls the API for real logs instead of
