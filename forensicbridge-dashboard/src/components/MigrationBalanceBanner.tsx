@@ -100,8 +100,21 @@ export function MigrationBalanceBanner() {
         return () => clearInterval(interval);
     }, [loadBalanceData]);
 
+    // AUDIT FIX LOW-1: Show skeleton loader instead of null to prevent layout shift
     if (loading) {
-        return null; // Don't show banner while loading
+        return (
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 mb-6 animate-pulse">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-5 h-5 bg-gray-300 dark:bg-gray-600 rounded" />
+                        <div className="space-y-2">
+                            <div className="h-4 w-40 bg-gray-300 dark:bg-gray-600 rounded" />
+                            <div className="h-3 w-64 bg-gray-200 dark:bg-gray-700 rounded" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     // Show prompt to select a plan if user has no tier

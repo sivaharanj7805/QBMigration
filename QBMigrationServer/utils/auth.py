@@ -1,16 +1,19 @@
-import os
+import logging
 from functools import wraps
 
 from flask import jsonify
 from flask_login import current_user
 
+_logger = logging.getLogger(__name__)
+
 
 def admin_required(f):
     """Decorator to require admin privileges.
 
-    Checks both:
-    1. Role-based: user.is_admin() (role hierarchy)
-    2. Email-based: ADMIN_EMAILS environment variable (comma-separated)
+    AUDIT FIX HIGH-4: Uses ONLY role-based access control via user.is_admin().
+    The ADMIN_EMAILS environment variable bypass has been removed to prevent
+    privilege escalation outside the RBAC system. Admin access must be granted
+    by setting the user's role column in the database.
     """
 
     @wraps(f)
@@ -18,17 +21,15 @@ def admin_required(f):
         if not current_user.is_authenticated:
             return jsonify({"error": "Authentication required"}), 401
 
-        # Check role-based admin
+        # Check role-based admin only — no email-based bypass
         if current_user.is_admin():
             return f(*args, **kwargs)
 
-        # Check email-based admin (ADMIN_EMAILS env var)
-        admin_emails = os.environ.get("ADMIN_EMAILS", "")
-        if admin_emails:
-            email_list = [e.strip().lower() for e in admin_emails.split(",") if e.strip()]
-            if current_user.email.lower() in email_list:
-                return f(*args, **kwargs)
-
+        _logger.warning(
+            "Admin access denied for user %s (role=%s)",
+            current_user.id,
+            getattr(current_user, "role", "unknown"),
+        )
         return jsonify({"error": "Admin privileges required"}), 403
 
     return decorated_function

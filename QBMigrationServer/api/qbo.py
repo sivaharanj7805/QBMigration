@@ -45,12 +45,14 @@ def _get_frontend_url():
         return url
 
     env = os.getenv("FLASK_ENV", "development")
-    if env != "development":
-        logger.warning(
-            "FRONTEND_URL is not configured in %s mode. "
-            "OAuth redirects will fall back to http://localhost:3000 which is "
-            "almost certainly wrong. Set FRONTEND_URL to the correct origin.",
-            env,
+    if env not in ("development", "testing"):
+        # AUDIT FIX MEDIUM-10: Fail-closed in production/staging.
+        # Falling back to localhost in production causes OAuth redirects to
+        # silently fail, which is worse than a hard error during deployment.
+        raise RuntimeError(
+            f"FRONTEND_URL is not configured in {env} mode. "
+            "Set the FRONTEND_URL environment variable to the correct origin "
+            "(e.g. https://app.yoursite.com). Refusing to fall back to localhost."
         )
     return "http://localhost:3000"
 

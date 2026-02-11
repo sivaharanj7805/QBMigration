@@ -480,6 +480,40 @@ class PremiumMigrationVerifier:
             logger.info(f"  QBO Credits: ${qbo_credits:,.2f}")
             logger.info(f"  QBO Balance: ${(qbo_debits - qbo_credits):,.2f}")
 
+            # AUDIT FIX HIGH-6: Entity count per account type verification
+            # A balanced trial balance can still mask missing/extra accounts
+            logger.info("\n[2.5/2] Verifying account counts by type...")
+            qbd_type_counts = {}
+            for account in qbd_accounts:
+                atype = account.get("AccountType", "Unknown")
+                qbd_type_counts[atype] = qbd_type_counts.get(atype, 0) + 1
+
+            qbo_type_counts = {}
+            for account in qbo_accounts:
+                atype = account.get("AccountType", "Unknown")
+                qbo_type_counts[atype] = qbo_type_counts.get(atype, 0) + 1
+
+            all_types = set(qbd_type_counts.keys()) | set(qbo_type_counts.keys())
+            entity_count_warnings = []
+            for atype in sorted(all_types):
+                qbd_count = qbd_type_counts.get(atype, 0)
+                qbo_count = qbo_type_counts.get(atype, 0)
+                if qbd_count != qbo_count:
+                    msg = (
+                        f"Account type '{atype}': QBD has {qbd_count}, "
+                        f"QBO has {qbo_count} (delta: {qbo_count - qbd_count})"
+                    )
+                    entity_count_warnings.append(msg)
+                    logger.warning(f"  [WARN] {msg}")
+
+            if entity_count_warnings:
+                logger.warning(
+                    f"  [WARN] {len(entity_count_warnings)} account type(s) "
+                    "have different counts between QBD and QBO"
+                )
+            else:
+                logger.info("  [OK] All account type counts match")
+
             # Verify equation: Debits = Credits (penny-perfect tolerance)
             qbd_balanced = abs(qbd_debits - qbd_credits) < Decimal("0.01")
             qbo_balanced = abs(qbo_debits - qbo_credits) < Decimal("0.01")
@@ -503,6 +537,7 @@ class PremiumMigrationVerifier:
                 "matches": debit_match and credit_match,
                 "debit_variance": str(qbd_debits - qbo_debits),
                 "credit_variance": str(qbd_credits - qbo_credits),
+                "entity_count_warnings": entity_count_warnings,
             }
 
             logger.info("\n" + "=" * 80)

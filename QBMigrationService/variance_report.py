@@ -21,9 +21,11 @@ class VarianceReportGenerator:
     - Line-by-line variance highlighting
     """
 
-    def __init__(self, company_name: str = ""):
+    def __init__(self, company_name: str = "", critical_threshold: Decimal = None):
         self.company_name = company_name
         self.tolerance = Decimal("0.01")  # Penny-perfect tolerance
+        # AUDIT FIX MEDIUM-15: Configurable threshold for CRITICAL vs WARNING severity
+        self.critical_threshold = critical_threshold or Decimal("1000")
 
     def generate_variance_report(
         self, source_data: Dict, destination_data: Dict, years: int = 3
@@ -182,7 +184,8 @@ class VarianceReportGenerator:
                     "source": self._decimal_to_str(source_revenue),
                     "destination": self._decimal_to_str(dest_revenue),
                     "variance": self._decimal_to_str(revenue_var),
-                    "severity": "CRITICAL" if abs(revenue_var) > 1000 else "WARNING",
+                    # AUDIT FIX MEDIUM-15: Use configurable threshold instead of hardcoded 1000
+                    "severity": "CRITICAL" if abs(revenue_var) > self.critical_threshold else "WARNING",
                 }
             )
 
@@ -198,7 +201,7 @@ class VarianceReportGenerator:
                     "source": self._decimal_to_str(source_expenses),
                     "destination": self._decimal_to_str(dest_expenses),
                     "variance": self._decimal_to_str(expense_var),
-                    "severity": "CRITICAL" if abs(expense_var) > 1000 else "WARNING",
+                    "severity": "CRITICAL" if abs(expense_var) > self.critical_threshold else "WARNING",
                 }
             )
 
@@ -214,7 +217,7 @@ class VarianceReportGenerator:
                     "source": self._decimal_to_str(source_net),
                     "destination": self._decimal_to_str(dest_net),
                     "variance": self._decimal_to_str(net_var),
-                    "severity": "CRITICAL" if abs(net_var) > 1000 else "WARNING",
+                    "severity": "CRITICAL" if abs(net_var) > self.critical_threshold else "WARNING",
                 }
             )
 
@@ -252,7 +255,7 @@ class VarianceReportGenerator:
                         "source": self._decimal_to_str(source_val),
                         "destination": self._decimal_to_str(dest_val),
                         "variance": self._decimal_to_str(variance),
-                        "severity": "CRITICAL" if abs(variance) > 1000 else "WARNING",
+                        "severity": "CRITICAL" if abs(variance) > self.critical_threshold else "WARNING",
                     }
                 )
 

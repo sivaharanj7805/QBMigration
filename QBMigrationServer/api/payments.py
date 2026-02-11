@@ -27,16 +27,20 @@ logger = logging.getLogger(__name__)
 payments_bp = Blueprint("payments", __name__, url_prefix="/api/payments")
 
 
-def _get_stripe():
-    """Get Stripe with API key. Thread-safe: returns module with key set per-call."""
+def _get_stripe_key() -> str:
+    """AUDIT FIX MEDIUM-17: Return the Stripe API key without mutating the global
+    stripe.api_key, which is not thread-safe. Callers should pass the key via
+    the api_key= keyword argument on each Stripe API call."""
     key = os.getenv("STRIPE_SECRET_KEY") or current_app.config.get("STRIPE_SECRET_KEY")
     if not key:
         raise ValueError("STRIPE_SECRET_KEY not configured")
-    # SECURITY FIX: Use per-request key via stripe's default_http_client pattern
-    # stripe.api_key mutation is not thread-safe, but stripe API calls accept
-    # api_key as a keyword argument which is the proper thread-safe approach.
-    # Store the key so callers can pass it explicitly.
-    stripe._thread_local_api_key = key
+    return key
+
+
+def _get_stripe():
+    """Backwards-compatible wrapper that also sets stripe.api_key.
+    Prefer _get_stripe_key() + api_key= kwarg for thread safety."""
+    key = _get_stripe_key()
     stripe.api_key = key
     return stripe
 
@@ -78,8 +82,9 @@ def create_checkout():
             )
 
         # HIGH-09 FIX: Lazy-load Stripe key (supports rotation without restart)
+        # AUDIT FIX MEDIUM-17: Use per-request key for thread safety
         try:
-            _get_stripe()
+            stripe_key = _get_stripe_key()
         except ValueError:
             return (
                 jsonify(
@@ -101,6 +106,7 @@ def create_checkout():
                     "user_id": current_user.id,
                     "company": current_user.company_name or "",
                 },
+                api_key=stripe_key,
             )
             current_user.stripe_customer_id = customer.id
             db.session.commit()
@@ -121,7 +127,7 @@ def create_checkout():
         success_url = f"{base_url}/payment-success?session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = f"{base_url}/select-tier?cancelled=true"
 
-        # Create Checkout Session
+        # Create Checkout Session (api_key= for thread safety)
         checkout_session = stripe.checkout.Session.create(
             customer=current_user.stripe_customer_id,
             payment_method_types=["card"],
@@ -148,6 +154,7 @@ def create_checkout():
             success_url=success_url,
             cancel_url=cancel_url,
             expires_at=int(datetime.now(timezone.utc).timestamp()) + 1800,  # 30 minutes
+            api_key=stripe_key,
         )
 
         # Create pending credit (will be activated by webhook)
@@ -448,7 +455,9 @@ def verify_session(session_id):
         # The webhook may have already processed this payment between the user's redirect
         # and this verification call, causing duplicate credit allocation.
         if credit.status == "pending" and credit.payment_status != "paid":
-            session = stripe.checkout.Session.retrieve(session_id)
+            session = stripe.checkout.Session.retrieve(
+                session_id, api_key=_get_stripe_key()
+            )
 
             if session.payment_status == "paid":
                 # Use SELECT FOR UPDATE to prevent race with concurrent webhook

@@ -284,11 +284,14 @@ class CasewareExporter:
         output_file = self.output_dir / "Audit_TB.csv"
 
         # Column headers
+        # AUDIT FIX MEDIUM-11: Include Prior Year Balance column per CaseWare
+        # Working Papers import spec (allows CPA year-over-year comparison).
         headers = [
             "Account Number",
             "Account Description",
             "Type",
             "Lead Sheet Code",
+            "Prior Year Balance",
             "Current Year Balance",
             "Debit",
             "Credit",
@@ -323,6 +326,12 @@ class CasewareExporter:
                 account.get("balance")
                 or account.get("Balance")
                 or account.get("CurrentBalance", 0)
+            )
+            # AUDIT FIX MEDIUM-11: Extract prior year balance if available
+            prior_year_balance = self._to_decimal(
+                account.get("prior_year_balance")
+                or account.get("PriorYearBalance")
+                or account.get("OpeningBalance", 0)
             )
 
             # Hash on ORIGINAL values for verification
@@ -366,6 +375,7 @@ class CasewareExporter:
                     acct_name,
                     type_code,
                     lead_sheet,
+                    f"{prior_year_balance:.2f}",
                     f"{balance:.2f}",
                     f"{debit:.2f}",
                     f"{credit:.2f}",
@@ -377,11 +387,12 @@ class CasewareExporter:
             with self._stats_lock:
                 self.stats["accounts_exported"] += 1
 
-        # Add totals row
+        # Add totals row (columns: AcctNum, Desc, Type, LeadSheet, PriorYr, CurYr, Dr, Cr, Hash)
         rows.append(
             [
                 "",
                 "TOTALS",
+                "",
                 "",
                 "",
                 "",

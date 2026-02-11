@@ -1121,29 +1121,39 @@ REDIS_UPLOAD_PREFIX = "chunked_upload:"
 REDIS_UPLOAD_SET = "chunked_upload_sessions"
 
 
+_in_memory_upload_sessions = {}  # AUDIT FIX MEDIUM-16: fallback when Redis is down
+
 def _get_redis_client():
     """Get Redis client for chunked upload storage."""
     try:
         import redis
 
         redis_url = current_app.config.get("REDIS_URL", "redis://localhost:6379/0")
-        return redis.from_url(redis_url, decode_responses=True)
+        client = redis.from_url(redis_url, decode_responses=True)
+        client.ping()  # Verify connection is alive
+        return client
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
+        logger.warning(
+            "Redis unavailable for chunked uploads: %s. "
+            "Using in-memory fallback (data will not survive process restart).",
+            e,
+        )
         return None
 
 
 def _get_upload_session(upload_id: str) -> dict:
-    """Retrieve upload session from Redis."""
+    """Retrieve upload session from Redis, falling back to in-memory."""
     r = _get_redis_client()
     if not r:
-        return None
+        # AUDIT FIX MEDIUM-16: In-memory fallback
+        return _in_memory_upload_sessions.get(upload_id)
     try:
         data = r.get(f"{REDIS_UPLOAD_PREFIX}{upload_id}")
         if data:
             return json.loads(data)
     except Exception as e:
         logger.error(f"Failed to get upload session {upload_id}: {e}")
+        return _in_memory_upload_sessions.get(upload_id)
     return None
 
 
@@ -1156,7 +1166,19 @@ def _set_upload_session(upload_id: str, session_data: dict):
     """
     r = _get_redis_client()
     if not r:
-        raise RuntimeError("Redis not available for chunked uploads")
+        # AUDIT FIX MEDIUM-16: In-memory fallback instead of hard failure
+        if len(_in_memory_upload_sessions) >= MAX_CONCURRENT_UPLOADS:
+            raise RuntimeError(
+                f"Max concurrent uploads ({MAX_CONCURRENT_UPLOADS}) reached "
+                "(in-memory fallback mode)"
+            )
+        _in_memory_upload_sessions[upload_id] = session_data
+        logger.warning(
+            "Stored upload session %s in memory (Redis unavailable). "
+            "Session will not survive process restart.",
+            upload_id,
+        )
+        return
 
     # PRODUCTION FIX: Use Lua script for atomic check-and-add operation
     # This prevents race condition where multiple requests could exceed

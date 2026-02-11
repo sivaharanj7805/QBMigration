@@ -143,9 +143,12 @@ export function ReconciliationShield({
     return (
         <div className={`card-forensic overflow-hidden border ${config.border}`}>
             {/* Header */}
+            {/* AUDIT FIX LOW-7: Added aria-expanded for screen readers */}
             <button
                 className={`w-full p-4 flex items-center justify-between text-left ${config.bg}`}
                 onClick={() => setExpanded(!expanded)}
+                aria-expanded={expanded}
+                aria-label={`${config.title}: ${config.subtitle}. Click to ${expanded ? "collapse" : "expand"} details.`}
             >
                 <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-full ${config.iconBg} flex items-center justify-center`}>

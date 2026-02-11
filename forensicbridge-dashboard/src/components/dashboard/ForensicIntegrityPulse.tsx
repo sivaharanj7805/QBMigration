@@ -58,6 +58,8 @@ async function fetchForensicLogs(migrationId: string): Promise<LogEntry[]> {
 
 export function ForensicIntegrityPulse({ isLive = false, migrationId }: ForensicIntegrityPulseProps) {
     const [logs, setLogs] = useState<LogEntry[]>([]);
+    // AUDIT FIX LOW-8: Surface API connectivity errors to UI
+    const [apiError, setApiError] = useState(false);
     const terminalRef = useRef<HTMLDivElement>(null);
     // Track whether we have real API data (to avoid overwriting with demos)
     const hasRealData = useRef(false);
@@ -68,9 +70,11 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
             fetchForensicLogs(migrationId).then((realLogs) => {
                 if (realLogs.length > 0) {
                     hasRealData.current = true;
+                    setApiError(false);
                     setLogs(realLogs);
                 } else {
                     hasRealData.current = false;
+                    setApiError(true);
                     // Fall back to demo logs if API returns empty
                     setLogs(demoLogs.slice(0, 5).map(log => ({
                         ...log,
@@ -152,10 +156,16 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {isLive && (
+                    {isLive && !apiError && (
                         <span className="flex items-center gap-1.5 text-xs text-green-400">
                             <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                             LIVE
+                        </span>
+                    )}
+                    {apiError && (
+                        <span className="flex items-center gap-1.5 text-xs text-yellow-400" title="Using demo data — forensic log API unreachable">
+                            <span className="w-2 h-2 bg-yellow-400 rounded-full" />
+                            DEMO
                         </span>
                     )}
                     <Shield className="w-4 h-4 text-gray-500" />

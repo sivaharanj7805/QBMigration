@@ -564,17 +564,27 @@ class User(UserMixin, db.Model):
     def record_failed_login(self):
         """
         Record failed login attempt.
-        FIX M-01: Uses atomic increment to prevent race conditions.
+        AUDIT FIX MEDIUM-14: Uses SQL-level atomic increment to prevent race
+        conditions where two concurrent failed logins each read the same count
+        and only increment by 1 instead of 2.
         Locks account after 5 failed attempts.
         """
-        self.failed_login_attempts = (self.failed_login_attempts or 0) + 1
-        self.last_failed_login = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        # Atomic SQL-level increment avoids TOCTOU race on concurrent requests
+        db.session.execute(
+            db.update(User)
+            .where(User.id == self.id)
+            .values(
+                failed_login_attempts=db.func.coalesce(User.failed_login_attempts, 0) + 1,
+                last_failed_login=now,
+            )
+        )
+        db.session.flush()
+        db.session.refresh(self)
 
         # Lock account after 5 failures
         if self.failed_login_attempts >= 5:
-            self.account_locked_until = datetime.now(timezone.utc) + timedelta(
-                minutes=15
-            )
+            self.account_locked_until = now + timedelta(minutes=15)
 
     def record_successful_login(self, ip_address=None):
         """
@@ -613,11 +623,15 @@ class User(UserMixin, db.Model):
                 from cryptography.fernet import Fernet
                 from flask import current_app
 
-                key = current_app.config.get(
-                    "MFA_ENCRYPTION_KEY"
-                ) or current_app.config.get(
-                    "QBO_ENCRYPTION_KEY"
-                ) or current_app.config.get("BACKUP_ENCRYPTION_KEY")
+                # AUDIT FIX HIGH-3: Require MFA_ENCRYPTION_KEY strictly.
+                # Fallback chain removed to prevent key rotation data loss.
+                key = current_app.config.get("MFA_ENCRYPTION_KEY")
+                if not key:
+                    logging.getLogger(__name__).error(
+                        "MFA_ENCRYPTION_KEY not configured. "
+                        "Set this environment variable to decrypt MFA secrets."
+                    )
+                    return None
                 if key:
                     f = Fernet(key.encode() if isinstance(key, str) else key)
                     return f.decrypt(self._mfa_secret_encrypted.encode()).decode()
@@ -653,17 +667,14 @@ class User(UserMixin, db.Model):
         from cryptography.fernet import Fernet
         from flask import current_app
 
-        # CRIT-01 FIX: Use same key chain as _get_mfa_secret to prevent
-        # encrypt/decrypt key mismatch. Order: MFA_ENCRYPTION_KEY (preferred,
-        # domain-separated) → QBO_ENCRYPTION_KEY → BACKUP_ENCRYPTION_KEY.
-        key = (
-            current_app.config.get("MFA_ENCRYPTION_KEY")
-            or current_app.config.get("QBO_ENCRYPTION_KEY")
-            or current_app.config.get("BACKUP_ENCRYPTION_KEY")
-        )
+        # AUDIT FIX HIGH-3: Use ONLY MFA_ENCRYPTION_KEY — no fallback chain.
+        # This ensures encrypt/decrypt always use the same key and prevents
+        # data loss during key rotation.
+        key = current_app.config.get("MFA_ENCRYPTION_KEY")
         if not key:
             raise ValueError(
-                "Encryption key not configured - cannot store MFA secret in plaintext"
+                "MFA_ENCRYPTION_KEY not configured - cannot store MFA secret. "
+                "Set this environment variable before enabling MFA."
             )
         f = Fernet(key.encode() if isinstance(key, str) else key)
         self._mfa_secret_encrypted = f.encrypt(value.encode()).decode()
@@ -691,13 +702,29 @@ class User(UserMixin, db.Model):
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).debug("Failed to decrypt backup codes: %s", exc)
-        # Fall back to legacy unencrypted column (DEPRECATED)
+        # AUDIT FIX HIGH-5: Block legacy unencrypted backup codes in production.
+        # Plaintext fallback is only allowed in development to aid migration.
         if self.backup_codes:
             import logging
 
-            logging.getLogger(__name__).warning(
-                f"User {self.id} still using legacy unencrypted backup_codes column. "
-                "Run migrate_legacy_mfa_data() to encrypt."
+            _log = logging.getLogger(__name__)
+            from flask import current_app
+
+            env = current_app.config.get("FLASK_ENV") or os.environ.get(
+                "FLASK_ENV", "development"
+            )
+            if env == "production":
+                _log.error(
+                    "User %s has legacy unencrypted backup_codes. "
+                    "Run migrate_legacy_mfa_data() to encrypt. "
+                    "Plaintext access is blocked in production.",
+                    self.id,
+                )
+                return None
+            _log.warning(
+                "User %s still using legacy unencrypted backup_codes column. "
+                "Run migrate_legacy_mfa_data() to encrypt.",
+                self.id,
             )
             try:
                 return json.loads(self.backup_codes)
