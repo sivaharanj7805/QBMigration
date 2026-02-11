@@ -706,9 +706,10 @@ namespace QBDesktopExtractor
         [JsonProperty("firstName")] public string FirstName { get; set; }
         [JsonProperty("middleName")] public string MiddleName { get; set; }
         [JsonProperty("lastName")] public string LastName { get; set; }
-        [JsonIgnore]
-        [JsonProperty("ssn")] public string SSN { get; set; }  // Sensitive - redact in output
-        public string SSNMasked => string.IsNullOrEmpty(SSN) ? "" : $"***-**-{SSN[^4..]}";
+        // LOW-01 FIX: Removed contradictory [JsonProperty] — SSN must never be serialized.
+        // MED-10 FIX: Added length check to prevent IndexOutOfRange on short SSN values.
+        [JsonIgnore] public string SSN { get; set; }
+        public string SSNMasked => string.IsNullOrEmpty(SSN) || SSN.Length < 4 ? "" : $"***-**-{SSN[^4..]}";
         [JsonProperty("phone")] public string Phone { get; set; }
         [JsonProperty("altPhone")] public string AltPhone { get; set; }
         [JsonProperty("fax")] public string Fax { get; set; }
@@ -1562,7 +1563,8 @@ namespace QBDesktopExtractor
         public int TotalEntitiesAttempted { get; set; }
         public int TotalEntitiesSucceeded { get; set; }
         public int TotalEntitiesFailed { get; set; }
-        public int TotalRecordsExtracted { get; set; }
+        // LOW-03 FIX: Changed from int to long to prevent overflow for large datasets
+        public long TotalRecordsExtracted { get; set; }
         public List<EntityExtractionResult> EntityResults { get; set; } = new List<EntityExtractionResult>();
         public List<string> Warnings { get; set; } = new List<string>();
         public List<string> Errors { get; set; } = new List<string>();

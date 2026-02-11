@@ -1198,6 +1198,11 @@ class MigrationOrchestrator:
         except ImportError:
             batch_size = 30
 
+        # MED-18 FIX: Prevent infinite loop if BATCH_SIZE is 0 or negative
+        if batch_size <= 0:
+            logger.warning(f"Invalid BATCH_SIZE={batch_size}, defaulting to 30")
+            batch_size = 30
+
         # Build batches of up to batch_size items
         batches = []
         for i in range(0, len(transformed_pairs), batch_size):
@@ -1415,15 +1420,22 @@ class MigrationOrchestrator:
                 f"Batch request failed for {api_entity_type} "
                 f"({len(batch_items)} items): {e} — retrying individually"
             )
-            # Track already-created source_ids to avoid duplicates during fallback
+            # HIGH-04 FIX: Add rate limiting between sequential fallback creates
+            # to prevent triggering QBO 429 storm after batch failure.
+            # HIGH-05 FIX: Track already-created source_ids to avoid duplicates
+            import time as _time
+
             already_created = {sid for sid, _ in success_mappings}
-            for source_id, entity_data in batch_items:
+            for idx, (source_id, entity_data) in enumerate(batch_items):
                 if source_id in already_created:
                     logger.info(
                         f"Skipping already-created {api_entity_type} "
                         f"({source_id}) during sequential fallback"
                     )
                     continue
+                # HIGH-04 FIX: Rate limit sequential fallback (0.5s between requests)
+                if idx > 0:
+                    _time.sleep(0.5)
                 try:
                     result = qbo_client.create_entity(
                         api_entity_type, entity_data, oauth_manager=oauth_manager

@@ -17,15 +17,16 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+  resetKey: number;  // MED-06 FIX: Counter to force children re-mount on retry
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, resetKey: 0 };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
@@ -83,7 +84,7 @@ export class ErrorBoundary extends Component<Props, State> {
               We&apos;re sorry, but something unexpected happened.
             </p>
             <button
-              onClick={() => this.setState({ hasError: false, error: null })}
+              onClick={() => this.setState(prev => ({ hasError: false, error: null, resetKey: prev.resetKey + 1 }))}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
               type="button"
             >
@@ -94,7 +95,9 @@ export class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    return this.props.children;
+    // MED-06 FIX: Use key to force re-mount of children when "Try Again" is clicked.
+    // Without this, React reuses the existing component tree which stays in error state.
+    return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>;
   }
 }
 

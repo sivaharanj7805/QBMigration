@@ -457,7 +457,14 @@ class User(UserMixin, db.Model):
             try:
                 if ph.verify(old_hash, password):
                     return True
-            except (VerifyMismatchError, VerificationError, InvalidHash):
+            except (VerifyMismatchError, VerificationError):
+                continue
+            except InvalidHash:
+                # LOW-14 FIX: Log corrupted hash entries instead of silently skipping
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Corrupted password hash in history for user {self.id} — skipping entry"
+                )
                 continue
 
         return False

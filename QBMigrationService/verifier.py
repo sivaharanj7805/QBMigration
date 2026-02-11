@@ -61,9 +61,20 @@ class MerkleTreeBuilder:
             if h:
                 self._leaf_hashes.append(h)
 
+    # CRIT-03 FIX: Domain separation constants for second-preimage resistance.
+    # Leaf nodes are prefixed with 0x00, internal nodes with 0x01.
+    # This prevents an attacker from presenting an internal node as a leaf.
+    _LEAF_PREFIX = b"\x00"
+    _INTERNAL_PREFIX = b"\x01"
+
     def build_tree(self) -> str:
         """
         Build the Merkle tree and compute the root hash.
+
+        CRIT-03 FIX: Uses domain-separated hashing (RFC 6962 §2.1) to prevent
+        second-preimage attacks. Leaf hashes use H(0x00 || data) and internal
+        nodes use H(0x01 || left || right). Odd leaves are promoted without
+        duplication to avoid ambiguous tree structures.
 
         Returns:
             The Merkle root hash (SHA-256)
@@ -72,10 +83,8 @@ class MerkleTreeBuilder:
             self._merkle_root = self._compute_sha256("EMPTY_TREE")
             return self._merkle_root
 
-        # Ensure even number of leaves (duplicate last if odd)
-        leaves = list(self._leaf_hashes)
-        if len(leaves) % 2 == 1:
-            leaves.append(leaves[-1])
+        # Hash leaves with domain separation (0x00 prefix)
+        leaves = [self._hash_leaf(h) for h in self._leaf_hashes]
 
         self._tree_levels = [leaves]
 
@@ -86,11 +95,13 @@ class MerkleTreeBuilder:
 
             for i in range(0, len(current_level), 2):
                 left = current_level[i]
-                right = current_level[i + 1] if i + 1 < len(current_level) else left
-
-                # Concatenate and hash
-                combined = left + right
-                parent_hash = self._compute_sha256(combined)
+                if i + 1 < len(current_level):
+                    right = current_level[i + 1]
+                    # Internal node: H(0x01 || left || right)
+                    parent_hash = self._hash_internal(left, right)
+                else:
+                    # CRIT-03 FIX: Promote odd leaf without duplication
+                    parent_hash = left
                 next_level.append(parent_hash)
 
             self._tree_levels.append(next_level)
@@ -100,6 +111,18 @@ class MerkleTreeBuilder:
             current_level[0] if current_level else self._compute_sha256("EMPTY_TREE")
         )
         return self._merkle_root
+
+    @classmethod
+    def _hash_leaf(cls, data: str) -> str:
+        """Hash a leaf node with domain separation: H(0x00 || data)."""
+        return hashlib.sha256(cls._LEAF_PREFIX + data.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _hash_internal(cls, left: str, right: str) -> str:
+        """Hash an internal node with domain separation: H(0x01 || left || right)."""
+        return hashlib.sha256(
+            cls._INTERNAL_PREFIX + left.encode("utf-8") + right.encode("utf-8")
+        ).hexdigest()
 
     def get_merkle_root(self) -> str:
         """Get the Merkle root (builds tree if not already built)."""
@@ -151,21 +174,25 @@ class MerkleTreeBuilder:
         """
         Verify a leaf hash using a proof path.
 
+        CRIT-03 FIX: Uses domain-separated hashing consistent with build_tree().
+        The leaf_hash should be the raw record hash (pre-leaf-prefix).
+
         Args:
-            leaf_hash: The hash to verify
+            leaf_hash: The raw record hash to verify (will be leaf-hashed internally)
             proof: Proof path from get_proof_path()
             expected_root: The expected Merkle root
 
         Returns:
             True if proof is valid, False otherwise
         """
-        current_hash = leaf_hash
+        # Apply leaf domain separation
+        current_hash = self._hash_leaf(leaf_hash)
 
         for sibling_hash, is_left in proof:
             if is_left:
-                current_hash = self._compute_sha256(sibling_hash + current_hash)
+                current_hash = self._hash_internal(sibling_hash, current_hash)
             else:
-                current_hash = self._compute_sha256(current_hash + sibling_hash)
+                current_hash = self._hash_internal(current_hash, sibling_hash)
 
         return current_hash == expected_root
 
@@ -432,7 +459,25 @@ class PremiumMigrationVerifier:
         logger.info("\n[2/2] Calculating QuickBooks Online trial balance...")
 
         try:
-            qbo_accounts = self.client.query("Account", oauth_manager=oauth_manager)
+            # MED-13 FIX: Add timeout to QBO verification queries to prevent indefinite hangs
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self.client.query, "Account", oauth_manager=oauth_manager)
+                try:
+                    qbo_accounts = future.result(timeout=120)  # 2-minute timeout
+                except FuturesTimeout:
+                    logger.error("QBO account query timed out after 120 seconds")
+                    self.report["errors"].append("QBO account query timed out")
+                    return False
+
+            # MED-14 FIX: Guard against empty QBO company falsely reporting balanced
+            if not qbo_accounts:
+                logger.warning("  [WARN] No accounts found in QBO — cannot verify trial balance")
+                self.report["errors"].append(
+                    "QBO company has no accounts — trial balance cannot be verified"
+                )
+                return False
 
             qbo_debits = Decimal("0")
             qbo_credits = Decimal("0")

@@ -343,13 +343,18 @@ class AWSMigrationManager:
         """
         FIX #60: Find S3 key for migration's metadata file with pagination support.
         S3 list_objects_v2 returns max 1000 objects per call.
+        MED-15 FIX: Use migration-specific prefix to avoid scanning entire bucket.
         """
         try:
-            prefix = "migrations/"
+            # MED-15 FIX: Use migration-specific prefix instead of broad "migrations/"
+            # This avoids scanning thousands of unrelated objects in large deployments.
+            prefix = f"migrations/{migration_id}/"
             continuation_token = None
+            max_pages = 10  # Safety limit to prevent infinite pagination
 
-            # FIX #60: Paginate through all S3 objects
-            while True:
+            page_count = 0
+            while page_count < max_pages:
+                page_count += 1
                 list_params = {"Bucket": bucket_name, "Prefix": prefix, "MaxKeys": 1000}
 
                 if continuation_token:
@@ -373,6 +378,12 @@ class AWSMigrationManager:
                 else:
                     # No more pages, file not found
                     return None
+
+            # MED-15 FIX: Exceeded max pagination pages
+            logger.warning(
+                f"Metadata search exceeded {max_pages} pages for migration {migration_id}"
+            )
+            return None
 
         except Exception as e:
             logger.error(f"Error finding metadata key: {str(e)}")

@@ -230,7 +230,11 @@ namespace QBMigrationLauncher
                         _failedLoginAttempts = 0;
 
                         // Save session
-                        // CRIT-08 FIX: Set expiry time (default 24 hours, or from server response)
+                        // MED-11 FIX: Use server-provided token expiry instead of hardcoded 24h.
+                        // Falls back to 1 hour (not 24h) if server doesn't provide expiry.
+                        var tokenExpiryHours = result.expires_in_seconds > 0
+                            ? result.expires_in_seconds / 3600.0
+                            : 1.0;  // Conservative 1-hour default
                         var session = new SessionData
                         {
                             Token = result.token,
@@ -238,7 +242,7 @@ namespace QBMigrationLauncher
                             UserId = result.user?.id ?? 0,
                             FirstName = result.user?.first_name,
                             CompanyName = result.user?.company_name,
-                            ExpiresAt = DateTime.UtcNow.AddHours(24)  // Default 24 hour expiry
+                            ExpiresAt = DateTime.UtcNow.AddHours(tokenExpiryHours)
                         };
 
                         SaveSession(session);

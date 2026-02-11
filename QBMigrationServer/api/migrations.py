@@ -646,19 +646,15 @@ def _provision_aws_instance(migration_id, migration, qbo_credentials):
     return aws_manager, instance_id, None
 
 
-def _consume_migration_credit(user_id, migration_id, migration, aws_manager, instance_id):
+def _consume_migration_credit(user_id, migration_id, migration):
     """
-    C-04 FIX: Atomic credit check + consumption using SELECT FOR UPDATE.
-    This is the authoritative credit gate -- the earlier count() is only
-    a non-locking fast-fail for UX.  The row lock here prevents the
-    TOCTOU double-spend race between concurrent requests.
+    CRIT-02 FIX: Atomic credit check + consumption using SELECT FOR UPDATE.
+    Must be called BEFORE EC2 provisioning to prevent orphaned instances.
 
     Args:
         user_id: The current user's ID
         migration_id: The migration UUID string
         migration: The Migration model instance
-        aws_manager: The AWSMigrationManager instance (for cleanup on failure)
-        instance_id: The EC2 instance ID (for cleanup on failure)
 
     Returns:
         None on success, or a (response, status_code) tuple on failure
@@ -671,19 +667,9 @@ def _consume_migration_credit(user_id, migration_id, migration, aws_manager, ins
         .first()
     )
     if not available_credit:
-        # Another request consumed the last credit between the early
-        # check and here.  Terminate the EC2 instance we just launched
-        # and fail the migration.
         logger.error(
-            f"Credit consumed by concurrent request for migration {migration_id}; "
-            f"terminating instance {instance_id}"
+            f"No credits available for migration {migration_id} (atomic check)"
         )
-        try:
-            aws_manager.cleanup_migration(
-                migration_id=migration_id, instance_id=instance_id
-            )
-        except Exception as cleanup_err:
-            logger.warning(f"Cleanup after credit race failed: {cleanup_err}")
         if hasattr(migration, "mark_as_failed") and callable(
             migration.mark_as_failed
         ):
@@ -793,19 +779,37 @@ def start_migration(migration_id):
         if realm_error:
             return realm_error
 
-        # Provision AWS instance
+        # CRIT-02 FIX: Atomically consume credit BEFORE provisioning EC2.
+        # This prevents orphaned EC2 instances when credits are exhausted
+        # between the early check and provisioning.
+        consume_error = _consume_migration_credit(
+            user_id, migration_id, migration
+        )
+        if consume_error:
+            return consume_error
+
+        # Provision AWS instance (credit already consumed)
         aws_manager, instance_id, provision_error = _provision_aws_instance(
             migration_id, migration, qbo_credentials
         )
         if provision_error:
+            # Refund the credit since provisioning failed
+            try:
+                refund_credit = (
+                    MigrationCredit.query.filter_by(
+                        migration_id=migration_id, status="used"
+                    )
+                    .first()
+                )
+                if refund_credit:
+                    refund_credit.status = "available"
+                    refund_credit.used_at = None
+                    refund_credit.migration_id = None
+                    db.session.commit()
+                    logger.info(f"Refunded credit for failed provisioning: {migration_id}")
+            except Exception as refund_err:
+                logger.error(f"Failed to refund credit after provisioning failure: {refund_err}")
             return provision_error
-
-        # Atomically consume a migration credit
-        consume_error = _consume_migration_credit(
-            user_id, migration_id, migration, aws_manager, instance_id
-        )
-        if consume_error:
-            return consume_error
 
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
 

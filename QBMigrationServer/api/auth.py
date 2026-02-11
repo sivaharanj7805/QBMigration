@@ -42,9 +42,10 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
 # H-03 FIX: JWT blocklist for logout revocation.
-# Primary: Redis (shared across all workers/processes)
-# Fallback: In-memory dict (per-process, used if Redis unavailable)
-_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp (fallback only)
+# CRIT-01 FIX: Redis is REQUIRED for multi-worker deployments.
+# In-memory fallback uses fail-closed policy: if Redis is down,
+# blocklist checks assume the token IS revoked (deny access).
+_jwt_blocklist: dict[str, float] = {}  # jti -> expiry timestamp (local cache only)
 _jwt_blocklist_lock = threading.Lock()
 
 
@@ -88,20 +89,15 @@ def _get_redis():
 
 
 def _blocklist_add(jti: str, exp_timestamp: float) -> None:
-    """Add a JWT ID to the blocklist. Uses Redis if available, falls back to in-memory."""
+    """Add a JWT ID to the blocklist. Uses Redis (shared across all workers).
+
+    CRIT-01 FIX: Also writes to local in-memory cache so that the worker
+    that performed the logout always honours it even if a subsequent Redis
+    read fails.  The authoritative store is Redis.
+    """
     ttl = max(int(exp_timestamp - _time.time()), 1)
 
-    # Try Redis first (shared across all workers)
-    redis = _get_redis()
-    if redis:
-        try:
-            redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
-            return
-        except Exception as exc:
-            # AUDIT FIX P6-L1: Warn on Redis fallback — in-memory blocklist is per-process only
-            logger.warning("Redis blocklist write failed, falling back to in-memory (per-process only): %s", exc)
-
-    # Fallback: in-memory (per-process only — tokens revoked here won't be seen by other workers)
+    # Always write to local cache (belt-and-suspenders)
     now = _time.time()
     with _jwt_blocklist_lock:
         # Prune expired entries
@@ -110,29 +106,58 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
             del _jwt_blocklist[k]
         _jwt_blocklist[jti] = exp_timestamp
 
+    # Write to Redis (shared across all workers)
+    redis = _get_redis()
+    if redis:
+        try:
+            redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
+            return
+        except Exception as exc:
+            logger.error("Redis blocklist write failed: %s. Token revocation may not propagate to other workers.", exc)
+    else:
+        logger.error("Redis unavailable for JWT blocklist write. Token revocation is local-only.")
+
 
 def _blocklist_check(jti: str) -> bool:
-    """Check if a JWT ID is in the blocklist (i.e., revoked)."""
-    # Try Redis first
+    """Check if a JWT ID is in the blocklist (i.e., revoked).
+
+    CRIT-01 FIX: Fail-closed policy — if Redis is unavailable and the token
+    is not in the local cache, we DENY access rather than silently allowing
+    a potentially-revoked token through.  This prevents the per-process
+    blindspot where Worker B doesn't see Worker A's logout.
+    """
+    # Check local cache first (fast path)
+    now = _time.time()
+    with _jwt_blocklist_lock:
+        exp = _jwt_blocklist.get(jti)
+        if exp is not None:
+            if exp < now:
+                del _jwt_blocklist[jti]
+            else:
+                return True  # Definitely revoked
+
+    # Check Redis (authoritative cross-worker store)
     redis = _get_redis()
     if redis:
         try:
             if redis.exists(f"jwt_blocklist:{jti}"):
                 return True
+            return False  # Redis says not revoked — trust it
         except Exception as exc:
-            logger.debug("Redis blocklist check failed, falling back to in-memory: %s", exc)
+            logger.error(
+                "Redis blocklist check failed: %s. Denying access (fail-closed).", exc
+            )
+            return True  # FAIL CLOSED: treat as revoked when Redis is unreachable
 
-    # Fallback: in-memory check
-    now = _time.time()
-    with _jwt_blocklist_lock:
-        exp = _jwt_blocklist.get(jti)
-        if exp is None:
-            return False
-        if exp < now:
-            # Expired entry, remove and allow
-            del _jwt_blocklist[jti]
-            return False
-        return True
+    # Redis not available at all — fail closed in production
+    import os
+    env = os.environ.get("FLASK_ENV", "production")
+    if env == "production":
+        logger.error("Redis unavailable for blocklist check. Denying access (fail-closed).")
+        return True  # FAIL CLOSED in production
+
+    # Development: allow through with warning
+    return False
 
 
 # SESSION BINDING: User-Agent validation for session security

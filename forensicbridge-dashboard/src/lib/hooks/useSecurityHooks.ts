@@ -130,26 +130,20 @@ export function useAbortController(): AbortController {
  * and call controller.abort() manually when needed.
  */
 export function useAbortSignal(): AbortSignal {
-    // PERFORMANCE FIX: Use lazy initialization to create controller only once
+    // MED-21 FIX: Create controller only once via lazy ref init (removed duplicate in useEffect)
     const controllerRef = useRef<AbortController | null>(null);
 
-    // Only create controller once (lazy initialization)
     if (controllerRef.current === null) {
         controllerRef.current = new AbortController();
     }
 
     useEffect(() => {
-        // Create fresh controller on mount
-        const controller = new AbortController();
-        controllerRef.current = controller;
-
         return () => {
             // Abort on unmount to prevent memory leaks
-            controller.abort();
+            controllerRef.current?.abort();
         };
     }, []);
 
-    // Return signal from the controller (safe because it's lazily initialized)
     return controllerRef.current.signal;
 }
 
@@ -159,22 +153,24 @@ export function useAbortSignal(): AbortSignal {
  */
 export function useLoadingGuard() {
     const [isLoading, setIsLoading] = useState(false);
+    // MED-20 FIX: Use ref for loading guard to avoid stale closure over isLoading state
+    const isLoadingRef = useRef(false);
     const operationIdRef = useRef(0);
 
     const execute = useCallback(async <T>(
         operation: (signal: AbortSignal) => Promise<T>
     ): Promise<T | null> => {
-        if (isLoading) {
+        if (isLoadingRef.current) {
             return null; // Prevent double execution
         }
 
+        isLoadingRef.current = true;
         const currentId = ++operationIdRef.current;
         const controller = new AbortController();
 
         setIsLoading(true);
         try {
             const result = await operation(controller.signal);
-            // Only process result if this is still the current operation
             if (currentId === operationIdRef.current) {
                 return result;
             }
@@ -186,10 +182,11 @@ export function useLoadingGuard() {
             return null;
         } finally {
             if (currentId === operationIdRef.current) {
+                isLoadingRef.current = false;
                 setIsLoading(false);
             }
         }
-    }, [isLoading]);
+    }, []);
 
     const cancel = useCallback(() => {
         operationIdRef.current++;

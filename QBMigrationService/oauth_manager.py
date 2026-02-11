@@ -281,13 +281,17 @@ class OAuthManager:
             with open(temp_file, "w") as f:
                 f.write(content_to_write)
 
-            # Set restrictive permissions
+            # MED-19 FIX: Enforce restrictive permissions; warn on failure instead of silently passing
             try:
                 import os
 
                 os.chmod(temp_file, 0o600)  # Owner read/write only
-            except (OSError, AttributeError):
-                pass  # May fail on Windows
+            except (OSError, AttributeError) as perm_err:
+                if _get_env() != "development":
+                    logger.warning(
+                        f"Could not set restrictive permissions on token file: {perm_err}. "
+                        "Token file may be world-readable."
+                    )
 
             # Atomic rename
             temp_file.replace(self.token_file)
@@ -296,8 +300,12 @@ class OAuthManager:
 
         except Exception as e:
             logger.info(f"[WARN] Failed to save tokens: {e}")
-            if temp_file.exists():
-                temp_file.unlink()
+            # LOW-07 FIX: Clean up orphaned temp file on failure
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except OSError:
+                pass  # Best-effort cleanup
 
     # ========================================================================
     # TOKEN REFRESH
@@ -362,15 +370,21 @@ class OAuthManager:
                     # A changed realm_id in a refresh response could indicate a
                     # token mixup or SSRF redirect — log a warning but keep going
                     # since Intuit occasionally omits realmId from refresh responses.
+                    # HIGH-08 FIX: Reject realm_id changes in production to prevent
+                    # silent company switch (potential MitM or token mixup).
                     new_realm_id = result.get("realmId")
                     if new_realm_id:
                         if self.realm_id and new_realm_id != self.realm_id:
-                            logger.warning(
-                                "realm_id changed on token refresh: %s -> %s. "
-                                "This may indicate a token mixup.",
-                                self.realm_id,
-                                new_realm_id,
+                            error_msg = (
+                                f"realm_id changed on token refresh: {self.realm_id} -> {new_realm_id}. "
+                                "This may indicate a token mixup or SSRF redirect."
                             )
+                            if _get_env() != "development":
+                                raise Exception(
+                                    f"SECURITY: {error_msg} "
+                                    "Refusing to continue with mismatched company ID."
+                                )
+                            logger.warning(error_msg)
                         self.realm_id = new_realm_id
 
                     scope_string = result.get("scope", "")

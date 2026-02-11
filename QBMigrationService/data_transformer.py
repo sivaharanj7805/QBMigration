@@ -220,10 +220,17 @@ class QBDataTransformer:
             )
 
         # Set up timeout (Unix only - Windows doesn't support SIGALRM)
+        # MED-17 FIX: Log explicit warning on Windows instead of silently skipping
         old_handler = None
         if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
             signal.alarm(timeout_seconds)
+        else:
+            logger.warning(
+                "SIGALRM not available on this platform (Windows). "
+                "Transformation timeout protection is disabled. "
+                "Consider using threading.Timer as an alternative."
+            )
 
         try:
             return self._transform_parallel_impl(qb_data, max_workers)
