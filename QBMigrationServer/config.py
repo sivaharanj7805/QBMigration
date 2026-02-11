@@ -255,7 +255,7 @@ class Config:
     MIGRATION_MAX_DURATION_HOURS = int(os.getenv("MIGRATION_MAX_DURATION_HOURS", "8"))
     WEBHOOK_RETRY_ATTEMPTS = int(os.getenv("WEBHOOK_RETRY_ATTEMPTS", "3"))
     WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "30"))
-    WEBHOOK_REPLAY_WINDOW_MINUTES = 5  # Reject webhooks older than 5 minutes
+    WEBHOOK_REPLAY_WINDOW_MINUTES = 2  # Reject webhooks older than 2 minutes
 
     # ============================================================================
     # CLEANUP & RETENTION

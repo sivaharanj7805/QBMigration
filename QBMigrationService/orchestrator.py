@@ -239,14 +239,24 @@ class MigrationOrchestrator:
         is already running against this realm.
         """
         if _redis_mod is None:
+            if os.environ.get("FLASK_ENV") == "production" or os.environ.get("ENVIRONMENT") == "production":
+                raise RuntimeError(
+                    "redis package is required in production for realm locking. "
+                    "Install redis: pip install redis"
+                )
             logger.warning(
                 "redis package not installed — realm lock unavailable. "
                 "Concurrent migration protection is disabled."
             )
-            return True  # Degrade gracefully — don't block if Redis unavailable
+            return True  # Degrade gracefully in development only
 
         redis_url = os.environ.get("REDIS_URL")
         if not redis_url:
+            if os.environ.get("FLASK_ENV") == "production" or os.environ.get("ENVIRONMENT") == "production":
+                raise RuntimeError(
+                    "REDIS_URL must be set in production for realm locking. "
+                    "Concurrent migrations without locks can create duplicate QBO entities."
+                )
             logger.warning("REDIS_URL not set — realm lock unavailable.")
             return True
 
@@ -276,8 +286,13 @@ class MigrationOrchestrator:
                 )
                 return False
         except Exception as e:
+            if os.environ.get("FLASK_ENV") == "production" or os.environ.get("ENVIRONMENT") == "production":
+                raise RuntimeError(
+                    f"Failed to acquire realm lock (Redis error): {e}. "
+                    "Cannot proceed without lock in production."
+                )
             logger.warning(f"Failed to acquire realm lock (Redis error): {e}")
-            return True  # Degrade gracefully
+            return True  # Degrade gracefully in development only
 
     def _release_realm_lock(self) -> None:
         """Release the distributed realm lock using atomic Lua script."""
