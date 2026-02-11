@@ -419,24 +419,10 @@ class ApiClient {
     }
 
     async getMigrations(page: number = 1, perPage: number = 20, signal?: AbortSignal) {
-        return this.deduplicatedRequest<{
-            migrations: Array<{
-                id: number;
-                migration_id: string;
-                status: string;
-                company_name: string;
-                qb_file_name: string;
-                progress_percent: number;
-                created_at: string;
-                completed_at: string | null;
-                s3_uri: string;
-            }>;
-            count: number;
-            page: number;
-            per_page: number;
-            total_pages: number;
-        // M-22 FIX: Pass MigrationListSchema for runtime Zod validation of pagination data
-        }>(`/api/migrations?page=${page}&per_page=${perPage}`, {}, MigrationListSchema, undefined, signal);
+        // M-22 FIX: Use MigrationListSchema for runtime Zod validation of pagination data
+        return this.deduplicatedRequest<z.infer<typeof MigrationListSchema>>(
+            `/api/migrations?page=${page}&per_page=${perPage}`, {}, MigrationListSchema, undefined, signal
+        );
     }
 
     async getMigration(migrationId: string, signal?: AbortSignal) {

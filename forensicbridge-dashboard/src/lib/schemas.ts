@@ -43,14 +43,17 @@ export const DashboardOverviewSchema = z.object({
 });
 
 export const MigrationStatusSchema = z.object({
+    id: z.number().int().optional(),
     migration_id: z.string(),
     status: z.enum(['pending', 'uploading', 'uploaded', 'provisioning', 'processing', 'completed', 'failed', 'cancelled']),
     progress_percent: z.number().min(0).max(100),
-    current_step: z.string(),
-    company_name: z.string().optional(),
+    current_step: z.string().optional().nullable(),
+    company_name: z.string().optional().nullable(),
+    qb_file_name: z.string().optional().nullable(),
     created_at: z.string(),
     completed_at: z.string().optional().nullable(),
     error_message: z.string().optional().nullable(),
+    s3_uri: z.string().optional().nullable(),
     customers_migrated: z.number().int().nonnegative().optional(),
     vendors_migrated: z.number().int().nonnegative().optional(),
     invoices_migrated: z.number().int().nonnegative().optional(),
@@ -62,9 +65,12 @@ export const MigrationListSchema = z.object({
     pagination: z.object({
         page: z.number().int().positive(),
         per_page: z.number().int().positive(),
-        total: z.number().int().nonnegative(),
-        pages: z.number().int().nonnegative(),
+        total_items: z.number().int().nonnegative(),
+        total_pages: z.number().int().nonnegative(),
+        has_next: z.boolean().optional(),
+        has_prev: z.boolean().optional(),
     }),
+    count: z.number().int().nonnegative().optional(),
 });
 
 export const TrialBalanceSchema = z.object({

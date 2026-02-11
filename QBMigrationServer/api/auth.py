@@ -1996,6 +1996,106 @@ def cancel_team_invite(invite_id):
     return jsonify({"success": True, "message": "Invite cancelled"})
 
 
+@auth_bp.route("/team/invite/resend", methods=["POST"])
+@require_auth
+def resend_team_invite():
+    """Resend a pending team invitation email."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    email = data.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"success": False, "error": "Email is required"}), 400
+
+    user_id = request.current_user["user_id"]
+
+    try:
+        invite = TeamInvite.query.filter_by(
+            owner_user_id=user_id, email=email, status="pending"
+        ).first()
+
+        if not invite:
+            return (
+                jsonify(
+                    {"success": False, "error": "No pending invite found for this email"}
+                ),
+                404,
+            )
+
+        # Check if invite has expired
+        if invite.expires_at and invite.expires_at < datetime.datetime.now(timezone.utc):
+            invite.status = "expired"
+            db.session.commit()
+            return (
+                jsonify(
+                    {"success": False, "error": "Invite has expired, please create a new one"}
+                ),
+                400,
+            )
+
+        # Resend the email
+        user = db.session.get(User, user_id)
+        try:
+            from utils.notifications import send_team_invite_email
+
+            send_team_invite_email(email, user, invite.invite_token)
+        except Exception as e:
+            logger.warning(f"Failed to resend invite email to {email}: {e}")
+
+        logger.info(f"Team invite resent by user {user_id} for {email}")
+        return jsonify({"success": True, "message": "Invitation resent"})
+
+    except Exception as e:
+        logger.exception(f"Failed to resend team invite: {e}")
+        return jsonify({"success": False, "error": "Failed to resend invitation"}), 500
+
+
+@auth_bp.route("/team/members/<int:member_id>/role", methods=["PATCH"])
+@require_auth
+def update_team_member_role(member_id):
+    """Update a team member's role. Only the team owner can change member roles."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    new_role = data.get("role", "").strip().lower()
+    if new_role not in ("member", "admin"):
+        return (
+            jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}),
+            400,
+        )
+
+    user_id = request.current_user["user_id"]
+
+    try:
+        # Find the accepted invite for this member under the current user's team
+        invite = TeamInvite.query.filter_by(
+            owner_user_id=user_id,
+            accepted_user_id=member_id,
+            status="accepted",
+        ).first()
+
+        if not invite:
+            return (
+                jsonify({"success": False, "error": "Team member not found"}),
+                404,
+            )
+
+        invite.role = new_role
+        db.session.commit()
+
+        logger.info(
+            f"User {user_id} updated team member {member_id} role to {new_role}"
+        )
+        return jsonify({"success": True, "message": f"Role updated to {new_role}"})
+
+    except Exception as e:
+        logger.exception(f"Failed to update team member role: {e}")
+        db.session.rollback()
+        return jsonify({"success": False, "error": "Failed to update role"}), 500
+
+
 # =============================================================================
 # PASSWORD RESET (CRITICAL PRODUCTION FEATURE)
 # =============================================================================

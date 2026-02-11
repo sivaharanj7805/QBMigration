@@ -302,11 +302,11 @@ def send_team_invite_email(email, inviter, invite_token):
         )
         safe_inviter_name = str(html_escape(inviter_name))
 
-        subject = f"{safe_inviter_name} invited you to join their team on QB Migration"
+        subject = f"{safe_inviter_name} invited you to join their team on ForensicBridge"
 
         body = f"""You've been invited to join a team!
 
-{inviter_name} has invited you to join their team on QB Migration.
+{inviter_name} has invited you to join their team on ForensicBridge.
 
 Click the link below to accept the invitation:
 
@@ -317,14 +317,14 @@ This invitation will expire in 7 days.
 If you don't have an account yet, you'll be prompted to create one.
 
 Best regards,
-QB Migration Team
+ForensicBridge Team
 """
 
         html = f"""
 <html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <h2 style="color: #2563eb;">You're Invited!</h2>
-    <p><strong>{safe_inviter_name}</strong> has invited you to join their team on QB Migration.</p>
+    <p><strong>{safe_inviter_name}</strong> has invited you to join their team on ForensicBridge.</p>
     <p style="margin: 30px 0;">
         <a href="{safe_accept_url}" style="background-color: #2563eb; color: white;
  padding: 12px 24px; text-decoration: none; border-radius: 4px;
@@ -341,7 +341,7 @@ QB Migration Team
     </p>
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     <p style="color: #999; font-size: 12px;">
-        QB Migration Team<br>
+        ForensicBridge Team<br>
         &copy; {datetime.now(timezone.utc).year} All rights reserved.
     </p>
 </body>

@@ -32,8 +32,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     // AUDIT FIX P13-M1: Integrate with Sentry for production error reporting
-    if (typeof window !== 'undefined' && (window as Record<string, unknown>).Sentry) {
-      const Sentry = (window as Record<string, unknown>).Sentry as {
+    if (typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).Sentry) {
+      const Sentry = (window as unknown as Record<string, unknown>).Sentry as {
         captureException: (err: Error, ctx?: Record<string, unknown>) => void;
       };
       Sentry.captureException(error, {

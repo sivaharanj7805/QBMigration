@@ -24,8 +24,8 @@ import {
 // Proper TypeScript interfaces instead of 'any'
 interface Migration {
     migration_id: string;
-    company_name: string;
-    qb_file_name?: string;
+    company_name?: string | null;
+    qb_file_name?: string | null;
     records_processed?: number;
     created_at: string;
     status: string;
@@ -358,8 +358,8 @@ export default function MigrationsPage() {
     });
 
     const migrations = data?.migrations || [];
-    // FIX F-04: Use pagination.pages from schema (consistent with MigrationListSchema)
-    const totalPages = data?.pagination?.pages || data?.total_pages || 1;
+    // FIX F-04: Use pagination.total_pages from API response (consistent with MigrationListSchema)
+    const totalPages = data?.pagination?.total_pages || 1;
 
     // Client-side filtering (server-side would be better for large datasets)
     const filteredMigrations = migrations.filter((m: Migration) => {
