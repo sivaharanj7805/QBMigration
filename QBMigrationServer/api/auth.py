@@ -1178,63 +1178,79 @@ def login():
     return response
 
 
-def _auto_sync_legacy_credits(user):
+def migrate_legacy_credits_batch():
     """
-    AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them.
-    This fixes existing users who selected tiers before the MigrationCredit fix.
-    HIGH-01 FIX: Wrapped in proper transaction with rollback on failure.
+    ONE-TIME migration: Sync legacy User.migrations_purchased/used fields
+    to MigrationCredit records for all users that have a mismatch.
 
-    Args:
-        user: The User model instance to sync credits for
+    Run this once via Flask shell or a management command:
+        flask shell
+        >>> from api.auth import migrate_legacy_credits_batch
+        >>> migrate_legacy_credits_batch()
+
+    After running successfully, the legacy User.migrations_purchased/used
+    fields become read-only historical references. MigrationCredit is the
+    sole source of truth going forward.
     """
-    user_id = user.id
-    try:
-        legacy_purchased = getattr(user, "migrations_purchased", None) or 0
-        legacy_used = getattr(user, "migrations_used", None) or 0
-        legacy_available = max(0, legacy_purchased - legacy_used)
+    from models.user import User as _User
 
-        actual_available = MigrationCredit.query.filter_by(
-            user_id=user_id, status="available", payment_status="paid"
-        ).count()
+    users = _User.query.filter(
+        db.or_(
+            _User.migrations_purchased > 0,
+            _User.migrations_used > 0,
+        )
+    ).all()
 
-        # If legacy shows credits but MigrationCredit table doesn't, sync them
-        if legacy_available > actual_available:
-            tier = user.subscription_tier or "starter"
-            credit_config = MigrationCredit.TIER_CONFIG.get(
-                tier, MigrationCredit.TIER_CONFIG["starter"]
-            )
+    synced = 0
+    for user in users:
+        user_id = user.id
+        try:
+            legacy_purchased = user.migrations_purchased or 0
+            legacy_used = user.migrations_used or 0
+            legacy_available = max(0, legacy_purchased - legacy_used)
 
-            # HIGH-01 FIX: Use nested transaction (savepoint) for atomic operation
-            db.session.begin_nested()
-            try:
-                for i in range(legacy_available - actual_available):
-                    credit = MigrationCredit(
-                        user_id=user_id,
-                        tier_type=tier,
-                        transaction_limit=credit_config.get("transaction_limit", 5000),
-                        price_cents=0,
-                        stripe_checkout_session_id=(
-                            f"auto-sync-{user_id}-{i}-"
-                            f"{datetime.datetime.now(timezone.utc).timestamp()}"
-                        ),
-                        payment_status="paid",
-                        status="available",
+            actual_available = MigrationCredit.query.filter_by(
+                user_id=user_id, status="available", payment_status="paid"
+            ).count()
+
+            if legacy_available > actual_available:
+                tier = user.subscription_tier or "starter"
+                credit_config = MigrationCredit.TIER_CONFIG.get(
+                    tier, MigrationCredit.TIER_CONFIG.get("starter", {})
+                )
+
+                db.session.begin_nested()
+                try:
+                    for i in range(legacy_available - actual_available):
+                        credit = MigrationCredit(
+                            user_id=user_id,
+                            tier_type=tier,
+                            transaction_limit=credit_config.get("transaction_limit", 5000),
+                            price_cents=0,
+                            stripe_checkout_session_id=(
+                                f"legacy-migration-{user_id}-{i}-"
+                                f"{datetime.datetime.now(timezone.utc).timestamp()}"
+                            ),
+                            payment_status="paid",
+                            status="available",
+                        )
+                        credit.paid_at = datetime.datetime.now(timezone.utc)
+                        db.session.add(credit)
+
+                    db.session.commit()
+                    synced += 1
+                    logger.info(
+                        f"Migrated {legacy_available - actual_available} legacy credits for user {user_id}"
                     )
-                    credit.paid_at = datetime.datetime.now(timezone.utc)
-                    db.session.add(credit)
+                except Exception as inner_e:
+                    db.session.rollback()
+                    logger.warning(f"Legacy credit migration rollback for user {user_id}: {inner_e}")
+        except Exception as e:
+            logger.warning(f"Legacy credit migration failed for user {user_id}: {e}")
 
-                db.session.commit()  # Commit the savepoint
-                logger.info(
-                    f"Auto-synced {legacy_available - actual_available} credits for user {user_id}"
-                )
-            except Exception as inner_e:
-                db.session.rollback()  # Rollback the savepoint
-                logger.warning(
-                    f"Auto-sync credits rollback for user {user_id}: {inner_e}"
-                )
-    except Exception as e:
-        logger.warning(f"Auto-sync credits failed for user {user_id}: {e}")
-        # Continue anyway - don't block the /me endpoint
+    db.session.commit()
+    logger.info(f"Legacy credit migration complete: {synced}/{len(users)} users synced")
+    return synced
 
 
 @auth_bp.route("/me", methods=["GET"])
@@ -1246,8 +1262,6 @@ def get_current_user():
 
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
-
-    _auto_sync_legacy_credits(user)
 
     # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
     # If tier info can't be retrieved, user should know something is wrong
@@ -1782,7 +1796,20 @@ def list_team_members():
 @auth_bp.route("/team/invite", methods=["POST"])
 @require_auth
 def invite_team_member():
-    """Invite a new team member"""
+    """Invite a new team member.
+
+    Creates a pending invitation and sends an email with the invite link.
+
+    Request body:
+        email (str): Email address to invite
+        role (str, optional): Role for the invited user (member, admin). Default: member
+
+    Returns:
+        200: Invite created successfully
+        400: Invalid request
+        404: User not found
+        409: Invite already pending for this email
+    """
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No data provided"}), 400
@@ -1792,23 +1819,113 @@ def invite_team_member():
     if not email:
         return jsonify({"success": False, "error": "Email is required"}), 400
 
+    # Basic email format validation
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return jsonify({"success": False, "error": "Invalid email format"}), 400
+
+    role = data.get("role", "member")
+    if role not in ("member", "admin"):
+        return jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}), 400
+
     user_id = request.current_user["user_id"]
     user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
 
-    # Team invitations are not yet implemented
-    logger.info(f"Team invite attempted by user {user_id} - feature not yet available")
+    # Prevent self-invite
+    if email == user.email:
+        return jsonify({"success": False, "error": "Cannot invite yourself"}), 400
 
-    return (
-        jsonify(
-            {
-                "error": "Team invitations are not yet available. This feature is coming soon."
-            }
-        ),
-        501,
-    )
+    try:
+        # Check for existing pending invite
+        existing = TeamInvite.query.filter_by(
+            owner_user_id=user_id, email=email, status="pending"
+        ).first()
+        if existing:
+            return jsonify({"success": False, "error": "An invite is already pending for this email"}), 409
+
+        invite = TeamInvite.create_invite(
+            owner_user_id=user_id,
+            email=email,
+            role=role,
+        )
+
+        # Send invite email (best-effort — don't fail the API call if email fails)
+        try:
+            from utils.notifications import send_team_invite_email
+
+            send_team_invite_email(email, user, invite.invite_token)
+        except Exception as e:
+            logger.warning(f"Failed to send invite email to {email}: {e}")
+
+        logger.info(f"Team invite created by user {user_id} for {email}")
+
+        return jsonify({
+            "success": True,
+            "message": "Invitation sent",
+            "invite": invite.to_dict(),
+        })
+
+    except Exception as e:
+        logger.exception(f"Failed to create team invite: {e}")
+        db.session.rollback()
+        return jsonify({"success": False, "error": "Failed to create invitation"}), 500
+
+
+@auth_bp.route("/team/invite/<token>/accept", methods=["POST"])
+@require_auth
+def accept_team_invite(token):
+    """Accept a team invitation using the invite token.
+
+    The authenticated user becomes a team member of the invite owner.
+
+    Returns:
+        200: Invite accepted
+        400: Invite expired or already used
+        404: Invite not found
+    """
+    user_id = request.current_user["user_id"]
+
+    invite = TeamInvite.find_by_token(token)
+    if not invite:
+        return jsonify({"success": False, "error": "Invite not found"}), 404
+
+    success, message = invite.accept(user_id)
+    if not success:
+        return jsonify({"success": False, "error": message}), 400
+
+    logger.info(f"User {user_id} accepted team invite {invite.id} from owner {invite.owner_user_id}")
+    return jsonify({"success": True, "message": message})
+
+
+@auth_bp.route("/team/invite/<int:invite_id>/cancel", methods=["POST"])
+@require_auth
+def cancel_team_invite(invite_id):
+    """Cancel a pending team invitation.
+
+    Only the invite owner can cancel their own invites.
+
+    Returns:
+        200: Invite cancelled
+        403: Not the invite owner
+        404: Invite not found
+    """
+    user_id = request.current_user["user_id"]
+
+    invite = db.session.get(TeamInvite, invite_id)
+    if not invite:
+        return jsonify({"success": False, "error": "Invite not found"}), 404
+
+    if invite.owner_user_id != user_id:
+        return jsonify({"success": False, "error": "Only the invite owner can cancel"}), 403
+
+    if invite.status != "pending":
+        return jsonify({"success": False, "error": f"Cannot cancel invite with status '{invite.status}'"}), 400
+
+    invite.cancel()
+    logger.info(f"User {user_id} cancelled team invite {invite_id}")
+    return jsonify({"success": True, "message": "Invite cancelled"})
 
 
 # =============================================================================

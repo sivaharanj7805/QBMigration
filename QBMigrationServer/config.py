@@ -345,11 +345,18 @@ class Config:
     SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000")
 
     # ============================================================================
-    # EMAIL
+    # EMAIL (supports SMTP, AWS SES via SMTP interface, or any SMTP-compatible relay)
     # ============================================================================
-    MAIL_SERVER = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+    # AWS SES SMTP setup:
+    #   MAIL_SERVER=email-smtp.<region>.amazonaws.com
+    #   MAIL_PORT=587
+    #   MAIL_USERNAME=<SES SMTP credential Access Key>
+    #   MAIL_PASSWORD=<SES SMTP credential Secret Key>
+    #   MAIL_DEFAULT_SENDER must be a verified SES identity
+    # ============================================================================
+    MAIL_SERVER = os.getenv("MAIL_SERVER", "email-smtp.ca-central-1.amazonaws.com")
     MAIL_PORT = int(os.getenv("MAIL_PORT", 587))
-    MAIL_USE_TLS = True
+    MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "true").lower() == "true"
     MAIL_USERNAME = os.getenv("MAIL_USERNAME")
     MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
     MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER", "noreply@qbmigrate.io")

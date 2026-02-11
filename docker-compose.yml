@@ -45,6 +45,13 @@ services:
       - QBO_ENVIRONMENT=${QBO_ENVIRONMENT:-sandbox}
       - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
       - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+      # Email (AWS SES SMTP or any SMTP relay)
+      - MAIL_SERVER=${MAIL_SERVER:-email-smtp.ca-central-1.amazonaws.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_DEFAULT_SENDER=${MAIL_DEFAULT_SENDER:-noreply@qbmigrate.io}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
