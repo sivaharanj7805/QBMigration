@@ -278,11 +278,11 @@ export default function AdminPage() {
                                     <tr key={user.id} className="border-b border-gray-50 hover:bg-gray-50">
                                         <td className="px-5 py-3">
                                             <div>
-                                                <p className="font-medium text-gray-900">{sanitize(user.name || "—")}</p>
-                                                <p className="text-xs text-gray-400">{sanitize(user.email)}</p>
+                                                <p className="font-medium text-gray-900">{sanitize.text(user.name || "—")}</p>
+                                                <p className="text-xs text-gray-400">{sanitize.text(user.email)}</p>
                                             </div>
                                         </td>
-                                        <td className="px-5 py-3 text-gray-600">{sanitize(user.company || "—")}</td>
+                                        <td className="px-5 py-3 text-gray-600">{sanitize.text(user.company || "—")}</td>
                                         <td className="px-5 py-3">
                                             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                                 user.role === "admin" || user.role === "super_admin"
