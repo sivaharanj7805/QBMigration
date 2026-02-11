@@ -54,6 +54,68 @@ class MigrationOrchestrator:
     5. Progress reporting
     """
 
+    # MED-03 FIX: Extracted from _run_migration_impl to reduce method length.
+    # Maps alternative/variant key names from QBD extractor output to the
+    # canonical entity type names used by the entity_order pipeline.
+    _KEY_NORMALIZATION_MAP: Dict[str, str] = {
+        # Master lists
+        "account": "Accounts", "accounts": "Accounts",
+        "customer": "Customers", "customers": "Customers",
+        "vendor": "Vendors", "vendors": "Vendors",
+        "item": "Items", "items": "Items",
+        "employee": "Employees", "employees": "Employees",
+        # Configuration lists
+        "class": "Classes", "classes": "Classes",
+        "department": "Departments", "departments": "Departments",
+        "term": "Terms", "terms": "Terms",
+        "paymentmethod": "PaymentMethods", "paymentmethods": "PaymentMethods",
+        "taxcode": "TaxCodes", "taxcodes": "TaxCodes", "salestaxcodes": "TaxCodes",
+        "taxrate": "TaxRates", "taxrates": "TaxRates",
+        "taxagency": "TaxAgencies", "taxagencies": "TaxAgencies",
+        "companycurrency": "CompanyCurrencies", "companycurrencies": "CompanyCurrencies",
+        "currencies": "CompanyCurrencies",
+        # Transactions
+        "invoice": "Invoices", "invoices": "Invoices",
+        "bill": "Bills", "bills": "Bills",
+        "payment": "Payments", "payments": "Payments", "receivepayments": "Payments",
+        "estimate": "Estimates", "estimates": "Estimates",
+        "salesreceipt": "SalesReceipts", "salesreceipts": "SalesReceipts",
+        "creditmemo": "CreditMemos", "creditmemos": "CreditMemos",
+        "vendorcredit": "VendorCredits", "vendorcredits": "VendorCredits",
+        "billpayment": "BillPayments", "billpayments": "BillPayments",
+        "purchaseorder": "PurchaseOrders", "purchaseorders": "PurchaseOrders",
+        "purchase": "Purchases", "purchases": "Purchases",
+        "checks": "Purchases", "creditcardcharges": "Purchases",
+        "journalentry": "JournalEntries", "journalentries": "JournalEntries",
+        "deposit": "Deposits", "deposits": "Deposits",
+        "transfer": "Transfers", "transfers": "Transfers",
+        "refundreceipt": "RefundReceipts", "refundreceipts": "RefundReceipts",
+        "timeactivity": "TimeActivities", "timeactivities": "TimeActivities",
+        "inventoryadjustment": "InventoryAdjustments", "inventoryadjustments": "InventoryAdjustments",
+        "taxpayment": "TaxPayments", "taxpayments": "TaxPayments",
+        "salestaxpayments": "TaxPayments",
+        "attachable": "Attachables", "attachables": "Attachables",
+        # New entity types
+        "salesorder": "SalesOrders", "salesorders": "SalesOrders",
+        "itemreceipt": "ItemReceipts", "itemreceipts": "ItemReceipts",
+        "charge": "Charges", "charges": "Charges",
+        "othername": "OtherNames", "othernames": "OtherNames",
+        "datedriventerm": "DateDrivenTerms", "datedriventerms": "DateDrivenTerms",
+        "lead": "Leads", "leads": "Leads",
+        "buildassembly": "BuildAssemblies", "buildassemblies": "BuildAssemblies",
+        "inventorytransfer": "InventoryTransfers", "inventorytransfers": "InventoryTransfers",
+        "dataextension": "DataExtensions", "dataextensions": "DataExtensions",
+        "salesrep": "SalesReps", "salesreps": "SalesReps",
+        "customermessage": "CustomerMessages", "customermessages": "CustomerMessages",
+        "jobtype": "JobTypes", "jobtypes": "JobTypes",
+        "vendortype": "VendorTypes", "vendortypes": "VendorTypes",
+        "pricelevel": "PriceLevels", "pricelevels": "PriceLevels",
+        "salestaxgroup": "SalesTaxGroups", "salestaxgroups": "SalesTaxGroups",
+        "shipmethod": "ShipMethods", "shipmethods": "ShipMethods",
+        "inventorysite": "InventorySites", "inventorysites": "InventorySites",
+        "customertype": "CustomerTypes", "customertypes": "CustomerTypes",
+    }
+
     def __init__(
         self,
         qbo_client_id: str,
@@ -257,6 +319,58 @@ class MigrationOrchestrator:
         "forensic": float("inf"),
     }
 
+    def _decrypt_and_validate(
+        self,
+        encrypted_data: bytes,
+        encryption_metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """MED-03 FIX: Extracted decryption + validation from _run_migration_impl.
+
+        Decrypts AES-256-GCM encrypted data, validates the key/IV/tag,
+        parses JSON, and returns the data dict.
+        """
+        import base64
+
+        enc_mgr = self._init_encryption()
+        aes_key = encryption_metadata.get("key") or encryption_metadata.get("aes_key")
+        if not aes_key:
+            raise ValueError(
+                "Missing encryption key in metadata (expected 'key' or 'aes_key')"
+            )
+        # AUDIT FIX HIGH-09: Validate encryption metadata format and key length
+        try:
+            decoded_key = base64.b64decode(aes_key)
+            if len(decoded_key) != 32:
+                raise ValueError(
+                    f"Invalid AES key length: expected 32 bytes, got {len(decoded_key)}"
+                )
+        except Exception as e:
+            if "Invalid AES key length" in str(e):
+                raise
+            raise ValueError(f"Invalid base64-encoded AES key: {type(e).__name__}")
+        iv = encryption_metadata.get("iv")
+        if not iv:
+            raise ValueError("Missing 'iv' in encryption metadata")
+        tag = encryption_metadata.get("tag")
+        if not tag:
+            raise ValueError(
+                "Missing 'tag' in encryption metadata - required for authenticated decryption"
+            )
+
+        decrypted_json = enc_mgr.decrypt_chunked(
+            encrypted_data, key=aes_key, iv=iv, tag=tag
+        )
+
+        data = json.loads(decrypted_json)
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Expected JSON object from decrypted data, got {type(data).__name__}"
+            )
+        logger.info(f"Decrypted {len(decrypted_json):,} bytes")
+        # AUDIT FIX CRIT-04: Clear decrypted plaintext from memory immediately after parsing
+        del decrypted_json
+        return data
+
     def _run_migration_impl(  # noqa: C901
         self,
         encrypted_data: bytes,
@@ -283,164 +397,12 @@ class MigrationOrchestrator:
         try:
             # Step 1: Decrypt data (5%)
             self._report_progress(5, "Decrypting data")
-
-            enc_mgr = self._init_encryption()
-            aes_key = encryption_metadata.get("key") or encryption_metadata.get(
-                "aes_key"
-            )
-            if not aes_key:
-                raise ValueError(
-                    "Missing encryption key in metadata (expected 'key' or 'aes_key')"
-                )
-            # AUDIT FIX HIGH-09: Validate encryption metadata format and key length
-            import base64
-
-            try:
-                decoded_key = base64.b64decode(aes_key)
-                if len(decoded_key) != 32:
-                    raise ValueError(
-                        f"Invalid AES key length: expected 32 bytes, got {len(decoded_key)}"
-                    )
-            except Exception as e:
-                if "Invalid AES key length" in str(e):
-                    raise
-                raise ValueError(f"Invalid base64-encoded AES key: {type(e).__name__}")
-            iv = encryption_metadata.get("iv")
-            if not iv:
-                raise ValueError("Missing 'iv' in encryption metadata")
-            tag = encryption_metadata.get("tag")
-            if not tag:
-                raise ValueError(
-                    "Missing 'tag' in encryption metadata - required for authenticated decryption"
-                )
-
-            decrypted_json = enc_mgr.decrypt_chunked(
-                encrypted_data, key=aes_key, iv=iv, tag=tag
-            )
-
-            data = json.loads(decrypted_json)
-            if not isinstance(data, dict):
-                raise ValueError(
-                    f"Expected JSON object from decrypted data, got {type(data).__name__}"
-                )
-            logger.info(f"Decrypted {len(decrypted_json):,} bytes")
-            # AUDIT FIX CRIT-04: Clear decrypted plaintext from memory immediately after parsing
-            del decrypted_json
+            data = self._decrypt_and_validate(encrypted_data, encryption_metadata)
 
             # Normalize data keys to match entity_order format
             normalized_data = {}
             for key, value in data.items():
-                key_map = {
-                    # Master lists
-                    "account": "Accounts",
-                    "accounts": "Accounts",
-                    "customer": "Customers",
-                    "customers": "Customers",
-                    "vendor": "Vendors",
-                    "vendors": "Vendors",
-                    "item": "Items",
-                    "items": "Items",
-                    "employee": "Employees",
-                    "employees": "Employees",
-                    # Configuration lists
-                    "class": "Classes",
-                    "classes": "Classes",
-                    "department": "Departments",
-                    "departments": "Departments",
-                    "term": "Terms",
-                    "terms": "Terms",
-                    "paymentmethod": "PaymentMethods",
-                    "paymentmethods": "PaymentMethods",
-                    "taxcode": "TaxCodes",
-                    "taxcodes": "TaxCodes",
-                    "salestaxcodes": "TaxCodes",
-                    "taxrate": "TaxRates",
-                    "taxrates": "TaxRates",
-                    "taxagency": "TaxAgencies",
-                    "taxagencies": "TaxAgencies",
-                    "companycurrency": "CompanyCurrencies",
-                    "companycurrencies": "CompanyCurrencies",
-                    "currencies": "CompanyCurrencies",
-                    # Transactions
-                    "invoice": "Invoices",
-                    "invoices": "Invoices",
-                    "bill": "Bills",
-                    "bills": "Bills",
-                    "payment": "Payments",
-                    "payments": "Payments",
-                    "receivepayments": "Payments",
-                    "estimate": "Estimates",
-                    "estimates": "Estimates",
-                    "salesreceipt": "SalesReceipts",
-                    "salesreceipts": "SalesReceipts",
-                    "creditmemo": "CreditMemos",
-                    "creditmemos": "CreditMemos",
-                    "vendorcredit": "VendorCredits",
-                    "vendorcredits": "VendorCredits",
-                    "billpayment": "BillPayments",
-                    "billpayments": "BillPayments",
-                    "purchaseorder": "PurchaseOrders",
-                    "purchaseorders": "PurchaseOrders",
-                    "purchase": "Purchases",
-                    "purchases": "Purchases",
-                    "checks": "Purchases",
-                    "creditcardcharges": "Purchases",
-                    "journalentry": "JournalEntries",
-                    "journalentries": "JournalEntries",
-                    "deposit": "Deposits",
-                    "deposits": "Deposits",
-                    "transfer": "Transfers",
-                    "transfers": "Transfers",
-                    "refundreceipt": "RefundReceipts",
-                    "refundreceipts": "RefundReceipts",
-                    "timeactivity": "TimeActivities",
-                    "timeactivities": "TimeActivities",
-                    "inventoryadjustment": "InventoryAdjustments",
-                    "inventoryadjustments": "InventoryAdjustments",
-                    "taxpayment": "TaxPayments",
-                    "taxpayments": "TaxPayments",
-                    "salestaxpayments": "TaxPayments",
-                    "attachable": "Attachables",
-                    "attachables": "Attachables",
-                    # New entity types
-                    "salesorder": "SalesOrders",
-                    "salesorders": "SalesOrders",
-                    "itemreceipt": "ItemReceipts",
-                    "itemreceipts": "ItemReceipts",
-                    "charge": "Charges",
-                    "charges": "Charges",
-                    "othername": "OtherNames",
-                    "othernames": "OtherNames",
-                    "datedriventerm": "DateDrivenTerms",
-                    "datedriventerms": "DateDrivenTerms",
-                    "lead": "Leads",
-                    "leads": "Leads",
-                    "buildassembly": "BuildAssemblies",
-                    "buildassemblies": "BuildAssemblies",
-                    "inventorytransfer": "InventoryTransfers",
-                    "inventorytransfers": "InventoryTransfers",
-                    "dataextension": "DataExtensions",
-                    "dataextensions": "DataExtensions",
-                    "salesrep": "SalesReps",
-                    "salesreps": "SalesReps",
-                    "customermessage": "CustomerMessages",
-                    "customermessages": "CustomerMessages",
-                    "jobtype": "JobTypes",
-                    "jobtypes": "JobTypes",
-                    "vendortype": "VendorTypes",
-                    "vendortypes": "VendorTypes",
-                    "pricelevel": "PriceLevels",
-                    "pricelevels": "PriceLevels",
-                    "salestaxgroup": "SalesTaxGroups",
-                    "salestaxgroups": "SalesTaxGroups",
-                    "shipmethod": "ShipMethods",
-                    "shipmethods": "ShipMethods",
-                    "inventorysite": "InventorySites",
-                    "inventorysites": "InventorySites",
-                    "customertype": "CustomerTypes",
-                    "customertypes": "CustomerTypes",
-                }
-                mapped = key_map.get(key.lower(), key)
+                mapped = self._KEY_NORMALIZATION_MAP.get(key.lower(), key)
                 normalized_data[mapped] = value
             data = normalized_data
 
@@ -1155,38 +1117,11 @@ class MigrationOrchestrator:
                 logger.warning(f"Transform failed for {entity_name}: {e}")
 
         # ── Step 2: Process TaxService entities sequentially ────────────────
-        for source_id, tax_code_name, tax_rate_details in tax_service_items:
-            try:
-                result = qbo_client.create_tax_service(
-                    tax_code_name, tax_rate_details, oauth_manager=oauth_manager
-                )
-
-                if result:
-                    # TaxService returns TaxCodeId (not standard 'Id')
-                    tax_code_obj = result.get("TaxCode")
-                    result_id = (
-                        result.get("Id")
-                        or result.get("TaxCodeId")
-                        or (
-                            tax_code_obj.get("Id")
-                            if isinstance(tax_code_obj, dict)
-                            else None
-                        )
-                    )
-                    if result_id:
-                        if source_id:
-                            if entity_name not in existing_maps:
-                                existing_maps[entity_name] = {}
-                            existing_maps[entity_name][source_id] = str(result_id)
-                        success_count += 1
-                    else:
-                        fail_count += 1
-                else:
-                    fail_count += 1
-
-            except Exception as e:
-                fail_count += 1
-                logger.warning(f"TaxService creation failed for '{tax_code_name}': {e}")
+        tax_ok, tax_fail = self._process_tax_service_entities(
+            qbo_client, entity_name, tax_service_items, existing_maps, oauth_manager
+        )
+        success_count += tax_ok
+        fail_count += tax_fail
 
         # ── Step 3: Batch-create regular entities ───────────────────────────
         if not transformed_pairs:
@@ -1217,24 +1152,14 @@ class MigrationOrchestrator:
             # Sequential processing — single batch or single worker
             for batch_idx, batch in enumerate(batches):
                 mappings, batch_fails = self._send_batch_request(
-                    qbo_client,
-                    api_entity_type,
-                    batch,
-                    oauth_manager,
-                    migration_id,
-                    batch_idx,
+                    qbo_client, api_entity_type, batch,
+                    oauth_manager, migration_id, batch_idx,
                 )
                 success_count += len(mappings)
                 fail_count += batch_fails
-                # Update existing_maps with new IDs for downstream dependencies
-                for src_id, qbo_id in mappings:
-                    if src_id:
-                        if entity_name not in existing_maps:
-                            existing_maps[entity_name] = {}
-                        existing_maps[entity_name][src_id] = qbo_id
-                        # FIX #13: Track created IDs for potential rollback
-                        if hasattr(self, "_created_entity_ids"):
-                            self._created_entity_ids[api_entity_type].append(qbo_id)
+                self._record_batch_mappings(
+                    mappings, entity_name, api_entity_type, existing_maps
+                )
         else:
             # Parallel batch submission with ThreadPoolExecutor
             # Collect all results first, then update existing_maps (thread-safe)
@@ -1245,12 +1170,8 @@ class MigrationOrchestrator:
                 for batch_idx, batch in enumerate(batches):
                     future = executor.submit(
                         self._send_batch_request,
-                        qbo_client,
-                        api_entity_type,
-                        batch,
-                        oauth_manager,
-                        migration_id,
-                        batch_idx,
+                        qbo_client, api_entity_type, batch,
+                        oauth_manager, migration_id, batch_idx,
                     )
                     futures[future] = batch
 
@@ -1266,16 +1187,79 @@ class MigrationOrchestrator:
 
             # Update existing_maps after all workers complete
             success_count += len(all_mappings)
-            for src_id, qbo_id in all_mappings:
-                if src_id:
-                    if entity_name not in existing_maps:
-                        existing_maps[entity_name] = {}
-                    existing_maps[entity_name][src_id] = qbo_id
-                    # FIX #13: Track created IDs for potential rollback
-                    if hasattr(self, "_created_entity_ids"):
-                        self._created_entity_ids[api_entity_type].append(qbo_id)
+            self._record_batch_mappings(
+                all_mappings, entity_name, api_entity_type, existing_maps
+            )
 
         return success_count, fail_count, skipped_count
+
+    def _process_tax_service_entities(
+        self,
+        qbo_client: "PremiumQBOClient",
+        entity_name: str,
+        tax_service_items: List[Tuple[Optional[str], str, list]],
+        existing_maps: Dict[str, Dict[str, str]],
+        oauth_manager: Optional["OAuthManager"] = None,
+    ) -> Tuple[int, int]:
+        """MED-04 FIX: Extracted from _batch_create_layer.
+
+        Process TaxService entities sequentially (can't use batch API).
+        Returns (success_count, fail_count).
+        """
+        success_count = 0
+        fail_count = 0
+        for source_id, tax_code_name, tax_rate_details in tax_service_items:
+            try:
+                result = qbo_client.create_tax_service(
+                    tax_code_name, tax_rate_details, oauth_manager=oauth_manager
+                )
+                if result:
+                    tax_code_obj = result.get("TaxCode")
+                    result_id = (
+                        result.get("Id")
+                        or result.get("TaxCodeId")
+                        or (
+                            tax_code_obj.get("Id")
+                            if isinstance(tax_code_obj, dict)
+                            else None
+                        )
+                    )
+                    if result_id:
+                        if source_id:
+                            if entity_name not in existing_maps:
+                                existing_maps[entity_name] = {}
+                            existing_maps[entity_name][source_id] = str(result_id)
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                fail_count += 1
+                logger.warning(f"TaxService creation failed for '{tax_code_name}': {e}")
+        return success_count, fail_count
+
+    def _record_batch_mappings(
+        self,
+        mappings: List[Tuple[Optional[str], str]],
+        entity_name: str,
+        api_entity_type: str,
+        existing_maps: Dict[str, Dict[str, str]],
+    ) -> None:
+        """MED-04 FIX: Extracted from _batch_create_layer.
+
+        Update existing_maps with new ID mappings and track created IDs
+        for potential rollback.  Called after both sequential and parallel
+        batch submission to eliminate duplicated mapping-update code.
+        """
+        for src_id, qbo_id in mappings:
+            if src_id:
+                if entity_name not in existing_maps:
+                    existing_maps[entity_name] = {}
+                existing_maps[entity_name][src_id] = qbo_id
+                # FIX #13: Track created IDs for potential rollback
+                if hasattr(self, "_created_entity_ids"):
+                    self._created_entity_ids[api_entity_type].append(qbo_id)
 
     def _send_batch_request(
         self,
@@ -1309,7 +1293,7 @@ class MigrationOrchestrator:
             - success_mappings: List of (source_id, qbo_id) for successful items
             - fail_count: Number of failed items in this batch
         """
-        # Enforce the 40 batch requests/minute rate limit
+        # Enforce the batch requests/minute rate limit (default 100, Intuit max 120)
         qbo_client._enforce_batch_rate_limit()
 
         success_mappings = []
