@@ -44,6 +44,7 @@ from extensions import limiter  # noqa: E402
 from flask import Flask, jsonify, redirect, request  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 from flask_login import LoginManager  # noqa: E402
+from flask_migrate import Migrate  # noqa: E402
 from flask_wtf.csrf import CSRFError, CSRFProtect  # noqa: E402
 from models.database import db, init_db  # noqa: E402
 from models.user import User  # noqa: E402
@@ -199,8 +200,12 @@ def verify_aws_configuration(app):
 
 def auto_migrate_database(app):
     """
-    Auto-migrate database schema on startup.
+    LEGACY auto-migrate database schema on startup.
     Adds any missing columns to ensure code and database are in sync.
+
+    AUDIT FIX HIGH: Skips when Flask-Migrate (Alembic) is managing the schema,
+    detected by the presence of the alembic_version table. New schema changes
+    should use: flask db migrate -m "description" && flask db upgrade
     """
     # Skip for SQLite (used in testing) - tables are created fresh via db.create_all()
     db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
@@ -210,6 +215,33 @@ def auto_migrate_database(app):
 
     try:
         with db.engine.connect() as conn:
+            # AUDIT FIX HIGH: Skip if Alembic is managing the schema
+            try:
+                result = conn.execute(text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_name = 'alembic_version'"
+                ))
+                if result.scalar():
+                    app.logger.info(
+                        "Alembic migration table detected - skipping legacy auto_migrate_database. "
+                        "Use 'flask db upgrade' for schema changes."
+                    )
+                    return
+            except Exception:
+                pass  # Table doesn't exist yet, continue with legacy migration
+
+            # Use PostgreSQL advisory lock to prevent concurrent DDL from Gunicorn workers
+            db_url = str(app.config.get("SQLALCHEMY_DATABASE_URI", ""))
+            if "postgresql" in db_url:
+                # Lock ID 12345 is arbitrary but unique to this migration
+                lock_result = conn.execute(text("SELECT pg_try_advisory_lock(12345)"))
+                got_lock = lock_result.scalar()
+                if not got_lock:
+                    app.logger.info(
+                        "Schema migration skipped - another worker holds the advisory lock"
+                    )
+                    return
+
             # Add all potentially missing columns to users table
             conn.execute(text("""
                 ALTER TABLE users
@@ -467,6 +499,11 @@ def auto_migrate_database(app):
             """))
 
             conn.commit()
+
+            # Release advisory lock if PostgreSQL
+            if "postgresql" in db_url:
+                conn.execute(text("SELECT pg_advisory_unlock(12345)"))
+
             app.logger.info(
                 "Database schema verified/updated successfully"
                 " (including migrations, whitelabel_settings,"
@@ -654,7 +691,13 @@ def create_app(config_name="development"):  # noqa: C901
         app.logger.error(f"Failed to initialize database: {str(e)}")
         raise
 
+    # Initialize Flask-Migrate for versioned database migrations
+    # Run `flask db upgrade` to apply pending migrations (replaces ad-hoc DDL)
+    Migrate(app, db, directory="migrations")
+
     # Auto-migrate database schema (add missing columns)
+    # NOTE: This is a legacy fallback that ensures new columns exist.
+    # New schema changes should use Flask-Migrate: `flask db migrate -m "description"`
     with app.app_context():
         auto_migrate_database(app)
 
@@ -941,15 +984,23 @@ def create_app(config_name="development"):  # noqa: C901
             except Exception as e:
                 app.logger.error(f"JWT header auth failed: {str(e)}")
 
-        # FIX: Also try auth_token cookie as fallback for cross-origin scenarios
+        # Cookie-based JWT fallback: only allowed for GET/HEAD/OPTIONS requests
+        # to prevent CSRF attacks. State-changing methods (POST/PUT/DELETE) MUST
+        # use the Authorization header with a Bearer token.
         auth_cookie = req.cookies.get("auth_token")
         if auth_cookie:
-            try:
-                payload = decode_token(auth_cookie)
-                if payload and "user_id" in payload:
-                    return db.session.get(User, int(payload["user_id"]))
-            except Exception as e:
-                app.logger.error(f"JWT cookie auth failed: {str(e)}")
+            if req.method in ("GET", "HEAD", "OPTIONS"):
+                try:
+                    payload = decode_token(auth_cookie)
+                    if payload and "user_id" in payload:
+                        return db.session.get(User, int(payload["user_id"]))
+                except Exception as e:
+                    app.logger.error(f"JWT cookie auth failed: {str(e)}")
+            else:
+                app.logger.warning(
+                    f"Cookie auth rejected for {req.method} {req.path} - "
+                    f"use Authorization header for state-changing requests"
+                )
 
         return None
 

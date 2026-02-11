@@ -149,12 +149,14 @@ class EncryptionManager:
         if isinstance(tag, str):
             tag = base64.b64decode(tag)
         if isinstance(encrypted_data, str):
-            # Could be base64 or raw string
+            # AUDIT FIX CRIT-11: Reject invalid base64 instead of silently
+            # falling back to UTF-8 encode (which produces garbage ciphertext)
             try:
                 encrypted_data = base64.b64decode(encrypted_data)
-            except Exception:
-                # Assume it's already bytes-like
-                encrypted_data = encrypted_data.encode("utf-8")
+            except Exception as b64_err:
+                raise ValueError(
+                    f"encrypted_data is a string but not valid base64: {b64_err}"
+                )
 
         # Decrypt using the core decrypt_data method
         plaintext_bytes = EncryptionManager.decrypt_data(
@@ -299,7 +301,7 @@ class EncryptionManager:
 
             # Allow legacy data but warn loudly
             logger.warning(warning_msg)
-            logger.info(f"⚠️  {warning_msg}")
+            logger.info(f"[WARN] {warning_msg}")
 
             # Calculate hash of current data for logging/debugging
             current_hash = hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
@@ -321,7 +323,7 @@ class EncryptionManager:
                 f"HASH MISMATCH: Expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
             )
             raise ValueError(
-                f"❌ HASH VERIFICATION FAILED - DATA INTEGRITY COMPROMISED\n"
+                f"HASH VERIFICATION FAILED - DATA INTEGRITY COMPROMISED\n"
                 f"   Expected: {expected_hash}\n"
                 f"   Actual:   {actual_hash}\n"
                 f"\n"
@@ -336,7 +338,7 @@ class EncryptionManager:
             )
 
         logger.info(f"Hash verification passed: {actual_hash[:16]}...")
-        logger.info("✅ Hash verification PASSED - Data integrity confirmed")
+        logger.info("[OK] Hash verification PASSED - Data integrity confirmed")
         return True
 
     @staticmethod
@@ -352,7 +354,7 @@ class EncryptionManager:
         )
 
         if expected_hash:
-            logger.info("⚠️  WARNING: Hash present but not verified by caller")
+            logger.info("[WARN] WARNING: Hash present but not verified by caller")
             logger.info("   Use decrypt_from_json_with_verification() for security")
 
         return plaintext
@@ -377,8 +379,9 @@ class EncryptionManager:
                     encrypted
                 )
                 return plaintext
-            except Exception:
-                # Fall through to legacy formats
+            except Exception as json_err:
+                # AUDIT FIX CRIT-11: Log JSON decryption failure before trying legacy
+                logger.warning(f"JSON-format decryption failed, trying legacy formats: {json_err}")
                 pass
 
         # Try legacy colon-separated formats
@@ -402,7 +405,7 @@ class EncryptionManager:
             elif len(parts) == 3:
                 # CBC mode (from .NET Framework version) - LEGACY ONLY
                 logger.info(
-                    "⚠️  WARNING: Legacy CBC encryption detected. Upgrade to GCM."
+                    "WARNING: Legacy CBC encryption detected. Upgrade to GCM."
                 )
 
                 iv = base64.b64decode(parts[0])
@@ -505,14 +508,15 @@ class EncryptionManager:
                 if isinstance(data, bytes):
                     del mutable_data
 
-            except Exception:
+            except Exception as e:
                 # If all else fails, at least overwrite with zeros
+                logger.debug(f"Primary memory zeroing failed, attempting fallback: {e}")
                 try:
                     if isinstance(data, bytearray):
                         for i in range(len(data)):
                             data[i] = 0
-                except Exception:
-                    pass  # Best effort - don't crash
+                except Exception as e2:
+                    logger.debug(f"Fallback memory zeroing failed (best effort): {e2}")
 
         elif isinstance(data, str):
             # Strings are immutable in Python, but we can try to clear
@@ -520,8 +524,8 @@ class EncryptionManager:
             try:
                 # Convert to bytes and clear that
                 EncryptionManager.secure_zero_memory(data.encode("utf-8"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"String memory zeroing failed (best effort): {e}")
 
     @staticmethod
     def secure_delete(filepath: str, passes: int = 7) -> bool:
@@ -564,11 +568,11 @@ class EncryptionManager:
 
             # Delete the file
             os.remove(filepath)
-            logger.info(f"✅ Securely deleted: {os.path.basename(filepath)}")
+            logger.info(f"[OK] Securely deleted: {os.path.basename(filepath)}")
             return True
 
         except Exception as e:
-            logger.info(f"⚠️  Failed to securely delete {filepath}: {e}")
+            logger.info(f"[WARN] Failed to securely delete {filepath}: {e}")
             return False
 
     @staticmethod
@@ -639,7 +643,6 @@ class EncryptionManager:
             # Decode ciphertext in memory (still needed for GCM)
             # Note: We can't stream GCM decryption due to authentication tag verification
             ciphertext = base64.b64decode(ciphertext_b64)
-            len(ciphertext)
 
             # Decrypt
             plaintext_bytes = EncryptionManager.decrypt_data(ciphertext, key, iv, tag)
@@ -653,11 +656,11 @@ class EncryptionManager:
                 actual_hash = hashlib.sha256(plaintext_bytes).hexdigest()
                 if actual_hash != expected_hash:
                     raise ValueError(
-                        f"❌ HASH VERIFICATION FAILED\n"
+                        f"HASH VERIFICATION FAILED\n"
                         f"   Expected: {expected_hash}\n"
                         f"   Actual:   {actual_hash}"
                     )
-                logger.info("✅ Hash verification PASSED")
+                logger.info("[OK] Hash verification PASSED")
 
             # Write to disk in chunks to avoid RAM bloat
             with open(output_path, "wb") as f:
@@ -679,7 +682,7 @@ class EncryptionManager:
                 pass
 
             logger.info(
-                f"✅ Streamed decryption complete: {os.path.basename(output_path)}"
+                f"Streamed decryption complete: {os.path.basename(output_path)}"
             )
             logger.info(f"   Size: {len(plaintext_bytes) / 1024 / 1024:.1f} MB")
 

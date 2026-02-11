@@ -358,8 +358,9 @@ export default function VaultPage() {
                     <div>
                         <h3 className="font-semibold text-green-900">Forensic Archival Service</h3>
                         <p className="text-sm text-green-700 mt-1">
-                            All archived data is stored in AWS S3 Glacier with 7-year legal retention.
-                            Metadata (who/what/when) is preserved, but actual financial data is purged after 24 hours.
+                            All archived data is stored in AWS S3 Glacier with configurable legal retention
+                            (7 years for CRA IC05-1R1, 6 years for IRS Rev. Proc. 98-25).
+                            Encrypted data and metadata are preserved for the full retention period.
                             Restore requests typically complete within 3-5 hours.
                         </p>
                         <div className="flex items-center gap-4 mt-3">

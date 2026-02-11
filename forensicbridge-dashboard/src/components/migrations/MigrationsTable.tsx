@@ -36,6 +36,7 @@ interface MigrationsTableProps {
     onStart?: (id: string) => void;
     onCancel?: (id: string) => void;
     onRetry?: (id: string) => void;
+    onDelete?: (id: string) => void;
     isLoading?: boolean;
     selectedIds?: Set<string>;
     onSelectionChange?: (ids: Set<string>) => void;
@@ -51,6 +52,7 @@ export function MigrationsTable({
     onStart,
     onCancel,
     onRetry,
+    onDelete,
     isLoading,
     selectedIds = new Set(),
     onSelectionChange,
@@ -404,11 +406,14 @@ export function MigrationsTable({
                                                         </Link>
                                                         <hr className="my-1 border-gray-200" />
                                                         <button
-                                                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                                                            className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
                                                             onClick={() => {
                                                                 setOpenMenuId(null);
-                                                                // Deletion would require a callback prop
+                                                                if (onDelete) {
+                                                                    onDelete(migration.migration_id);
+                                                                }
                                                             }}
+                                                            disabled={!onDelete}
                                                         >
                                                             Delete Migration
                                                         </button>

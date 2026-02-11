@@ -3,6 +3,7 @@ import hmac
 import logging
 from datetime import datetime, timedelta, timezone
 
+from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request
 from models.database import db, is_postgresql
 from models.migration import Migration
@@ -11,6 +12,9 @@ from utils.notifications import send_migration_failure_alert
 
 webhooks_bp = Blueprint("webhooks", __name__)
 logger = logging.getLogger(__name__)
+
+# Webhook payload size limit (1MB - status updates should be small)
+WEBHOOK_MAX_PAYLOAD_BYTES = 1 * 1024 * 1024
 
 
 def verify_webhook_signature(migration_id, signature, timestamp):
@@ -100,6 +104,22 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
         Flask response tuple (jsonify(...), status_code)
     """
     try:
+        # SECURITY: Reject oversized webhook payloads
+        if request.content_length and request.content_length > WEBHOOK_MAX_PAYLOAD_BYTES:
+            logger.warning(
+                f"Webhook payload too large: {request.content_length} bytes "
+                f"from {request.remote_addr}"
+            )
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Payload too large (max {WEBHOOK_MAX_PAYLOAD_BYTES} bytes)",
+                    }
+                ),
+                413,
+            )
+
         # Extract and validate required headers
         migration_id = request.headers.get("X-Migration-Id")
         signature = request.headers.get("X-Webhook-Signature")
@@ -304,6 +324,7 @@ def _handle_failed(migration, data):
 
 
 @webhooks_bp.route("/api/webhooks/migration-started", methods=["POST"])
+@limiter.limit("60 per minute")
 def migration_started():
     """
     Webhook called when EC2 instance starts migration
@@ -330,6 +351,7 @@ def migration_started():
 
 
 @webhooks_bp.route("/api/webhooks/migration-progress", methods=["POST"])
+@limiter.limit("300 per minute")
 def migration_progress():
     """
     Webhook called to update migration progress
@@ -350,6 +372,7 @@ def migration_progress():
 
 
 @webhooks_bp.route("/api/webhooks/migration-completed", methods=["POST"])
+@limiter.limit("60 per minute")
 def migration_completed():
     """
     Webhook called when migration completes successfully
@@ -370,6 +393,7 @@ def migration_completed():
 
 
 @webhooks_bp.route("/api/webhooks/migration-failed", methods=["POST"])
+@limiter.limit("60 per minute")
 def migration_failed():
     """
     Webhook called when migration fails
@@ -390,6 +414,7 @@ def migration_failed():
 
 
 @webhooks_bp.route("/api/webhooks/health", methods=["GET"])
+@limiter.limit("120 per minute")
 def webhook_health():
     """Health check for webhook endpoint"""
     return (

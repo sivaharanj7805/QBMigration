@@ -338,6 +338,7 @@ def get_live_status(migration_id):
 
 @dashboard_bp.route("/api/migrations/bulk-status", methods=["POST"])
 @require_auth
+@limiter.limit("30 per minute")
 def get_bulk_status():
     """
     Get status for multiple migrations at once (Enterprise feature).

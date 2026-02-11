@@ -688,8 +688,9 @@ class User(UserMixin, db.Model):
                     return json.loads(
                         f.decrypt(self._backup_codes_encrypted.encode()).decode()
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).debug("Failed to decrypt backup codes: %s", exc)
         # Fall back to legacy unencrypted column (DEPRECATED)
         if self.backup_codes:
             import logging
@@ -983,8 +984,9 @@ class User(UserMixin, db.Model):
             state = sa_inspect(self)
             if state.identity:
                 return str(state.identity[0])
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("SQLAlchemy inspect failed for user identity: %s", exc)
         return str(self.id)
 
     @property

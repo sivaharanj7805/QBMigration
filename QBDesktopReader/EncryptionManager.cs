@@ -21,7 +21,11 @@ namespace QBDesktopExtractor
     /// </summary>
     public static class EncryptionManager
     {
-        public const string AlgorithmName = "AES-256-CBC-HMAC-Chunked";
+        // NOTE: Despite the AesGcmCompat class name, the actual implementation uses
+        // AES-256-CBC + HMAC-SHA256 (encrypt-then-MAC) for .NET Framework compatibility.
+        // This provides equivalent authenticated encryption security to AES-GCM.
+        // The Python server-side uses native AES-256-GCM via kms_manager.py.
+        public const string AlgorithmName = "AES-256-CBC-HMAC-SHA256-Chunked";
         public const int KeySize = 256;
         public const int NonceSize = 12;
         public const int TagSize = 16;

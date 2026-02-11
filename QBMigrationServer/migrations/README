@@ -1,0 +1,11 @@
+Database migration repository (Flask-Migrate / Alembic).
+
+Usage:
+  flask db migrate -m "description"   # Auto-generate migration from model changes
+  flask db upgrade                     # Apply pending migrations
+  flask db downgrade                   # Revert the last migration
+  flask db history                     # Show migration history
+
+Legacy SQL files (add_performance_indexes.sql, add_tier_columns.sql) are
+retained for reference but are superseded by the versioned migrations in
+versions/.

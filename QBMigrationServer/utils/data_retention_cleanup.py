@@ -26,13 +26,41 @@ from models.migration import Migration
 logger = logging.getLogger(__name__)
 
 
-def cleanup_old_migration_data(retention_hours=24, dry_run=False):
+def get_retention_hours_for_jurisdiction(jurisdiction=None):
+    """
+    Get the retention period in hours based on tax jurisdiction.
+
+    Jurisdictions:
+        - 'CRA': Canada Revenue Agency - IC05-1R1 requires 6 years (~52,560 hours)
+        - 'IRS': US Internal Revenue Service - Rev. Proc. 98-25 requires 7 years (~61,320 hours)
+        - None: Use default from environment (DATA_RETENTION_HOURS, default 24h for temp data)
+
+    For financial data archival, this returns the compliance-mandated retention.
+    For temp/working data cleanup, callers should pass retention_hours directly.
+    """
+    import os
+
+    if jurisdiction == "CRA":
+        # CRA IC05-1R1: 6 years from end of tax year
+        return int(os.getenv("CRA_RETENTION_HOURS", str(6 * 365 * 24)))  # ~52,560 hours
+    elif jurisdiction == "IRS":
+        # IRS Rev. Proc. 98-25: 7 years for most records
+        return int(os.getenv("IRS_RETENTION_HOURS", str(7 * 365 * 24)))  # ~61,320 hours
+    else:
+        # Default: temp data cleanup (24 hours)
+        return int(os.getenv("DATA_RETENTION_HOURS", "24"))
+
+
+def cleanup_old_migration_data(retention_hours=24, dry_run=False, jurisdiction=None):
     """
     Strip sensitive data from migrations older than retention_hours.
 
     Args:
-        retention_hours (int): Number of hours to retain full data (default: 24)
+        retention_hours (int): Number of hours to retain full data (default: 24).
+            If jurisdiction is provided, this is overridden by the compliance period.
         dry_run (bool): If True, only report what would be cleaned without making changes
+        jurisdiction (str, optional): 'CRA' for Canadian 6-year compliance,
+            'IRS' for US 7-year compliance, None for default.
 
     Returns:
         dict: {
@@ -42,6 +70,13 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False):
             'dry_run': bool
         }
     """
+    if jurisdiction:
+        retention_hours = get_retention_hours_for_jurisdiction(jurisdiction)
+        logger.info(
+            f"Using {jurisdiction} jurisdiction retention: {retention_hours} hours "
+            f"(~{retention_hours / (365 * 24):.1f} years)"
+        )
+
     cutoff_time = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
     errors = []
     cleaned_count = 0

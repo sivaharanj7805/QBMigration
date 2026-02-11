@@ -851,6 +851,7 @@ def process_migration(migration_id):
 
 @migrations_bp.route("/api/migrations/<migration_id>/cancel", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def cancel_migration(migration_id):
     """
     Cancel running migration
@@ -946,6 +947,7 @@ def cancel_migration(migration_id):
 
 @migrations_bp.route("/api/migrations/<migration_id>/retry", methods=["POST"])
 @require_auth
+@limiter.limit("5 per minute")
 def retry_migration(migration_id):
     """
     Retry failed migration
@@ -1110,6 +1112,7 @@ def delete_migration(migration_id):
 
 @migrations_bp.route("/api/migrations/<migration_id>/execute", methods=["POST"])
 @require_auth
+@limiter.limit("5 per minute")
 def execute_migration_celery(migration_id):
     """
     Execute migration using Celery background worker (Option B).

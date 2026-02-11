@@ -260,7 +260,7 @@ class AuditLogger:
 
         except Exception as e:
             # Don't let logging failures crash the application
-            logger.info(f"⚠️  Log write failed: {e}")
+            logger.info(f"[WARN] Log write failed: {e}")
 
     def log_security_event(self, event_type: str, details: Dict[str, Any]):
         """Log security event"""
@@ -409,7 +409,7 @@ class AuditLogger:
                     else:
                         entries.append(json.loads(line))
                 except Exception as e:
-                    logger.info(f"⚠️  Could not parse log entry: {e}")
+                    logger.info(f"[WARN] Could not parse log entry: {e}")
 
         return entries
 
@@ -437,4 +437,4 @@ class AuditLogger:
                 # Rename current to .old
                 log_file.rename(old_file)
 
-                logger.info(f"✓ Rotated log: {log_file.name}")
+                logger.info(f"[OK] Rotated log: {log_file.name}")

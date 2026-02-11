@@ -7,8 +7,14 @@ using Newtonsoft.Json;
 namespace QBDesktopExtractor
 {
     /// <summary>
-    /// Manages extraction checkpoints for resumability
-    /// Allows resuming from last successful entity if extraction fails
+    /// Manages extraction checkpoints for resumability.
+    /// Allows resuming from last successful entity if extraction fails.
+    ///
+    /// SECURITY NOTE: Checkpoint data is stored as plaintext JSON. This is acceptable
+    /// because checkpoint state contains NO PII -- only operational metadata such as
+    /// entity names (e.g., "Customers", "Invoices"), record counts, session IDs,
+    /// timestamps, and phase indicators. No actual financial data, customer names,
+    /// account numbers, or other sensitive information is persisted in checkpoints.
     /// </summary>
     public class ExtractionCheckpoint
     {

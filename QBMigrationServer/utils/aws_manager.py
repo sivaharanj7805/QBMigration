@@ -113,7 +113,7 @@ class AWSMigrationManager:
 
             s3_uri = f"s3://{bucket_name}/{object_key}"
 
-            logger.info(f"✓ Uploaded to S3: {s3_uri}")
+            logger.info(f"[OK] Uploaded to S3: {s3_uri}")
 
             # Set lifecycle policy (auto-delete after processing)
             try:
@@ -287,7 +287,7 @@ class AWSMigrationManager:
                 Metadata={"migration-id": migration_id, "type": "encryption-metadata"},
             )
 
-            logger.info("✓ Encryption metadata stored")
+            logger.info("[OK] Encryption metadata stored")
 
             return True
 
@@ -331,7 +331,7 @@ class AWSMigrationManager:
             metadata_json = response["Body"].read().decode("utf-8")
             metadata = json.loads(metadata_json)
 
-            logger.info("✓ Encryption metadata retrieved")
+            logger.info("[OK] Encryption metadata retrieved")
 
             return metadata
 
@@ -513,7 +513,7 @@ class AWSMigrationManager:
             instance_id = response["Instances"][0]["InstanceId"]
 
             logger.info(
-                f"✓ Created EC2 instance: {instance_id} for migration {migration_id}"
+                f"Created EC2 instance: {instance_id} for migration {migration_id}"
             )
 
             # Publish metric
@@ -863,7 +863,7 @@ exit $EXIT_CODE
                 self.secrets.delete_secret(
                     SecretId=secret_name, ForceDeleteWithoutRecovery=True
                 )
-                logger.info(f"✓ Secret deleted: {secret_name}")
+                logger.info(f"[OK] Secret deleted: {secret_name}")
                 secret_deleted = True
             except ClientError as e:
                 if e.response["Error"]["Code"] == "ResourceNotFoundException":
@@ -877,7 +877,7 @@ exit $EXIT_CODE
             cleanup_success = all([instance_terminated, s3_deleted, secret_deleted])
             if cleanup_success:
                 logger.info(
-                    f"✓ Complete cleanup successful for migration {migration_id}"
+                    f"Complete cleanup successful for migration {migration_id}"
                 )
             else:
                 logger.warning(

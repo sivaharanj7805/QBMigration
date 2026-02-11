@@ -152,67 +152,86 @@ namespace QBDesktopExtractor
             long totalBytes = fileInfo.Length;
             long uploadedBytes = 0;
 
-            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            // FIX HIGH: Wrap multipart upload in try/finally to ensure AbortMultipartUploadAsync
+            // is always called on failure. Without this, a failure between part upload and
+            // completion leaves orphaned S3 multipart uploads that consume storage indefinitely.
+            try
             {
-                byte[] buffer = new byte[CHUNK_SIZE];
-                int bytesRead;
-
-                while ((bytesRead = await fileStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    // Get part upload URL
-                    var partUrlResponse = await GetPartUploadUrlAsync(uploadId, partNumber, s3Key);
-                    string partUrl = partUrlResponse["upload_url"]?.ToString();
+                    byte[] buffer = new byte[CHUNK_SIZE];
+                    int bytesRead;
 
-                    // Upload part
-                    using (var partContent = new ByteArrayContent(buffer, 0, bytesRead))
+                    while ((bytesRead = await fileStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
                     {
-                        var partRequest = new HttpRequestMessage(HttpMethod.Put, partUrl)
-                        {
-                            Content = partContent
-                        };
+                        // Get part upload URL
+                        var partUrlResponse = await GetPartUploadUrlAsync(uploadId, partNumber, s3Key);
+                        string partUrl = partUrlResponse["upload_url"]?.ToString();
 
-                        var partResponse = await _httpClient.SendAsync(partRequest, cancellationToken);
-
-                        if (!partResponse.IsSuccessStatusCode)
+                        // Upload part
+                        using (var partContent = new ByteArrayContent(buffer, 0, bytesRead))
                         {
-                            throw new Exception($"Part {partNumber} upload failed");
+                            var partRequest = new HttpRequestMessage(HttpMethod.Put, partUrl)
+                            {
+                                Content = partContent
+                            };
+
+                            var partResponse = await _httpClient.SendAsync(partRequest, cancellationToken);
+
+                            if (!partResponse.IsSuccessStatusCode)
+                            {
+                                throw new Exception($"Part {partNumber} upload failed");
+                            }
+
+                            // Get ETag from response
+                            // FIX CRIT-03: Proper ETag validation with Trim('"', ' ')
+                            string etag = partResponse.Headers.ETag?.Tag ?? $"\"{partNumber}\"";
+                            string cleanEtag = etag?.Trim('"', ' ') ?? partNumber.ToString();
+                            if (string.IsNullOrWhiteSpace(cleanEtag))
+                            {
+                                cleanEtag = partNumber.ToString();
+                            }
+                            parts.Add(new JObject
+                            {
+                                ["PartNumber"] = partNumber,
+                                ["ETag"] = cleanEtag
+                            });
                         }
 
-                        // Get ETag from response
-                        // FIX CRIT-03: Proper ETag validation with Trim('"', ' ')
-                        string etag = partResponse.Headers.ETag?.Tag ?? $"\"{partNumber}\"";
-                        string cleanEtag = etag?.Trim('"', ' ') ?? partNumber.ToString();
-                        if (string.IsNullOrWhiteSpace(cleanEtag))
+                        uploadedBytes += bytesRead;
+                        // FIX MED-17: Prevent integer overflow in progress calculation
+                        // Use division before multiplication to avoid overflow with large files
+                        int percentComplete = totalBytes > 0
+                            ? (int)Math.Min(100, (uploadedBytes * 100L) / totalBytes)
+                            : 0;
+                        progress?.Report(new UploadProgress
                         {
-                            cleanEtag = partNumber.ToString();
-                        }
-                        parts.Add(new JObject
-                        {
-                            ["PartNumber"] = partNumber,
-                            ["ETag"] = cleanEtag
+                            Phase = "Uploading",
+                            PercentComplete = percentComplete,
+                            BytesUploaded = uploadedBytes,
+                            TotalBytes = totalBytes
                         });
+
+                        partNumber++;
                     }
-
-                    uploadedBytes += bytesRead;
-                    // FIX MED-17: Prevent integer overflow in progress calculation
-                    // Use division before multiplication to avoid overflow with large files
-                    int percentComplete = totalBytes > 0
-                        ? (int)Math.Min(100, (uploadedBytes * 100L) / totalBytes)
-                        : 0;
-                    progress?.Report(new UploadProgress
-                    {
-                        Phase = "Uploading",
-                        PercentComplete = percentComplete,
-                        BytesUploaded = uploadedBytes,
-                        TotalBytes = totalBytes
-                    });
-
-                    partNumber++;
                 }
-            }
 
-            // Complete multipart upload
-            await CompleteMultipartUploadAsync(uploadId, s3Key, parts, migrationId);
+                // Complete multipart upload
+                await CompleteMultipartUploadAsync(uploadId, s3Key, parts, migrationId);
+            }
+            catch (Exception)
+            {
+                // Abort the multipart upload to clean up orphaned parts in S3
+                try
+                {
+                    await AbortMultipartUploadAsync(uploadId, s3Key);
+                }
+                catch (Exception abortEx)
+                {
+                    _logger?.Log(LogLevel.Warning, "Failed to abort multipart upload {0}: {1}", uploadId, abortEx.Message);
+                }
+                throw;
+            }
 
             progress?.Report(new UploadProgress { Phase = "Complete", PercentComplete = 100 });
 
@@ -341,6 +360,34 @@ namespace QBDesktopExtractor
                 var content = await response.Content.ReadAsStringAsync();
                 _logger?.Log(LogLevel.Error, "Failed to complete multipart upload: {0} - {1}", response.StatusCode, content);
                 throw new Exception($"Failed to complete multipart upload: {response.StatusCode}");
+            }
+        }
+
+        /// <summary>
+        /// Abort a multipart upload to clean up orphaned parts in S3.
+        /// Called on failure to prevent storage leaks from incomplete uploads.
+        /// </summary>
+        private async Task AbortMultipartUploadAsync(string uploadId, string s3Key)
+        {
+            var request = new JObject
+            {
+                ["upload_id"] = uploadId,
+                ["s3_key"] = s3Key,
+                ["reason"] = "client_error"
+            };
+
+            var response = await PostAuthenticatedAsync(
+                $"{_serverUrl}/api/upload/multipart/abort",
+                new StringContent(request.ToString(), Encoding.UTF8, "application/json"));
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger?.Log(LogLevel.Warning, "Multipart abort returned {0}: {1}", response.StatusCode, content);
+            }
+            else
+            {
+                _logger?.Log(LogLevel.Info, "Multipart upload {0} aborted successfully", uploadId);
             }
         }
 

@@ -43,7 +43,7 @@ def run_migration(engine, sql, description):
         with engine.connect() as conn:
             conn.execute(text(sql))
             conn.commit()
-        logger.info(f"  ✓ {description}")
+        logger.info(f"  [OK] {description}")
         return True
     except ProgrammingError as e:
         if "already exists" in str(e) or "duplicate column" in str(e).lower():
@@ -71,7 +71,7 @@ def main():
         engine = create_engine(database_url)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        logger.info("  ✓ Database connection successful")
+        logger.info("  [OK] Database connection successful")
     except OperationalError as e:
         logger.info(f"  ✗ Failed to connect to database: {str(e)}")
         sys.exit(1)
@@ -160,7 +160,7 @@ def main():
     success = users_success + migrations_success
 
     if success == total:
-        logger.info("✓ ALL MIGRATIONS COMPLETED SUCCESSFULLY")
+        logger.info("[OK] ALL MIGRATIONS COMPLETED SUCCESSFULLY")
         logger.info()
         logger.info("Next steps:")
         logger.info("  1. Restart the ForensicBridge service:")
@@ -172,7 +172,7 @@ def main():
         logger.info("  3. Check the logs for any errors:")
         logger.info("     sudo journalctl -u forensicbridge -n 20 --no-pager")
     else:
-        logger.info(f"⚠ {success}/{total} migrations completed")
+        logger.info(f"[WARN] {success}/{total} migrations completed")
         logger.info("Some migrations failed. Check the error messages above.")
 
     logger.info("=" * 60)

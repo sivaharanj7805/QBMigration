@@ -97,8 +97,8 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
         try:
             redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
             return
-        except Exception:
-            pass  # Fall through to in-memory
+        except Exception as exc:
+            logger.debug("Redis blocklist write failed, falling back to in-memory: %s", exc)
 
     # Fallback: in-memory (per-process only)
     now = _time.time()
@@ -118,8 +118,8 @@ def _blocklist_check(jti: str) -> bool:
         try:
             if redis.exists(f"jwt_blocklist:{jti}"):
                 return True
-        except Exception:
-            pass  # Fall through to in-memory
+        except Exception as exc:
+            logger.debug("Redis blocklist check failed, falling back to in-memory: %s", exc)
 
     # Fallback: in-memory check
     now = _time.time()
@@ -1037,8 +1037,8 @@ def login():
                 argon2.PasswordHasher().verify(
                     "$argon2id$v=19$m=65536,t=3,p=4$fake$fake", password
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Constant-time fake hash verification (expected): %s", exc)
             password_valid = False
 
     # FIX #37: Consistent error handling regardless of user existence
@@ -1975,8 +1975,8 @@ def forgot_password():
         try:
             fake_password = os.urandom(16).hex()
             _ = ph.hash(fake_password)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Constant-time fake hash operation (expected): %s", exc)
 
     # Ensure constant response time to prevent timing attacks
     elapsed = _time.time() - start_time

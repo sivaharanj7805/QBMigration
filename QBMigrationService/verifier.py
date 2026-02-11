@@ -480,13 +480,13 @@ class PremiumMigrationVerifier:
             logger.info(f"  QBO Credits: ${qbo_credits:,.2f}")
             logger.info(f"  QBO Balance: ${(qbo_debits - qbo_credits):,.2f}")
 
-            # Verify equation: Debits = Credits (within tolerance)
-            qbd_balanced = abs(qbd_debits - qbd_credits) < Decimal("0.05")
-            qbo_balanced = abs(qbo_debits - qbo_credits) < Decimal("0.05")
+            # Verify equation: Debits = Credits (penny-perfect tolerance)
+            qbd_balanced = abs(qbd_debits - qbd_credits) < Decimal("0.01")
+            qbo_balanced = abs(qbo_debits - qbo_credits) < Decimal("0.01")
 
-            # Verify QBD matches QBO
-            debit_match = abs(qbd_debits - qbo_debits) < Decimal("1.00")
-            credit_match = abs(qbd_credits - qbo_credits) < Decimal("1.00")
+            # Verify QBD matches QBO (penny-perfect tolerance)
+            debit_match = abs(qbd_debits - qbo_debits) < Decimal("0.01")
+            credit_match = abs(qbd_credits - qbo_credits) < Decimal("0.01")
 
             # AUDIT FIX HIGH-16: Use str() instead of float() to preserve penny-level precision
             self.report["critical_metrics"]["trial_balance"] = {
@@ -508,11 +508,11 @@ class PremiumMigrationVerifier:
             logger.info("\n" + "=" * 80)
 
             if qbd_balanced and qbo_balanced and debit_match and credit_match:
-                logger.info("  ✅ TRIAL BALANCE VERIFIED - BOOKS ARE BALANCED")
+                logger.info("  [OK] TRIAL BALANCE VERIFIED - BOOKS ARE BALANCED")
                 logger.info("=" * 80)
                 return True
             else:
-                logger.info("  ❌ TRIAL BALANCE FAILED - MIGRATION IS COMPROMISED")
+                logger.info("  [FAIL] TRIAL BALANCE FAILED - MIGRATION IS COMPROMISED")
                 logger.info("=" * 80)
 
                 if not qbd_balanced:
@@ -569,7 +569,7 @@ class PremiumMigrationVerifier:
         ]
 
         if not bank_accounts:
-            logger.info("  ⚠️  No bank accounts found")
+            logger.info("  [WARN] No bank accounts found")
             reconciliation_results["warnings"].append("No bank accounts in source data")
             return reconciliation_results
 
@@ -588,7 +588,7 @@ class PremiumMigrationVerifier:
                 f"[2/3] Retrieved {len(qbo_bank_accounts)} bank account(s) from QBO"
             )
         except Exception as e:
-            logger.info(f"  ❌ Failed to retrieve QBO accounts: {e}")
+            logger.info(f"  [FAIL] Failed to retrieve QBO accounts: {e}")
             reconciliation_results["verified"] = False
             reconciliation_results["discrepancies"].append(
                 f"Cannot retrieve QBO accounts: {e}"
@@ -607,7 +607,7 @@ class PremiumMigrationVerifier:
             if not qbo_account:
                 warning = f"Bank account '{account_name}' not found in QBO"
                 reconciliation_results["warnings"].append(warning)
-                logger.info(f"  ⚠️  {warning}")
+                logger.info(f"  [WARN] {warning}")
                 continue
 
             qbd_reconciled_balance = qbd_account.get("ReconciledBalance", 0)
@@ -639,20 +639,20 @@ class PremiumMigrationVerifier:
                     reconciliation_results["discrepancies"].append(discrepancy)
                     reconciliation_results["verified"] = False
 
-                    logger.info(f"  ❌ {account_name}: Difference ${balance_diff:,.2f}")
+                    logger.info(f"  [FAIL] {account_name}: Difference ${balance_diff:,.2f}")
                 else:
-                    logger.info(f"  ✅ {account_name}: Balanced")
+                    logger.info(f"  [OK] {account_name}: Balanced")
 
             except Exception as e:
                 warning = f"Cannot verify {account_name}: {e}"
                 reconciliation_results["warnings"].append(warning)
-                logger.info(f"  ⚠️  {warning}")
+                logger.info(f"  [WARN] {warning}")
 
         logger.info("" + "=" * 80)
         if reconciliation_results["verified"]:
-            logger.info("  ✅ BANK RECONCILIATION VERIFIED")
+            logger.info("  [OK] BANK RECONCILIATION VERIFIED")
         else:
-            logger.info("  ❌ DISCREPANCIES FOUND")
+            logger.info("  [FAIL] DISCREPANCIES FOUND")
         logger.info("=" * 80 + "")
 
         self.report["critical_metrics"]["reconciliation"] = reconciliation_results
@@ -866,7 +866,7 @@ class PremiumMigrationVerifier:
 
         except Exception as e:
             # Log error but don't fail reconciliation
-            logger.info(f"⚠️  Item-based transaction lookup failed: {e}")
+            logger.info(f"[WARN] Item-based transaction lookup failed: {e}")
 
         return transactions
 
@@ -920,7 +920,7 @@ class PremiumMigrationVerifier:
             variance = total_ar - total_open_invoices
 
             if abs(variance) > Decimal("1.00"):
-                logger.info(f"  ⚠️  Unapplied payment variance: ${variance:,.2f}")
+                logger.info(f"  [WARN] Unapplied payment variance: ${variance:,.2f}")
 
                 self.report["warnings"].append(
                     f"Unapplied payment variance detected: ${variance:,.2f}. "
@@ -1148,13 +1148,13 @@ class PremiumMigrationVerifier:
                     "Data integrity hash mismatch - source data may have been modified"
                 )
         else:
-            logger.info("  Data Integrity: ⚠️ No hash available")
+            logger.info("  Data Integrity: [WARN] No hash available")
 
         logger.info("=" * 80)
         if passed:
-            logger.info("  ✅ VERIFICATION PASSED")
+            logger.info("  [OK] VERIFICATION PASSED")
         else:
-            logger.info("  ❌ VERIFICATION FAILED")
+            logger.info("  [FAIL] VERIFICATION FAILED")
         logger.info("=" * 80 + "\n")
 
         return {
@@ -1607,7 +1607,51 @@ class PremiumMigrationVerifier:
         # Build PDF
         doc.build(story)
 
-        logger.info(f"  ✓ PDF certificate generated: {filepath}")
+        # Cryptographic signing: compute SHA-256 hash of the generated PDF
+        # and append a detached signature manifest for tamper detection
+        try:
+            import os
+
+            with open(filepath, "rb") as f:
+                pdf_bytes = f.read()
+            pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+
+            # Generate HMAC signature using server secret key
+            signing_key = os.environ.get("SECRET_KEY", "")
+            if signing_key:
+                import hmac
+
+                signature = hmac.new(
+                    signing_key.encode("utf-8"),
+                    pdf_bytes,
+                    hashlib.sha256,
+                ).hexdigest()
+            else:
+                signature = "unsigned-no-secret-key"
+
+            # Write detached signature manifest alongside the PDF
+            sig_manifest = {
+                "document": os.path.basename(filepath),
+                "hash_algorithm": "SHA-256",
+                "document_hash": pdf_hash,
+                "signature_algorithm": "HMAC-SHA256",
+                "signature": signature,
+                "signed_at": datetime.now(timezone.utc).isoformat(),
+                "signer": "ForensicBridge Audit System",
+                "migration_id": migration_id,
+                "merkle_root": merkle_root or "N/A",
+            }
+
+            sig_filepath = filepath.replace(".pdf", ".sig.json")
+            with open(sig_filepath, "w") as f:
+                json.dump(sig_manifest, f, indent=2)
+
+            logger.info(f"  [OK] PDF signature manifest: {sig_filepath}")
+            logger.info(f"    Document hash: {pdf_hash[:32]}...")
+        except Exception as e:
+            logger.warning(f"  [WARN] PDF signing failed (non-fatal): {e}")
+
+        logger.info(f"  [OK] PDF certificate generated: {filepath}")
         logger.info("    This document can be provided to your CPA for tax audits")
 
     def save_report(self, filepath: str):
@@ -1623,7 +1667,7 @@ class PremiumMigrationVerifier:
         with open(filepath, "w") as f:
             json.dump(self.report, f, indent=2, default=decimal_default)
 
-        logger.info(f"\n✓ Verification report saved: {filepath}")
+        logger.info(f"\n[OK] Verification report saved: {filepath}")
         logger.info("\n  Summary:")
         logger.info(f"    Errors: {len(self.report['errors'])}")
         logger.info(f"    Warnings: {len(self.report['warnings'])}")
@@ -1694,12 +1738,12 @@ class PremiumMigrationVerifier:
                     )
                     drilldown["total_variance"] += abs(variance)
 
-                    logger.info(f"  ❌ {name}: ${variance:+,.2f} variance")
+                    logger.info(f"  [FAIL] {name}: ${variance:+,.2f} variance")
                 else:
                     drilldown["accounts_matched"].append(
                         {"account_name": name, "balance": float(qbd_balance)}
                     )
-                    logger.info(f"  ✅ {name}: Matched (${qbd_balance:,.2f})")
+                    logger.info(f"  [OK] {name}: Matched (${qbd_balance:,.2f})")
             else:
                 # Account missing in QBO
                 drilldown["accounts_missing_in_qbo"].append(
@@ -1710,7 +1754,7 @@ class PremiumMigrationVerifier:
                     }
                 )
                 drilldown["total_variance"] += abs(qbd_balance)
-                logger.info(f"  ⚠️  {name}: MISSING in QBO (${qbd_balance:,.2f})")
+                logger.info(f"  [WARN] {name}: MISSING in QBO (${qbd_balance:,.2f})")
 
         # Find extra accounts in QBO (not in QBD)
         for qbo_acc in qbo_accounts:
@@ -1721,7 +1765,7 @@ class PremiumMigrationVerifier:
                     drilldown["accounts_extra_in_qbo"].append(
                         {"account_name": name, "balance": float(balance)}
                     )
-                    logger.info(f"  ⚠️  {name}: EXTRA in QBO (${balance:,.2f})")
+                    logger.info(f"  [WARN] {name}: EXTRA in QBO (${balance:,.2f})")
 
         # Generate recommended actions
         if drilldown["accounts_with_variance"]:

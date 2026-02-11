@@ -25,7 +25,7 @@ namespace QBDesktopExtractor
         private static readonly bool _useEventLog;
         private const string EventLogSource = "ForensicBridge";
         private const string EventLogName = "Application";
-        private const long MaxLogFileSize = 10 * 1024 * 1024; // 10MB
+        private const long MaxLogFileSize = 50 * 1024 * 1024; // 50MB
         
         static Logger()
         {

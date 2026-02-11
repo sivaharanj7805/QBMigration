@@ -31,12 +31,12 @@ try:
     )
 
     CELERY_AVAILABLE = True
-    logger.info("✅ Celery available - using production job queue")
+    logger.info("[OK] Celery available - using production job queue")
 
 except ImportError:
     CELERY_AVAILABLE = False
     celery_app = None
-    logger.info("⚠️  Celery not available - using fallback threading")
+    logger.info("[WARN] Celery not available - using fallback threading")
 
 
 # Celery task for deletion (only defined if Celery available)
@@ -79,6 +79,15 @@ if CELERY_AVAILABLE:
         }
 
 
+    # Per-jurisdiction retention periods (hours)
+    # CRA IC05-1R1: 6 years from end of tax year
+    # IRS Rev. Proc. 98-25: 7 years for most records
+JURISDICTION_RETENTION_HOURS = {
+    "CRA": 6 * 365 * 24,   # ~52,560 hours (6 years)
+    "IRS": 7 * 365 * 24,   # ~61,320 hours (7 years)
+}
+
+
 class DataRetentionManager:
     """
     Enhanced data retention with:
@@ -86,10 +95,20 @@ class DataRetentionManager:
     - Persistent deletion tracking
     - User-triggered immediate deletion
     - Configurable retention periods
+    - Per-jurisdiction compliance (CRA IC05-1R1, IRS Rev. Proc. 98-25)
     """
 
-    def __init__(self, retention_hours=1):
-        self.retention_hours = retention_hours
+    def __init__(self, retention_hours=1, jurisdiction=None):
+        if jurisdiction and jurisdiction in JURISDICTION_RETENTION_HOURS:
+            self.retention_hours = JURISDICTION_RETENTION_HOURS[jurisdiction]
+            self.jurisdiction = jurisdiction
+            logger.info(
+                f"DataRetentionManager using {jurisdiction} jurisdiction: "
+                f"{self.retention_hours} hours (~{self.retention_hours / (365 * 24):.0f} years)"
+            )
+        else:
+            self.retention_hours = retention_hours
+            self.jurisdiction = jurisdiction
         self.logger = AuditLogger()
         self.deletion_jobs = []
         self.jobs_file = os.path.join(
@@ -226,11 +245,25 @@ class DataRetentionManager:
         self._execute_deletion(job)
 
     def _execute_deletion(self, job):
-        """Execute file deletion for a job"""
+        """Execute file deletion for a job with path traversal prevention."""
         deleted_count = 0
         failed_count = 0
 
+        # SECURITY: Validate file paths to prevent arbitrary file deletion
+        allowed_base = os.environ.get(
+            "DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data"
+        )
+
         for file_path in job["file_paths"]:
+            # Path traversal prevention (matches Celery task protection)
+            real_path = os.path.realpath(file_path)
+            if not real_path.startswith(os.path.realpath(allowed_base)):
+                logger.error(
+                    f"Path traversal blocked: {file_path} is outside {allowed_base}"
+                )
+                failed_count += 1
+                continue
+
             if os.path.exists(file_path):
                 try:
                     EncryptionManager.secure_delete(file_path)
@@ -261,24 +294,37 @@ class DataRetentionManager:
 
         self._save_jobs()
 
-        logger.info(f"\n✓ Auto-deletion completed for migration {job['migration_id']}")
+        logger.info(f"\n[OK] Auto-deletion completed for migration {job['migration_id']}")
         logger.info(f"  Deleted: {deleted_count} files")
         if failed_count > 0:
             logger.info(f"  Failed: {failed_count} files")
 
     def delete_immediately(self, migration_id, file_paths):
-        """Delete files immediately (no delay)"""
+        """Delete files immediately (no delay) with path traversal prevention."""
         if not isinstance(file_paths, list):
             file_paths = [file_paths]
 
         deleted_count = 0
 
+        # SECURITY: Validate file paths to prevent arbitrary file deletion
+        allowed_base = os.environ.get(
+            "DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data"
+        )
+
         for file_path in file_paths:
+            # Path traversal prevention
+            real_path = os.path.realpath(file_path)
+            if not real_path.startswith(os.path.realpath(allowed_base)):
+                logger.error(
+                    f"Path traversal blocked: {file_path} is outside {allowed_base}"
+                )
+                continue
+
             if os.path.exists(file_path):
                 try:
                     EncryptionManager.secure_delete(file_path)
                     self.logger.log_deletion(migration_id, file_path)
-                    logger.info(f"✓ Deleted: {os.path.basename(file_path)}")
+                    logger.info(f"Deleted: {os.path.basename(file_path)}")
                     deleted_count += 1
                 except Exception as e:
                     logger.error(f"Failed to delete {file_path}: {e}")
@@ -353,6 +399,6 @@ class DataRetentionManager:
 
         if removed_count > 0:
             self._save_jobs()
-            logger.info(f"✓ Cleaned up {removed_count} old deletion records")
+            logger.info(f"[OK] Cleaned up {removed_count} old deletion records")
 
         return removed_count

@@ -230,14 +230,15 @@ class MigrationOrchestrator:
             return self._run_migration_impl(
                 encrypted_data, encryption_metadata, company_name
             )
-        except Exception:
-            # AUDIT FIX MED-21: Ensure QBO client session is closed on exception
+        except Exception as e:
+            # Ensure QBO client session is closed on exception
+            logger.error(f"Migration failed: {e}")
             if hasattr(self, "_qbo_client") and self._qbo_client:
                 try:
                     if hasattr(self._qbo_client, "session") and self._qbo_client.session:
                         self._qbo_client.session.close()
-                except Exception:
-                    pass
+                except Exception as cleanup_err:
+                    logger.debug(f"QBO session cleanup error: {cleanup_err}")
             raise
         finally:
             # Always restore signal handler and cancel alarm
@@ -615,6 +616,21 @@ class MigrationOrchestrator:
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
+            # AUDIT FIX CRIT-01: Attempt rollback of partially-created QBO entities
+            rollback_result = None
+            if hasattr(self, "_created_entity_ids") and any(
+                ids for ids in self._created_entity_ids.values()
+            ):
+                try:
+                    logger.info(f"Migration {migration_id}: Attempting rollback of partial entities...")
+                    rollback_result = self.rollback_migration(
+                        qbo_client=qbo_client, oauth_manager=oauth_manager
+                    )
+                    logger.info(f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}")
+                except Exception as rollback_err:
+                    logger.error(f"Migration {migration_id}: Rollback failed: {rollback_err}")
+                    rollback_result = {"rollback_error": str(rollback_err)}
+
             # Preserve partial progress and manual_review even on failure
             error_result = {
                 "success": False,
@@ -623,6 +639,10 @@ class MigrationOrchestrator:
                 "duration_seconds": duration,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
             }
+
+            if rollback_result:
+                error_result["rollback"] = rollback_result
+
             # Include manual_review if transformer was initialized before crash
             try:
                 if transformer and hasattr(transformer, "manual_review"):
@@ -631,8 +651,8 @@ class MigrationOrchestrator:
                     ts = dict(transformer.stats)
                     ts["by_entity_type"] = dict(ts.get("by_entity_type", {}))
                     error_result["transformer_stats"] = ts
-            except Exception:
-                pass  # Don't let diagnostic collection mask the real error
+            except Exception as diag_err:
+                logger.debug(f"Diagnostic collection failed (non-fatal): {diag_err}")
             return error_result
 
     def _migrate_entity(

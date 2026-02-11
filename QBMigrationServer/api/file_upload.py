@@ -52,6 +52,7 @@ def allowed_file(filename: str) -> bool:
 
 @file_upload_bp.route("/upload", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def upload_qb_export():
     """
     Upload QuickBooks Desktop export files (IIF, CSV, Excel)

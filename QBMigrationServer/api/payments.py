@@ -237,6 +237,7 @@ def create_checkout():
 
 
 @payments_bp.route("/webhook", methods=["POST"])
+@limiter.limit("100 per minute")
 def stripe_webhook():
     """
     Handle Stripe webhooks.
@@ -339,6 +340,7 @@ def handle_successful_payment(session):
 
     except Exception as e:
         logger.exception("Error processing successful payment")
+        raise  # Re-raise so webhook returns 500 and Stripe retries
 
 
 def handle_expired_session(session):

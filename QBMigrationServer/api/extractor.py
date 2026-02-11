@@ -318,8 +318,8 @@ def is_cache_valid():
             if actual_hash != expected_hash:
                 logger.warning("Cache hash mismatch, invalidating cache")
                 return False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Cache hash verification failed: %s", exc)
 
     return True
 
@@ -1091,6 +1091,7 @@ def zip_info():
 
 
 @extractor_bp.route("/zip/verify", methods=["POST"])
+@limiter.limit("30 per minute")
 def verify_zip():
     """
     Verify a downloaded zip file by its hash.

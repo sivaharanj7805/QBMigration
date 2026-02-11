@@ -217,16 +217,16 @@ export default function UploadPage() {
         e.stopPropagation();
         setIsDragActive(false);
 
-        // FIX F-09: Deduplicate files by name before processing
+        // AUDIT FIX CRIT-04: Deduplicate files by name before processing
         const droppedFiles = Array.from(e.dataTransfer.files);
+        const existingNames = new Set(files.map(f => f.name));
         droppedFiles.forEach(file => {
-            setFiles(prev => {
-                if (prev.some(f => f.name === file.name)) return prev;
-                return prev; // processFile handles adding
-            });
-            processFile(file);
+            if (!existingNames.has(file.name)) {
+                existingNames.add(file.name); // prevent duplicates within same drop
+                processFile(file);
+            }
         });
-    }, [processFile]);
+    }, [processFile, files]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selectedFiles = Array.from(e.target.files || []);

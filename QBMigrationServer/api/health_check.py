@@ -7,12 +7,14 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 from api.auth import require_auth
+from extensions import limiter
 from flask import Blueprint, jsonify, request, send_file
 
 health_check_bp = Blueprint("health_check", __name__, url_prefix="/api/health-check")
 
 
 @health_check_bp.route("/scan", methods=["POST"])
+@limiter.limit("10 per minute")
 @require_auth
 def scan_file():
     """
@@ -101,6 +103,7 @@ def scan_file():
 
 
 @health_check_bp.route("/report/<session_id>", methods=["GET"])
+@limiter.limit("10 per minute")
 @require_auth
 def generate_report(session_id):
     """

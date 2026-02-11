@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from api.auth import require_auth
+from extensions import limiter
 from flask import Blueprint, jsonify, request
 from models import Migration, Project, db
 from models.database import is_postgresql
@@ -61,6 +62,7 @@ def list_projects():
 
 @projects_bp.route("", methods=["POST"])
 @require_auth
+@limiter.limit("10 per minute")
 def create_project():
     """
     Create a new migration project.
