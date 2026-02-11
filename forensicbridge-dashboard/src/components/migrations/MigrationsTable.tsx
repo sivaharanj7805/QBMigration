@@ -217,6 +217,7 @@ export function MigrationsTable({
     }
 
     // FIX: Show error state if error is provided
+    // AUDIT FIX LOW-2: Added retry button to error state
     if (error) {
         return (
             <div className="card-forensic overflow-hidden">
@@ -224,6 +225,12 @@ export function MigrationsTable({
                     <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
                     <p className="text-lg font-medium text-gray-900">Failed to load migrations</p>
                     <p className="mt-1 text-gray-500">{error}</p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="mt-4 px-4 py-2 text-sm font-medium text-white bg-[var(--bridge-blue)] rounded-md hover:opacity-90 transition-opacity"
+                    >
+                        Try Again
+                    </button>
                 </div>
             </div>
         );
@@ -231,6 +238,8 @@ export function MigrationsTable({
 
     return (
         <div className="card-forensic overflow-hidden">
+            {/* AUDIT FIX LOW-4: Horizontal scroll wrapper for mobile devices */}
+            <div className="overflow-x-auto">
             <table className="data-table">
                 <thead>
                     <tr>
@@ -428,6 +437,7 @@ export function MigrationsTable({
                     )}
                 </tbody>
             </table>
+            </div>
         </div>
     );
 }

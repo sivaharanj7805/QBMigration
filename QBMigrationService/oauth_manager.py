@@ -358,8 +358,21 @@ class OAuthManager:
                     expires_in = result.get("expires_in", 3600)
                     self.token_expiry = datetime.now() + timedelta(seconds=expires_in)
 
-                    # Parse realm_id and scopes
-                    self.realm_id = result.get("realmId", self.realm_id)
+                    # AUDIT FIX MEDIUM-9: Validate realm_id consistency on refresh.
+                    # A changed realm_id in a refresh response could indicate a
+                    # token mixup or SSRF redirect — log a warning but keep going
+                    # since Intuit occasionally omits realmId from refresh responses.
+                    new_realm_id = result.get("realmId")
+                    if new_realm_id:
+                        if self.realm_id and new_realm_id != self.realm_id:
+                            logger.warning(
+                                "realm_id changed on token refresh: %s -> %s. "
+                                "This may indicate a token mixup.",
+                                self.realm_id,
+                                new_realm_id,
+                            )
+                        self.realm_id = new_realm_id
+
                     scope_string = result.get("scope", "")
                     self.scopes = scope_string.split() if scope_string else []
 

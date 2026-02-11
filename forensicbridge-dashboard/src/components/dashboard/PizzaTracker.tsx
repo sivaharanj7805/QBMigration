@@ -72,6 +72,14 @@ export function PizzaTracker({
                     <p className="text-xs text-gray-500">
                         Elapsed: {formatTime(elapsedSeconds)}
                     </p>
+                    {/* AUDIT FIX LOW-3: Show estimated time remaining */}
+                    {overallPercentage > 5 && overallPercentage < 100 && elapsedSeconds > 0 && (
+                        <p className="text-xs text-gray-400">
+                            ETA: ~{formatTime(
+                                Math.round((elapsedSeconds / overallPercentage) * (100 - overallPercentage))
+                            )}
+                        </p>
+                    )}
                 </div>
             </div>
 

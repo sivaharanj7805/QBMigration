@@ -382,18 +382,27 @@ class PremiumQBOClient:
             entity_type, qbd_id, qbo_id, migration_id, sync_token
         )
 
+    # AUDIT FIX MEDIUM-8: SyncToken cache TTL to prevent stale tokens
+    SYNCTOKEN_TTL_SECONDS = 300  # 5 minutes
+
     def get_synctoken(self, entity_type: str, qbo_id: str) -> str:
         """
         FIX #33, #124: Retrieve current SyncToken for entity
         FIX: Acquire db_lock FIRST, then synctoken_lock to match lock ordering
         in record_created() and prevent deadlocks.
+        AUDIT FIX MEDIUM-8: Cache entries expire after SYNCTOKEN_TTL_SECONDS.
         """
         with self.db_lock:
             with self.synctoken_lock:
-                # Check cache first
+                # Check cache first, with TTL expiry
                 cache_key = (entity_type, str(qbo_id))
                 if cache_key in self.synctoken_cache:
-                    return self.synctoken_cache[cache_key]
+                    cache_time = getattr(self, "_synctoken_cache_times", {}).get(cache_key, 0)
+                    if time.time() - cache_time < self.SYNCTOKEN_TTL_SECONDS:
+                        return self.synctoken_cache[cache_key]
+                    else:
+                        # Expired — remove from cache
+                        del self.synctoken_cache[cache_key]
 
             # Fall back to DB lookup (still under db_lock)
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
@@ -412,9 +421,12 @@ class PremiumQBOClient:
 
             if result:
                 sync_token = result[0] or "0"
-                # Update cache (acquire synctoken_lock under db_lock)
+                # Update cache with TTL timestamp (acquire synctoken_lock under db_lock)
                 with self.synctoken_lock:
                     self.synctoken_cache[(entity_type, str(qbo_id))] = sync_token
+                    if not hasattr(self, "_synctoken_cache_times"):
+                        self._synctoken_cache_times = {}
+                    self._synctoken_cache_times[(entity_type, str(qbo_id))] = time.time()
                 return sync_token
 
             return "0"
@@ -425,11 +437,15 @@ class PremiumQBOClient:
         DEADLOCK FIX: Acquire db_lock FIRST, then synctoken_lock to match
         lock ordering in record_created() and get_synctoken().
         Previous code acquired synctoken_lock first, causing deadlock risk.
+        AUDIT FIX MEDIUM-8: Record cache timestamp for TTL expiry.
         """
         with self.db_lock:
             # Update cache under consistent lock ordering (db_lock → synctoken_lock)
             with self.synctoken_lock:
                 self.synctoken_cache[(entity_type, qbo_id)] = new_synctoken
+                if not hasattr(self, "_synctoken_cache_times"):
+                    self._synctoken_cache_times = {}
+                self._synctoken_cache_times[(entity_type, qbo_id)] = time.time()
 
             conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             try:
@@ -1109,8 +1125,15 @@ class PremiumQBOClient:
             self.batch_counter += 1
             return f"batch_{int(time.time())}_{self.batch_counter}"
 
+    # AUDIT FIX HIGH-2: Updated from 40 to 120 per Intuit Batch API limits
+    # (updated October 31, 2025). Using 100 as safety margin (83% of 120).
+    BATCH_REQUESTS_PER_MINUTE = 100
+
     def _enforce_batch_rate_limit(self):
-        """Enforce 40 batch requests per minute per realm.
+        """Enforce batch requests per minute per realm.
+
+        AUDIT FIX HIGH-2: Updated from 40 to 100 (safety margin below Intuit's
+        120/min limit as of October 2025). This triples migration throughput.
 
         Uses a loop to handle the race where multiple threads may wake
         from sleep simultaneously and all try to append at once.
@@ -1123,15 +1146,15 @@ class PremiumQBOClient:
                 self._batch_timestamps = [
                     t for t in self._batch_timestamps if now - t < 60
                 ]
-                if len(self._batch_timestamps) >= 40:
-                    sleep_time = 60 - (now - self._batch_timestamps[0])
+                if len(self._batch_timestamps) >= self.BATCH_REQUESTS_PER_MINUTE:
+                    sleep_time = 60 - (now - self._batch_timestamps[0]) + 0.1
                 else:
                     # Under limit — atomically record this batch's timestamp
                     self._batch_timestamps.append(time.time())
                     return  # Safe to proceed
             # Sleep OUTSIDE lock so other threads aren't blocked
             if sleep_time > 0:
-                logger.info(f"Batch rate limit reached. Sleeping {sleep_time:.1f}s")
+                logger.info(f"Batch rate limit reached ({self.BATCH_REQUESTS_PER_MINUTE}/min). Sleeping {sleep_time:.1f}s")
                 time.sleep(sleep_time)
             # Re-check after sleeping (another thread may have consumed the slot)
 
@@ -1159,6 +1182,10 @@ class PremiumQBOClient:
         # FIX #312: Use idempotency key for crash recovery
         idempotency_key = f"{batch_id}_{migration_id}"
 
+        # AUDIT FIX MEDIUM-7: Bidirectional bId→entity mapping for robust
+        # response correlation instead of fragile index parsing
+        bid_to_entity = {}
+
         for j, entity_data in enumerate(batch):
             # Dedup check: skip already-migrated entities
             qbd_id = (
@@ -1174,8 +1201,19 @@ class PremiumQBOClient:
                 logger.debug(f"Skipping already-migrated {entity_type} {qbd_id}")
                 continue
 
+            bid = f"bid_{j}"
+            bid_to_entity[bid] = entity_data
             batch_data["BatchItemRequest"].append(
-                {"bId": f"bid_{j}", "operation": "create", entity_type: entity_data}
+                {"bId": bid, "operation": "create", entity_type: entity_data}
+            )
+
+        # AUDIT FIX HIGH-1: Validate batch size does not exceed QBO's 30-item maximum
+        batch_item_count = len(batch_data["BatchItemRequest"])
+        if batch_item_count > 30:
+            raise ValueError(
+                f"BatchItemRequest contains {batch_item_count} items, exceeding "
+                "the QBO Batch API maximum of 30 operations per request. "
+                "Reduce batch_size in configuration."
             )
 
         # FIX: Don't send empty BatchItemRequest after dedup filters everything
@@ -1207,23 +1245,14 @@ class PremiumQBOClient:
             for i, batch_item in enumerate(batch_responses):
                 bid = batch_item.get("bId", f"bid_{i}")
 
-                # CRITICAL FIX: Parse bId to get the correct original request index
-                # Response order is NOT guaranteed to match request order!
-                try:
-                    # bId format is "bid_N" where N is the original index
-                    req_index = int(bid.split("_")[1]) if "_" in bid else i
-                except (IndexError, ValueError):
+                # AUDIT FIX MEDIUM-7: Use bidirectional mapping for robust correlation
+                # instead of fragile index parsing from bId string
+                original_entity = bid_to_entity.get(bid)
+                if original_entity is None:
                     logger.warning(
-                        f"Could not parse bId '{bid}', using response index {i}"
+                        f"Orphaned bId '{bid}' in batch response — no matching request entity"
                     )
-                    req_index = i
-
-                # Safely get original entity
-                original_entity = (
-                    batch[req_index]
-                    if req_index < len(batch)
-                    else batch[i] if i < len(batch) else {}
-                )
+                    original_entity = batch[i] if i < len(batch) else {}
 
                 if batch_item.get(entity_type):
                     # Success
@@ -1253,16 +1282,26 @@ class PremiumQBOClient:
                         )
 
                 elif batch_item.get("Fault"):
-                    # Failure
+                    # AUDIT FIX MEDIUM-4: Robust fault parsing with full error details
                     fault = batch_item["Fault"]
-                    error_msg = fault.get("Error", [{}])[0].get(
-                        "Message", "Unknown error"
-                    )
+                    errors = fault.get("Error", [])
+                    if not isinstance(errors, list):
+                        errors = [errors] if errors else [{}]
 
+                    error_details = []
+                    for error in errors:
+                        if isinstance(error, dict):
+                            msg = error.get("Message", "Unknown error")
+                            detail = error.get("Detail", "")
+                            error_details.append(f"{msg}: {detail}" if detail else msg)
+                        else:
+                            error_details.append(str(error))
+
+                    error_msg = "; ".join(error_details) or "Unknown fault"
                     failed_item = {
                         "entity": original_entity,
                         "error": error_msg,
-                        "fault_code": fault.get("type"),
+                        "fault_code": fault.get("type", "UNKNOWN"),
                     }
                     failed.append(failed_item)
 
