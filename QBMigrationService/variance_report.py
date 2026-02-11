@@ -125,9 +125,7 @@ class VarianceReportGenerator:
                     f"Cannot convert financial value '{value}' to Decimal. "
                     "Refusing to silently default to zero."
                 )
-            logger.warning(
-                f"Empty/whitespace value converted to default '{default}'"
-            )
+            logger.warning(f"Empty/whitespace value converted to default '{default}'")
             return Decimal(default)
 
     def _decimal_to_str(self, value: Decimal) -> str:
@@ -185,7 +183,11 @@ class VarianceReportGenerator:
                     "destination": self._decimal_to_str(dest_revenue),
                     "variance": self._decimal_to_str(revenue_var),
                     # AUDIT FIX MEDIUM-15: Use configurable threshold instead of hardcoded 1000
-                    "severity": "CRITICAL" if abs(revenue_var) > self.critical_threshold else "WARNING",
+                    "severity": (
+                        "CRITICAL"
+                        if abs(revenue_var) > self.critical_threshold
+                        else "WARNING"
+                    ),
                 }
             )
 
@@ -201,7 +203,11 @@ class VarianceReportGenerator:
                     "source": self._decimal_to_str(source_expenses),
                     "destination": self._decimal_to_str(dest_expenses),
                     "variance": self._decimal_to_str(expense_var),
-                    "severity": "CRITICAL" if abs(expense_var) > self.critical_threshold else "WARNING",
+                    "severity": (
+                        "CRITICAL"
+                        if abs(expense_var) > self.critical_threshold
+                        else "WARNING"
+                    ),
                 }
             )
 
@@ -217,7 +223,11 @@ class VarianceReportGenerator:
                     "source": self._decimal_to_str(source_net),
                     "destination": self._decimal_to_str(dest_net),
                     "variance": self._decimal_to_str(net_var),
-                    "severity": "CRITICAL" if abs(net_var) > self.critical_threshold else "WARNING",
+                    "severity": (
+                        "CRITICAL"
+                        if abs(net_var) > self.critical_threshold
+                        else "WARNING"
+                    ),
                 }
             )
 
@@ -255,7 +265,11 @@ class VarianceReportGenerator:
                         "source": self._decimal_to_str(source_val),
                         "destination": self._decimal_to_str(dest_val),
                         "variance": self._decimal_to_str(variance),
-                        "severity": "CRITICAL" if abs(variance) > self.critical_threshold else "WARNING",
+                        "severity": (
+                            "CRITICAL"
+                            if abs(variance) > self.critical_threshold
+                            else "WARNING"
+                        ),
                     }
                 )
 
@@ -344,9 +358,7 @@ class VarianceReportGenerator:
         for acct in report.get("account_details", []):
             severity_class = acct["severity"].lower()
             # FIX: Values are already strings from _decimal_to_str(), use directly
-            variance_display = (
-                f"${acct['variance']}" if acct["has_variance"] else "-"
-            )
+            variance_display = f"${acct['variance']}" if acct["has_variance"] else "-"
             account_rows += f"""
             <tr class="severity-{severity_class}">
                 <td>{acct['account_name']}</td>

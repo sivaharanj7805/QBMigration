@@ -60,9 +60,7 @@ def sanitize_migration_id(migration_id: str) -> str:
 # NOTE: Must be defined before credential validation which references it
 ENVIRONMENT = os.getenv("QBO_ENVIRONMENT", "sandbox").lower()
 if ENVIRONMENT not in ("sandbox", "production"):
-    logger.warning(
-        f"Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'"
-    )
+    logger.warning(f"Invalid environment '{ENVIRONMENT}', defaulting to 'sandbox'")
     ENVIRONMENT = "sandbox"
 
 # ============================================================================

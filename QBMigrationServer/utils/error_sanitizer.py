@@ -12,7 +12,6 @@ Version: 1.0.0
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, Optional, Tuple
 
@@ -334,6 +333,7 @@ def is_production() -> bool:
         True if in production, False otherwise
     """
     from utils.env_helper import is_production as _is_prod
+
     return _is_prod()
 
 
@@ -402,7 +402,9 @@ def sanitize_error_message(error: Exception, context: Optional[str] = None) -> s
     string_indicators = [i for i in sensitive_indicators if i != "line \\d+"]
     has_sensitive = any(indicator in sanitized for indicator in string_indicators)
     if not has_sensitive:
-        has_sensitive = any(re.search(pattern, sanitized) for pattern in regex_indicators)
+        has_sensitive = any(
+            re.search(pattern, sanitized) for pattern in regex_indicators
+        )
     if has_sensitive:
         # Still contains sensitive info - use generic message
         generic_msg = get_generic_error_message(context)

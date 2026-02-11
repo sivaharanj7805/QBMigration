@@ -136,7 +136,9 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False, jurisdiction=N
                 # successful cleanups are persisted even on partial failure.
                 if not dry_run and cleaned_count % 100 == 0:
                     db.session.commit()
-                    logger.info(f"Periodic commit: cleaned {cleaned_count} migrations so far")
+                    logger.info(
+                        f"Periodic commit: cleaned {cleaned_count} migrations so far"
+                    )
 
             except Exception as e:
                 error_msg = f"Failed to strip data from migration {migration.migration_id}: {str(e)}"
@@ -146,7 +148,9 @@ def cleanup_old_migration_data(retention_hours=24, dry_run=False, jurisdiction=N
 
         if not dry_run:
             db.session.commit()
-            logger.info(f"Successfully cleaned {cleaned_count} migrations (final commit)")
+            logger.info(
+                f"Successfully cleaned {cleaned_count} migrations (final commit)"
+            )
         else:
             logger.info(f"[DRY RUN] Would clean {cleaned_count} migrations")
 
@@ -209,7 +213,9 @@ def cleanup_s3_temp_files(retention_hours=24, dry_run=False):
                 "dry_run": dry_run,
             }
 
-        s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "ca-central-1"))
+        s3 = boto3.client(
+            "s3", region_name=os.environ.get("AWS_REGION", "ca-central-1")
+        )
 
         # List objects in uploads/ prefix (temporary upload location)
         paginator = s3.get_paginator("list_objects_v2")

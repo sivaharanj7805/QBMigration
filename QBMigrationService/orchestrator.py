@@ -67,61 +67,113 @@ class MigrationOrchestrator:
     # canonical entity type names used by the entity_order pipeline.
     _KEY_NORMALIZATION_MAP: Dict[str, str] = {
         # Master lists
-        "account": "Accounts", "accounts": "Accounts",
-        "customer": "Customers", "customers": "Customers",
-        "vendor": "Vendors", "vendors": "Vendors",
-        "item": "Items", "items": "Items",
-        "employee": "Employees", "employees": "Employees",
+        "account": "Accounts",
+        "accounts": "Accounts",
+        "customer": "Customers",
+        "customers": "Customers",
+        "vendor": "Vendors",
+        "vendors": "Vendors",
+        "item": "Items",
+        "items": "Items",
+        "employee": "Employees",
+        "employees": "Employees",
         # Configuration lists
-        "class": "Classes", "classes": "Classes",
-        "department": "Departments", "departments": "Departments",
-        "term": "Terms", "terms": "Terms",
-        "paymentmethod": "PaymentMethods", "paymentmethods": "PaymentMethods",
-        "taxcode": "TaxCodes", "taxcodes": "TaxCodes", "salestaxcodes": "TaxCodes",
-        "taxrate": "TaxRates", "taxrates": "TaxRates",
-        "taxagency": "TaxAgencies", "taxagencies": "TaxAgencies",
-        "companycurrency": "CompanyCurrencies", "companycurrencies": "CompanyCurrencies",
+        "class": "Classes",
+        "classes": "Classes",
+        "department": "Departments",
+        "departments": "Departments",
+        "term": "Terms",
+        "terms": "Terms",
+        "paymentmethod": "PaymentMethods",
+        "paymentmethods": "PaymentMethods",
+        "taxcode": "TaxCodes",
+        "taxcodes": "TaxCodes",
+        "salestaxcodes": "TaxCodes",
+        "taxrate": "TaxRates",
+        "taxrates": "TaxRates",
+        "taxagency": "TaxAgencies",
+        "taxagencies": "TaxAgencies",
+        "companycurrency": "CompanyCurrencies",
+        "companycurrencies": "CompanyCurrencies",
         "currencies": "CompanyCurrencies",
         # Transactions
-        "invoice": "Invoices", "invoices": "Invoices",
-        "bill": "Bills", "bills": "Bills",
-        "payment": "Payments", "payments": "Payments", "receivepayments": "Payments",
-        "estimate": "Estimates", "estimates": "Estimates",
-        "salesreceipt": "SalesReceipts", "salesreceipts": "SalesReceipts",
-        "creditmemo": "CreditMemos", "creditmemos": "CreditMemos",
-        "vendorcredit": "VendorCredits", "vendorcredits": "VendorCredits",
-        "billpayment": "BillPayments", "billpayments": "BillPayments",
-        "purchaseorder": "PurchaseOrders", "purchaseorders": "PurchaseOrders",
-        "purchase": "Purchases", "purchases": "Purchases",
-        "checks": "Purchases", "creditcardcharges": "Purchases",
-        "journalentry": "JournalEntries", "journalentries": "JournalEntries",
-        "deposit": "Deposits", "deposits": "Deposits",
-        "transfer": "Transfers", "transfers": "Transfers",
-        "refundreceipt": "RefundReceipts", "refundreceipts": "RefundReceipts",
-        "timeactivity": "TimeActivities", "timeactivities": "TimeActivities",
-        "inventoryadjustment": "InventoryAdjustments", "inventoryadjustments": "InventoryAdjustments",
-        "taxpayment": "TaxPayments", "taxpayments": "TaxPayments",
+        "invoice": "Invoices",
+        "invoices": "Invoices",
+        "bill": "Bills",
+        "bills": "Bills",
+        "payment": "Payments",
+        "payments": "Payments",
+        "receivepayments": "Payments",
+        "estimate": "Estimates",
+        "estimates": "Estimates",
+        "salesreceipt": "SalesReceipts",
+        "salesreceipts": "SalesReceipts",
+        "creditmemo": "CreditMemos",
+        "creditmemos": "CreditMemos",
+        "vendorcredit": "VendorCredits",
+        "vendorcredits": "VendorCredits",
+        "billpayment": "BillPayments",
+        "billpayments": "BillPayments",
+        "purchaseorder": "PurchaseOrders",
+        "purchaseorders": "PurchaseOrders",
+        "purchase": "Purchases",
+        "purchases": "Purchases",
+        "checks": "Purchases",
+        "creditcardcharges": "Purchases",
+        "journalentry": "JournalEntries",
+        "journalentries": "JournalEntries",
+        "deposit": "Deposits",
+        "deposits": "Deposits",
+        "transfer": "Transfers",
+        "transfers": "Transfers",
+        "refundreceipt": "RefundReceipts",
+        "refundreceipts": "RefundReceipts",
+        "timeactivity": "TimeActivities",
+        "timeactivities": "TimeActivities",
+        "inventoryadjustment": "InventoryAdjustments",
+        "inventoryadjustments": "InventoryAdjustments",
+        "taxpayment": "TaxPayments",
+        "taxpayments": "TaxPayments",
         "salestaxpayments": "TaxPayments",
-        "attachable": "Attachables", "attachables": "Attachables",
+        "attachable": "Attachables",
+        "attachables": "Attachables",
         # New entity types
-        "salesorder": "SalesOrders", "salesorders": "SalesOrders",
-        "itemreceipt": "ItemReceipts", "itemreceipts": "ItemReceipts",
-        "charge": "Charges", "charges": "Charges",
-        "othername": "OtherNames", "othernames": "OtherNames",
-        "datedriventerm": "DateDrivenTerms", "datedriventerms": "DateDrivenTerms",
-        "lead": "Leads", "leads": "Leads",
-        "buildassembly": "BuildAssemblies", "buildassemblies": "BuildAssemblies",
-        "inventorytransfer": "InventoryTransfers", "inventorytransfers": "InventoryTransfers",
-        "dataextension": "DataExtensions", "dataextensions": "DataExtensions",
-        "salesrep": "SalesReps", "salesreps": "SalesReps",
-        "customermessage": "CustomerMessages", "customermessages": "CustomerMessages",
-        "jobtype": "JobTypes", "jobtypes": "JobTypes",
-        "vendortype": "VendorTypes", "vendortypes": "VendorTypes",
-        "pricelevel": "PriceLevels", "pricelevels": "PriceLevels",
-        "salestaxgroup": "SalesTaxGroups", "salestaxgroups": "SalesTaxGroups",
-        "shipmethod": "ShipMethods", "shipmethods": "ShipMethods",
-        "inventorysite": "InventorySites", "inventorysites": "InventorySites",
-        "customertype": "CustomerTypes", "customertypes": "CustomerTypes",
+        "salesorder": "SalesOrders",
+        "salesorders": "SalesOrders",
+        "itemreceipt": "ItemReceipts",
+        "itemreceipts": "ItemReceipts",
+        "charge": "Charges",
+        "charges": "Charges",
+        "othername": "OtherNames",
+        "othernames": "OtherNames",
+        "datedriventerm": "DateDrivenTerms",
+        "datedriventerms": "DateDrivenTerms",
+        "lead": "Leads",
+        "leads": "Leads",
+        "buildassembly": "BuildAssemblies",
+        "buildassemblies": "BuildAssemblies",
+        "inventorytransfer": "InventoryTransfers",
+        "inventorytransfers": "InventoryTransfers",
+        "dataextension": "DataExtensions",
+        "dataextensions": "DataExtensions",
+        "salesrep": "SalesReps",
+        "salesreps": "SalesReps",
+        "customermessage": "CustomerMessages",
+        "customermessages": "CustomerMessages",
+        "jobtype": "JobTypes",
+        "jobtypes": "JobTypes",
+        "vendortype": "VendorTypes",
+        "vendortypes": "VendorTypes",
+        "pricelevel": "PriceLevels",
+        "pricelevels": "PriceLevels",
+        "salestaxgroup": "SalesTaxGroups",
+        "salestaxgroups": "SalesTaxGroups",
+        "shipmethod": "ShipMethods",
+        "shipmethods": "ShipMethods",
+        "inventorysite": "InventorySites",
+        "inventorysites": "InventorySites",
+        "customertype": "CustomerTypes",
+        "customertypes": "CustomerTypes",
     }
 
     def __init__(
@@ -205,7 +257,8 @@ class MigrationOrchestrator:
             conn = _redis_mod.from_url(redis_url, socket_connect_timeout=5)
             # SET NX = acquire only if not already held
             acquired = conn.set(
-                lock_key, lock_value,
+                lock_key,
+                lock_value,
                 nx=True,
                 ex=self._REALM_LOCK_TTL_SECONDS,
             )
@@ -389,7 +442,10 @@ class MigrationOrchestrator:
             logger.error(f"Migration failed: {e}")
             if hasattr(self, "_qbo_client") and self._qbo_client:
                 try:
-                    if hasattr(self._qbo_client, "session") and self._qbo_client.session:
+                    if (
+                        hasattr(self._qbo_client, "session")
+                        and self._qbo_client.session
+                    ):
                         self._qbo_client.session.close()
                 except Exception as cleanup_err:
                     logger.debug(f"QBO session cleanup error: {cleanup_err}")
@@ -477,12 +533,16 @@ class MigrationOrchestrator:
         logger.info(f"Starting migration {migration_id} for {company_name}")
 
         # AUDIT FIX P10-M1: Enforce tier transaction limit
-        tier = getattr(self, "subscription_tier", None) or os.environ.get("SUBSCRIPTION_TIER", "professional")
+        tier = getattr(self, "subscription_tier", None) or os.environ.get(
+            "SUBSCRIPTION_TIER", "professional"
+        )
         tier_limit = self.TIER_TRANSACTION_LIMITS.get(tier.lower(), 100_000)
-        logger.info(f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}")
+        logger.info(
+            f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}"
+        )
         transformer = None  # Initialize before try so except block can access it
         qbo_client = None  # AUDIT FIX CRIT-02: Init before try so rollback can safely reference it
-        oauth_mgr = None   # AUDIT FIX CRIT-01: Init before try so rollback can safely reference it
+        oauth_mgr = None  # AUDIT FIX CRIT-01: Init before try so rollback can safely reference it
 
         # FIX #13: Track created entity IDs for potential rollback
         self._created_entity_ids: Dict[str, List[str]] = defaultdict(list)
@@ -694,13 +754,19 @@ class MigrationOrchestrator:
                 ids for ids in self._created_entity_ids.values()
             ):
                 try:
-                    logger.info(f"Migration {migration_id}: Attempting rollback of partial entities...")
+                    logger.info(
+                        f"Migration {migration_id}: Attempting rollback of partial entities..."
+                    )
                     rollback_result = self.rollback_migration(
                         qbo_client=qbo_client, oauth_manager=oauth_mgr
                     )
-                    logger.info(f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}")
+                    logger.info(
+                        f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}"
+                    )
                 except Exception as rollback_err:
-                    logger.error(f"Migration {migration_id}: Rollback failed: {rollback_err}")
+                    logger.error(
+                        f"Migration {migration_id}: Rollback failed: {rollback_err}"
+                    )
                     rollback_result = {"rollback_error": str(rollback_err)}
 
             # Preserve partial progress and manual_review even on failure
@@ -1245,8 +1311,12 @@ class MigrationOrchestrator:
             # Sequential processing — single batch or single worker
             for batch_idx, batch in enumerate(batches):
                 mappings, batch_fails = self._send_batch_request(
-                    qbo_client, api_entity_type, batch,
-                    oauth_manager, migration_id, batch_idx,
+                    qbo_client,
+                    api_entity_type,
+                    batch,
+                    oauth_manager,
+                    migration_id,
+                    batch_idx,
                 )
                 success_count += len(mappings)
                 fail_count += batch_fails
@@ -1263,8 +1333,12 @@ class MigrationOrchestrator:
                 for batch_idx, batch in enumerate(batches):
                     future = executor.submit(
                         self._send_batch_request,
-                        qbo_client, api_entity_type, batch,
-                        oauth_manager, migration_id, batch_idx,
+                        qbo_client,
+                        api_entity_type,
+                        batch,
+                        oauth_manager,
+                        migration_id,
+                        batch_idx,
                     )
                     futures[future] = batch
 

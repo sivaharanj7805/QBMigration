@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -107,7 +108,10 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
     """
     try:
         # SECURITY: Reject oversized webhook payloads
-        if request.content_length and request.content_length > WEBHOOK_MAX_PAYLOAD_BYTES:
+        if (
+            request.content_length
+            and request.content_length > WEBHOOK_MAX_PAYLOAD_BYTES
+        ):
             logger.warning(
                 f"Webhook payload too large: {request.content_length} bytes "
                 f"from {request.remote_addr}"
@@ -149,9 +153,7 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
         if not is_valid:
             logger.warning(f"Invalid webhook signature for {migration_id}: {error}")
             return (
-                jsonify(
-                    {"success": False, "error": "Webhook verification failed"}
-                ),
+                jsonify({"success": False, "error": "Webhook verification failed"}),
                 401,
             )
 
@@ -217,8 +219,10 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
         # AUDIT FIX MUST-06: Enqueue failed webhooks to PostgreSQL dead letter queue
         # instead of only logging them. This enables replay from the admin dashboard.
         import traceback as _tb
+
         try:
             from models.dead_letter import DeadLetterWebhook
+
             DeadLetterWebhook.enqueue(
                 source="migration",
                 event_type=webhook_type,
@@ -226,10 +230,13 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
                 error_message=str(e),
                 event_id=request.headers.get("X-Webhook-Id"),
                 migration_id=request.headers.get("X-Migration-Id"),
-                headers=json.dumps({
-                    k: v for k, v in request.headers
-                    if k.startswith("X-") and "signature" not in k.lower()
-                }),
+                headers=json.dumps(
+                    {
+                        k: v
+                        for k, v in request.headers
+                        if k.startswith("X-") and "signature" not in k.lower()
+                    }
+                ),
                 error_traceback=_tb.format_exc(),
             )
         except Exception as dlq_err:
@@ -257,9 +264,7 @@ def _handle_started(migration, data):
     else:
         migration.status = "processing"
         migration.started_at = datetime.now(timezone.utc)
-    logger.info(
-        f"Migration {migration.migration_id} started on instance {instance_id}"
-    )
+    logger.info(f"Migration {migration.migration_id} started on instance {instance_id}")
     return {"success": True, "message": "Migration start acknowledged"}, 200
 
 
@@ -340,7 +345,9 @@ def _handle_failed(migration, data):
         from tasks import cleanup_migration_async
 
         cleanup_migration_async.delay(migration.migration_id, migration.aws_instance_id)
-        logger.info(f"Scheduled async cleanup for failed migration {migration.migration_id}")
+        logger.info(
+            f"Scheduled async cleanup for failed migration {migration.migration_id}"
+        )
     except Exception as e:
         logger.error(
             f"Failed to schedule async cleanup for {migration.migration_id}: {str(e)}"
@@ -358,7 +365,11 @@ def _handle_failed(migration, data):
             )
             cleanup_status = "failed"
 
-    return {"success": True, "message": "Failure acknowledged", "cleanup_status": cleanup_status}, 200
+    return {
+        "success": True,
+        "message": "Failure acknowledged",
+        "cleanup_status": cleanup_status,
+    }, 200
 
 
 # ---------------------------------------------------------------------------

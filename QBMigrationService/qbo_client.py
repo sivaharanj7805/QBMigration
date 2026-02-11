@@ -406,7 +406,9 @@ class PremiumQBOClient:
                 # Check cache first, with TTL expiry
                 cache_key = (entity_type, str(qbo_id))
                 if cache_key in self.synctoken_cache:
-                    cache_time = getattr(self, "_synctoken_cache_times", {}).get(cache_key, 0)
+                    cache_time = getattr(self, "_synctoken_cache_times", {}).get(
+                        cache_key, 0
+                    )
                     if time.time() - cache_time < self.SYNCTOKEN_TTL_SECONDS:
                         return self.synctoken_cache[cache_key]
                     else:
@@ -435,7 +437,9 @@ class PremiumQBOClient:
                     self.synctoken_cache[(entity_type, str(qbo_id))] = sync_token
                     if not hasattr(self, "_synctoken_cache_times"):
                         self._synctoken_cache_times = {}
-                    self._synctoken_cache_times[(entity_type, str(qbo_id))] = time.time()
+                    self._synctoken_cache_times[(entity_type, str(qbo_id))] = (
+                        time.time()
+                    )
                 return sync_token
 
             return "0"
@@ -1018,12 +1022,8 @@ class PremiumQBOClient:
         if "Fault" in response:
             fault = response.get("Fault", {})
             errors = fault.get("Error", [])
-            error_msg = "; ".join(
-                e.get("Message", "Unknown error") for e in errors
-            )
-            raise Exception(
-                f"Failed to update {entity_type} {qbo_id}: {error_msg}"
-            )
+            error_msg = "; ".join(e.get("Message", "Unknown error") for e in errors)
+            raise Exception(f"Failed to update {entity_type} {qbo_id}: {error_msg}")
 
         # Extract updated entity and refresh SyncToken
         updated = response.get(entity_type, {})
@@ -1090,12 +1090,18 @@ class PremiumQBOClient:
             # issue, or general server error. Parse the message for more context.
             if "6000" in error_codes:
                 msg_lower = full_error_msg.lower()
-                if "scope" in msg_lower or "permission" in msg_lower or "access" in msg_lower:
+                if (
+                    "scope" in msg_lower
+                    or "permission" in msg_lower
+                    or "access" in msg_lower
+                ):
                     logger.error(
                         f"QBO SCOPE VIOLATION (6000): {full_error_msg}. "
                         f"Check OAuth scopes and realm permissions."
                     )
-                    raise PermissionError(f"QBO scope violation (6000): {full_error_msg}")
+                    raise PermissionError(
+                        f"QBO scope violation (6000): {full_error_msg}"
+                    )
                 else:
                     # Non-scope 6000 errors may be transient - log and raise generic
                     logger.error(
@@ -1110,7 +1116,9 @@ class PremiumQBOClient:
                     f"QBO AUTH ERROR (5010): {full_error_msg}. "
                     f"Token may be invalid — different from expired (401)."
                 )
-                raise PermissionError(f"QBO authentication error (5010): {full_error_msg}")
+                raise PermissionError(
+                    f"QBO authentication error (5010): {full_error_msg}"
+                )
 
             # AUDIT FIX P11-M1: Handle error 6010 (invalid entity ID) — skip and log
             if "6010" in error_codes:
@@ -1226,7 +1234,9 @@ class PremiumQBOClient:
                     return  # Safe to proceed
             # Sleep OUTSIDE lock so other threads aren't blocked
             if sleep_time > 0:
-                logger.info(f"Batch rate limit reached ({self.BATCH_REQUESTS_PER_MINUTE}/min). Sleeping {sleep_time:.1f}s")
+                logger.info(
+                    f"Batch rate limit reached ({self.BATCH_REQUESTS_PER_MINUTE}/min). Sleeping {sleep_time:.1f}s"
+                )
                 time.sleep(sleep_time)
             # Re-check after sleeping (another thread may have consumed the slot)
 

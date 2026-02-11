@@ -18,7 +18,6 @@ Covers uncovered lines from the coverage report including:
 import os
 
 import jwt
-
 from app import setup_logging
 
 

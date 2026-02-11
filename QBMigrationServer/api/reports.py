@@ -618,9 +618,17 @@ def _generate_health_report(migration, output_path):
 
         # Health indicators -- derive from actual migration data
         story.append(Paragraph("<b>Health Indicators:</b>", styles["Heading2"]))
-        integrity_status = "PASSED" if migration.status == "completed" else "NOT VERIFIED"
-        hash_status = "PASSED" if getattr(migration, "file_hash", None) else "NOT VERIFIED"
-        balance_status = "BALANCED" if getattr(migration, "trial_balance_variance", None) == 0 else "NOT VERIFIED"
+        integrity_status = (
+            "PASSED" if migration.status == "completed" else "NOT VERIFIED"
+        )
+        hash_status = (
+            "PASSED" if getattr(migration, "file_hash", None) else "NOT VERIFIED"
+        )
+        balance_status = (
+            "BALANCED"
+            if getattr(migration, "trial_balance_variance", None) == 0
+            else "NOT VERIFIED"
+        )
         story.append(Paragraph(f"Data Integrity: {integrity_status}", styles["Normal"]))
         story.append(Paragraph(f"Hash Verification: {hash_status}", styles["Normal"]))
         story.append(Paragraph(f"Trial Balance: {balance_status}", styles["Normal"]))
@@ -666,10 +674,7 @@ def _build_discrepancy_table(migration):
         A list of discrepancy dicts (may be empty if no discrepancies found)
     """
     discrepancies = []
-    if (
-        hasattr(migration, "verification_results")
-        and migration.verification_results
-    ):
+    if hasattr(migration, "verification_results") and migration.verification_results:
         try:
             verification_data = json.loads(migration.verification_results)
             discrepancies = verification_data.get("discrepancies", [])

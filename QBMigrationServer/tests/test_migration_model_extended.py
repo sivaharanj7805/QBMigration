@@ -22,17 +22,13 @@ class TestMigrationStatusManagement:
     def test_mark_as_uploaded(self, db_session, test_migration):
         test_migration.status = "uploading"
         db_session.commit()
-        result = test_migration.mark_as_uploaded(
-            "s3://bucket/key", "bucket", "key"
-        )
+        result = test_migration.mark_as_uploaded("s3://bucket/key", "bucket", "key")
         assert result is True
         assert test_migration.status == "uploaded"
         assert test_migration.s3_uri == "s3://bucket/key"
 
     def test_mark_as_uploaded_from_pending(self, db_session, test_migration):
-        result = test_migration.mark_as_uploaded(
-            "s3://bucket/key", "bucket", "key"
-        )
+        result = test_migration.mark_as_uploaded("s3://bucket/key", "bucket", "key")
         assert result is True
 
     def test_mark_as_uploaded_idempotent(self, db_session, test_migration):
@@ -333,8 +329,8 @@ class TestMigrationErrorEncryption:
         assert test_migration.get_error_message() is None
 
     def test_get_error_message_with_key(self, db_session, test_migration):
-        from flask import current_app
         from cryptography.fernet import Fernet
+        from flask import current_app
 
         key = Fernet.generate_key().decode()
         current_app.config["BACKUP_ENCRYPTION_KEY"] = key

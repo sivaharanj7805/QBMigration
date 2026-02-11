@@ -50,6 +50,7 @@ def _get_app():
     global _cached_app
     if _cached_app is None:
         from app import create_app
+
         _cached_app = create_app()
     return _cached_app
 
@@ -125,8 +126,8 @@ def update_migration_status(
 @celery.task(
     bind=True,
     name="tasks.run_migration",
-    soft_time_limit=3600,   # Soft limit: 1 hour (raises SoftTimeLimitExceeded)
-    time_limit=3900,        # Hard kill: 1 hour 5 minutes
+    soft_time_limit=3600,  # Soft limit: 1 hour (raises SoftTimeLimitExceeded)
+    time_limit=3900,  # Hard kill: 1 hour 5 minutes
 )
 def run_migration_task(
     self,
@@ -410,7 +411,11 @@ def cleanup_orphaned_resources():
                                 "Migration timed out after 2 hours in processing state"
                             )
                         except Exception as e:
-                            logger.warning("Error message encryption failed for migration %s: %s", migration.migration_id, e)
+                            logger.warning(
+                                "Error message encryption failed for migration %s: %s",
+                                migration.migration_id,
+                                e,
+                            )
 
                     if migration.aws_instance_id:
                         aws_manager.terminate_instance(migration.aws_instance_id)

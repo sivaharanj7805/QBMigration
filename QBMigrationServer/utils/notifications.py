@@ -193,7 +193,11 @@ def send_migration_failure_alert(migration):
 
         # M-09 FIX: Sanitize user-controlled company_name to prevent
         # header injection or email body manipulation via newlines
-        safe_company = (migration.company_name or "N/A").replace("\n", " ").replace("\r", " ")[:200]
+        safe_company = (
+            (migration.company_name or "N/A")
+            .replace("\n", " ")
+            .replace("\r", " ")[:200]
+        )
         body = f"""
 Migration Failure Alert
 

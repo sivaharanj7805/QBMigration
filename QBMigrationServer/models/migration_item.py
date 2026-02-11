@@ -51,9 +51,7 @@ class MigrationItem(db.Model):
     entity_type = db.Column(
         db.String(50), nullable=False
     )  # Customer, Vendor, Invoice, Bill, Account, etc.
-    source_id = db.Column(
-        db.String(100), nullable=False
-    )  # ListID/TxnID from QBD
+    source_id = db.Column(db.String(100), nullable=False)  # ListID/TxnID from QBD
     source_name = db.Column(
         db.String(500)
     )  # Display name for UI (e.g., "Acme Corp", "INV-1001")
@@ -130,7 +128,9 @@ class MigrationItem(db.Model):
             "retry_count": self.retry_count,
             "batch_id": self.batch_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+            "processed_at": (
+                self.processed_at.isoformat() if self.processed_at else None
+            ),
         }
 
     @staticmethod
@@ -152,7 +152,13 @@ class MigrationItem(db.Model):
         summary = {}
         for entity_type, status, count in rows:
             if entity_type not in summary:
-                summary[entity_type] = {"total": 0, "success": 0, "failed": 0, "skipped": 0, "pending": 0}
+                summary[entity_type] = {
+                    "total": 0,
+                    "success": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "pending": 0,
+                }
             summary[entity_type][status] = summary[entity_type].get(status, 0) + count
             summary[entity_type]["total"] += count
 

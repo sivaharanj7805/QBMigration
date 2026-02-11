@@ -21,7 +21,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from cryptography.fernet import Fernet
-
 from models.migration import Migration
 
 # ---------------------------------------------------------------------------

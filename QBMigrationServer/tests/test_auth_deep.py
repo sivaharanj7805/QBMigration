@@ -68,6 +68,7 @@ def _enable_mfa_for_user(user, app):
 
     key = Fernet.generate_key().decode()
     app.config["BACKUP_ENCRYPTION_KEY"] = key
+    app.config["MFA_ENCRYPTION_KEY"] = key
     secret, qr_url, backup_codes = user.enable_2fa()
     return secret, backup_codes
 
@@ -341,9 +342,8 @@ class TestRequireMFA:
         self, app, db_session, test_user
     ):
         """Lines 257-268: MFA enabled but not recently verified -> 403."""
-        from flask import jsonify
-
         from api.auth import require_auth, require_mfa
+        from flask import jsonify
 
         app.config["REQUIRE_MFA_FOR_PRIVILEGED_OPS"] = True
         secret, _ = _enable_mfa_for_user(test_user, app)
@@ -377,9 +377,8 @@ class TestRequireMFA:
 class TestRequireRole:
     def test_wrong_role_returns_403(self, app, db_session, test_user):
         """Lines 318-336: user lacks required role -> 403."""
-        from flask import jsonify
-
         from api.auth import require_auth, require_role
+        from flask import jsonify
 
         test_user.role = "user"
         db_session.commit()
@@ -403,9 +402,8 @@ class TestRequireRole:
 
     def test_correct_role_allows(self, app, db_session, test_user):
         """Lines 314-315: user has correct role -> allow."""
-        from flask import jsonify
-
         from api.auth import require_auth, require_role
+        from flask import jsonify
 
         test_user.role = "admin"
         db_session.commit()
@@ -428,9 +426,8 @@ class TestRequireRole:
 
     def test_super_admin_hierarchy(self, app, db_session, test_user):
         """Lines 318-320: role hierarchy check - super_admin accesses admin."""
-        from flask import jsonify
-
         from api.auth import require_auth, require_role
+        from flask import jsonify
 
         test_user.role = "super_admin"
         db_session.commit()
@@ -453,9 +450,8 @@ class TestRequireRole:
 
     def test_role_user_not_found(self, app, db_session):
         """Lines 306-308: user deleted but has valid token."""
-        from flask import jsonify
-
         from api.auth import require_auth, require_role
+        from flask import jsonify
 
         token = create_token(99999, "gone@example.com")
 
@@ -479,9 +475,8 @@ class TestRequireRole:
 class TestAdminRequired:
     def test_admin_required_rejects_normal_user(self, app, db_session, test_user):
         """Line 349: require_admin shorthand rejects non-admin."""
-        from flask import jsonify
-
         from api.auth import require_admin, require_auth
+        from flask import jsonify
 
         test_user.role = "user"
         db_session.commit()
@@ -1160,11 +1155,14 @@ class TestTeamDeep:
     def test_team_invite_feature_not_available(
         self, authenticated_client, db_session, test_user
     ):
+        """Team invites are now implemented and working."""
         response = authenticated_client.post(
             "/api/auth/team/invite",
             json={"email": "team@example.com"},
         )
-        assert response.status_code == 501
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["success"] is True
 
 
 # ============================================================================

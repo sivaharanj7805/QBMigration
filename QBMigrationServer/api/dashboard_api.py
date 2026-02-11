@@ -865,7 +865,7 @@ def preview_audit_certificate(migration_id):
     Get audit certificate preview data (for thumbnail card).
     """
     # H-04 FIX: Validate migration_id format before it reaches the DB query
-    if not re.match(r'^[a-zA-Z0-9\-]{1,64}$', migration_id):
+    if not re.match(r"^[a-zA-Z0-9\-]{1,64}$", migration_id):
         return jsonify({"error": "Invalid migration ID format"}), 400
 
     try:
@@ -923,9 +923,7 @@ def _generate_caseware_data(migration):
     migration_id = migration.migration_id
 
     # Create output directory for Caseware bundle
-    bundle_dir = os.path.join(
-        current_app.root_path, "caseware_bundles", migration_id
-    )
+    bundle_dir = os.path.join(current_app.root_path, "caseware_bundles", migration_id)
     os.makedirs(bundle_dir, exist_ok=True)
 
     # Import the CasewareExporter
@@ -940,10 +938,7 @@ def _generate_caseware_data(migration):
     qb_data = {}
 
     # Try to load stored data
-    if (
-        hasattr(migration, "trial_balance_data")
-        and migration.trial_balance_data
-    ):
+    if hasattr(migration, "trial_balance_data") and migration.trial_balance_data:
         try:
             stored_data = json.loads(migration.trial_balance_data)
             if "accounts" in stored_data:
@@ -1055,9 +1050,7 @@ def _encrypt_caseware_bundle(data, key):
         try:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-                logger.info(
-                    f"Deleted temporary file: {os.path.basename(temp_file)}"
-                )
+                logger.info(f"Deleted temporary file: {os.path.basename(temp_file)}")
         except Exception as cleanup_error:
             logger.warning(
                 f"Failed to delete temporary file {temp_file}: {cleanup_error}"
@@ -1192,7 +1185,12 @@ def export_caseware_bundle(migration_id):
             # C-14 FIX: Never write unencrypted financial data as fallback.
             # Return an error instead of generating an unencrypted zip bundle.
             logger.warning(f"CasewareExporter not available: {str(ie)}")
-            return jsonify({"error": "Caseware export not available. Please contact support."}), 503
+            return (
+                jsonify(
+                    {"error": "Caseware export not available. Please contact support."}
+                ),
+                503,
+            )
 
     except Exception as e:
         logger.exception(f"Failed to export Caseware bundle for {migration_id}")
@@ -1270,9 +1268,7 @@ def _find_caseware_file(migration_id):
             continue
 
     if not path_is_valid:
-        logger.warning(
-            f"Attempted to serve file outside allowed dirs: {bundle_path}"
-        )
+        logger.warning(f"Attempted to serve file outside allowed dirs: {bundle_path}")
         return jsonify({"success": False, "error": "Invalid bundle path"}), 400
 
     return {
@@ -1320,9 +1316,7 @@ def _decrypt_caseware_bundle(path, key):
             iterations=100000,
             backend=default_backend(),
         )
-        encryption_key = base64.urlsafe_b64encode(
-            kdf.derive(key.encode())
-        )
+        encryption_key = base64.urlsafe_b64encode(kdf.derive(key.encode()))
         cipher = Fernet(encryption_key)
 
         try:
@@ -1342,17 +1336,13 @@ def _decrypt_caseware_bundle(path, key):
         iterations=100000,
         backend=default_backend(),
     )
-    encryption_key = base64.urlsafe_b64encode(
-        kdf.derive(key.encode())
-    )
+    encryption_key = base64.urlsafe_b64encode(kdf.derive(key.encode()))
     cipher = Fernet(encryption_key)
 
     try:
         return cipher.decrypt(encrypted_data)
     except Exception as decrypt_error:
-        logger.error(
-            f"Failed to decrypt Caseware bundle: {decrypt_error}"
-        )
+        logger.error(f"Failed to decrypt Caseware bundle: {decrypt_error}")
         return (
             jsonify(
                 {
@@ -1404,7 +1394,9 @@ def download_caseware_bundle(migration_id):
 
         migration = found["migration"]
         bundle_path = found["bundle_path"]
-        download_name = f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip"
+        download_name = (
+            f"{migration.company_name or migration_id}_Caseware_Audit_Bundle.zip"
+        )
 
         # CRITICAL FIX: Decrypt the file before sending to user
         # Previous code returned the encrypted blob which users couldn't open

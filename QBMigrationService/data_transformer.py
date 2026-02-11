@@ -57,6 +57,7 @@ QBOEntity = Dict[str, Any]
 
 class DecimalEncoder(json.JSONEncoder):
     """JSON encoder that handles Decimal objects for financial data."""
+
     def default(self, obj):
         if isinstance(obj, Decimal):
             return str(obj)
@@ -608,7 +609,7 @@ class QBDataTransformer:
                 entity_type=entity_type,
                 name=f"Unsupported type: {entity_type}",
                 reason=f"No transform method '{method_name}' — entity skipped. "
-                       f"Add transform_{normalized_type}() to support this type.",
+                f"Add transform_{normalized_type}() to support this type.",
             )
             return None
 
@@ -983,7 +984,9 @@ class QBDataTransformer:
         # Truncate first so we keep the most meaningful leading content
         if len(name) > max_len:
             self.stats["truncations"] += 1
-            logger.debug(f"Truncating name from {len(name)} to {max_len} chars: '{name[:30]}...'")
+            logger.debug(
+                f"Truncating name from {len(name)} to {max_len} chars: '{name[:30]}...'"
+            )
             name = name[:max_len]
         # QBO allows alphanumeric, spaces, and these special chars in DisplayName
         name = re.sub(r"[^\w\s\-\'&.,/()@#:;!+]", "", name)

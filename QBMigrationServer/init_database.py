@@ -55,13 +55,18 @@ def init_database():
 
         # SECURITY FIX: Validate DDL identifiers against allowlist before interpolation
         import re as _re
+
         _VALID_IDENTIFIER = _re.compile(r"^[a-z_]+$")
         _VALID_TYPE = _re.compile(r"^[A-Z()0-9 ]+$")
 
         with db.engine.connect() as conn:
             for col_name, col_type in tier_columns.items():
-                assert _VALID_IDENTIFIER.match(col_name), f"Invalid column name: {col_name}"
-                assert _VALID_TYPE.match(col_type.split(" DEFAULT")[0].strip()), f"Invalid type: {col_type}"
+                assert _VALID_IDENTIFIER.match(
+                    col_name
+                ), f"Invalid column name: {col_name}"
+                assert _VALID_TYPE.match(
+                    col_type.split(" DEFAULT")[0].strip()
+                ), f"Invalid type: {col_type}"
                 if col_name not in existing_columns:
                     try:
                         conn.execute(

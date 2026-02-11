@@ -53,12 +53,16 @@ if CELERY_AVAILABLE:
         failed_count = 0
 
         # SECURITY FIX: Validate file paths to prevent arbitrary file deletion
-        allowed_base = os.environ.get("DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data")
+        allowed_base = os.environ.get(
+            "DATA_RETENTION_BASE_DIR", "/var/lib/forensicbridge/data"
+        )
         for file_path in job_data["file_paths"]:
             # Path traversal prevention
             real_path = os.path.realpath(file_path)
             if not real_path.startswith(os.path.realpath(allowed_base)):
-                logger.error(f"Path traversal blocked: {file_path} is outside {allowed_base}")
+                logger.error(
+                    f"Path traversal blocked: {file_path} is outside {allowed_base}"
+                )
                 failed_count += 1
                 continue
             if os.path.exists(file_path):
@@ -78,13 +82,12 @@ if CELERY_AVAILABLE:
             "migration_id": job_data["migration_id"],
         }
 
-
     # Per-jurisdiction retention periods (hours)
     # CRA IC05-1R1: 6 years from end of tax year
     # IRS Rev. Proc. 98-25: 7 years for most records
 JURISDICTION_RETENTION_HOURS = {
-    "CRA": 6 * 365 * 24,   # ~52,560 hours (6 years)
-    "IRS": 7 * 365 * 24,   # ~61,320 hours (7 years)
+    "CRA": 6 * 365 * 24,  # ~52,560 hours (6 years)
+    "IRS": 7 * 365 * 24,  # ~61,320 hours (7 years)
 }
 
 
@@ -294,7 +297,9 @@ class DataRetentionManager:
 
         self._save_jobs()
 
-        logger.info(f"\n[OK] Auto-deletion completed for migration {job['migration_id']}")
+        logger.info(
+            f"\n[OK] Auto-deletion completed for migration {job['migration_id']}"
+        )
         logger.info(f"  Deleted: {deleted_count} files")
         if failed_count > 0:
             logger.info(f"  Failed: {failed_count} files")

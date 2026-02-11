@@ -253,7 +253,8 @@ def init_tracing(app):  # noqa: C901
                 )
                 exporter = OTLPSpanExporter(
                     endpoint=otlp_endpoint,
-                    insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "false").lower() == "true",
+                    insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "false").lower()
+                    == "true",
                 )
                 provider.add_span_processor(BatchSpanProcessor(exporter))
                 logger.info(f"OpenTelemetry OTLP exporter configured: {otlp_endpoint}")

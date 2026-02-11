@@ -48,9 +48,7 @@ def init_observability(app) -> bool:
     # Check if observability is enabled
     flask_env = get_env()
     traces_enabled = (
-        os.getenv(
-            "OTEL_TRACES_ENABLED", "true" if is_production() else "false"
-        ).lower()
+        os.getenv("OTEL_TRACES_ENABLED", "true" if is_production() else "false").lower()
         == "true"
     )
     metrics_enabled = os.getenv("OTEL_METRICS_ENABLED", "true").lower() == "true"
@@ -93,7 +91,8 @@ def init_observability(app) -> bool:
             if otlp_endpoint:
                 exporter = OTLPSpanExporter(
                     endpoint=otlp_endpoint,
-                    insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "false").lower() == "true",
+                    insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "false").lower()
+                    == "true",
                 )
                 _tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
                 logger.info(

@@ -619,7 +619,8 @@ class MultiAZDeployment:
             if "InsufficientInstanceCapacity" in str(e):
                 logger.warning(f"Zone {zone} at capacity, trying alternate zone")
                 alternate_zones = [
-                    z for z in ALLOWED_AVAILABILITY_ZONES
+                    z
+                    for z in ALLOWED_AVAILABILITY_ZONES
                     if z != zone and z not in _tried_zones
                 ]
                 if alternate_zones:

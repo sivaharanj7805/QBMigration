@@ -307,15 +307,11 @@ class TestDashboardAPICoverage:
         assert resp.status_code in [400, 404]
 
     def test_live_status_not_found(self, authenticated_client, db_session):
-        resp = authenticated_client.get(
-            "/api/migrations/nonexistent-id/live-status"
-        )
+        resp = authenticated_client.get("/api/migrations/nonexistent-id/live-status")
         assert resp.status_code in [400, 404]
 
     def test_trial_balance_not_found(self, authenticated_client, db_session):
-        resp = authenticated_client.get(
-            "/api/migrations/nonexistent-id/trial-balance"
-        )
+        resp = authenticated_client.get("/api/migrations/nonexistent-id/trial-balance")
         assert resp.status_code in [400, 404]
 
     def test_bulk_status_empty(self, authenticated_client, db_session):
@@ -382,12 +378,9 @@ class TestConfigCoverage:
                 "AWS_SECRET_ACCESS_KEY": "test-secret",
             },
         ):
-            import warnings
-
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
+            # This now raises OSError instead of just warning
+            with pytest.raises(OSError, match="AWS access keys are not allowed"):
                 Config.warn_aws_credentials()
-                assert len(w) >= 1
 
 
 class TestSessionValidationCoverage:

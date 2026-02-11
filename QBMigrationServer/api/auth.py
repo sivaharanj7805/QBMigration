@@ -78,9 +78,14 @@ def _get_redis():
     _redis_last_attempt = now
     try:
         import redis as _redis_mod
-        redis_url = os.environ.get("REDIS_URL") or os.environ.get("RATELIMIT_STORAGE_URL")
+
+        redis_url = os.environ.get("REDIS_URL") or os.environ.get(
+            "RATELIMIT_STORAGE_URL"
+        )
         if redis_url and redis_url != "memory://":
-            _redis_conn = _redis_mod.from_url(redis_url, decode_responses=True, socket_connect_timeout=3)
+            _redis_conn = _redis_mod.from_url(
+                redis_url, decode_responses=True, socket_connect_timeout=3
+            )
             _redis_conn.ping()
             return _redis_conn
     except Exception:
@@ -113,9 +118,14 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
             redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
             return
         except Exception as exc:
-            logger.error("Redis blocklist write failed: %s. Token revocation may not propagate to other workers.", exc)
+            logger.error(
+                "Redis blocklist write failed: %s. Token revocation may not propagate to other workers.",
+                exc,
+            )
     else:
-        logger.error("Redis unavailable for JWT blocklist write. Token revocation is local-only.")
+        logger.error(
+            "Redis unavailable for JWT blocklist write. Token revocation is local-only."
+        )
 
 
 def _blocklist_check(jti: str) -> bool:
@@ -151,9 +161,12 @@ def _blocklist_check(jti: str) -> bool:
 
     # Redis not available at all — fail closed in production
     import os
+
     env = os.environ.get("FLASK_ENV", "production")
     if env == "production":
-        logger.error("Redis unavailable for blocklist check. Denying access (fail-closed).")
+        logger.error(
+            "Redis unavailable for blocklist check. Denying access (fail-closed)."
+        )
         return True  # FAIL CLOSED in production
 
     # Development: allow through with warning
@@ -857,11 +870,35 @@ def register():
         MAX_NAME_LENGTH = 200
         MAX_COMPANY_LENGTH = 300
         if len(first_name) > MAX_NAME_LENGTH:
-            return jsonify({"success": False, "error": f"First name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"First name must not exceed {MAX_NAME_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
         if len(last_name) > MAX_NAME_LENGTH:
-            return jsonify({"success": False, "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
         if len(company) > MAX_COMPANY_LENGTH:
-            return jsonify({"success": False, "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
 
         # Sanitize inputs - remove potentially dangerous characters
         first_name = sanitize(first_name, 100)
@@ -1078,6 +1115,7 @@ def login():
             # Constant-time: always verify against a fake hash to prevent timing attacks
             try:
                 import argon2
+
                 argon2.PasswordHasher().verify(
                     "$argon2id$v=19$m=65536,t=3,p=4$fake$fake", password
                 )
@@ -1225,7 +1263,9 @@ def migrate_legacy_credits_batch():
                         credit = MigrationCredit(
                             user_id=user_id,
                             tier_type=tier,
-                            transaction_limit=credit_config.get("transaction_limit", 5000),
+                            transaction_limit=credit_config.get(
+                                "transaction_limit", 5000
+                            ),
                             price_cents=0,
                             stripe_checkout_session_id=(
                                 f"legacy-migration-{user_id}-{i}-"
@@ -1244,7 +1284,9 @@ def migrate_legacy_credits_batch():
                     )
                 except Exception as inner_e:
                     db.session.rollback()
-                    logger.warning(f"Legacy credit migration rollback for user {user_id}: {inner_e}")
+                    logger.warning(
+                        f"Legacy credit migration rollback for user {user_id}: {inner_e}"
+                    )
         except Exception as e:
             logger.warning(f"Legacy credit migration failed for user {user_id}: {e}")
 
@@ -1825,7 +1867,10 @@ def invite_team_member():
 
     role = data.get("role", "member")
     if role not in ("member", "admin"):
-        return jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}), 400
+        return (
+            jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}),
+            400,
+        )
 
     user_id = request.current_user["user_id"]
     user = db.session.get(User, user_id)
@@ -1843,7 +1888,15 @@ def invite_team_member():
             owner_user_id=user_id, email=email, status="pending"
         ).first()
         if existing:
-            return jsonify({"success": False, "error": "An invite is already pending for this email"}), 409
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "An invite is already pending for this email",
+                    }
+                ),
+                409,
+            )
 
         invite = TeamInvite.create_invite(
             owner_user_id=user_id,
@@ -1861,11 +1914,13 @@ def invite_team_member():
 
         logger.info(f"Team invite created by user {user_id} for {email}")
 
-        return jsonify({
-            "success": True,
-            "message": "Invitation sent",
-            "invite": invite.to_dict(),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": "Invitation sent",
+                "invite": invite.to_dict(),
+            }
+        )
 
     except Exception as e:
         logger.exception(f"Failed to create team invite: {e}")
@@ -1895,7 +1950,9 @@ def accept_team_invite(token):
     if not success:
         return jsonify({"success": False, "error": message}), 400
 
-    logger.info(f"User {user_id} accepted team invite {invite.id} from owner {invite.owner_user_id}")
+    logger.info(
+        f"User {user_id} accepted team invite {invite.id} from owner {invite.owner_user_id}"
+    )
     return jsonify({"success": True, "message": message})
 
 
@@ -1918,10 +1975,21 @@ def cancel_team_invite(invite_id):
         return jsonify({"success": False, "error": "Invite not found"}), 404
 
     if invite.owner_user_id != user_id:
-        return jsonify({"success": False, "error": "Only the invite owner can cancel"}), 403
+        return (
+            jsonify({"success": False, "error": "Only the invite owner can cancel"}),
+            403,
+        )
 
     if invite.status != "pending":
-        return jsonify({"success": False, "error": f"Cannot cancel invite with status '{invite.status}'"}), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Cannot cancel invite with status '{invite.status}'",
+                }
+            ),
+            400,
+        )
 
     invite.cancel()
     logger.info(f"User {user_id} cancelled team invite {invite_id}")

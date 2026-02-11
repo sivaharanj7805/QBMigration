@@ -10,8 +10,8 @@ Revises: 001_drop_legacy_mfa_columns
 Create Date: 2026-02-11
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers
 revision = "002_add_migration_items"

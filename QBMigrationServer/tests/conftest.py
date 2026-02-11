@@ -42,6 +42,12 @@ def app():
     # Create test app
     app = create_app("testing")
 
+    # Ensure MFA encryption key is available for all MFA-related tests
+    from cryptography.fernet import Fernet
+
+    if not app.config.get("MFA_ENCRYPTION_KEY"):
+        app.config["MFA_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+
     # SAFETY CHECK 1: Verify we're using test database
     db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     if (

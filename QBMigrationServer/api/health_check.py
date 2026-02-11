@@ -169,7 +169,9 @@ def generate_report(session_id):
         # Scan results summary placeholder - populated when scan data is available.
         c.setFont("Helvetica", 10)
         c.drawString(70, height - 300, "Readiness Score: Pending full scan")
-        c.drawString(70, height - 315, "Estimated Migration Time: Calculated after scan")
+        c.drawString(
+            70, height - 315, "Estimated Migration Time: Calculated after scan"
+        )
         c.drawString(70, height - 330, "Issues Found: Run /scan endpoint first")
 
         # Footer

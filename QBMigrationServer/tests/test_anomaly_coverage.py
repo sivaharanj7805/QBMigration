@@ -17,12 +17,16 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.migration import Migration  # noqa: E402
-from utils.anomaly_detector import (check_login_anomalies,  # noqa: E402
-                                    check_migration_anomalies,
-                                    check_upload_anomalies,
-                                    detect_large_file_upload,
-                                    detect_rapid_migrations, is_suspicious_ip,
-                                    is_unusual_login_time, log_anomaly)
+from utils.anomaly_detector import check_login_anomalies  # noqa: E402
+from utils.anomaly_detector import (
+    check_migration_anomalies,
+    check_upload_anomalies,
+    detect_large_file_upload,
+    detect_rapid_migrations,
+    is_suspicious_ip,
+    is_unusual_login_time,
+    log_anomaly,
+)
 
 
 class TestDetectLargeFileUploadDaily:

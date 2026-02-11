@@ -197,9 +197,9 @@ def restore_vault_item(migration_id):
                             "GlacierJobParameters": {"Tier": "Standard"},
                         },
                     )
-                    restore_job_id = restore_response.get(
-                        "ResponseMetadata", {}
-                    ).get("RequestId")
+                    restore_job_id = restore_response.get("ResponseMetadata", {}).get(
+                        "RequestId"
+                    )
                     migration.current_step = (
                         f"S3 Glacier restore initiated (RequestId: {restore_job_id})"
                     )
@@ -223,9 +223,7 @@ def restore_vault_item(migration_id):
                 migration.status = "pending"
                 db.session.commit()
         except Exception as e:
-            logger.warning(
-                f"S3 Glacier restore request failed for {migration_id}: {e}"
-            )
+            logger.warning(f"S3 Glacier restore request failed for {migration_id}: {e}")
             migration.current_step = (
                 "Restore requested (S3 retrieval pending manual action)"
             )

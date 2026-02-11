@@ -42,12 +42,16 @@ class TestAccountLockout:
         assert test_user.is_locked() is False
 
     def test_is_locked_active_lock(self, db_session, test_user):
-        test_user.account_locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+        test_user.account_locked_until = datetime.now(timezone.utc) + timedelta(
+            minutes=15
+        )
         db_session.commit()
         assert test_user.is_locked() is True
 
     def test_is_locked_expired_lock(self, db_session, test_user):
-        test_user.account_locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+        test_user.account_locked_until = datetime.now(timezone.utc) - timedelta(
+            minutes=1
+        )
         db_session.commit()
         assert test_user.is_locked() is False
         # M-01 FIX: is_locked() is a pure query - no side effects

@@ -14,7 +14,6 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from config import Config
 from extensions import limiter
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
@@ -172,7 +171,12 @@ def validate_license():
             return jsonify({"valid": False, "error": "Invalid license key format"}), 400
 
         if not _validate_fingerprint_format(hardware_fingerprint):
-            return jsonify({"valid": False, "error": "Invalid hardware fingerprint format"}), 400
+            return (
+                jsonify(
+                    {"valid": False, "error": "Invalid hardware fingerprint format"}
+                ),
+                400,
+            )
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -265,10 +269,18 @@ def activate_license():
 
         # C-08: Format validation
         if not _validate_license_format(license_key):
-            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+            return (
+                jsonify({"success": False, "error": "Invalid license key format"}),
+                400,
+            )
 
         if not _validate_fingerprint_format(hardware_fingerprint):
-            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
+            return (
+                jsonify(
+                    {"success": False, "error": "Invalid hardware fingerprint format"}
+                ),
+                400,
+            )
 
         # Find license
         license_obj = License.find_by_key(license_key)
@@ -340,7 +352,9 @@ def activate_license():
 
 
 @license_bp.route("/usage", methods=["POST"])
-@limiter.limit("30 per minute")  # HIGH-07 FIX: Rate limit to prevent license key brute-force
+@limiter.limit(
+    "30 per minute"
+)  # HIGH-07 FIX: Rate limit to prevent license key brute-force
 def get_usage():
     """
     Get license usage/remaining migrations
@@ -415,7 +429,9 @@ def get_usage():
 
 
 @license_bp.route("/use-migration", methods=["POST"])
-@limiter.limit("10 per minute")  # HIGH-07 FIX: Strict rate limit on migration consumption
+@limiter.limit(
+    "10 per minute"
+)  # HIGH-07 FIX: Strict rate limit on migration consumption
 def use_migration():
     """
     Consume one migration from the license
@@ -451,10 +467,18 @@ def use_migration():
 
         # C-08: Format validation
         if not _validate_license_format(license_key):
-            return jsonify({"success": False, "error": "Invalid license key format"}), 400
+            return (
+                jsonify({"success": False, "error": "Invalid license key format"}),
+                400,
+            )
 
         if not _validate_fingerprint_format(hardware_fingerprint):
-            return jsonify({"success": False, "error": "Invalid hardware fingerprint format"}), 400
+            return (
+                jsonify(
+                    {"success": False, "error": "Invalid hardware fingerprint format"}
+                ),
+                400,
+            )
 
         # Find and validate license
         license_obj = License.find_by_key(license_key)

@@ -9,4 +9,12 @@ from models.migration_item import MigrationItem
 from models.project import Project
 from models.user import User
 
-__all__ = ["db", "Migration", "MigrationItem", "User", "Project", "License", "LicenseActivation"]
+__all__ = [
+    "db",
+    "Migration",
+    "MigrationItem",
+    "User",
+    "Project",
+    "License",
+    "LicenseActivation",
+]

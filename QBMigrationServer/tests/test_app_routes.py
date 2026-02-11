@@ -42,7 +42,10 @@ class TestErrorHandlers:
         assert response.status_code == 404
         data = response.get_json()
         assert data["success"] is False
-        assert "not found" in data["error"].lower() or "not found" in data.get("message", "").lower()
+        assert (
+            "not found" in data["error"].lower()
+            or "not found" in data.get("message", "").lower()
+        )
 
     def test_401_on_protected_endpoint(self, client):
         response = client.get("/api/auth/me")

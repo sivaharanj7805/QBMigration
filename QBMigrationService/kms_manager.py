@@ -401,7 +401,9 @@ class KMSFallbackManager:
     def _load_or_generate_key(self):
         """Load or generate a local master key."""
         # SECURITY FIX: Use secure absolute path instead of relative CWD
-        key_path = os.environ.get("LOCAL_MASTER_KEY_PATH", "/var/lib/forensicbridge/.master_key")
+        key_path = os.environ.get(
+            "LOCAL_MASTER_KEY_PATH", "/var/lib/forensicbridge/.master_key"
+        )
 
         if os.path.exists(key_path):
             with open(key_path, "rb") as f:

@@ -16,12 +16,12 @@ import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import requests
-from flask import Blueprint, current_app, jsonify, redirect, request, session
-from flask_login import current_user, login_required
-from models.database import db
 
 # H-32 FIX: Import limiter to rate-limit QBO OAuth and token refresh endpoints
 from extensions import limiter
+from flask import Blueprint, current_app, jsonify, redirect, request, session
+from flask_login import current_user, login_required
+from models.database import db
 
 qbo_bp = Blueprint("qbo", __name__, url_prefix="/api/qbo")
 logger = logging.getLogger(__name__)

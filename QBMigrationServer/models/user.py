@@ -108,14 +108,15 @@ class User(UserMixin, db.Model):
     # This prevents accidental plaintext writes while the migration is pending.
     from sqlalchemy.orm import validates as _validates
 
-    @_validates('mfa_secret', 'backup_codes')
+    @_validates("mfa_secret", "backup_codes")
     def _block_legacy_mfa_writes(self, key, value):
         if value is not None:
             import logging
+
             logging.getLogger(__name__).error(
                 "SECURITY: Attempted write to deprecated column '%s'. "
                 "Use encrypted columns (_mfa_secret_encrypted, _backup_codes_encrypted) instead.",
-                key
+                key,
             )
             raise ValueError(
                 f"Column '{key}' is deprecated and write-blocked. "
@@ -150,7 +151,6 @@ class User(UserMixin, db.Model):
         BACKUP_ENCRYPTION_KEY fallback only in development to aid migration.
         """
         from flask import current_app
-        import os
 
         key = current_app.config.get("QBO_ENCRYPTION_KEY")
         if not key:
@@ -478,6 +478,7 @@ class User(UserMixin, db.Model):
             except InvalidHash:
                 # LOW-14 FIX: Log corrupted hash entries instead of silently skipping
                 import logging
+
                 logging.getLogger(__name__).warning(
                     f"Corrupted password hash in history for user {self.id} — skipping entry"
                 )
@@ -600,7 +601,8 @@ class User(UserMixin, db.Model):
             db.update(User)
             .where(User.id == self.id)
             .values(
-                failed_login_attempts=db.func.coalesce(User.failed_login_attempts, 0) + 1,
+                failed_login_attempts=db.func.coalesce(User.failed_login_attempts, 0)
+                + 1,
                 last_failed_login=now,
             )
         )
@@ -640,7 +642,6 @@ class User(UserMixin, db.Model):
         Legacy unencrypted fallback blocked in production.
         """
         import logging
-        import os
 
         # Try encrypted first
         if self._mfa_secret_encrypted:
@@ -726,7 +727,10 @@ class User(UserMixin, db.Model):
                     )
             except Exception as exc:
                 import logging
-                logging.getLogger(__name__).debug("Failed to decrypt backup codes: %s", exc)
+
+                logging.getLogger(__name__).debug(
+                    "Failed to decrypt backup codes: %s", exc
+                )
         # AUDIT FIX HIGH-5: Block legacy unencrypted backup codes in production.
         # Plaintext fallback is only allowed in development to aid migration.
         if self.backup_codes:
@@ -735,7 +739,9 @@ class User(UserMixin, db.Model):
             _log = logging.getLogger(__name__)
             from flask import current_app
 
-            env = current_app.config.get("FLASK_ENV") or os.environ.get(
+            import os as _os
+
+            env = current_app.config.get("FLASK_ENV") or _os.environ.get(
                 "FLASK_ENV", "development"
             )
             if env == "production":
@@ -1038,7 +1044,10 @@ class User(UserMixin, db.Model):
                 return str(state.identity[0])
         except Exception as exc:
             import logging
-            logging.getLogger(__name__).debug("SQLAlchemy inspect failed for user identity: %s", exc)
+
+            logging.getLogger(__name__).debug(
+                "SQLAlchemy inspect failed for user identity: %s", exc
+            )
         return str(self.id)
 
     @property

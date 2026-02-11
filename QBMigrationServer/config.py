@@ -1,6 +1,5 @@
 import logging
 import os
-import secrets
 from datetime import timedelta
 
 from dotenv import load_dotenv

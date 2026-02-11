@@ -24,8 +24,6 @@ def generate_session_id(max_retries: int = 10) -> str:
     FIX HIGH-04: Improved race condition handling with longer random part
     and microsecond precision timestamp.
     """
-    import time
-
     # FIX M-05: Eliminate TOCTOU race - generate ID without pre-checking DB.
     # With 12 random chars from 62-char alphabet (62^12 = 3.2e21 combinations),
     # collisions are astronomically unlikely. The unique DB constraint catches

@@ -14,6 +14,7 @@ Author: ForensicBridge Security Team
 """
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone

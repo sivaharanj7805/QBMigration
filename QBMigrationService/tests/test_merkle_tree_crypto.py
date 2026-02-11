@@ -20,12 +20,16 @@ import pytest
 # Ensure the QBMigrationService package is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from verifier import MerkleTreeBuilder, build_merkle_tree_from_extraction, verify_merkle_root
-
+from verifier import (
+    MerkleTreeBuilder,
+    build_merkle_tree_from_extraction,
+    verify_merkle_root,
+)
 
 # ---------------------------------------------------------------------------
 # DOMAIN SEPARATION (CRIT-03 FIX)
 # ---------------------------------------------------------------------------
+
 
 class TestDomainSeparation:
     """Verify RFC 6962 §2.1 domain-separated hashing."""
@@ -89,6 +93,7 @@ class TestDomainSeparation:
 # ---------------------------------------------------------------------------
 # TREE CONSTRUCTION
 # ---------------------------------------------------------------------------
+
 
 class TestTreeConstruction:
     """Tests for Merkle tree building."""
@@ -198,6 +203,7 @@ class TestTreeConstruction:
 # DETERMINISM
 # ---------------------------------------------------------------------------
 
+
 class TestDeterminism:
     """Verify tree is deterministic."""
 
@@ -243,6 +249,7 @@ class TestDeterminism:
 # PROOF GENERATION & VERIFICATION
 # ---------------------------------------------------------------------------
 
+
 class TestProofVerification:
     """Tests for get_proof_path() and verify_proof()."""
 
@@ -281,8 +288,9 @@ class TestProofVerification:
         # Verify every leaf
         for idx, leaf in enumerate(leaves):
             proof = builder.get_proof_path(idx)
-            assert builder.verify_proof(leaf, proof, root) is True, \
-                f"Proof failed for leaf {idx}"
+            assert (
+                builder.verify_proof(leaf, proof, root) is True
+            ), f"Proof failed for leaf {idx}"
 
     def test_proof_path_invalid_index(self):
         """Raises ValueError for out-of-range leaf index."""
@@ -304,14 +312,16 @@ class TestProofVerification:
 
         for idx in range(5):
             proof = builder.get_proof_path(idx)
-            assert builder.verify_proof(
-                ["A", "B", "C", "D", "E"][idx], proof, root
-            ) is True
+            assert (
+                builder.verify_proof(["A", "B", "C", "D", "E"][idx], proof, root)
+                is True
+            )
 
 
 # ---------------------------------------------------------------------------
 # REPORT GENERATION
 # ---------------------------------------------------------------------------
+
 
 class TestReportGeneration:
     """Tests for generate_report()."""
@@ -350,6 +360,7 @@ class TestReportGeneration:
 # ---------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # ---------------------------------------------------------------------------
+
 
 class TestBuildMerkleTreeFromExtraction:
     """Tests for build_merkle_tree_from_extraction helper."""
@@ -420,6 +431,7 @@ class TestVerifyMerkleRoot:
 # ---------------------------------------------------------------------------
 # GET MERKLE ROOT LAZY BUILD
 # ---------------------------------------------------------------------------
+
 
 class TestGetMerkleRoot:
     """Tests for get_merkle_root auto-build."""

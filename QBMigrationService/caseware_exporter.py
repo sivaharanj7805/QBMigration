@@ -239,7 +239,9 @@ class CasewareExporter:
         # HIGH-01 FIX: Escape pipe characters in values to prevent separator collision.
         # Without this, field values containing "|" create ambiguous canonical forms
         # that could allow different records to produce the same hash.
-        escaped_input = [part.replace("\\", "\\\\").replace("|", "\\|") for part in hash_input]
+        escaped_input = [
+            part.replace("\\", "\\\\").replace("|", "\\|") for part in hash_input
+        ]
         canonical_string = "|".join(escaped_input)
         hash_bytes = hashlib.sha256(canonical_string.encode("utf-8")).hexdigest()
 
@@ -358,7 +360,9 @@ class CasewareExporter:
             # LOW-04 FIX: Log warning if lead sheet mapping fails
             lead_sheet = self.leadsheet_mapper.get_lead_sheet_code(acct_type)
             if not lead_sheet:
-                logger.warning(f"No lead sheet mapping for account type '{acct_type}' (account: {raw_acct_name})")
+                logger.warning(
+                    f"No lead sheet mapping for account type '{acct_type}' (account: {raw_acct_name})"
+                )
 
             # Determine debit/credit
             if acct_type in self.DEBIT_TYPES:
@@ -947,7 +951,9 @@ For technical support: support@forensicbridge.com
                 f"confidence: {aida_package.verification_confidence.value}"
             )
         except ImportError:
-            logger.warning("AiDA integration module not available - skipping AiDA package")
+            logger.warning(
+                "AiDA integration module not available - skipping AiDA package"
+            )
         except Exception as e:
             logger.warning(f"AiDA package generation failed (non-fatal): {e}")
 

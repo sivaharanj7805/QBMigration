@@ -134,6 +134,7 @@ class LicenseManager:
 
         # Create signature using HMAC (not hash concatenation)
         import hmac
+
         data_str = json.dumps(license_data, sort_keys=True)
         signature = hmac.new(
             self.secret_key.encode(), data_str.encode(), hashlib.sha256
@@ -170,6 +171,7 @@ class LicenseManager:
 
             # Verify signature using HMAC with constant-time comparison
             import hmac as _hmac
+
             stored_sig = license_data.pop("signature")
             data_str = json.dumps(license_data, sort_keys=True)
             expected_sig = _hmac.new(

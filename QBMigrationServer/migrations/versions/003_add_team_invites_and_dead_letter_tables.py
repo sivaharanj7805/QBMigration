@@ -8,8 +8,8 @@ Revises: 002_add_migration_items
 Create Date: 2026-02-11
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers
 revision = "003_add_team_invites_dlq"

@@ -29,17 +29,19 @@ class DeadLetterWebhook(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # Source identification
-    source = db.Column(
-        db.String(50), nullable=False
-    )  # "stripe", "migration", "qbo"
-    event_type = db.Column(db.String(100), nullable=False)  # e.g., "checkout.session.completed"
+    source = db.Column(db.String(50), nullable=False)  # "stripe", "migration", "qbo"
+    event_type = db.Column(
+        db.String(100), nullable=False
+    )  # e.g., "checkout.session.completed"
     event_id = db.Column(db.String(200))  # External event ID for dedup
 
     # Linked migration (if applicable)
     migration_id = db.Column(db.String(36), index=True)
 
     # Payload (stored for replay)
-    payload = db.Column(db.Text, nullable=False)  # JSON string of the original webhook body
+    payload = db.Column(
+        db.Text, nullable=False
+    )  # JSON string of the original webhook body
     headers = db.Column(db.Text)  # JSON string of relevant headers
 
     # Error details

@@ -460,10 +460,13 @@ class PremiumMigrationVerifier:
 
         try:
             # MED-13 FIX: Add timeout to QBO verification queries to prevent indefinite hangs
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FuturesTimeout
 
             with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(self.client.query, "Account", oauth_manager=oauth_manager)
+                future = executor.submit(
+                    self.client.query, "Account", oauth_manager=oauth_manager
+                )
                 try:
                     qbo_accounts = future.result(timeout=120)  # 2-minute timeout
                 except FuturesTimeout:
@@ -473,7 +476,9 @@ class PremiumMigrationVerifier:
 
             # MED-14 FIX: Guard against empty QBO company falsely reporting balanced
             if not qbo_accounts:
-                logger.warning("  [WARN] No accounts found in QBO — cannot verify trial balance")
+                logger.warning(
+                    "  [WARN] No accounts found in QBO — cannot verify trial balance"
+                )
                 self.report["errors"].append(
                     "QBO company has no accounts — trial balance cannot be verified"
                 )
@@ -719,7 +724,9 @@ class PremiumMigrationVerifier:
                     reconciliation_results["discrepancies"].append(discrepancy)
                     reconciliation_results["verified"] = False
 
-                    logger.info(f"  [FAIL] {account_name}: Difference ${balance_diff:,.2f}")
+                    logger.info(
+                        f"  [FAIL] {account_name}: Difference ${balance_diff:,.2f}"
+                    )
                 else:
                     logger.info(f"  [OK] {account_name}: Balanced")
 
@@ -1195,7 +1202,9 @@ class PremiumMigrationVerifier:
         if total_failed > 0:
             # FIX MIGRATION-MED-12: Guard against division by zero
             total_attempted = total_uploaded + total_failed
-            failure_rate = (total_failed / total_attempted * 100) if total_attempted > 0 else 0
+            failure_rate = (
+                (total_failed / total_attempted * 100) if total_attempted > 0 else 0
+            )
             if failure_rate > 5:  # More than 5% failure rate
                 issues.append(
                     f"High failure rate: {failure_rate:.1f}% ({total_failed} failed)"
@@ -1369,10 +1378,18 @@ class PremiumMigrationVerifier:
             debit_var = abs(qbd_debits_val - qbo_debits_val)
             credit_var = abs(qbd_credits_val - qbo_credits_val)
             total = max(qbd_debits_val, Decimal("1"))  # Avoid division by zero
-            balance_sheet_match = float(max(Decimal("0"), Decimal("100") - (debit_var / total * Decimal("100"))))
-            pl_match = float(max(
-                Decimal("0"), Decimal("100") - (credit_var / max(qbd_credits_val, Decimal("1")) * Decimal("100"))
-            ))
+            balance_sheet_match = float(
+                max(Decimal("0"), Decimal("100") - (debit_var / total * Decimal("100")))
+            )
+            pl_match = float(
+                max(
+                    Decimal("0"),
+                    Decimal("100")
+                    - (
+                        credit_var / max(qbd_credits_val, Decimal("1")) * Decimal("100")
+                    ),
+                )
+            )
         else:
             balance_sheet_match = 0.0
             pl_match = 0.0

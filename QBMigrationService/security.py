@@ -15,6 +15,7 @@ import pyotp
 def _get_env():
     return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
 
+
 # FIX: Use proper logging instead of print statements
 logger = logging.getLogger(__name__)
 

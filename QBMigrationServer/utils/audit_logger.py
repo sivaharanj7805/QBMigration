@@ -69,7 +69,9 @@ from typing import Any, Dict, Optional
 # In production, this should be set via environment variable
 _hmac_raw = os.getenv("AUDIT_HMAC_KEY", "")
 if not _hmac_raw and os.getenv("FLASK_ENV") == "production":
-    raise RuntimeError("AUDIT_HMAC_KEY must be set in production for tamper-proof audit logs")
+    raise RuntimeError(
+        "AUDIT_HMAC_KEY must be set in production for tamper-proof audit logs"
+    )
 AUDIT_HMAC_KEY = _hmac_raw.encode("utf-8")
 
 # Configure audit logger
@@ -214,7 +216,7 @@ def _sanitize_log_value(value):
     """Sanitize a value for safe logging (prevent log injection)."""
     if isinstance(value, str):
         # Remove newlines and control characters that could inject fake log entries
-        return value.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+        return value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
     return value
 
 
@@ -303,8 +305,12 @@ class AuditLogger:
         # AUDIT FIX HIGH: Add HMAC signature for tamper detection
         event_json = event.to_json()
         if AUDIT_HMAC_KEY:
-            sig = hmac.new(AUDIT_HMAC_KEY, event_json.encode("utf-8"), hashlib.sha256).hexdigest()
-            log_line = json.dumps({"payload": json.loads(event_json), "hmac_sha256": sig})
+            sig = hmac.new(
+                AUDIT_HMAC_KEY, event_json.encode("utf-8"), hashlib.sha256
+            ).hexdigest()
+            log_line = json.dumps(
+                {"payload": json.loads(event_json), "hmac_sha256": sig}
+            )
         else:
             log_line = event_json
 
