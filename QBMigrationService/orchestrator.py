@@ -274,6 +274,8 @@ class MigrationOrchestrator:
         tier_limit = self.TIER_TRANSACTION_LIMITS.get(tier.lower(), 100_000)
         logger.info(f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}")
         transformer = None  # Initialize before try so except block can access it
+        qbo_client = None  # AUDIT FIX CRIT-02: Init before try so rollback can safely reference it
+        oauth_mgr = None   # AUDIT FIX CRIT-01: Init before try so rollback can safely reference it
 
         # FIX #13: Track created entity IDs for potential rollback
         self._created_entity_ids: Dict[str, List[str]] = defaultdict(list)
@@ -639,7 +641,7 @@ class MigrationOrchestrator:
                 try:
                     logger.info(f"Migration {migration_id}: Attempting rollback of partial entities...")
                     rollback_result = self.rollback_migration(
-                        qbo_client=qbo_client, oauth_manager=oauth_manager
+                        qbo_client=qbo_client, oauth_manager=oauth_mgr
                     )
                     logger.info(f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}")
                 except Exception as rollback_err:

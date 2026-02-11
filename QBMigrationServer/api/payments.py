@@ -285,7 +285,15 @@ def stripe_webhook():
         # Mark as processing with 24h TTL
         redis_conn.setex(f"stripe_event:{event_id}", 86400, "processing")
     except Exception:
-        pass  # Redis unavailable — proceed without dedup
+        # AUDIT FIX HIGH-01: Log Redis failure instead of silently ignoring.
+        # The handle_successful_payment() function already has its own
+        # database-level idempotency check (credit.payment_status == "paid"),
+        # so duplicate processing is prevented even without Redis.
+        logger.warning(
+            "Redis unavailable for Stripe event dedup (event %s). "
+            "Database-level idempotency will still prevent duplicate processing.",
+            event_id,
+        )
 
     # FIX B-05: Handle events with proper error propagation
     # Return 500 on critical failures so Stripe retries the webhook

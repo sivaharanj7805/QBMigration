@@ -316,18 +316,32 @@ def _handle_failed(migration, data):
                 f"Failed to send failure alert for {migration.migration_id}: {e}"
             )
 
-    # Trigger cleanup
+    # AUDIT FIX HIGH-02: Use async Celery cleanup (matching _handle_completed)
+    # to prevent slow AWS API calls from delaying the webhook response.
+    cleanup_status = "scheduled"
     try:
-        aws_manager = AWSMigrationManager()
-        aws_manager.cleanup_migration(
-            migration.migration_id, migration.aws_instance_id
-        )
+        from tasks import cleanup_migration_async
+
+        cleanup_migration_async.delay(migration.migration_id, migration.aws_instance_id)
+        logger.info(f"Scheduled async cleanup for failed migration {migration.migration_id}")
     except Exception as e:
         logger.error(
-            f"Cleanup trigger failed for {migration.migration_id}: {str(e)}"
+            f"Failed to schedule async cleanup for {migration.migration_id}: {str(e)}"
         )
+        # Fall back to synchronous cleanup if Celery unavailable
+        try:
+            aws_manager = AWSMigrationManager()
+            aws_manager.cleanup_migration(
+                migration.migration_id, migration.aws_instance_id
+            )
+            cleanup_status = "completed_sync"
+        except Exception as sync_err:
+            logger.error(
+                f"Sync cleanup also failed for {migration.migration_id}: {str(sync_err)}"
+            )
+            cleanup_status = "failed"
 
-    return {"success": True, "message": "Failure acknowledged"}, 200
+    return {"success": True, "message": "Failure acknowledged", "cleanup_status": cleanup_status}, 200
 
 
 # ---------------------------------------------------------------------------
