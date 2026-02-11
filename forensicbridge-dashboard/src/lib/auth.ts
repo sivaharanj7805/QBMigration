@@ -16,6 +16,7 @@ export interface User {
     last_name?: string;      // Backend format
     company?: string;        // Frontend format
     company_name?: string;   // Backend format
+    role?: string;
 }
 
 export interface AuthState {
