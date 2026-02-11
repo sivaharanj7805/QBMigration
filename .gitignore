@@ -118,3 +118,9 @@ out/
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+
+# Deployment secrets (never commit)
+deploy/.last-deploy
+deploy/user-data-generated.sh
+deploy/*.pem
+.env.local
