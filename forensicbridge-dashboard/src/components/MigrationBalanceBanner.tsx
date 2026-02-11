@@ -68,7 +68,9 @@ export function MigrationBalanceBanner() {
                 }
             }
         } catch (error) {
-            console.error('Failed to load balance data:', error);
+            if (process.env.NODE_ENV === 'development') {
+                console.error('Failed to load balance data:', error);
+            }
             // MED-07 FIX: Set error state so user sees feedback instead of blank
             if (isMountedRef.current) {
                 setFetchError(true);

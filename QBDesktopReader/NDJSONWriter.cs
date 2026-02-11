@@ -84,8 +84,8 @@ namespace QBDesktopExtractor
             {
                 RunId = sessionId,
                 StartedAt = DateTime.UtcNow,
-                SchemaVersion = "4.3",
-                ExtractorVersion = "4.3"
+                SchemaVersion = "4.2",
+                ExtractorVersion = "4.2"
             };
 
             // JSON settings for consistent output
@@ -115,6 +115,17 @@ namespace QBDesktopExtractor
                 ct.ThrowIfCancellationRequested();
 
                 string json = JsonConvert.SerializeObject(record, _jsonSettings);
+
+                // FIX: Validate NDJSON format - ensure no unescaped newlines in JSON
+                // which would break NDJSON parsers (each line must be valid JSON)
+                if (json.Contains('\n') || json.Contains('\r'))
+                {
+                    _logger?.Log(LogLevel.Warning,
+                        "Record in {0} contains unescaped newlines - sanitizing for NDJSON compliance",
+                        entityName);
+                    json = json.Replace("\r\n", " ").Replace("\n", " ").Replace("\r", " ");
+                }
+
                 byte[] bytes = Encoding.UTF8.GetBytes(json + "\n");
 
                 await fileInfo.Stream.WriteAsync(bytes, 0, bytes.Length, ct);

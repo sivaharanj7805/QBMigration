@@ -690,9 +690,11 @@ Resources:
       HealthyThresholdCount: 2
       UnhealthyThresholdCount: 3
       TargetType: instance
-      Targets:
-        - Id: !Ref EC2Instance
-          Port: 5000
+      # FIX: Removed standalone EC2Instance target. ALB now targets the
+      # AutoScalingGroup exclusively (via TargetGroupARNs on the ASG resource).
+      # Previously, if the standalone instance failed, ASG instances wouldn't
+      # receive traffic.
+      # Targets: (managed by AutoScalingGroup.TargetGroupARNs)
 
   ALBHTTPListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -944,6 +946,32 @@ Resources:
       ResourceId: !Ref VPC
       ResourceType: VPC
       TrafficType: ALL
+
+  # ============================================================================
+  # FIX: VPC ENDPOINTS (avoids routing through public internet via NAT Gateway)
+  # ============================================================================
+
+  SecretsManagerVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      PrivateDnsEnabled: true
+
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
 
   # ============================================================================
   # AUDIT FIX HIGH-02: CLOUDTRAIL

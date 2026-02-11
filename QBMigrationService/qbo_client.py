@@ -95,6 +95,15 @@ class PremiumQBOClient:
         self.batch_counter = 0
         self.batch_lock = Lock()
 
+        # FIX: Circuit breaker to prevent hammering QBO API when it's down.
+        # After `failure_threshold` consecutive failures, the circuit opens
+        # and all requests fail fast for `recovery_timeout` seconds.
+        self._cb_failure_count = 0
+        self._cb_failure_threshold = 5
+        self._cb_open_until = 0.0  # timestamp when circuit closes
+        self._cb_recovery_timeout = 60  # seconds
+        self._cb_lock = Lock()
+
         # Per-minute batch rate limiting
         self._batch_timestamps = []
         self._batch_timestamps_lock = Lock()
@@ -646,6 +655,15 @@ class PremiumQBOClient:
         """
         self._check_shutdown()
 
+        # FIX: Circuit breaker - fail fast if QBO API is down
+        with self._cb_lock:
+            if self._cb_open_until > time.time():
+                remaining = int(self._cb_open_until - time.time())
+                raise RuntimeError(
+                    f"Circuit breaker OPEN: QBO API had {self._cb_failure_threshold} consecutive "
+                    f"failures. Requests blocked for {remaining}s to prevent cascading failures."
+                )
+
         # TESTING REPORT: Generate or use provided correlation ID
         if correlation_id is None and getattr(config, "ENABLE_CORRELATION_IDS", True):
             correlation_id = str(uuid.uuid4())
@@ -830,6 +848,10 @@ class PremiumQBOClient:
                         entity_type = key
                         self.update_synctoken(entity_type, entity_id, sync_token)
 
+            # FIX: Circuit breaker - reset failure count on success
+            with self._cb_lock:
+                self._cb_failure_count = 0
+
             return result
 
         except requests.exceptions.Timeout:
@@ -852,6 +874,7 @@ class PremiumQBOClient:
                 logger.error(
                     f"[{correlation_id}] Request timed out after {max_retries} retries"
                 )
+                self._cb_record_failure()
                 raise
         except requests.exceptions.RequestException:
             if retries < max_retries:
@@ -873,6 +896,7 @@ class PremiumQBOClient:
                 logger.error(
                     f"[{correlation_id}] Request failed after {max_retries} retries"
                 )
+                self._cb_record_failure()
                 raise
 
     def _calculate_backoff(self, retries: int) -> float:
@@ -895,6 +919,17 @@ class PremiumQBOClient:
             wait_time = max(0.1, wait_time + jitter)
 
         return round(wait_time, 2)
+
+    def _cb_record_failure(self) -> None:
+        """FIX: Circuit breaker - record a failure and open circuit if threshold reached."""
+        with self._cb_lock:
+            self._cb_failure_count += 1
+            if self._cb_failure_count >= self._cb_failure_threshold:
+                self._cb_open_until = time.time() + self._cb_recovery_timeout
+                logger.error(
+                    f"Circuit breaker OPENED after {self._cb_failure_count} consecutive failures. "
+                    f"All requests blocked for {self._cb_recovery_timeout}s."
+                )
 
     def delete_entity(
         self, entity_type: str, qbo_id: str, oauth_manager: Optional[Any] = None
@@ -1050,13 +1085,24 @@ class PremiumQBOClient:
                 "; ".join(error_details) if error_details else "Unknown error"
             )
 
-            # AUDIT FIX P3-C1: Fail-fast on scope violation (error 6000) — non-retryable
+            # FIX: Error 6000 has multiple subtypes - don't treat all as scope violation.
+            # 6000 can mean: scope violation, file locked, data corruption, network
+            # issue, or general server error. Parse the message for more context.
             if "6000" in error_codes:
-                logger.error(
-                    f"QBO SCOPE VIOLATION (6000): {full_error_msg}. "
-                    f"Check OAuth scopes and realm permissions."
-                )
-                raise PermissionError(f"QBO scope violation (6000): {full_error_msg}")
+                msg_lower = full_error_msg.lower()
+                if "scope" in msg_lower or "permission" in msg_lower or "access" in msg_lower:
+                    logger.error(
+                        f"QBO SCOPE VIOLATION (6000): {full_error_msg}. "
+                        f"Check OAuth scopes and realm permissions."
+                    )
+                    raise PermissionError(f"QBO scope violation (6000): {full_error_msg}")
+                else:
+                    # Non-scope 6000 errors may be transient - log and raise generic
+                    logger.error(
+                        f"QBO ERROR (6000): {full_error_msg}. "
+                        f"Error 6000 has subtypes: locked file, data issue, or server error."
+                    )
+                    raise RuntimeError(f"QBO error (6000): {full_error_msg}")
 
             # AUDIT FIX P11-H2: Distinguish error 5010 (invalid auth) from standard 401
             if "5010" in error_codes:
@@ -1292,7 +1338,7 @@ class PremiumQBOClient:
                         or original_entity.get("Id")
                         or original_entity.get("Name")
                         or original_entity.get("DocNumber")
-                        or f"index_{req_index}"
+                        or f"index_{i}"
                     )
                     qbo_id = (
                         str(created_entity.get("Id"))

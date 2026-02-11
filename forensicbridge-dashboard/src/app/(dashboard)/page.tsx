@@ -264,7 +264,9 @@ export default function DashboardHome() {
             }
         } catch (err) {
             // MED-05 FIX: Show error to user in all environments, not just development
-            console.error("Failed to fetch dashboard data:", err);
+            if (process.env.NODE_ENV === 'development') {
+                console.error("Failed to fetch dashboard data:", err);
+            }
             if (isMountedRef.current) {
                 setError("Failed to load dashboard data. Please try refreshing the page.");
             }

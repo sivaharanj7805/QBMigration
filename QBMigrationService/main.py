@@ -65,8 +65,18 @@ class MigrationOrchestrator:
     7. Schedule deletion
     """
 
-    def __init__(self):
-        """Initialize orchestrator."""
+    def __init__(self, oauth_tokens: dict = None):
+        """Initialize orchestrator.
+
+        Args:
+            oauth_tokens: Optional dict with keys 'access_token', 'refresh_token',
+                         'realm_id', 'client_id', 'client_secret'. When provided,
+                         tokens are used directly instead of reading from os.environ.
+        """
+        # SECURITY FIX: Store OAuth tokens in instance instead of os.environ
+        # to avoid exposure via /proc/<pid>/environ
+        self._oauth_tokens = oauth_tokens or {}
+
         # Initialize directories
         initialize_directories()
 
@@ -257,17 +267,18 @@ class MigrationOrchestrator:
             logger.info("   This may take several minutes...")
 
             # CRITICAL FIX: Validate QBO credentials before upload
+            # SECURITY FIX: Read from instance tokens first, fall back to env vars
             qbo_plan = os.getenv("QBO_PLAN", "Plus")
-            access_token = os.getenv("QBO_ACCESS_TOKEN")
-            realm_id = os.getenv("QBO_REALM_ID")
+            access_token = self._oauth_tokens.get("access_token") or os.getenv("QBO_ACCESS_TOKEN")
+            realm_id = self._oauth_tokens.get("realm_id") or os.getenv("QBO_REALM_ID")
 
             if not access_token:
                 raise ValueError(
-                    "QBO_ACCESS_TOKEN environment variable not set. Cannot upload to QBO."
+                    "QBO access token not provided. Pass oauth_tokens or set QBO_ACCESS_TOKEN."
                 )
             if not realm_id:
                 raise ValueError(
-                    "QBO_REALM_ID environment variable not set. Cannot upload to QBO."
+                    "QBO realm ID not provided. Pass oauth_tokens or set QBO_REALM_ID."
                 )
 
             # CRITICAL FIX: Initialize QBOClient with access_token and base_url
@@ -278,9 +289,9 @@ class MigrationOrchestrator:
 
             # Initialize OAuth manager for automatic token refresh during long migrations
             oauth_mgr = None
-            client_id = os.getenv("QBO_CLIENT_ID")
-            client_secret = os.getenv("QBO_CLIENT_SECRET")
-            refresh_token = os.getenv("QBO_REFRESH_TOKEN")
+            client_id = self._oauth_tokens.get("client_id") or os.getenv("QBO_CLIENT_ID")
+            client_secret = self._oauth_tokens.get("client_secret") or os.getenv("QBO_CLIENT_SECRET")
+            refresh_token = self._oauth_tokens.get("refresh_token") or os.getenv("QBO_REFRESH_TOKEN")
             if client_id and client_secret and refresh_token:
                 try:
                     from config import (

@@ -66,11 +66,15 @@ namespace QBDesktopExtractor
 
         // SECRET/KEY patterns - CRITICAL for security
         private static readonly Regex JsonSecretRegex = new Regex(
-            @"""(api[_-]?key|secret|token|password|private[_-]?key|hmac[_-]?key|key|auth|credential|bearer)""\s*:\s*""[^""]+""",
+            // FIX: Narrowed "key" pattern to avoid redacting legitimate business data
+            // (e.g., {"key": "AccountType"} was being redacted). Now requires compound
+            // names like "api_key" or "secret_key" instead of bare "key".
+            @"""(api[_-]?key|secret[_-]?key|access[_-]?token|password|private[_-]?key|hmac[_-]?key|auth[_-]?key|auth[_-]?token|credential|bearer)""\s*:\s*""[^""]+""",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex KeyValueSecretRegex = new Regex(
-            @"(api[_-]?key|secret|token|password|private[_-]?key|hmac[_-]?key|key|auth|credential|bearer)\s*[=:]\s*[^\s,;]+",
+            // FIX: Narrowed pattern to avoid over-redacting legitimate data
+            @"(api[_-]?key|secret[_-]?key|access[_-]?token|password|private[_-]?key|hmac[_-]?key|auth[_-]?key|auth[_-]?token|credential|bearer)\s*[=:]\s*[^\s,;]+",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex BearerTokenRegex = new Regex(

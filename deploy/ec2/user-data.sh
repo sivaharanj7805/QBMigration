@@ -147,14 +147,34 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 echo "[6/10] Configuring Redis..."
 
 # Update Redis configuration for production
-cat > /etc/redis/redis.conf.d/qbmigration.conf << 'EOF'
+# SECURITY FIX: Retrieve Redis password from Secrets Manager and set requirepass
+REDIS_PASSWORD=$(aws secretsmanager get-secret-value \
+    --secret-id forensicbridge/${ENVIRONMENT:-production}/redis \
+    --query 'SecretString' --output text --region "${AWS_REGION:-ca-central-1}" 2>/dev/null \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null)
+
+if [ -z "$REDIS_PASSWORD" ]; then
+    # Fallback: read from environment file if Secrets Manager unavailable
+    REDIS_PASSWORD=$(grep '^REDIS_PASSWORD=' /etc/qbmigration/environment 2>/dev/null | cut -d= -f2)
+fi
+
+if [ -z "$REDIS_PASSWORD" ]; then
+    echo "ERROR: Redis password not found in Secrets Manager or environment. Redis will NOT start without authentication."
+    exit 1
+fi
+
+cat > /etc/redis/redis.conf.d/qbmigration.conf << REDISEOF
 # QBMigration Redis Configuration
 maxmemory 512mb
 maxmemory-policy allkeys-lru
 appendonly yes
-# Require password (set via environment variable during service start)
-# requirepass will be set dynamically
-EOF
+# SECURITY FIX: requirepass is now always set (was previously commented out)
+requirepass ${REDIS_PASSWORD}
+REDISEOF
+
+# Secure the config file since it contains the password
+chmod 640 /etc/redis/redis.conf.d/qbmigration.conf
+chown redis:redis /etc/redis/redis.conf.d/qbmigration.conf
 
 systemctl enable redis-server
 systemctl restart redis-server

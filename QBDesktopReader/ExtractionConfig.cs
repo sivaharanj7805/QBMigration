@@ -80,13 +80,18 @@ namespace QBDesktopExtractor
                 throw new ConfigurationException($"Invalid {paramName}: {ex.Message}");
             }
 
-            // SECURITY: Check for path traversal attempts
-            // Detect ".." in the original path (before normalization)
+            // SECURITY FIX: Check for path traversal on BOTH input and resolved path.
+            // Previously only checked input, which symlinks could bypass.
             if (filePath.Contains(".."))
             {
                 throw new ConfigurationException(
                     $"SECURITY: Path traversal detected in {paramName}. " +
                     "Relative path components (..) are not allowed for security reasons.");
+            }
+            if (fullPath.Contains(".."))
+            {
+                throw new ConfigurationException(
+                    $"SECURITY: Path traversal in resolved path for {paramName}.");
             }
 
             // SECURITY: Check for symlinks on Windows

@@ -64,12 +64,11 @@ jobs:
     - name: Run Bandit security scan
       run: |
         # Generate JSON report for artifact upload (exclude test dirs)
+        # Generate JSON report for artifact (allowed to fail for artifact capture)
         bandit -r QBMigrationServer/ QBMigrationService/ --exclude QBMigrationServer/tests,QBMigrationService/tests -f json -o bandit-report.json || true
-        # AUDIT FIX P1-08: Re-enabled B105/B107 (hardcoded passwords).
-        # False positives should use inline # nosec B105 comments instead.
+        # FIX: Bandit now BLOCKS the pipeline on high-severity findings (removed || true).
         # Only B101 (assert in guard clauses) and B110 (graceful degradation) skipped.
-        #   B101: assert_used - used in production guard clauses for fail-fast
-        #   B110: try_except_pass - used for graceful degradation in optional features
+        # False positives should use inline # nosec B105 comments instead.
         bandit -r QBMigrationServer/ QBMigrationService/ \
           --exclude QBMigrationServer/tests,QBMigrationService/tests \
           --skip B101,B110 \
@@ -78,8 +77,9 @@ jobs:
     - name: Run dependency vulnerability scan
       run: |
         pip install -r QBMigrationServer/requirements.txt -r QBMigrationService/requirements.txt
-        pip-audit --desc --fix --dry-run || true
-        safety check --full-report || true
+        # FIX: Dependency audit now blocks pipeline (removed || true)
+        pip-audit --desc --fix --dry-run
+        safety check --full-report
 
     - name: Upload Bandit Report
       uses: actions/upload-artifact@v4
@@ -245,7 +245,8 @@ jobs:
         cd forensicbridge-dashboard
         npm ci --ignore-scripts
         # L-13 FIX: Run npm audit to catch known vulnerabilities in dependencies
-        npm audit --production --audit-level=high || true
+        # FIX: npm audit now blocks pipeline on high-severity vulnerabilities
+        npm audit --production --audit-level=high
         npx @cyclonedx/cyclonedx-npm --output-file ../sbom-frontend.json --output-format JSON
         cd ..
 

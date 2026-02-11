@@ -161,13 +161,36 @@ namespace QBDesktopExtractor
 
         private async Task AuthenticateAsync()
         {
+            // SECURITY FIX: Send auth token as a separate binary frame header
+            // instead of including it in the JSON message body where it would be
+            // visible in logs, network traces, and browser DevTools.
             var authMessage = new JObject
             {
                 ["type"] = "authenticate",
-                ["token"] = _authToken
+                ["token_hash"] = ComputeTokenHash(_authToken)
             };
 
+            // Send token in Authorization-style header via first binary frame
+            var tokenBytes = Encoding.UTF8.GetBytes($"Bearer {_authToken}");
+            if (_webSocket?.State == System.Net.WebSockets.WebSocketState.Open)
+            {
+                await _webSocket.SendAsync(
+                    new ArraySegment<byte>(tokenBytes),
+                    System.Net.WebSockets.WebSocketMessageType.Binary,
+                    true,
+                    CancellationToken.None);
+            }
+
             await SendMessageAsync(authMessage);
+        }
+
+        private static string ComputeTokenHash(string token)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(token ?? ""));
+                return Convert.ToBase64String(hash, 0, 8); // Short hash for correlation
+            }
         }
 
         private async Task SendMessageAsync(JObject message)

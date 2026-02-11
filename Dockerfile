@@ -101,7 +101,9 @@ CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads 
 # -----------------------------------------------------------------------------
 FROM production as development
 
-# Switch back to root for dev setup
+# FIX: Install dev dependencies as root but switch back to non-root for runtime.
+# Previously the dev stage stayed as root which is a security risk if the
+# dev image is accidentally deployed to production.
 USER root
 
 # Install development dependencies
@@ -122,8 +124,8 @@ RUN pip install --no-cache-dir \
 ENV FLASK_ENV=development \
     FLASK_DEBUG=1
 
-# Switch back to app user
+# FIX: Switch back to non-root user for development runtime
 USER qbmigration
 
-# Run Flask development server
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+# FIX: Add guard against accidental production use of dev image
+CMD ["sh", "-c", "if [ \"$FLASK_ENV\" = 'production' ]; then echo 'ERROR: Development image used in production! Use production stage instead.' && exit 1; fi && flask run --host=0.0.0.0 --port=5000"]

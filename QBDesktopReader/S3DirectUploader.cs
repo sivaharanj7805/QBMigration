@@ -191,6 +191,25 @@ namespace QBDesktopExtractor
                             {
                                 cleanEtag = partNumber.ToString();
                             }
+
+                            // FIX: Verify part checksum - compute MD5 of uploaded chunk
+                            // and compare against ETag (S3 ETag for single-part = MD5)
+                            using (var md5 = System.Security.Cryptography.MD5.Create())
+                            {
+                                var localHash = BitConverter.ToString(
+                                    md5.ComputeHash(buffer, 0, bytesRead)
+                                ).Replace("-", "").ToLowerInvariant();
+
+                                if (!string.IsNullOrEmpty(cleanEtag) &&
+                                    cleanEtag.Length == 32 &&
+                                    !string.Equals(localHash, cleanEtag, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _logger?.Log(LogLevel.Warning,
+                                        "S3 part {0} checksum mismatch: local={1}, ETag={2}. Data may be corrupted.",
+                                        partNumber, localHash, cleanEtag);
+                                }
+                            }
+
                             parts.Add(new JObject
                             {
                                 ["PartNumber"] = partNumber,
@@ -219,8 +238,14 @@ namespace QBDesktopExtractor
                 // Complete multipart upload
                 await CompleteMultipartUploadAsync(uploadId, s3Key, parts, migrationId);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // SECURITY FIX: Log upload failure instead of silent suppression.
+                // Silent exceptions here could cause undetected data loss.
+                _logger?.Log(LogLevel.Error,
+                    "S3 multipart upload failed for key '{0}', uploadId '{1}': {2}",
+                    s3Key, uploadId, ex.Message);
+
                 // Abort the multipart upload to clean up orphaned parts in S3
                 try
                 {

@@ -122,7 +122,12 @@ def update_migration_status(
             logger.error(f"Migration {migration_id} not found for status update")
 
 
-@celery.task(bind=True, name="tasks.run_migration")
+@celery.task(
+    bind=True,
+    name="tasks.run_migration",
+    soft_time_limit=3600,   # Soft limit: 1 hour (raises SoftTimeLimitExceeded)
+    time_limit=3900,        # Hard kill: 1 hour 5 minutes
+)
 def run_migration_task(
     self,
     migration_id: str,
@@ -154,21 +159,15 @@ def run_migration_task(
         from config import initialize_directories
         from main import MigrationOrchestrator
 
-        # SECURITY NOTE: OAuth tokens are temporarily stored in env vars because
-        # MigrationOrchestrator reads them from os.environ. This is a security
-        # risk as env vars are visible in /proc/<pid>/environ on Linux and may
-        # leak into child processes, crash dumps, or logging. A future refactor
-        # should pass tokens as arguments through the orchestrator API instead.
-        if oauth_tokens:
-            os.environ["QBO_ACCESS_TOKEN"] = oauth_tokens.get("access_token", "")
-            os.environ["QBO_REFRESH_TOKEN"] = oauth_tokens.get("refresh_token", "")
-            os.environ["QBO_REALM_ID"] = oauth_tokens.get("realm_id", "")
+        # SECURITY FIX: Pass OAuth tokens directly to orchestrator instead of
+        # storing in os.environ where they are visible in /proc/<pid>/environ.
+        _oauth = oauth_tokens or {}
 
         # Initialize directories
         initialize_directories()
 
-        # Create orchestrator with progress callback
-        orchestrator = MigrationOrchestrator()
+        # Create orchestrator with OAuth tokens passed directly
+        orchestrator = MigrationOrchestrator(oauth_tokens=_oauth)
 
         # Update progress periodically
         update_migration_status(
@@ -209,10 +208,8 @@ def run_migration_task(
         raise
 
     finally:
-        # FIX HIGH: Always clean up OAuth tokens from environment variables
-        # to minimize the window of exposure for sensitive credentials.
-        for env_key in ("QBO_ACCESS_TOKEN", "QBO_REFRESH_TOKEN", "QBO_REALM_ID"):
-            os.environ.pop(env_key, None)
+        # Cleanup: clear any references to OAuth tokens
+        _oauth = None
 
 
 @celery.task(bind=True, name="tasks.generate_caseware_export")
@@ -368,11 +365,11 @@ def cleanup_orphaned_resources():
 
             # Thresholds for different scenarios
             completed_threshold = datetime.now(timezone.utc) - timedelta(
-                hours=6
-            )  # Completed but not cleaned up
+                hours=1
+            )  # Completed but not cleaned up (reduced from 6h to 1h)
             stuck_threshold = datetime.now(timezone.utc) - timedelta(
-                hours=2
-            )  # Processing for too long
+                minutes=90
+            )  # Processing for too long (reduced from 2h to 90m)
 
             # PRODUCTION FIX: Find migrations needing cleanup including stuck ones
             # 1. Completed/failed migrations older than 6 hours that weren't cleaned
