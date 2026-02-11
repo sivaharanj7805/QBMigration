@@ -120,10 +120,15 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
         };
     }, [isLive, migrationId]);
 
-    // Auto-scroll to bottom
+    // LOW-09 FIX: Only auto-scroll if user hasn't scrolled up manually.
+    // Check if user is within 50px of the bottom before forcing scroll.
     useEffect(() => {
         if (terminalRef.current) {
-            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+            const el = terminalRef.current;
+            const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+            if (isNearBottom) {
+                el.scrollTop = el.scrollHeight;
+            }
         }
     }, [logs]);
 

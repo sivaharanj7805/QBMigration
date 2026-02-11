@@ -140,7 +140,10 @@ class ApiClient {
             return this.request<T>(endpoint, options, schema, customTimeout, signal);
         }
 
-        const dedupeKey = `${method}:${endpoint}`;
+        // HIGH-02 FIX: Include full endpoint (with query params) in dedup key.
+        // Previously only used the path, causing different pages to return
+        // the same cached response (e.g., ?page=1 and ?page=2 were deduped).
+        const dedupeKey = `${method}:${this.baseUrl}${endpoint}`;
         const existing = this.inflightRequests.get(dedupeKey);
         if (existing) {
             return existing as Promise<ApiResponse<T>>;

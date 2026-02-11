@@ -282,6 +282,13 @@ SENSITIVE_PATTERNS = [
     (r"redis://[^:]+:[^@]+@[^\s?]+", "redis://[REDACTED]"),
 ]
 
+# MED-16 FIX: Pre-compile regex patterns at module load time for performance.
+# Previously 30+ patterns were compiled on every call to sanitize_error_message().
+_COMPILED_SENSITIVE_PATTERNS = [
+    (re.compile(pattern, re.IGNORECASE), replacement)
+    for pattern, replacement in SENSITIVE_PATTERNS
+]
+
 # Generic error messages for common exception types
 EXCEPTION_TYPE_MESSAGES = {
     "ValueError": "Invalid input value",
@@ -368,9 +375,10 @@ def sanitize_error_message(error: Exception, context: Optional[str] = None) -> s
         return generic_msg
 
     # Step 2: Apply regex patterns to redact sensitive information
+    # MED-16 FIX: Use pre-compiled patterns for performance
     sanitized = error_message
-    for pattern, replacement in SENSITIVE_PATTERNS:
-        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    for compiled_re, replacement in _COMPILED_SENSITIVE_PATTERNS:
+        sanitized = compiled_re.sub(replacement, sanitized)
 
     # Step 3: If message still contains sensitive indicators, use generic message
     sensitive_indicators = [

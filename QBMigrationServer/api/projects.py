@@ -302,10 +302,11 @@ def delete_project(project_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    # Check if there are active migrations
+    # MED-04 FIX: Check for active migrations using all valid active statuses.
+    # "migrating" removed (not a valid status), "provisioning" and "queued" added.
     active_migrations = Migration.query.filter(
         Migration.session_id == project.session_id,
-        Migration.status.in_(["uploading", "processing", "migrating"]),
+        Migration.status.in_(["uploading", "processing", "provisioning", "queued"]),
     ).count()
 
     if active_migrations > 0:

@@ -136,6 +136,11 @@ export function sanitizeUrl(url: string | null | undefined): string {
         return '';
     }
 
+    // LOW-11 FIX: Block protocol-relative URLs (//evil.com) which could redirect to external sites
+    if (trimmed.startsWith('//') && !trimmed.startsWith('///')) {
+        return '';
+    }
+
     // Allow http, https, mailto, tel, and relative URLs
     const safeProtocols = ['http://', 'https://', 'mailto:', 'tel:', '/', '#', '?'];
     if (!safeProtocols.some(protocol => trimmed.startsWith(protocol)) && !trimmed.startsWith('.')) {

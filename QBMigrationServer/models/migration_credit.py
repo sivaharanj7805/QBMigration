@@ -184,19 +184,27 @@ class MigrationCredit(db.Model):
     def use_for_migration(self, migration_id, transactions_count=0):
         """
         Use this credit for a migration.
+        HIGH-11 FIX: Uses SELECT FOR UPDATE to prevent TOCTOU double-spend.
+
         Returns True if successful, False if credit can't be used.
         """
-        if self.status != "available":
+        # HIGH-11 FIX: Re-read with row lock to prevent concurrent consumption
+        locked_credit = (
+            MigrationCredit.query.filter_by(id=self.id)
+            .with_for_update()
+            .first()
+        )
+        if not locked_credit or locked_credit.status != "available":
             return False
 
         # Check transaction limit (skip if unlimited = -1)
-        if self.transaction_limit != -1 and transactions_count > self.transaction_limit:
+        if locked_credit.transaction_limit != -1 and transactions_count > locked_credit.transaction_limit:
             return False
 
-        self.status = "used"
-        self.migration_id = migration_id
-        self.transactions_used = transactions_count
-        self.used_at = datetime.now(timezone.utc)
+        locked_credit.status = "used"
+        locked_credit.migration_id = migration_id
+        locked_credit.transactions_used = transactions_count
+        locked_credit.used_at = datetime.now(timezone.utc)
         db.session.commit()
         return True
 

@@ -642,7 +642,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         public List<QBAccount> ExtractAccounts()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendAccountQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -685,7 +685,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         public List<QBCustomer> ExtractCustomers()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendCustomerQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -779,7 +779,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         public List<QBVendor> ExtractVendors()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendVendorQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -844,7 +844,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         public List<QBEmployee> ExtractEmployees()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendEmployeeQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -895,7 +895,7 @@ namespace QBDesktopExtractor
 
         public List<QBLead> ExtractLeads()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendLeadQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -940,7 +940,7 @@ namespace QBDesktopExtractor
 
         public List<QBOtherName> ExtractOtherNames()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendOtherNameQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -989,7 +989,7 @@ namespace QBDesktopExtractor
             var items = new List<QBItem>();
 
             // Extract all item types using ItemQuery (which returns all types)
-            var allItems = iteratorHelper.ExtractWithIterator(
+            var allItems = _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendItemQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1514,7 +1514,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         public List<QBPayrollItemWage> ExtractPayrollItemWages()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendPayrollItemWageQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1538,7 +1538,7 @@ namespace QBDesktopExtractor
 
         public List<QBPayrollItemNonWage> ExtractPayrollItemNonWages()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendPayrollItemNonWageQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1733,7 +1733,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBInvoice> ExtractInvoices()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendInvoiceQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1805,7 +1805,7 @@ namespace QBDesktopExtractor
 
         private List<QBPurchaseOrder> ExtractPurchaseOrders()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendPurchaseOrderQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1871,7 +1871,7 @@ namespace QBDesktopExtractor
 
         private List<QBSalesOrder> ExtractSalesOrders()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendSalesOrderQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -1940,7 +1940,7 @@ namespace QBDesktopExtractor
 
         private List<QBBill> ExtractBills()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendBillQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2020,7 +2020,7 @@ namespace QBDesktopExtractor
 
         private List<QBBillPaymentCheck> ExtractBillPayments()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendBillPaymentCheckQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2079,7 +2079,7 @@ namespace QBDesktopExtractor
 
         private List<QBVendorCredit> ExtractVendorCredits()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendVendorCreditQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2157,7 +2157,7 @@ namespace QBDesktopExtractor
 
         private List<QBReceivePayment> ExtractReceivePayments()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendReceivePaymentQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2220,7 +2220,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBCheck> ExtractChecks()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendCheckQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2303,7 +2303,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBCreditCardCharge> ExtractCreditCardCharges()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendCreditCardChargeQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2385,7 +2385,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBCreditCardCredit> ExtractCreditCardCredits()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendCreditCardCreditQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2467,7 +2467,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBCharge> ExtractCharges()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendChargeQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2503,7 +2503,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBCreditMemo> ExtractCreditMemos()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendCreditMemoQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2563,7 +2563,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBDeposit> ExtractDeposits()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendDepositQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2642,7 +2642,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBInventoryAdjustment> ExtractInventoryAdjustments()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendInventoryAdjustmentQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2698,7 +2698,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBItemReceipt> ExtractItemReceipts()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendItemReceiptQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2782,7 +2782,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBBuildAssembly> ExtractBuildAssemblies()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendBuildAssemblyQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2828,7 +2828,7 @@ namespace QBDesktopExtractor
 
         private List<QBTransfer> ExtractTransfers()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendTransferQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2862,7 +2862,7 @@ namespace QBDesktopExtractor
 
         private List<QBInventoryTransfer> ExtractInventoryTransfers()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendTransferInventoryQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2913,7 +2913,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBSalesReceipt> ExtractSalesReceipts()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendSalesReceiptQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -2978,7 +2978,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBEstimate> ExtractEstimates()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendEstimateQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -3037,7 +3037,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBJournalEntry> ExtractJournalEntries()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendJournalEntryQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -3351,7 +3351,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBBillPaymentCreditCard> ExtractBillPaymentCreditCards()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendBillPaymentCreditCardQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -3402,7 +3402,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBARRefundCreditCard> ExtractARRefundCreditCards()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendARRefundCreditCardQueryRq(),
                 recordParser: (record, index) =>
                 {
@@ -3434,7 +3434,7 @@ namespace QBDesktopExtractor
         // ========================================================================
         private List<QBSalesTaxPaymentCheck> ExtractSalesTaxPayments()
         {
-            return iteratorHelper.ExtractWithIterator(
+            return _iteratorHelper.ExtractWithIterator(
                 queryAppender: (request) => request.AppendSalesTaxPaymentCheckQueryRq(),
                 recordParser: (record, index) =>
                 {

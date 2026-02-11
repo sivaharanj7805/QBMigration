@@ -43,12 +43,14 @@ const phaseDescriptions = {
 export function PizzaTracker({
     phases,
     currentPhase: _currentPhase,
-    overallPercentage,
+    overallPercentage: rawPercentage,
     currentEntity,
     statusMessage,
     companyName,
     elapsedSeconds = 0,
 }: PizzaTrackerProps) {
+    // LOW-08 FIX: Clamp percentage to 0-100 range
+    const overallPercentage = Math.min(100, Math.max(0, rawPercentage));
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);

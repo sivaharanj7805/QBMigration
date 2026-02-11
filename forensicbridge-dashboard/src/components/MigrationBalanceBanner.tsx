@@ -33,6 +33,8 @@ export function MigrationBalanceBanner() {
     const [balanceData, setBalanceData] = useState<MigrationBalanceData | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    // MED-07 FIX: Track API errors to show user-facing feedback
+    const [fetchError, setFetchError] = useState(false);
 
     // FIX: Track mounted state to prevent state updates on unmounted component
     const isMountedRef = useRef(true);
@@ -66,9 +68,10 @@ export function MigrationBalanceBanner() {
                 }
             }
         } catch (error) {
-            // FIX: Only log errors in development mode
-            if (process.env.NODE_ENV === 'development') {
-                console.error('Failed to load balance data:', error);
+            console.error('Failed to load balance data:', error);
+            // MED-07 FIX: Set error state so user sees feedback instead of blank
+            if (isMountedRef.current) {
+                setFetchError(true);
             }
         } finally {
             // FIX: Check if mounted before setting state in finally block
@@ -112,6 +115,20 @@ export function MigrationBalanceBanner() {
                             <div className="h-3 w-64 bg-gray-200 dark:bg-gray-700 rounded" />
                         </div>
                     </div>
+                </div>
+            </div>
+        );
+    }
+
+    // MED-07 FIX: Show error banner when API fails instead of silently failing
+    if (fetchError && !balanceData) {
+        return (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-6">
+                <div className="flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-500" />
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                        Unable to load migration balance. Please check your connection.
+                    </p>
                 </div>
             </div>
         );

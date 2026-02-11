@@ -52,8 +52,10 @@ def verify_webhook_signature(migration_id, signature, timestamp):
         if webhook_time.tzinfo is None:
             webhook_time = webhook_time.replace(tzinfo=timezone.utc)
         age = datetime.now(timezone.utc) - webhook_time
+        # MED-02 FIX: Reduced default replay window from 5 minutes to 2 minutes
+        # to shrink the window for delayed replay attacks.
         max_age = timedelta(
-            minutes=current_app.config.get("WEBHOOK_REPLAY_WINDOW_MINUTES", 5)
+            minutes=current_app.config.get("WEBHOOK_REPLAY_WINDOW_MINUTES", 2)
         )
 
         if age > max_age:

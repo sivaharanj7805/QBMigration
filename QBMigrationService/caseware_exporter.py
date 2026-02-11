@@ -236,8 +236,11 @@ class CasewareExporter:
                     value = f"{Decimal(str(value)):.2f}"
                 hash_input.append(f"{key}:{value}")
 
-        # Compute SHA-256
-        canonical_string = "|".join(hash_input)
+        # HIGH-01 FIX: Escape pipe characters in values to prevent separator collision.
+        # Without this, field values containing "|" create ambiguous canonical forms
+        # that could allow different records to produce the same hash.
+        escaped_input = [part.replace("\\", "\\\\").replace("|", "\\|") for part in hash_input]
+        canonical_string = "|".join(escaped_input)
         hash_bytes = hashlib.sha256(canonical_string.encode("utf-8")).hexdigest()
 
         return hash_bytes
@@ -352,7 +355,10 @@ class CasewareExporter:
             type_code = self.leadsheet_mapper.get_type_code(acct_type)
 
             # FIX #33: Get Lead Sheet code from locale-aware mapper
+            # LOW-04 FIX: Log warning if lead sheet mapping fails
             lead_sheet = self.leadsheet_mapper.get_lead_sheet_code(acct_type)
+            if not lead_sheet:
+                logger.warning(f"No lead sheet mapping for account type '{acct_type}' (account: {raw_acct_name})")
 
             # Determine debit/credit
             if acct_type in self.DEBIT_TYPES:
@@ -413,9 +419,11 @@ class CasewareExporter:
                 # CASEWARE FORMAT: Header row MUST be row 1
                 writer.writerow(headers)
 
-                # Write data rows (row 2 onwards) - exclude TOTALS row for Caseware
-                # TOTALS row would be imported as an account and fail validation
-                for row in rows[:-1]:  # Exclude last row (TOTALS)
+                # LOW-05 FIX: Explicitly filter out TOTALS row by content check
+                # instead of assuming it's always the last row.
+                for row in rows:
+                    if row[1] == "TOTALS":
+                        continue  # Skip TOTALS row (not valid for CaseWare import)
                     writer.writerow(row)
         except IOError as e:
             logger.error(f"Failed to write Trial Balance file: {e}")
