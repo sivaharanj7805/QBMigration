@@ -30,6 +30,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
+# AUDIT FIX MUST-01: Redis advisory lock to prevent concurrent migrations
+# to the same QBO realm_id. Without this, two users migrating to the same
+# company could create duplicate Customers/Vendors (creates don't use SyncToken).
+try:
+    import redis as _redis_mod
+except ImportError:
+    _redis_mod = None
+
 # FIX #35: TYPE_CHECKING for forward references without circular imports
 if TYPE_CHECKING:
     from data_transformer import QBDataTransformer
@@ -59,61 +67,113 @@ class MigrationOrchestrator:
     # canonical entity type names used by the entity_order pipeline.
     _KEY_NORMALIZATION_MAP: Dict[str, str] = {
         # Master lists
-        "account": "Accounts", "accounts": "Accounts",
-        "customer": "Customers", "customers": "Customers",
-        "vendor": "Vendors", "vendors": "Vendors",
-        "item": "Items", "items": "Items",
-        "employee": "Employees", "employees": "Employees",
+        "account": "Accounts",
+        "accounts": "Accounts",
+        "customer": "Customers",
+        "customers": "Customers",
+        "vendor": "Vendors",
+        "vendors": "Vendors",
+        "item": "Items",
+        "items": "Items",
+        "employee": "Employees",
+        "employees": "Employees",
         # Configuration lists
-        "class": "Classes", "classes": "Classes",
-        "department": "Departments", "departments": "Departments",
-        "term": "Terms", "terms": "Terms",
-        "paymentmethod": "PaymentMethods", "paymentmethods": "PaymentMethods",
-        "taxcode": "TaxCodes", "taxcodes": "TaxCodes", "salestaxcodes": "TaxCodes",
-        "taxrate": "TaxRates", "taxrates": "TaxRates",
-        "taxagency": "TaxAgencies", "taxagencies": "TaxAgencies",
-        "companycurrency": "CompanyCurrencies", "companycurrencies": "CompanyCurrencies",
+        "class": "Classes",
+        "classes": "Classes",
+        "department": "Departments",
+        "departments": "Departments",
+        "term": "Terms",
+        "terms": "Terms",
+        "paymentmethod": "PaymentMethods",
+        "paymentmethods": "PaymentMethods",
+        "taxcode": "TaxCodes",
+        "taxcodes": "TaxCodes",
+        "salestaxcodes": "TaxCodes",
+        "taxrate": "TaxRates",
+        "taxrates": "TaxRates",
+        "taxagency": "TaxAgencies",
+        "taxagencies": "TaxAgencies",
+        "companycurrency": "CompanyCurrencies",
+        "companycurrencies": "CompanyCurrencies",
         "currencies": "CompanyCurrencies",
         # Transactions
-        "invoice": "Invoices", "invoices": "Invoices",
-        "bill": "Bills", "bills": "Bills",
-        "payment": "Payments", "payments": "Payments", "receivepayments": "Payments",
-        "estimate": "Estimates", "estimates": "Estimates",
-        "salesreceipt": "SalesReceipts", "salesreceipts": "SalesReceipts",
-        "creditmemo": "CreditMemos", "creditmemos": "CreditMemos",
-        "vendorcredit": "VendorCredits", "vendorcredits": "VendorCredits",
-        "billpayment": "BillPayments", "billpayments": "BillPayments",
-        "purchaseorder": "PurchaseOrders", "purchaseorders": "PurchaseOrders",
-        "purchase": "Purchases", "purchases": "Purchases",
-        "checks": "Purchases", "creditcardcharges": "Purchases",
-        "journalentry": "JournalEntries", "journalentries": "JournalEntries",
-        "deposit": "Deposits", "deposits": "Deposits",
-        "transfer": "Transfers", "transfers": "Transfers",
-        "refundreceipt": "RefundReceipts", "refundreceipts": "RefundReceipts",
-        "timeactivity": "TimeActivities", "timeactivities": "TimeActivities",
-        "inventoryadjustment": "InventoryAdjustments", "inventoryadjustments": "InventoryAdjustments",
-        "taxpayment": "TaxPayments", "taxpayments": "TaxPayments",
+        "invoice": "Invoices",
+        "invoices": "Invoices",
+        "bill": "Bills",
+        "bills": "Bills",
+        "payment": "Payments",
+        "payments": "Payments",
+        "receivepayments": "Payments",
+        "estimate": "Estimates",
+        "estimates": "Estimates",
+        "salesreceipt": "SalesReceipts",
+        "salesreceipts": "SalesReceipts",
+        "creditmemo": "CreditMemos",
+        "creditmemos": "CreditMemos",
+        "vendorcredit": "VendorCredits",
+        "vendorcredits": "VendorCredits",
+        "billpayment": "BillPayments",
+        "billpayments": "BillPayments",
+        "purchaseorder": "PurchaseOrders",
+        "purchaseorders": "PurchaseOrders",
+        "purchase": "Purchases",
+        "purchases": "Purchases",
+        "checks": "Purchases",
+        "creditcardcharges": "Purchases",
+        "journalentry": "JournalEntries",
+        "journalentries": "JournalEntries",
+        "deposit": "Deposits",
+        "deposits": "Deposits",
+        "transfer": "Transfers",
+        "transfers": "Transfers",
+        "refundreceipt": "RefundReceipts",
+        "refundreceipts": "RefundReceipts",
+        "timeactivity": "TimeActivities",
+        "timeactivities": "TimeActivities",
+        "inventoryadjustment": "InventoryAdjustments",
+        "inventoryadjustments": "InventoryAdjustments",
+        "taxpayment": "TaxPayments",
+        "taxpayments": "TaxPayments",
         "salestaxpayments": "TaxPayments",
-        "attachable": "Attachables", "attachables": "Attachables",
+        "attachable": "Attachables",
+        "attachables": "Attachables",
         # New entity types
-        "salesorder": "SalesOrders", "salesorders": "SalesOrders",
-        "itemreceipt": "ItemReceipts", "itemreceipts": "ItemReceipts",
-        "charge": "Charges", "charges": "Charges",
-        "othername": "OtherNames", "othernames": "OtherNames",
-        "datedriventerm": "DateDrivenTerms", "datedriventerms": "DateDrivenTerms",
-        "lead": "Leads", "leads": "Leads",
-        "buildassembly": "BuildAssemblies", "buildassemblies": "BuildAssemblies",
-        "inventorytransfer": "InventoryTransfers", "inventorytransfers": "InventoryTransfers",
-        "dataextension": "DataExtensions", "dataextensions": "DataExtensions",
-        "salesrep": "SalesReps", "salesreps": "SalesReps",
-        "customermessage": "CustomerMessages", "customermessages": "CustomerMessages",
-        "jobtype": "JobTypes", "jobtypes": "JobTypes",
-        "vendortype": "VendorTypes", "vendortypes": "VendorTypes",
-        "pricelevel": "PriceLevels", "pricelevels": "PriceLevels",
-        "salestaxgroup": "SalesTaxGroups", "salestaxgroups": "SalesTaxGroups",
-        "shipmethod": "ShipMethods", "shipmethods": "ShipMethods",
-        "inventorysite": "InventorySites", "inventorysites": "InventorySites",
-        "customertype": "CustomerTypes", "customertypes": "CustomerTypes",
+        "salesorder": "SalesOrders",
+        "salesorders": "SalesOrders",
+        "itemreceipt": "ItemReceipts",
+        "itemreceipts": "ItemReceipts",
+        "charge": "Charges",
+        "charges": "Charges",
+        "othername": "OtherNames",
+        "othernames": "OtherNames",
+        "datedriventerm": "DateDrivenTerms",
+        "datedriventerms": "DateDrivenTerms",
+        "lead": "Leads",
+        "leads": "Leads",
+        "buildassembly": "BuildAssemblies",
+        "buildassemblies": "BuildAssemblies",
+        "inventorytransfer": "InventoryTransfers",
+        "inventorytransfers": "InventoryTransfers",
+        "dataextension": "DataExtensions",
+        "dataextensions": "DataExtensions",
+        "salesrep": "SalesReps",
+        "salesreps": "SalesReps",
+        "customermessage": "CustomerMessages",
+        "customermessages": "CustomerMessages",
+        "jobtype": "JobTypes",
+        "jobtypes": "JobTypes",
+        "vendortype": "VendorTypes",
+        "vendortypes": "VendorTypes",
+        "pricelevel": "PriceLevels",
+        "pricelevels": "PriceLevels",
+        "salestaxgroup": "SalesTaxGroups",
+        "salestaxgroups": "SalesTaxGroups",
+        "shipmethod": "ShipMethods",
+        "shipmethods": "ShipMethods",
+        "inventorysite": "InventorySites",
+        "inventorysites": "InventorySites",
+        "customertype": "CustomerTypes",
+        "customertypes": "CustomerTypes",
     }
 
     def __init__(
@@ -165,6 +225,81 @@ class MigrationOrchestrator:
         self._qbo_client = None
         self._transformer = None
         self._verifier = None
+
+    # AUDIT FIX MUST-01: Realm lock timeout (2 hours matches migration timeout)
+    _REALM_LOCK_TTL_SECONDS = 7200
+    _REALM_LOCK_KEY_PREFIX = "migration_lock:realm:"
+
+    def _acquire_realm_lock(self) -> bool:
+        """Acquire a distributed Redis lock for this QBO realm_id.
+
+        Prevents concurrent migrations to the same QBO company, which would
+        create duplicate entities (creates don't use SyncToken for conflict
+        detection). Returns True if lock acquired, False if another migration
+        is already running against this realm.
+        """
+        if _redis_mod is None:
+            logger.warning(
+                "redis package not installed — realm lock unavailable. "
+                "Concurrent migration protection is disabled."
+            )
+            return True  # Degrade gracefully — don't block if Redis unavailable
+
+        redis_url = os.environ.get("REDIS_URL")
+        if not redis_url:
+            logger.warning("REDIS_URL not set — realm lock unavailable.")
+            return True
+
+        lock_key = f"{self._REALM_LOCK_KEY_PREFIX}{self.realm_id}"
+        lock_value = f"{os.getpid()}:{uuid.uuid4().hex[:8]}"
+
+        try:
+            conn = _redis_mod.from_url(redis_url, socket_connect_timeout=5)
+            # SET NX = acquire only if not already held
+            acquired = conn.set(
+                lock_key,
+                lock_value,
+                nx=True,
+                ex=self._REALM_LOCK_TTL_SECONDS,
+            )
+            if acquired:
+                self._realm_lock_conn = conn
+                self._realm_lock_key = lock_key
+                self._realm_lock_value = lock_value
+                logger.info(f"Acquired realm lock for {self.realm_id}")
+                return True
+            else:
+                holder = conn.get(lock_key)
+                logger.error(
+                    f"Realm {self.realm_id} is locked by another migration "
+                    f"(holder={holder}). Cannot start concurrent migration."
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to acquire realm lock (Redis error): {e}")
+            return True  # Degrade gracefully
+
+    def _release_realm_lock(self) -> None:
+        """Release the distributed realm lock using atomic Lua script."""
+        conn = getattr(self, "_realm_lock_conn", None)
+        key = getattr(self, "_realm_lock_key", None)
+        value = getattr(self, "_realm_lock_value", None)
+        if not conn or not key or not value:
+            return
+
+        # Atomic delete-if-owner to prevent releasing someone else's lock
+        lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        try:
+            conn.eval(lua_script, 1, key, value)
+            logger.info(f"Released realm lock for {self.realm_id}")
+        except Exception as e:
+            logger.warning(f"Failed to release realm lock: {e}")
 
     def _report_progress(self, percent: int, message: str) -> None:
         """Report progress to callback."""
@@ -273,6 +408,15 @@ class MigrationOrchestrator:
         """
         import signal
 
+        # AUDIT FIX MUST-01: Acquire distributed lock to prevent concurrent
+        # migrations to the same QBO company (realm_id). Without this, two
+        # users could create duplicate Customers/Vendors simultaneously.
+        if not self._acquire_realm_lock():
+            raise RuntimeError(
+                f"Another migration is already running for QBO company {self.realm_id}. "
+                f"Please wait for it to complete before starting a new one."
+            )
+
         # FIX #12: Add timeout protection to prevent infinite migrations
         def _migration_timeout_handler(signum, frame):
             raise TimeoutError(
@@ -298,12 +442,17 @@ class MigrationOrchestrator:
             logger.error(f"Migration failed: {e}")
             if hasattr(self, "_qbo_client") and self._qbo_client:
                 try:
-                    if hasattr(self._qbo_client, "session") and self._qbo_client.session:
+                    if (
+                        hasattr(self._qbo_client, "session")
+                        and self._qbo_client.session
+                    ):
                         self._qbo_client.session.close()
                 except Exception as cleanup_err:
                     logger.debug(f"QBO session cleanup error: {cleanup_err}")
             raise
         finally:
+            # Always release the realm lock so the next migration can proceed
+            self._release_realm_lock()
             # Always restore signal handler and cancel alarm
             if hasattr(signal, "SIGALRM"):
                 signal.alarm(0)
@@ -384,12 +533,16 @@ class MigrationOrchestrator:
         logger.info(f"Starting migration {migration_id} for {company_name}")
 
         # AUDIT FIX P10-M1: Enforce tier transaction limit
-        tier = getattr(self, "subscription_tier", None) or os.environ.get("SUBSCRIPTION_TIER", "professional")
+        tier = getattr(self, "subscription_tier", None) or os.environ.get(
+            "SUBSCRIPTION_TIER", "professional"
+        )
         tier_limit = self.TIER_TRANSACTION_LIMITS.get(tier.lower(), 100_000)
-        logger.info(f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}")
+        logger.info(
+            f"Migration {migration_id}: tier={tier}, transaction_limit={tier_limit}"
+        )
         transformer = None  # Initialize before try so except block can access it
         qbo_client = None  # AUDIT FIX CRIT-02: Init before try so rollback can safely reference it
-        oauth_mgr = None   # AUDIT FIX CRIT-01: Init before try so rollback can safely reference it
+        oauth_mgr = None  # AUDIT FIX CRIT-01: Init before try so rollback can safely reference it
 
         # FIX #13: Track created entity IDs for potential rollback
         self._created_entity_ids: Dict[str, List[str]] = defaultdict(list)
@@ -601,13 +754,19 @@ class MigrationOrchestrator:
                 ids for ids in self._created_entity_ids.values()
             ):
                 try:
-                    logger.info(f"Migration {migration_id}: Attempting rollback of partial entities...")
+                    logger.info(
+                        f"Migration {migration_id}: Attempting rollback of partial entities..."
+                    )
                     rollback_result = self.rollback_migration(
                         qbo_client=qbo_client, oauth_manager=oauth_mgr
                     )
-                    logger.info(f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}")
+                    logger.info(
+                        f"Migration {migration_id}: Rollback result: {rollback_result.get('deleted', {})}"
+                    )
                 except Exception as rollback_err:
-                    logger.error(f"Migration {migration_id}: Rollback failed: {rollback_err}")
+                    logger.error(
+                        f"Migration {migration_id}: Rollback failed: {rollback_err}"
+                    )
                     rollback_result = {"rollback_error": str(rollback_err)}
 
             # Preserve partial progress and manual_review even on failure
@@ -1152,8 +1311,12 @@ class MigrationOrchestrator:
             # Sequential processing — single batch or single worker
             for batch_idx, batch in enumerate(batches):
                 mappings, batch_fails = self._send_batch_request(
-                    qbo_client, api_entity_type, batch,
-                    oauth_manager, migration_id, batch_idx,
+                    qbo_client,
+                    api_entity_type,
+                    batch,
+                    oauth_manager,
+                    migration_id,
+                    batch_idx,
                 )
                 success_count += len(mappings)
                 fail_count += batch_fails
@@ -1170,8 +1333,12 @@ class MigrationOrchestrator:
                 for batch_idx, batch in enumerate(batches):
                     future = executor.submit(
                         self._send_batch_request,
-                        qbo_client, api_entity_type, batch,
-                        oauth_manager, migration_id, batch_idx,
+                        qbo_client,
+                        api_entity_type,
+                        batch,
+                        oauth_manager,
+                        migration_id,
+                        batch_idx,
                     )
                     futures[future] = batch
 

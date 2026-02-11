@@ -298,7 +298,9 @@ class TestCompleteExtraction:
         assert response.status_code == 403
         data = response.get_json()
         assert data["success"] is False
-        assert "extraction" in data["error"].lower() or "active" in data["error"].lower()
+        assert (
+            "extraction" in data["error"].lower() or "active" in data["error"].lower()
+        )
 
 
 # ---------------------------------------------------------------------------

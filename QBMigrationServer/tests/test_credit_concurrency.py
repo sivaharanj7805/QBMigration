@@ -11,7 +11,7 @@ Covers:
 
 import os
 import threading
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -216,7 +216,10 @@ class TestFindBestCredit:
         """Returns the smallest credit that can handle the transaction count."""
         # Create user first
         from models.user import User
-        user = User(email="credit-test@example.com", first_name="Test", last_name="User")
+
+        user = User(
+            email="credit-test@example.com", first_name="Test", last_name="User"
+        )
         user.set_password("TestPassword1234!")
         db_session.add(user)
         db_session.commit()
@@ -258,6 +261,7 @@ class TestFindBestCredit:
     def test_no_suitable_credit(self, db_session):
         """Returns None when no credit can handle the transaction count."""
         from models.user import User
+
         user = User(email="nocredit@example.com", first_name="No", last_name="Credit")
         user.set_password("TestPassword1234!")
         db_session.add(user)
@@ -282,6 +286,7 @@ class TestFindBestCredit:
     def test_skips_used_credits(self, db_session):
         """Used credits are not returned."""
         from models.user import User
+
         user = User(email="used@example.com", first_name="Used", last_name="Credit")
         user.set_password("TestPassword1234!")
         db_session.add(user)
@@ -306,6 +311,7 @@ class TestFindBestCredit:
     def test_unlimited_credit_sorted_last(self, db_session):
         """Unlimited credits are used only when smaller ones insufficient."""
         from models.user import User
+
         user = User(email="unlim@example.com", first_name="Unlim", last_name="Test")
         user.set_password("TestPassword1234!")
         db_session.add(user)
@@ -343,6 +349,7 @@ class TestGetAvailableForUser:
     def test_returns_only_available_paid(self, db_session):
         """Only returns credits with status=available AND payment_status=paid."""
         from models.user import User
+
         user = User(email="avail@example.com", first_name="Avail", last_name="Test")
         user.set_password("TestPassword1234!")
         db_session.add(user)
@@ -350,21 +357,35 @@ class TestGetAvailableForUser:
 
         # Available + Paid (should be returned)
         credit1 = MigrationCredit(
-            user_id=user.id, tier_type="starter", transaction_limit=5000,
-            price_cents=49700, stripe_checkout_session_id="cs_ap",
-            stripe_payment_intent_id="pi_ap", payment_status="paid", status="available",
+            user_id=user.id,
+            tier_type="starter",
+            transaction_limit=5000,
+            price_cents=49700,
+            stripe_checkout_session_id="cs_ap",
+            stripe_payment_intent_id="pi_ap",
+            payment_status="paid",
+            status="available",
         )
         # Available but NOT paid (should NOT be returned)
         credit2 = MigrationCredit(
-            user_id=user.id, tier_type="business", transaction_limit=25000,
-            price_cents=99700, stripe_checkout_session_id="cs_anp",
-            payment_status="pending", status="available",
+            user_id=user.id,
+            tier_type="business",
+            transaction_limit=25000,
+            price_cents=99700,
+            stripe_checkout_session_id="cs_anp",
+            payment_status="pending",
+            status="available",
         )
         # Paid but used (should NOT be returned)
         credit3 = MigrationCredit(
-            user_id=user.id, tier_type="professional", transaction_limit=100000,
-            price_cents=199700, stripe_checkout_session_id="cs_pu",
-            stripe_payment_intent_id="pi_pu", payment_status="paid", status="used",
+            user_id=user.id,
+            tier_type="professional",
+            transaction_limit=100000,
+            price_cents=199700,
+            stripe_checkout_session_id="cs_pu",
+            stripe_payment_intent_id="pi_pu",
+            payment_status="paid",
+            status="used",
         )
         db_session.add_all([credit1, credit2, credit3])
         db_session.commit()
@@ -380,6 +401,7 @@ class TestGetCreditsSummary:
     def test_summary_includes_only_paid(self, db_session):
         """Summary only counts paid credits."""
         from models.user import User
+
         user = User(email="summary@example.com", first_name="Sum", last_name="Test")
         user.set_password("TestPassword1234!")
         db_session.add(user)
@@ -392,10 +414,16 @@ class TestGetCreditsSummary:
             ("pending", "pending", "cs_s3"),
         ]:
             credit = MigrationCredit(
-                user_id=user.id, tier_type="starter", transaction_limit=5000,
-                price_cents=49700, stripe_checkout_session_id=sid,
-                stripe_payment_intent_id=f"pi_{sid}" if payment_status == "paid" else None,
-                payment_status=payment_status, status=status,
+                user_id=user.id,
+                tier_type="starter",
+                transaction_limit=5000,
+                price_cents=49700,
+                stripe_checkout_session_id=sid,
+                stripe_payment_intent_id=(
+                    f"pi_{sid}" if payment_status == "paid" else None
+                ),
+                payment_status=payment_status,
+                status=status,
             )
             db_session.add(credit)
         db_session.commit()
@@ -412,8 +440,12 @@ class TestToDict:
     def test_to_dict_includes_all_fields(self):
         """to_dict includes all expected fields."""
         credit = MigrationCredit(
-            id=1, tier_type="business", transaction_limit=25000,
-            price_cents=99700, status="available", payment_status="paid",
+            id=1,
+            tier_type="business",
+            transaction_limit=25000,
+            price_cents=99700,
+            status="available",
+            payment_status="paid",
         )
         d = credit.to_dict()
 

@@ -181,7 +181,9 @@ class MigrationOrchestrator:
                 return False
 
             if scan_result["warnings"]:
-                logger.info(f"\n[WARN] Found {len(scan_result['warnings'])} warning(s):")
+                logger.info(
+                    f"\n[WARN] Found {len(scan_result['warnings'])} warning(s):"
+                )
                 for warning in scan_result["warnings"][:3]:
                     logger.info(f"  • {warning}")
 
@@ -238,7 +240,9 @@ class MigrationOrchestrator:
                     transformed_data["trial_balance"], qb_data
                 )
 
-                logger.info(f"\n[REPORT] Generated discrepancy report: {discrepancy_report}")
+                logger.info(
+                    f"\n[REPORT] Generated discrepancy report: {discrepancy_report}"
+                )
                 logger.info("\n[WARN] NEXT STEPS:")
                 logger.info("   1. Review the discrepancy report")
                 logger.info("   2. Fix the trial balance in QuickBooks Desktop")
@@ -269,7 +273,9 @@ class MigrationOrchestrator:
             # CRITICAL FIX: Validate QBO credentials before upload
             # SECURITY FIX: Read from instance tokens first, fall back to env vars
             qbo_plan = os.getenv("QBO_PLAN", "Plus")
-            access_token = self._oauth_tokens.get("access_token") or os.getenv("QBO_ACCESS_TOKEN")
+            access_token = self._oauth_tokens.get("access_token") or os.getenv(
+                "QBO_ACCESS_TOKEN"
+            )
             realm_id = self._oauth_tokens.get("realm_id") or os.getenv("QBO_REALM_ID")
 
             if not access_token:
@@ -289,9 +295,15 @@ class MigrationOrchestrator:
 
             # Initialize OAuth manager for automatic token refresh during long migrations
             oauth_mgr = None
-            client_id = self._oauth_tokens.get("client_id") or os.getenv("QBO_CLIENT_ID")
-            client_secret = self._oauth_tokens.get("client_secret") or os.getenv("QBO_CLIENT_SECRET")
-            refresh_token = self._oauth_tokens.get("refresh_token") or os.getenv("QBO_REFRESH_TOKEN")
+            client_id = self._oauth_tokens.get("client_id") or os.getenv(
+                "QBO_CLIENT_ID"
+            )
+            client_secret = self._oauth_tokens.get("client_secret") or os.getenv(
+                "QBO_CLIENT_SECRET"
+            )
+            refresh_token = self._oauth_tokens.get("refresh_token") or os.getenv(
+                "QBO_REFRESH_TOKEN"
+            )
             if client_id and client_secret and refresh_token:
                 try:
                     from config import (
@@ -434,9 +446,7 @@ class MigrationOrchestrator:
             # Step 7: Schedule deletion of TEMPORARY files only
             # CRITICAL FIX: Do NOT delete user's original encrypted source file
             # Only delete files WE created during migration
-            logger.info(
-                "\nSTEP 7: Scheduling secure deletion of temporary files..."
-            )
+            logger.info("\nSTEP 7: Scheduling secure deletion of temporary files...")
             files_to_delete = [decrypted_file]  # Only the decrypted temp file
 
             # Only delete results file if user explicitly requests

@@ -485,9 +485,7 @@ def _decrypt_qbo_credentials(migration_id, data):
         try:
             from api.EncryptionManager import decrypt_client_credentials
 
-            qbo_credentials = decrypt_client_credentials(
-                data["encrypted_credentials"]
-            )
+            qbo_credentials = decrypt_client_credentials(data["encrypted_credentials"])
             logger.info(f"Migration {migration_id}: Using encrypted credentials")
         except Exception as e:
             logger.error(f"Failed to decrypt credentials for {migration_id}: {e}")
@@ -518,8 +516,7 @@ def _decrypt_qbo_credentials(migration_id, data):
         )
 
     if not qbo_credentials or not all(
-        k in qbo_credentials
-        for k in ["client_id", "client_secret", "refresh_token"]
+        k in qbo_credentials for k in ["client_id", "client_secret", "refresh_token"]
     ):
         return None, (
             jsonify(
@@ -613,23 +610,25 @@ def _provision_aws_instance(migration_id, migration, qbo_credentials):
 
     if not instance_id:
         logger.error(f"Failed to create EC2 instance for {migration_id}")
-        if hasattr(migration, "mark_as_failed") and callable(
-            migration.mark_as_failed
-        ):
+        if hasattr(migration, "mark_as_failed") and callable(migration.mark_as_failed):
             migration.mark_as_failed(
                 "Failed to create AWS instance", "EC2_CREATE_ERROR"
             )
         else:
             migration.status = "failed"
             db.session.commit()
-        return None, None, (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "Failed to create AWS instance. Please try again.",
-                }
+        return (
+            None,
+            None,
+            (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Failed to create AWS instance. Please try again.",
+                    }
+                ),
+                500,
             ),
-            500,
         )
 
     # Mark as processing
@@ -670,9 +669,7 @@ def _consume_migration_credit(user_id, migration_id, migration):
         logger.error(
             f"No credits available for migration {migration_id} (atomic check)"
         )
-        if hasattr(migration, "mark_as_failed") and callable(
-            migration.mark_as_failed
-        ):
+        if hasattr(migration, "mark_as_failed") and callable(migration.mark_as_failed):
             migration.mark_as_failed(
                 "No migration credits available", "CREDIT_EXHAUSTED"
             )
@@ -782,9 +779,7 @@ def start_migration(migration_id):
         # CRIT-02 FIX: Atomically consume credit BEFORE provisioning EC2.
         # This prevents orphaned EC2 instances when credits are exhausted
         # between the early check and provisioning.
-        consume_error = _consume_migration_credit(
-            user_id, migration_id, migration
-        )
+        consume_error = _consume_migration_credit(user_id, migration_id, migration)
         if consume_error:
             return consume_error
 
@@ -795,20 +790,21 @@ def start_migration(migration_id):
         if provision_error:
             # Refund the credit since provisioning failed
             try:
-                refund_credit = (
-                    MigrationCredit.query.filter_by(
-                        migration_id=migration_id, status="used"
-                    )
-                    .first()
-                )
+                refund_credit = MigrationCredit.query.filter_by(
+                    migration_id=migration_id, status="used"
+                ).first()
                 if refund_credit:
                     refund_credit.status = "available"
                     refund_credit.used_at = None
                     refund_credit.migration_id = None
                     db.session.commit()
-                    logger.info(f"Refunded credit for failed provisioning: {migration_id}")
+                    logger.info(
+                        f"Refunded credit for failed provisioning: {migration_id}"
+                    )
             except Exception as refund_err:
-                logger.error(f"Failed to refund credit after provisioning failure: {refund_err}")
+                logger.error(
+                    f"Failed to refund credit after provisioning failure: {refund_err}"
+                )
             return provision_error
 
         logger.info(f"Migration {migration_id} started on AWS instance {instance_id}")
@@ -876,9 +872,13 @@ def cancel_migration(migration_id):
     try:
         # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
         # cancel/retry races on the same migration row.
-        migration = Migration.query.filter_by(
-            migration_id=migration_id, user_id=_get_current_user_id()
-        ).with_for_update().first()
+        migration = (
+            Migration.query.filter_by(
+                migration_id=migration_id, user_id=_get_current_user_id()
+            )
+            .with_for_update()
+            .first()
+        )
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404
@@ -972,9 +972,13 @@ def retry_migration(migration_id):
     try:
         # UPLOAD-MED-05 FIX: Use SELECT FOR UPDATE to prevent concurrent
         # cancel/retry races on the same migration row.
-        migration = Migration.query.filter_by(
-            migration_id=migration_id, user_id=_get_current_user_id()
-        ).with_for_update().first()
+        migration = (
+            Migration.query.filter_by(
+                migration_id=migration_id, user_id=_get_current_user_id()
+            )
+            .with_for_update()
+            .first()
+        )
 
         if not migration:
             return jsonify({"success": False, "error": "Migration not found"}), 404

@@ -381,7 +381,9 @@ class EncryptionManager:
                 return plaintext
             except Exception as json_err:
                 # AUDIT FIX CRIT-11: Log JSON decryption failure before trying legacy
-                logger.warning(f"JSON-format decryption failed, trying legacy formats: {json_err}")
+                logger.warning(
+                    f"JSON-format decryption failed, trying legacy formats: {json_err}"
+                )
                 pass
 
         # Try legacy colon-separated formats
@@ -404,9 +406,7 @@ class EncryptionManager:
 
             elif len(parts) == 3:
                 # CBC mode (from .NET Framework version) - LEGACY ONLY
-                logger.info(
-                    "WARNING: Legacy CBC encryption detected. Upgrade to GCM."
-                )
+                logger.info("WARNING: Legacy CBC encryption detected. Upgrade to GCM.")
 
                 iv = base64.b64decode(parts[0])
                 ciphertext = base64.b64decode(parts[1])

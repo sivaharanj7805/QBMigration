@@ -12,7 +12,9 @@ import {
     Settings,
     LogOut,
     ChevronLeft,
-    ExternalLink
+    ExternalLink,
+    ShieldCheck,
+    HelpCircle,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getAuthState, clearAuth } from "@/lib/auth";
@@ -32,6 +34,9 @@ const bottomNav = [
     { name: "Settings", href: "/settings", icon: Settings },
 ];
 
+// AUDIT FIX MUST-04: Admin navigation item (shown only to admin/super_admin users)
+const adminNav = { name: "Admin", href: "/admin", icon: ShieldCheck };
+
 export function Sidebar() {
     const pathname = usePathname();
     const router = useRouter();
@@ -39,6 +44,7 @@ export function Sidebar() {
     const [userName, setUserName] = useState("");
     const [userCompany, setUserCompany] = useState("");
     const [userInitials, setUserInitials] = useState("");
+    const [isAdmin, setIsAdmin] = useState(false);
 
     // Load user data from localStorage
     useEffect(() => {
@@ -59,6 +65,10 @@ export function Sidebar() {
                 authState.user.company_name ||
                 "ForensicBridge User"
             );
+
+            // AUDIT FIX MUST-04: Show admin nav for admin/super_admin users
+            const role = authState.user.role;
+            setIsAdmin(role === "admin" || role === "super_admin");
 
             // Generate initials
             const nameParts = fullName.trim().split(' ').filter(Boolean);
@@ -162,6 +172,19 @@ export function Sidebar() {
 
             {/* Bottom Navigation */}
             <nav className="px-2 py-4 border-t border-gray-100 space-y-1" aria-label="Secondary">
+                {/* AUDIT FIX MUST-04: Admin panel link (visible only to admins) */}
+                {isAdmin && (
+                    <Link
+                        href={adminNav.href}
+                        className={`sidebar-link ${pathname === adminNav.href ? "active" : ""}`}
+                        title={collapsed ? adminNav.name : undefined}
+                        aria-current={pathname === adminNav.href ? "page" : undefined}
+                        aria-label={collapsed ? adminNav.name : undefined}
+                    >
+                        <adminNav.icon className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+                        {!collapsed && <span>{adminNav.name}</span>}
+                    </Link>
+                )}
                 {bottomNav.map((item) => {
                     const isActive = pathname === item.href;
                     return (
@@ -178,6 +201,18 @@ export function Sidebar() {
                         </Link>
                     );
                 })}
+                {/* AUDIT FIX: Help center link for enterprise customers */}
+                <a
+                    href="https://docs.forensicbridge.ca"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="sidebar-link text-gray-500 hover:text-gray-700"
+                    title={collapsed ? "Help Center" : undefined}
+                    aria-label={collapsed ? "Help Center" : undefined}
+                >
+                    <HelpCircle className="w-5 h-5 flex-shrink-0" aria-hidden="true" />
+                    {!collapsed && <span>Help Center</span>}
+                </a>
                 <button
                     onClick={handleLogout}
                     className="sidebar-link w-full text-red-500 hover:bg-red-50"

@@ -739,13 +739,24 @@ def _save_v31_to_s3(records, migration):
         try:
             enc_mgr = EncryptionManager()
             aes_key = records["aes_key"]
-            encrypted_key = enc_mgr.encrypt_data(aes_key.encode() if isinstance(aes_key, str) else aes_key)
-            encryption_metadata["encrypted_aes_key"] = base64.b64encode(encrypted_key).decode()
+            encrypted_key = enc_mgr.encrypt_data(
+                aes_key.encode() if isinstance(aes_key, str) else aes_key
+            )
+            encryption_metadata["encrypted_aes_key"] = base64.b64encode(
+                encrypted_key
+            ).decode()
             encryption_metadata["server_encrypted"] = True
-            logger.info(f"Migration {migration_id}: AES key encrypted server-side before storage")
+            logger.info(
+                f"Migration {migration_id}: AES key encrypted server-side before storage"
+            )
         except Exception as enc_err:
-            logger.error(f"Migration {migration_id}: Failed to encrypt AES key server-side: {enc_err}")
-            return jsonify({"success": False, "error": "Failed to secure encryption key"}), 500
+            logger.error(
+                f"Migration {migration_id}: Failed to encrypt AES key server-side: {enc_err}"
+            )
+            return (
+                jsonify({"success": False, "error": "Failed to secure encryption key"}),
+                500,
+            )
 
     # Upload to S3
     try:
@@ -842,12 +853,14 @@ def _handle_v31_upload(data, user):
     parsed = _parse_ndjson_data(data)
 
     # Validate records: hash verification, size check, duplicate detection
-    validation = _validate_v31_records({
-        "encrypted_data_bytes": payload["encrypted_data_bytes"],
-        "client_hash": payload["client_hash"],
-        "session_id": parsed["session_id"],
-        "user": user,
-    })
+    validation = _validate_v31_records(
+        {
+            "encrypted_data_bytes": payload["encrypted_data_bytes"],
+            "client_hash": payload["client_hash"],
+            "session_id": parsed["session_id"],
+            "user": user,
+        }
+    )
     if isinstance(validation, tuple):
         return validation
 
@@ -1122,6 +1135,7 @@ REDIS_UPLOAD_SET = "chunked_upload_sessions"
 
 
 _in_memory_upload_sessions = {}  # AUDIT FIX MEDIUM-16: fallback when Redis is down
+
 
 def _get_redis_client():
     """Get Redis client for chunked upload storage."""
@@ -1897,7 +1911,9 @@ def abort_chunked_upload():
                         try:
                             aws.delete_from_s3(s3_key)
                         except Exception as exc:
-                            logger.debug("Best-effort S3 cleanup failed for %s: %s", s3_key, exc)
+                            logger.debug(
+                                "Best-effort S3 cleanup failed for %s: %s", s3_key, exc
+                            )
             except Exception as e:
                 logger.warning(
                     f"Cleanup failed for aborted upload {upload_id}: {str(e)}"

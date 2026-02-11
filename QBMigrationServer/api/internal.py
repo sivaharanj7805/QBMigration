@@ -18,6 +18,7 @@ import hmac
 import logging
 import os
 import re
+from functools import wraps
 import urllib.parse
 from datetime import datetime, timezone
 from functools import wraps
@@ -28,6 +29,8 @@ from models.database import db
 from models.migration import Migration
 from models.migration_credit import MigrationCredit
 from models.team_invite import TeamInvite
+from models.user import User
+from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
 
@@ -271,3 +274,139 @@ def cleanup_expired():
     except Exception as e:
         logger.error(f"Cleanup error: {str(e)}")
         return jsonify({"success": False, "error": "Cleanup failed"}), 500
+
+
+# =============================================================================
+# ADMIN DASHBOARD ENDPOINTS (JWT/session-authenticated, admin role required)
+# =============================================================================
+
+
+def _check_admin_role():
+    """Check if current authenticated user has admin role.
+    Returns None if authorized, or a (response, status) tuple if not.
+    """
+    user_id = request.current_user.get("user_id")
+    user = db.session.get(User, user_id)
+    if not user or user.role not in ("admin", "super_admin"):
+        return jsonify({"success": False, "error": "Admin access required"}), 403
+    return None
+
+
+@internal_bp.route("/admin/users", methods=["GET"])
+def admin_list_users():
+    """List all users for admin dashboard. Requires admin role."""
+    from api.auth import require_auth
+
+    @require_auth
+    def _authed():
+        admin_check = _check_admin_role()
+        if admin_check is not None:
+            return admin_check
+
+        try:
+            migration_counts = (
+                db.session.query(
+                    Migration.user_id,
+                    func.count(Migration.id).label("migrations_count"),
+                )
+                .group_by(Migration.user_id)
+                .subquery()
+            )
+
+            users = (
+                db.session.query(User, migration_counts.c.migrations_count)
+                .outerjoin(migration_counts, User.id == migration_counts.c.user_id)
+                .order_by(User.created_at.desc())
+                .all()
+            )
+
+            users_data = []
+            for user, mig_count in users:
+                users_data.append(
+                    {
+                        "id": user.id,
+                        "email": user.email,
+                        "name": (
+                            f"{user.first_name or ''} {user.last_name or ''}".strip()
+                            or user.email.split("@")[0]
+                        ),
+                        "company": getattr(user, "company_name", None) or "",
+                        "role": user.role or "user",
+                        "is_active": (
+                            user.is_active if hasattr(user, "is_active") else True
+                        ),
+                        "created_at": (
+                            user.created_at.isoformat() if user.created_at else None
+                        ),
+                        "migrations_count": mig_count or 0,
+                        "last_login": (
+                            user.last_login_at.isoformat()
+                            if hasattr(user, "last_login_at") and user.last_login_at
+                            else None
+                        ),
+                    }
+                )
+
+            return jsonify({"success": True, "users": users_data}), 200
+
+        except Exception as e:
+            logger.exception(f"Failed to list users: {str(e)}")
+            return jsonify({"success": False, "error": "Failed to list users"}), 500
+
+    return _authed()
+
+
+@internal_bp.route("/admin/migration-stats", methods=["GET"])
+def admin_migration_stats():
+    """Get aggregate migration statistics. Requires admin role."""
+    from api.auth import require_auth
+
+    @require_auth
+    def _authed():
+        admin_check = _check_admin_role()
+        if admin_check is not None:
+            return admin_check
+
+        try:
+            total = Migration.query.count()
+            completed = Migration.query.filter_by(status="completed").count()
+            failed = Migration.query.filter_by(status="failed").count()
+            in_progress = Migration.query.filter(
+                Migration.status.in_(
+                    [
+                        "pending",
+                        "uploading",
+                        "uploaded",
+                        "provisioning",
+                        "processing",
+                    ]
+                )
+            ).count()
+            pending = Migration.query.filter_by(status="pending").count()
+
+            return (
+                jsonify(
+                    {
+                        "success": True,
+                        "stats": {
+                            "total": total,
+                            "completed": completed,
+                            "failed": failed,
+                            "in_progress": in_progress,
+                            "pending": pending,
+                        },
+                    }
+                ),
+                200,
+            )
+
+        except Exception as e:
+            logger.exception(f"Failed to get migration stats: {str(e)}")
+            return (
+                jsonify(
+                    {"success": False, "error": "Failed to get migration stats"}
+                ),
+                500,
+            )
+
+    return _authed()

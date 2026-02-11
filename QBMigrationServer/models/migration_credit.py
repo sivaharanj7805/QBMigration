@@ -190,15 +190,16 @@ class MigrationCredit(db.Model):
         """
         # HIGH-11 FIX: Re-read with row lock to prevent concurrent consumption
         locked_credit = (
-            MigrationCredit.query.filter_by(id=self.id)
-            .with_for_update()
-            .first()
+            MigrationCredit.query.filter_by(id=self.id).with_for_update().first()
         )
         if not locked_credit or locked_credit.status != "available":
             return False
 
         # Check transaction limit (skip if unlimited = -1)
-        if locked_credit.transaction_limit != -1 and transactions_count > locked_credit.transaction_limit:
+        if (
+            locked_credit.transaction_limit != -1
+            and transactions_count > locked_credit.transaction_limit
+        ):
             return False
 
         locked_credit.status = "used"

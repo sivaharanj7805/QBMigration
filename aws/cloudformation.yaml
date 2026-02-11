@@ -23,8 +23,8 @@ Parameters:
   
   AllowedSSHCidr:
     Type: String
-    Default: '10.0.0.0/8'
-    Description: CIDR block allowed for SSH access (restrict to VPN/office IP)
+    Default: '10.0.0.0/32'
+    Description: CIDR block allowed for SSH access (restrict to VPN/office IP — default is a single-host placeholder, override with your VPN CIDR)
 
   # ADV-04: Alert email for SNS alarm subscriptions
   AlertEmail:

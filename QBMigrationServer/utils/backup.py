@@ -593,7 +593,9 @@ class BackupManager:
                                     "filename": obj["Key"].split("/")[-1],
                                     "path": f"s3://{self.s3_bucket}/{obj['Key']}",
                                     "size": obj["Size"],
-                                    "created": obj["LastModified"],  # CRIT-02 FIX: Keep tz-aware
+                                    "created": obj[
+                                        "LastModified"
+                                    ],  # CRIT-02 FIX: Keep tz-aware
                                     "location": "s3",
                                     "encrypted": True,  # S3 server-side encryption
                                 }

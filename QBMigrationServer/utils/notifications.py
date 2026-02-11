@@ -193,7 +193,11 @@ def send_migration_failure_alert(migration):
 
         # M-09 FIX: Sanitize user-controlled company_name to prevent
         # header injection or email body manipulation via newlines
-        safe_company = (migration.company_name or "N/A").replace("\n", " ").replace("\r", " ")[:200]
+        safe_company = (
+            (migration.company_name or "N/A")
+            .replace("\n", " ")
+            .replace("\r", " ")[:200]
+        )
         body = f"""
 Migration Failure Alert
 
@@ -273,4 +277,79 @@ QB Migration Team
 
     except Exception as e:
         logger.exception(f"Failed to send completion notification: {str(e)}")
+        return False
+
+
+def send_team_invite_email(email, inviter, invite_token):
+    """Send a team invitation email.
+
+    Args:
+        email: Recipient email address
+        inviter: User model instance of the person sending the invite
+        invite_token: Secure token for accepting the invite
+
+    Returns:
+        bool: True if sent successfully
+    """
+    try:
+        frontend_url = current_app.config.get("FRONTEND_URL", "http://localhost:3000")
+        accept_url = f"{frontend_url}/team/accept-invite?token={invite_token}"
+
+        safe_accept_url = str(html_escape(accept_url))
+        inviter_name = (
+            f"{inviter.first_name or ''} {inviter.last_name or ''}".strip()
+            or inviter.email
+        )
+        safe_inviter_name = str(html_escape(inviter_name))
+
+        subject = f"{safe_inviter_name} invited you to join their team on ForensicBridge"
+
+        body = f"""You've been invited to join a team!
+
+{inviter_name} has invited you to join their team on ForensicBridge.
+
+Click the link below to accept the invitation:
+
+{accept_url}
+
+This invitation will expire in 7 days.
+
+If you don't have an account yet, you'll be prompted to create one.
+
+Best regards,
+ForensicBridge Team
+"""
+
+        html = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <h2 style="color: #2563eb;">You're Invited!</h2>
+    <p><strong>{safe_inviter_name}</strong> has invited you to join their team on ForensicBridge.</p>
+    <p style="margin: 30px 0;">
+        <a href="{safe_accept_url}" style="background-color: #2563eb; color: white;
+ padding: 12px 24px; text-decoration: none; border-radius: 4px;
+ display: inline-block;">
+            Accept Invitation
+        </a>
+    </p>
+    <p style="color: #666; font-size: 14px;">
+        Or copy and paste this link into your browser:<br>
+        <a href="{safe_accept_url}">{safe_accept_url}</a>
+    </p>
+    <p style="color: #666; font-size: 14px;">
+        This invitation will expire in 7 days.
+    </p>
+    <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+    <p style="color: #999; font-size: 12px;">
+        ForensicBridge Team<br>
+        &copy; {datetime.now(timezone.utc).year} All rights reserved.
+    </p>
+</body>
+</html>
+"""
+
+        return send_email(email, subject, body, html)
+
+    except Exception as e:
+        logger.exception(f"Failed to send team invite email: {str(e)}")
         return False

@@ -218,7 +218,10 @@ class TestAppErrorHandlersCoverage:
         resp = client.get("/health")
         assert resp.status_code == 200
         # Check rate limit headers
-        assert "X-RateLimit-Limit" in resp.headers or "X-Content-Type-Options" in resp.headers
+        assert (
+            "X-RateLimit-Limit" in resp.headers
+            or "X-Content-Type-Options" in resp.headers
+        )
 
     def test_security_headers_on_auth_endpoints(self, client):
         """Security headers on auth register (lines 848-849)."""
@@ -287,12 +290,14 @@ class TestReportsDeepCoverage:
         """Generate discrepancy report (lines 280-320)."""
         test_migration.status = "completed"
         test_migration.completed_at = datetime.now(timezone.utc)
-        test_migration.verification_results = json.dumps({
-            "discrepancies": [
-                {"field": "revenue", "qbd_value": 1000, "qbo_value": 999}
-            ],
-            "data_quality_score": 95,
-        })
+        test_migration.verification_results = json.dumps(
+            {
+                "discrepancies": [
+                    {"field": "revenue", "qbd_value": 1000, "qbo_value": 999}
+                ],
+                "data_quality_score": 95,
+            }
+        )
         db_session.commit()
 
         resp = authenticated_client.post(
@@ -310,10 +315,12 @@ class TestReportsDeepCoverage:
         """List reports includes discrepancy report when data exists."""
         test_migration.status = "completed"
         test_migration.completed_at = datetime.now(timezone.utc)
-        test_migration.verification_results = json.dumps({
-            "discrepancies": [{"field": "test"}],
-            "data_quality_score": 98,
-        })
+        test_migration.verification_results = json.dumps(
+            {
+                "discrepancies": [{"field": "test"}],
+                "data_quality_score": 98,
+            }
+        )
         db_session.commit()
 
         resp = authenticated_client.get("/api/reports")
@@ -359,9 +366,7 @@ class TestWebhooksDeepCoverage:
         payload = json.dumps({"migration_id": "test-123", "status": "completed"})
         import hmac as _hmac
 
-        sig = _hmac.new(
-            secret.encode(), payload.encode(), hashlib.sha256
-        ).hexdigest()
+        sig = _hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
         resp = client.post(
             "/api/webhooks/migration-completed",

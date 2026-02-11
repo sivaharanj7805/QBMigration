@@ -115,7 +115,7 @@ def setup_logging(app):
     app.logger.info("=" * 80)
     app.logger.info("QB MIGRATION SERVER STARTING")
     app.logger.info("=" * 80)
-    app.logger.info(f'Environment: {get_env()}')
+    app.logger.info(f"Environment: {get_env()}")
     app.logger.info(f'Debug Mode: {app.config.get("DEBUG", False)}')
     # FIX: Never log database URI - may contain credentials
     db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "unknown")
@@ -147,8 +147,16 @@ def setup_sentry(app):
                 """FIX: Filter sensitive endpoints from Sentry traces."""
                 url = event.get("request", {}).get("url", "")
                 # Don't trace auth, upload, or QBO endpoints to avoid PII leakage
-                sensitive_prefixes = ("/api/auth", "/api/upload", "/api/qbo", "/api/payments")
-                if any(url.startswith(p) or f"/{p.lstrip('/')}" in url for p in sensitive_prefixes):
+                sensitive_prefixes = (
+                    "/api/auth",
+                    "/api/upload",
+                    "/api/qbo",
+                    "/api/payments",
+                )
+                if any(
+                    url.startswith(p) or f"/{p.lstrip('/')}" in url
+                    for p in sensitive_prefixes
+                ):
                     return None
                 return event
 
@@ -227,10 +235,12 @@ def auto_migrate_database(app):
         with db.engine.connect() as conn:
             # AUDIT FIX HIGH: Skip if Alembic is managing the schema
             try:
-                result = conn.execute(text(
-                    "SELECT 1 FROM information_schema.tables "
-                    "WHERE table_name = 'alembic_version'"
-                ))
+                result = conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.tables "
+                        "WHERE table_name = 'alembic_version'"
+                    )
+                )
                 if result.scalar():
                     app.logger.info(
                         "Alembic migration table detected - skipping legacy auto_migrate_database. "
@@ -432,9 +442,7 @@ def auto_migrate_database(app):
             # PRODUCTION FIX: Track migration errors instead of silently swallowing them
             # H-10 FIX: Whitelist column names to prevent SQL injection via f-string
             _VALID_COLUMN_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-            _VALID_TYPE_RE = re.compile(
-                r"^[A-Z][A-Z0-9_()',. ]{0,80}$"
-            )
+            _VALID_TYPE_RE = re.compile(r"^[A-Z][A-Z0-9_()',. ]{0,80}$")
             migration_errors = []
             for col_name, col_type in migration_columns:
                 if not _VALID_COLUMN_RE.match(col_name):
@@ -446,9 +454,7 @@ def auto_migrate_database(app):
                     )
                     continue
                 if not _VALID_TYPE_RE.match(col_type):
-                    migration_errors.append(
-                        f"{col_name}: rejected by type whitelist"
-                    )
+                    migration_errors.append(f"{col_name}: rejected by type whitelist")
                     app.logger.error(
                         f"Schema migration blocked: invalid type '{col_type}' for column '{col_name}'"
                     )
@@ -623,7 +629,7 @@ def create_app(config_name="development"):  # noqa: C901
         # PIPEDA: Only Canadian AWS regions are permitted for data residency compliance
         ALLOWED_REGIONS = {
             "ca-central-1",  # Montreal
-            "ca-west-1",     # Calgary
+            "ca-west-1",  # Calgary
         }
 
         # Validate region is Canadian (PIPEDA requirement)
@@ -760,9 +766,7 @@ def create_app(config_name="development"):  # noqa: C901
 
     # CRITICAL SECURITY FIX: Block localhost in production CORS origins
     # This is a security risk - localhost should never be allowed in production
-    if is_production() and "localhost" in str(
-        allowed_origins
-    ):
+    if is_production() and "localhost" in str(allowed_origins):
         raise ValueError(
             "CRITICAL SECURITY ERROR: 'localhost' found in CORS origins for production environment! "
             "Remove localhost from ALLOWED_ORIGINS environment variable. "

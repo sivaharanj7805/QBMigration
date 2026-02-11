@@ -45,12 +45,28 @@ services:
       - QBO_ENVIRONMENT=${QBO_ENVIRONMENT:-sandbox}
       - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
       - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+      # Email (AWS SES SMTP or any SMTP relay)
+      - MAIL_SERVER=${MAIL_SERVER:-email-smtp.ca-central-1.amazonaws.com}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_DEFAULT_SENDER=${MAIL_DEFAULT_SENDER:-noreply@qbmigrate.io}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         # FIX I-07: Wait for Redis healthcheck before starting server
         condition: service_healthy
+    # AUDIT FIX: Resource limits to prevent any container from exhausting host resources
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
@@ -112,6 +128,11 @@ services:
       maxmemory 256mb
       maxmemory-policy noeviction
       requirepass $${REDIS_PASSWORD}" > /tmp/redis.conf && redis-server /tmp/redis.conf'
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
     healthcheck:
       # SECURITY FIX: Don't expose password in process list - use shell to hide it
       test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping 2>/dev/null | grep -q PONG"]

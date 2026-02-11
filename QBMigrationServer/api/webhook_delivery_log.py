@@ -282,16 +282,20 @@ class WebhookLogger:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         # Aggregate totals, avg processing time, and success count in SQL
-        summary = db.session.query(
-            func.count(WebhookDeliveryLog.id).label("total"),
-            func.avg(WebhookDeliveryLog.processing_time_ms).label("avg_time"),
-            func.sum(
-                case(
-                    (WebhookDeliveryLog.response_code == 200, 1),
-                    else_=0,
-                )
-            ).label("successful"),
-        ).filter(WebhookDeliveryLog.received_at >= cutoff).first()
+        summary = (
+            db.session.query(
+                func.count(WebhookDeliveryLog.id).label("total"),
+                func.avg(WebhookDeliveryLog.processing_time_ms).label("avg_time"),
+                func.sum(
+                    case(
+                        (WebhookDeliveryLog.response_code == 200, 1),
+                        else_=0,
+                    )
+                ).label("successful"),
+            )
+            .filter(WebhookDeliveryLog.received_at >= cutoff)
+            .first()
+        )
 
         total = summary.total or 0
         if total == 0:

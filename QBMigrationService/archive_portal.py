@@ -17,6 +17,7 @@ from flask import Flask, jsonify, render_template_string, request
 def _get_env():
     return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
 
+
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -40,6 +41,7 @@ if not _api_key or _api_key in ("dev-key-changeme", "changeme", "dev", "test"):
             "Set ARCHIVE_API_KEY environment variable for production."
         )
         import secrets as _secrets
+
         _api_key = _secrets.token_urlsafe(32)  # Random dev key, not predictable
 
 API_KEY = _api_key

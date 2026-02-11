@@ -18,7 +18,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from models.database import db
 from models.migration import Migration
 

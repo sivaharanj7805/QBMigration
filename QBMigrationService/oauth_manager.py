@@ -30,6 +30,7 @@ import requests
 def _get_env():
     return os.getenv("APP_ENV") or os.getenv("FLASK_ENV", "development")
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +130,9 @@ class OAuthManager:
             try:
                 import boto3
 
-                kms = boto3.client("kms", region_name=os.getenv("AWS_REGION", "ca-central-1"))
+                kms = boto3.client(
+                    "kms", region_name=os.getenv("AWS_REGION", "ca-central-1")
+                )
 
                 # Generate data key
                 response = kms.generate_data_key(
@@ -393,7 +396,9 @@ class OAuthManager:
                     # ✅ Save encrypted
                     self.save_tokens()
 
-                    logger.info(f"[OK] Access token refreshed (expires in {expires_in}s)")
+                    logger.info(
+                        f"[OK] Access token refreshed (expires in {expires_in}s)"
+                    )
 
                     # Verify scopes
                     self.verify_scopes()
@@ -514,7 +519,9 @@ class OAuthManager:
                     self.scopes = actual_scopes
                     return True
                 else:
-                    logger.info(f"  [WARN] Token missing required scope: {required_scope}")
+                    logger.info(
+                        f"  [WARN] Token missing required scope: {required_scope}"
+                    )
                     logger.info(
                         f"     Actual scopes: {', '.join(actual_scopes) if actual_scopes else 'none'}"
                     )
@@ -530,7 +537,9 @@ class OAuthManager:
                 if fail_on_missing:
                     raise Exception("Could not verify OAuth scopes")
 
-                logger.info("  [WARN] Could not verify scopes (proceeding with caution)")
+                logger.info(
+                    "  [WARN] Could not verify scopes (proceeding with caution)"
+                )
                 return True
 
         except requests.exceptions.RequestException as e:
@@ -633,7 +642,9 @@ class OAuthManager:
 
                 return company_info
             else:
-                logger.info(f"[WARN] Could not fetch company info: {response.status_code}")
+                logger.info(
+                    f"[WARN] Could not fetch company info: {response.status_code}"
+                )
                 return None
 
         except requests.exceptions.Timeout:

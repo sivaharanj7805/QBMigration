@@ -4,12 +4,16 @@
 #
 # Run manually with: pytest tests/test_s3.py -m integration
 import os
+
 import pytest
 
 # Guard: Skip entire module at collection time if no AWS credentials
 collect_ignore_glob = []
-if not os.environ.get('AWS_ACCESS_KEY_ID'):
-    pytest.skip("Skipped: requires AWS credentials (set AWS_ACCESS_KEY_ID to run)", allow_module_level=True)
+if not os.environ.get("AWS_ACCESS_KEY_ID"):
+    pytest.skip(
+        "Skipped: requires AWS credentials (set AWS_ACCESS_KEY_ID to run)",
+        allow_module_level=True,
+    )
 
 from dotenv import load_dotenv
 
@@ -27,10 +31,11 @@ from app import create_app
 # Create app with testing config
 app = create_app("development")
 
+import uuid
+from io import BytesIO
+
 # Now import AWS manager
 from utils.aws_manager import AWSMigrationManager
-from io import BytesIO
-import uuid
 
 print("=" * 60)
 print("S3 UPLOAD TEST")

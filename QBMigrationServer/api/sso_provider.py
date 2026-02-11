@@ -23,10 +23,9 @@ from functools import wraps
 from typing import Any, Dict, Optional
 
 import defusedxml.ElementTree as SafeET
-from flask import Blueprint, current_app, jsonify, redirect, request, session
-from flask_login import current_user, login_required
-
 from extensions import limiter
+from flask import Blueprint, current_app, jsonify, redirect, request, session
+from flask_login import login_required
 from utils.auth import admin_required
 from utils.pii_redaction import hash_email
 
@@ -557,10 +556,11 @@ def _parse_saml_response(saml_response, org_id, provider):
         # Fallback for development/testing without certificate
         # SECURITY: Default-deny. Only skip validation if explicitly opted out
         # AND not in production.
-        if not (os.getenv("SKIP_SAML_VALIDATION") == "true" and os.getenv("FLASK_ENV") != "production"):
-            logger.error(
-                "SAML validation unavailable - certificate required"
-            )
+        if not (
+            os.getenv("SKIP_SAML_VALIDATION") == "true"
+            and os.getenv("FLASK_ENV") != "production"
+        ):
+            logger.error("SAML validation unavailable - certificate required")
             return None, (jsonify({"error": "SAML not properly configured"}), 500)
 
         logger.warning(
@@ -679,7 +679,7 @@ def oauth_callback():
 
     # Validate state (H-26: use constant-time comparison to prevent timing attacks)
     stored_state = session.get("sso_state")
-    if not hmac.compare_digest(str(state or ''), str(stored_state or '')):
+    if not hmac.compare_digest(str(state or ""), str(stored_state or "")):
         logger.warning("SSO state mismatch - possible CSRF")
         return jsonify({"error": "Invalid state"}), 400
 

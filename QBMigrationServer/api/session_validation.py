@@ -252,9 +252,7 @@ def validate_session():
     # where concurrent requests both pass the device limit check before either commits.
     from models.database import is_postgresql
 
-    query = SessionActivation.query.filter_by(
-        session_id=session_id, status="active"
-    )
+    query = SessionActivation.query.filter_by(session_id=session_id, status="active")
     if is_postgresql():
         query = query.with_for_update()
     existing_activations = query.all()
@@ -387,7 +385,14 @@ def _validate_hardware_fingerprint(data):
         )
         return None, (jsonify({"success": False, "error": "Invalid session code"}), 404)
 
-    return (session_id, fingerprint_hash, ip_address, user_agent, device_name, project), None
+    return (
+        session_id,
+        fingerprint_hash,
+        ip_address,
+        user_agent,
+        device_name,
+        project,
+    ), None
 
 
 def _bind_session(session_id, fingerprint_hash, ip_address, user_agent, device_name):
@@ -548,7 +553,9 @@ def activate_session():
     if error_response is not None:
         return error_response
 
-    session_id, fingerprint_hash, ip_address, user_agent, device_name, project = validated
+    session_id, fingerprint_hash, ip_address, user_agent, device_name, project = (
+        validated
+    )
 
     try:
         # Bind device to session with race-condition-safe locking
@@ -704,8 +711,13 @@ def _setup_s3_for_extraction(session_id, fingerprint_hash, ip_address):
 
 
 def _generate_extraction_credentials(
-    session_id, fingerprint_hash, ip_address, project, activation,
-    total_extractions, transactions_remaining
+    session_id,
+    fingerprint_hash,
+    ip_address,
+    project,
+    activation,
+    total_extractions,
+    transactions_remaining,
 ):
     """Generate an extraction token and update activation tracking.
 
@@ -722,9 +734,7 @@ def _generate_extraction_credentials(
     # CRIT-03 FIX: Store token in DB so complete_extraction can validate it.
     # This ensures only the caller who started the extraction can complete it,
     # maintaining forensic chain of custody.
-    activation.extraction_token = hashlib.sha256(
-        extraction_token.encode()
-    ).hexdigest()
+    activation.extraction_token = hashlib.sha256(extraction_token.encode()).hexdigest()
 
     # Update activation tracking
     activation.extraction_count += 1
@@ -813,13 +823,19 @@ def start_extraction():
 
     # Generate token, update counters, and return credentials
     return _generate_extraction_credentials(
-        session_id, fingerprint_hash, ip_address, project, activation,
-        total_extractions, transactions_remaining
+        session_id,
+        fingerprint_hash,
+        ip_address,
+        project,
+        activation,
+        total_extractions,
+        transactions_remaining,
     )
 
 
-def _verify_upload_completion(session_id, fingerprint_hash, ip_address,
-                              extraction_token, transaction_count):
+def _verify_upload_completion(
+    session_id, fingerprint_hash, ip_address, extraction_token, transaction_count
+):
     """Verify extraction token and transaction limits before completing extraction.
 
     Validates the chain-of-custody token (CRIT-03 FIX), clears the single-use
@@ -849,8 +865,12 @@ def _verify_upload_completion(session_id, fingerprint_hash, ip_address,
     token_hash = hashlib.sha256(extraction_token.encode()).hexdigest()
     if not hmac.compare_digest(token_hash, activation.extraction_token):
         log_validation_attempt(
-            session_id, fingerprint_hash, ip_address, "complete", "failed",
-            "Invalid extraction token — chain of custody violation"
+            session_id,
+            fingerprint_hash,
+            ip_address,
+            "complete",
+            "failed",
+            "Invalid extraction token — chain of custody violation",
         )
         return None, (
             jsonify({"success": False, "error": "Invalid extraction token"}),
@@ -894,8 +914,9 @@ def _verify_upload_completion(session_id, fingerprint_hash, ip_address,
     return (project, activation), None
 
 
-def _update_extraction_status(session_id, fingerprint_hash, ip_address,
-                               project, transaction_count):
+def _update_extraction_status(
+    session_id, fingerprint_hash, ip_address, project, transaction_count
+):
     """Record transactions and update project status after extraction completes.
 
     Generates a migration ID, records the transaction count against the project,

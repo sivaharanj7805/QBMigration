@@ -307,7 +307,10 @@ class HealthCheckPDFGenerator:
             return ""
 
         items = "\n".join(
-            [f'<div class="issue {css_class}">{html.escape(issue)}</div>' for issue in issues]
+            [
+                f'<div class="issue {css_class}">{html.escape(issue)}</div>'
+                for issue in issues
+            ]
         )
 
         return f"""

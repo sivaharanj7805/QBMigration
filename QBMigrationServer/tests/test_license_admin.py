@@ -7,14 +7,15 @@ and GET /api/license/<int:license_id>/history.
 """
 
 import pytest
-
 from models.license import License
 
 
 @pytest.fixture(autouse=True)
-def set_admin_env(monkeypatch):
-    """Set ADMIN_EMAILS so the admin_required decorator grants access to test@example.com."""
-    monkeypatch.setenv("ADMIN_EMAILS", "test@example.com")
+def set_admin_user(test_user, db_session):
+    """Set test_user to admin role so admin_required decorator grants access."""
+    test_user.role = "admin"
+    db_session.commit()
+    return test_user
 
 
 def _create_license(db_session, tier="professional", user_email="customer@example.com"):

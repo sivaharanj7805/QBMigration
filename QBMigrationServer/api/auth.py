@@ -78,9 +78,14 @@ def _get_redis():
     _redis_last_attempt = now
     try:
         import redis as _redis_mod
-        redis_url = os.environ.get("REDIS_URL") or os.environ.get("RATELIMIT_STORAGE_URL")
+
+        redis_url = os.environ.get("REDIS_URL") or os.environ.get(
+            "RATELIMIT_STORAGE_URL"
+        )
         if redis_url and redis_url != "memory://":
-            _redis_conn = _redis_mod.from_url(redis_url, decode_responses=True, socket_connect_timeout=3)
+            _redis_conn = _redis_mod.from_url(
+                redis_url, decode_responses=True, socket_connect_timeout=3
+            )
             _redis_conn.ping()
             return _redis_conn
     except Exception:
@@ -113,9 +118,14 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
             redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
             return
         except Exception as exc:
-            logger.error("Redis blocklist write failed: %s. Token revocation may not propagate to other workers.", exc)
+            logger.error(
+                "Redis blocklist write failed: %s. Token revocation may not propagate to other workers.",
+                exc,
+            )
     else:
-        logger.error("Redis unavailable for JWT blocklist write. Token revocation is local-only.")
+        logger.error(
+            "Redis unavailable for JWT blocklist write. Token revocation is local-only."
+        )
 
 
 def _blocklist_check(jti: str) -> bool:
@@ -151,9 +161,12 @@ def _blocklist_check(jti: str) -> bool:
 
     # Redis not available at all — fail closed in production
     import os
+
     env = os.environ.get("FLASK_ENV", "production")
     if env == "production":
-        logger.error("Redis unavailable for blocklist check. Denying access (fail-closed).")
+        logger.error(
+            "Redis unavailable for blocklist check. Denying access (fail-closed)."
+        )
         return True  # FAIL CLOSED in production
 
     # Development: allow through with warning
@@ -684,6 +697,9 @@ def create_token(user_id: int, email: str, expires_hours: int = 1) -> str:
         + datetime.timedelta(hours=expires_hours),
         "iat": datetime.datetime.now(timezone.utc),
         "jti": _secrets.token_hex(16),  # Unique token ID for revocation tracking
+        # AUDIT FIX: Add issuer and audience claims for defense-in-depth
+        "iss": "forensicbridge",
+        "aud": "forensicbridge-dashboard",
     }
     algorithm = current_app.config.get("JWT_ALGORITHM", "HS256")
     return jwt.encode(payload, _get_jwt_signing_key(), algorithm=algorithm)
@@ -700,7 +716,22 @@ def decode_token(token: str) -> Optional[dict]:
         # Reject any algorithm not in the safe set
         if not all(a in _SAFE_JWT_ALGORITHMS for a in allowed):
             return None
-        payload = jwt.decode(token, _get_jwt_verification_key(), algorithms=allowed)
+        payload = jwt.decode(
+            token,
+            _get_jwt_verification_key(),
+            algorithms=allowed,
+            # AUDIT FIX: Validate issuer and audience for defense-in-depth.
+            # Tokens without these claims (pre-upgrade) are still accepted
+            # because options.require is not set — only validated if present.
+            issuer="forensicbridge",
+            audience="forensicbridge-dashboard",
+            options={"verify_aud": False, "verify_iss": False},
+        )
+        # Validate issuer/audience if present (new tokens have them)
+        if payload.get("iss") and payload["iss"] != "forensicbridge":
+            return None
+        if payload.get("aud") and payload["aud"] != "forensicbridge-dashboard":
+            return None
         # H-03 FIX: Check if token has been revoked via logout
         jti = payload.get("jti")
         if jti and _blocklist_check(jti):
@@ -839,11 +870,35 @@ def register():
         MAX_NAME_LENGTH = 200
         MAX_COMPANY_LENGTH = 300
         if len(first_name) > MAX_NAME_LENGTH:
-            return jsonify({"success": False, "error": f"First name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"First name must not exceed {MAX_NAME_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
         if len(last_name) > MAX_NAME_LENGTH:
-            return jsonify({"success": False, "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Last name must not exceed {MAX_NAME_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
         if len(company) > MAX_COMPANY_LENGTH:
-            return jsonify({"success": False, "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Company name must not exceed {MAX_COMPANY_LENGTH} characters",
+                    }
+                ),
+                400,
+            )
 
         # Sanitize inputs - remove potentially dangerous characters
         first_name = sanitize(first_name, 100)
@@ -1060,6 +1115,7 @@ def login():
             # Constant-time: always verify against a fake hash to prevent timing attacks
             try:
                 import argon2
+
                 argon2.PasswordHasher().verify(
                     "$argon2id$v=19$m=65536,t=3,p=4$fake$fake", password
                 )
@@ -1160,63 +1216,83 @@ def login():
     return response
 
 
-def _auto_sync_legacy_credits(user):
+def migrate_legacy_credits_batch():
     """
-    AUTO-SYNC: If user has legacy credits but no MigrationCredit records, create them.
-    This fixes existing users who selected tiers before the MigrationCredit fix.
-    HIGH-01 FIX: Wrapped in proper transaction with rollback on failure.
+    ONE-TIME migration: Sync legacy User.migrations_purchased/used fields
+    to MigrationCredit records for all users that have a mismatch.
 
-    Args:
-        user: The User model instance to sync credits for
+    Run this once via Flask shell or a management command:
+        flask shell
+        >>> from api.auth import migrate_legacy_credits_batch
+        >>> migrate_legacy_credits_batch()
+
+    After running successfully, the legacy User.migrations_purchased/used
+    fields become read-only historical references. MigrationCredit is the
+    sole source of truth going forward.
     """
-    user_id = user.id
-    try:
-        legacy_purchased = getattr(user, "migrations_purchased", None) or 0
-        legacy_used = getattr(user, "migrations_used", None) or 0
-        legacy_available = max(0, legacy_purchased - legacy_used)
+    from models.user import User as _User
 
-        actual_available = MigrationCredit.query.filter_by(
-            user_id=user_id, status="available", payment_status="paid"
-        ).count()
+    users = _User.query.filter(
+        db.or_(
+            _User.migrations_purchased > 0,
+            _User.migrations_used > 0,
+        )
+    ).all()
 
-        # If legacy shows credits but MigrationCredit table doesn't, sync them
-        if legacy_available > actual_available:
-            tier = user.subscription_tier or "starter"
-            credit_config = MigrationCredit.TIER_CONFIG.get(
-                tier, MigrationCredit.TIER_CONFIG["starter"]
-            )
+    synced = 0
+    for user in users:
+        user_id = user.id
+        try:
+            legacy_purchased = user.migrations_purchased or 0
+            legacy_used = user.migrations_used or 0
+            legacy_available = max(0, legacy_purchased - legacy_used)
 
-            # HIGH-01 FIX: Use nested transaction (savepoint) for atomic operation
-            db.session.begin_nested()
-            try:
-                for i in range(legacy_available - actual_available):
-                    credit = MigrationCredit(
-                        user_id=user_id,
-                        tier_type=tier,
-                        transaction_limit=credit_config.get("transaction_limit", 5000),
-                        price_cents=0,
-                        stripe_checkout_session_id=(
-                            f"auto-sync-{user_id}-{i}-"
-                            f"{datetime.datetime.now(timezone.utc).timestamp()}"
-                        ),
-                        payment_status="paid",
-                        status="available",
+            actual_available = MigrationCredit.query.filter_by(
+                user_id=user_id, status="available", payment_status="paid"
+            ).count()
+
+            if legacy_available > actual_available:
+                tier = user.subscription_tier or "starter"
+                credit_config = MigrationCredit.TIER_CONFIG.get(
+                    tier, MigrationCredit.TIER_CONFIG.get("starter", {})
+                )
+
+                db.session.begin_nested()
+                try:
+                    for i in range(legacy_available - actual_available):
+                        credit = MigrationCredit(
+                            user_id=user_id,
+                            tier_type=tier,
+                            transaction_limit=credit_config.get(
+                                "transaction_limit", 5000
+                            ),
+                            price_cents=0,
+                            stripe_checkout_session_id=(
+                                f"legacy-migration-{user_id}-{i}-"
+                                f"{datetime.datetime.now(timezone.utc).timestamp()}"
+                            ),
+                            payment_status="paid",
+                            status="available",
+                        )
+                        credit.paid_at = datetime.datetime.now(timezone.utc)
+                        db.session.add(credit)
+
+                    db.session.commit()
+                    synced += 1
+                    logger.info(
+                        f"Migrated {legacy_available - actual_available} legacy credits for user {user_id}"
                     )
-                    credit.paid_at = datetime.datetime.now(timezone.utc)
-                    db.session.add(credit)
+                except Exception as inner_e:
+                    db.session.rollback()
+                    logger.warning(
+                        f"Legacy credit migration rollback for user {user_id}: {inner_e}"
+                    )
+        except Exception as e:
+            logger.warning(f"Legacy credit migration failed for user {user_id}: {e}")
 
-                db.session.commit()  # Commit the savepoint
-                logger.info(
-                    f"Auto-synced {legacy_available - actual_available} credits for user {user_id}"
-                )
-            except Exception as inner_e:
-                db.session.rollback()  # Rollback the savepoint
-                logger.warning(
-                    f"Auto-sync credits rollback for user {user_id}: {inner_e}"
-                )
-    except Exception as e:
-        logger.warning(f"Auto-sync credits failed for user {user_id}: {e}")
-        # Continue anyway - don't block the /me endpoint
+    db.session.commit()
+    logger.info(f"Legacy credit migration complete: {synced}/{len(users)} users synced")
+    return synced
 
 
 @auth_bp.route("/me", methods=["GET"])
@@ -1228,8 +1304,6 @@ def get_current_user():
 
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
-
-    _auto_sync_legacy_credits(user)
 
     # BILLING FIX: Fail fast instead of swallowing errors that hide billing problems
     # If tier info can't be retrieved, user should know something is wrong
@@ -1764,7 +1838,20 @@ def list_team_members():
 @auth_bp.route("/team/invite", methods=["POST"])
 @require_auth
 def invite_team_member():
-    """Invite a new team member"""
+    """Invite a new team member.
+
+    Creates a pending invitation and sends an email with the invite link.
+
+    Request body:
+        email (str): Email address to invite
+        role (str, optional): Role for the invited user (member, admin). Default: member
+
+    Returns:
+        200: Invite created successfully
+        400: Invalid request
+        404: User not found
+        409: Invite already pending for this email
+    """
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No data provided"}), 400
@@ -1774,23 +1861,239 @@ def invite_team_member():
     if not email:
         return jsonify({"success": False, "error": "Email is required"}), 400
 
+    # Basic email format validation
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return jsonify({"success": False, "error": "Invalid email format"}), 400
+
+    role = data.get("role", "member")
+    if role not in ("member", "admin"):
+        return (
+            jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}),
+            400,
+        )
+
     user_id = request.current_user["user_id"]
     user = db.session.get(User, user_id)
 
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
 
-    # Team invitations are not yet implemented
-    logger.info(f"Team invite attempted by user {user_id} - feature not yet available")
+    # Prevent self-invite
+    if email == user.email:
+        return jsonify({"success": False, "error": "Cannot invite yourself"}), 400
 
-    return (
-        jsonify(
+    try:
+        # Check for existing pending invite
+        existing = TeamInvite.query.filter_by(
+            owner_user_id=user_id, email=email, status="pending"
+        ).first()
+        if existing:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "An invite is already pending for this email",
+                    }
+                ),
+                409,
+            )
+
+        invite = TeamInvite.create_invite(
+            owner_user_id=user_id,
+            email=email,
+            role=role,
+        )
+
+        # Send invite email (best-effort — don't fail the API call if email fails)
+        try:
+            from utils.notifications import send_team_invite_email
+
+            send_team_invite_email(email, user, invite.invite_token)
+        except Exception as e:
+            logger.warning(f"Failed to send invite email to {email}: {e}")
+
+        logger.info(f"Team invite created by user {user_id} for {email}")
+
+        return jsonify(
             {
-                "error": "Team invitations are not yet available. This feature is coming soon."
+                "success": True,
+                "message": "Invitation sent",
+                "invite": invite.to_dict(),
             }
-        ),
-        501,
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to create team invite: {e}")
+        db.session.rollback()
+        return jsonify({"success": False, "error": "Failed to create invitation"}), 500
+
+
+@auth_bp.route("/team/invite/<token>/accept", methods=["POST"])
+@require_auth
+def accept_team_invite(token):
+    """Accept a team invitation using the invite token.
+
+    The authenticated user becomes a team member of the invite owner.
+
+    Returns:
+        200: Invite accepted
+        400: Invite expired or already used
+        404: Invite not found
+    """
+    user_id = request.current_user["user_id"]
+
+    invite = TeamInvite.find_by_token(token)
+    if not invite:
+        return jsonify({"success": False, "error": "Invite not found"}), 404
+
+    success, message = invite.accept(user_id)
+    if not success:
+        return jsonify({"success": False, "error": message}), 400
+
+    logger.info(
+        f"User {user_id} accepted team invite {invite.id} from owner {invite.owner_user_id}"
     )
+    return jsonify({"success": True, "message": message})
+
+
+@auth_bp.route("/team/invite/<int:invite_id>/cancel", methods=["POST"])
+@require_auth
+def cancel_team_invite(invite_id):
+    """Cancel a pending team invitation.
+
+    Only the invite owner can cancel their own invites.
+
+    Returns:
+        200: Invite cancelled
+        403: Not the invite owner
+        404: Invite not found
+    """
+    user_id = request.current_user["user_id"]
+
+    invite = db.session.get(TeamInvite, invite_id)
+    if not invite:
+        return jsonify({"success": False, "error": "Invite not found"}), 404
+
+    if invite.owner_user_id != user_id:
+        return (
+            jsonify({"success": False, "error": "Only the invite owner can cancel"}),
+            403,
+        )
+
+    if invite.status != "pending":
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Cannot cancel invite with status '{invite.status}'",
+                }
+            ),
+            400,
+        )
+
+    invite.cancel()
+    logger.info(f"User {user_id} cancelled team invite {invite_id}")
+    return jsonify({"success": True, "message": "Invite cancelled"})
+
+
+@auth_bp.route("/team/invite/resend", methods=["POST"])
+@require_auth
+def resend_team_invite():
+    """Resend a pending team invitation email."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    email = data.get("email", "").strip().lower()
+    if not email:
+        return jsonify({"success": False, "error": "Email is required"}), 400
+
+    user_id = request.current_user["user_id"]
+
+    try:
+        invite = TeamInvite.query.filter_by(
+            owner_user_id=user_id, email=email, status="pending"
+        ).first()
+
+        if not invite:
+            return (
+                jsonify(
+                    {"success": False, "error": "No pending invite found for this email"}
+                ),
+                404,
+            )
+
+        # Check if invite has expired
+        if invite.expires_at and invite.expires_at < datetime.datetime.now(timezone.utc):
+            invite.status = "expired"
+            db.session.commit()
+            return (
+                jsonify(
+                    {"success": False, "error": "Invite has expired, please create a new one"}
+                ),
+                400,
+            )
+
+        # Resend the email
+        user = db.session.get(User, user_id)
+        try:
+            from utils.notifications import send_team_invite_email
+
+            send_team_invite_email(email, user, invite.invite_token)
+        except Exception as e:
+            logger.warning(f"Failed to resend invite email to {email}: {e}")
+
+        logger.info(f"Team invite resent by user {user_id} for {email}")
+        return jsonify({"success": True, "message": "Invitation resent"})
+
+    except Exception as e:
+        logger.exception(f"Failed to resend team invite: {e}")
+        return jsonify({"success": False, "error": "Failed to resend invitation"}), 500
+
+
+@auth_bp.route("/team/members/<int:member_id>/role", methods=["PATCH"])
+@require_auth
+def update_team_member_role(member_id):
+    """Update a team member's role. Only the team owner can change member roles."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"success": False, "error": "No data provided"}), 400
+
+    new_role = data.get("role", "").strip().lower()
+    if new_role not in ("member", "admin"):
+        return (
+            jsonify({"success": False, "error": "Role must be 'member' or 'admin'"}),
+            400,
+        )
+
+    user_id = request.current_user["user_id"]
+
+    try:
+        # Find the accepted invite for this member under the current user's team
+        invite = TeamInvite.query.filter_by(
+            owner_user_id=user_id,
+            accepted_user_id=member_id,
+            status="accepted",
+        ).first()
+
+        if not invite:
+            return (
+                jsonify({"success": False, "error": "Team member not found"}),
+                404,
+            )
+
+        invite.role = new_role
+        db.session.commit()
+
+        logger.info(
+            f"User {user_id} updated team member {member_id} role to {new_role}"
+        )
+        return jsonify({"success": True, "message": f"Role updated to {new_role}"})
+
+    except Exception as e:
+        logger.exception(f"Failed to update team member role: {e}")
+        db.session.rollback()
+        return jsonify({"success": False, "error": "Failed to update role"}), 500
 
 
 # =============================================================================

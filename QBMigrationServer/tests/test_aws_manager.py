@@ -15,7 +15,7 @@ import json
 import os
 from datetime import datetime, timezone
 from io import BytesIO
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -27,6 +27,7 @@ os.environ["FLASK_ENV"] = "testing"
 # Helpers to build a mock AWSMigrationManager without real AWS credentials
 # ---------------------------------------------------------------------------
 
+
 def _make_manager():
     """Create an AWSMigrationManager with all boto3 clients mocked."""
     with patch("utils.aws_manager.boto3") as mock_boto3:
@@ -34,6 +35,7 @@ def _make_manager():
         mock_boto3.client.return_value = mock_client
 
         from utils.aws_manager import AWSMigrationManager
+
         mgr = AWSMigrationManager(region="us-east-1")
 
         # Replace clients with individually trackable mocks
@@ -50,6 +52,7 @@ def _make_manager():
 # ---------------------------------------------------------------------------
 # S3 OPERATIONS
 # ---------------------------------------------------------------------------
+
 
 class TestS3Upload:
     """Tests for upload_to_s3."""
@@ -177,6 +180,7 @@ class TestS3Delete:
 # ENCRYPTION METADATA
 # ---------------------------------------------------------------------------
 
+
 class TestEncryptionMetadata:
     """Tests for store/get encryption metadata."""
 
@@ -212,7 +216,11 @@ class TestEncryptionMetadata:
         metadata = {"algorithm": "AES-256-GCM", "key_id": "test-key"}
 
         # Mock _find_migration_metadata_key
-        with patch.object(mgr, "_find_migration_metadata_key", return_value="migrations/mig-001/encryption_metadata.json"):
+        with patch.object(
+            mgr,
+            "_find_migration_metadata_key",
+            return_value="migrations/mig-001/encryption_metadata.json",
+        ):
             mock_body = MagicMock()
             mock_body.read.return_value = json.dumps(metadata).encode("utf-8")
             mgr.s3.get_object.return_value = {"Body": mock_body}
@@ -292,6 +300,7 @@ class TestFindMigrationMetadataKey:
 # EC2 INSTANCE PROVISIONING
 # ---------------------------------------------------------------------------
 
+
 class TestEC2Provisioning:
     """Tests for create_ec2_instance and related methods."""
 
@@ -307,16 +316,18 @@ class TestEC2Provisioning:
         mock_boto3.client.return_value = mock_ssm
 
         with app.app_context():
-            app.config.update({
-                "AWS_EC2_AMI_ID": "ami-test",
-                "AWS_EC2_INSTANCE_TYPE": "t3.medium",
-                "AWS_EC2_KEY_NAME": "test-key",
-                "AWS_EC2_SECURITY_GROUP": "sg-test",
-                "AWS_EC2_SUBNET_ID": "subnet-test",
-                "AWS_IAM_INSTANCE_PROFILE": "test-profile",
-                "SERVER_URL": "https://test.example.com",
-                "AWS_S3_CODE_BUCKET": "code-bucket",
-            })
+            app.config.update(
+                {
+                    "AWS_EC2_AMI_ID": "ami-test",
+                    "AWS_EC2_INSTANCE_TYPE": "t3.medium",
+                    "AWS_EC2_KEY_NAME": "test-key",
+                    "AWS_EC2_SECURITY_GROUP": "sg-test",
+                    "AWS_EC2_SUBNET_ID": "subnet-test",
+                    "AWS_IAM_INSTANCE_PROFILE": "test-profile",
+                    "SERVER_URL": "https://test.example.com",
+                    "AWS_S3_CODE_BUCKET": "code-bucket",
+                }
+            )
             result = mgr.create_ec2_instance(
                 "mig-001",
                 "s3://test-bucket/data.bin",
@@ -338,12 +349,14 @@ class TestEC2Provisioning:
         mgr = _make_manager()
 
         with app.app_context():
-            app.config.update({
-                "AWS_EC2_AMI_ID": None,
-                "AWS_EC2_INSTANCE_TYPE": "t3.medium",
-                "AWS_EC2_KEY_NAME": None,
-                "AWS_IAM_INSTANCE_PROFILE": None,
-            })
+            app.config.update(
+                {
+                    "AWS_EC2_AMI_ID": None,
+                    "AWS_EC2_INSTANCE_TYPE": "t3.medium",
+                    "AWS_EC2_KEY_NAME": None,
+                    "AWS_IAM_INSTANCE_PROFILE": None,
+                }
+            )
             result = mgr.create_ec2_instance(
                 "mig-001", "s3://test/data.bin", {}, "secret"
             )
@@ -368,17 +381,21 @@ class TestEC2Provisioning:
         """Returns instance state dictionary."""
         mgr = _make_manager()
         mgr.ec2.describe_instances.return_value = {
-            "Reservations": [{
-                "Instances": [{
-                    "State": {"Name": "running"},
-                    "InstanceType": "t3.medium",
-                    "PublicIpAddress": "1.2.3.4",
-                    "PrivateIpAddress": "10.0.0.1",
-                    "LaunchTime": datetime(2026, 1, 1, tzinfo=timezone.utc),
-                    "Monitoring": {"State": "enabled"},
-                    "Tags": [{"Key": "Name", "Value": "test"}],
-                }]
-            }]
+            "Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "State": {"Name": "running"},
+                            "InstanceType": "t3.medium",
+                            "PublicIpAddress": "1.2.3.4",
+                            "PrivateIpAddress": "10.0.0.1",
+                            "LaunchTime": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                            "Monitoring": {"State": "enabled"},
+                            "Tags": [{"Key": "Name", "Value": "test"}],
+                        }
+                    ]
+                }
+            ]
         }
 
         result = mgr.get_instance_status("i-test")
@@ -399,6 +416,7 @@ class TestEC2Provisioning:
 # COST TRACKING
 # ---------------------------------------------------------------------------
 
+
 class TestCostTracking:
     """Tests for get_migration_cost."""
 
@@ -406,18 +424,20 @@ class TestCostTracking:
         """Parses AWS Cost Explorer response correctly."""
         mgr = _make_manager()
         mgr.ce.get_cost_and_usage.return_value = {
-            "ResultsByTime": [{
-                "Groups": [
-                    {
-                        "Keys": ["Amazon EC2"],
-                        "Metrics": {"UnblendedCost": {"Amount": "10.50"}},
-                    },
-                    {
-                        "Keys": ["Amazon S3"],
-                        "Metrics": {"UnblendedCost": {"Amount": "1.25"}},
-                    },
-                ]
-            }]
+            "ResultsByTime": [
+                {
+                    "Groups": [
+                        {
+                            "Keys": ["Amazon EC2"],
+                            "Metrics": {"UnblendedCost": {"Amount": "10.50"}},
+                        },
+                        {
+                            "Keys": ["Amazon S3"],
+                            "Metrics": {"UnblendedCost": {"Amount": "1.25"}},
+                        },
+                    ]
+                }
+            ]
         }
 
         result = mgr.get_migration_cost("mig-001", "2026-01-01", "2026-01-31")
@@ -438,6 +458,7 @@ class TestCostTracking:
 # ---------------------------------------------------------------------------
 # CLEANUP & LIFECYCLE
 # ---------------------------------------------------------------------------
+
 
 class TestCleanupMigration:
     """Tests for cleanup_migration."""
@@ -495,6 +516,7 @@ class TestCleanupMigration:
 # ---------------------------------------------------------------------------
 # CLOUDWATCH METRICS
 # ---------------------------------------------------------------------------
+
 
 class TestCloudWatchMetrics:
     """Tests for _publish_metric."""

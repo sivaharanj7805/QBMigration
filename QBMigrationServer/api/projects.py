@@ -23,6 +23,7 @@ projects_bp = Blueprint("projects", __name__, url_prefix="/api/projects")
 
 
 @projects_bp.route("", methods=["GET"])
+@limiter.limit("30/minute")
 @require_auth
 def list_projects():
     """List all projects for the current user"""
@@ -207,6 +208,7 @@ def create_project():
 
 
 @projects_bp.route("/<int:project_id>", methods=["GET"])
+@limiter.limit("60/minute")
 @require_auth
 def get_project(project_id):
     """Get project details"""

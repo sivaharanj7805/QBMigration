@@ -2,9 +2,12 @@
 
 from datetime import datetime, timezone
 
-from utils.anomaly_detector import (detect_large_file_upload,
-                                    detect_rapid_migrations, is_suspicious_ip,
-                                    is_unusual_login_time)
+from utils.anomaly_detector import (
+    detect_large_file_upload,
+    detect_rapid_migrations,
+    is_suspicious_ip,
+    is_unusual_login_time,
+)
 
 
 class TestIsUnusualLoginTime:

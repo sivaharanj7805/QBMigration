@@ -26,6 +26,7 @@ websocket_bp = Blueprint("websocket", __name__, url_prefix="/api/ws")
 # SocketIO instance - initialized in app.py
 socketio = None
 
+
 def _get_internal_api_key():
     """Read INTERNAL_API_KEY at call time, not module-load time."""
     return os.getenv("INTERNAL_API_KEY")

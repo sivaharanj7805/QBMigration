@@ -887,9 +887,7 @@ exit $EXIT_CODE
 
             cleanup_success = all([instance_terminated, s3_deleted, secret_deleted])
             if cleanup_success:
-                logger.info(
-                    f"Complete cleanup successful for migration {migration_id}"
-                )
+                logger.info(f"Complete cleanup successful for migration {migration_id}")
             else:
                 logger.warning(
                     f"⚠ Cleanup completed with warnings for migration {migration_id}"

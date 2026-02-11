@@ -10,8 +10,9 @@ Revision ID: 001_drop_legacy_mfa
 Revises:
 Create Date: 2026-02-11
 """
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 
 revision = "001_drop_legacy_mfa"
 down_revision = None

@@ -138,7 +138,9 @@ class TestCompleteExtraction:
         # No activation exists for this device, so returns 403
         assert response.status_code == 403
 
-    def test_complete_extraction_exceeds_limit_no_token(self, client, db_session, test_user):
+    def test_complete_extraction_exceeds_limit_no_token(
+        self, client, db_session, test_user
+    ):
         """Without extraction_token, complete-extraction returns 400 before checking limits."""
         project = Project(
             user_id=test_user.id,

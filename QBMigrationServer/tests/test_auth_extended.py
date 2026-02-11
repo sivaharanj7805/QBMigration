@@ -509,14 +509,16 @@ class TestTeamInvite:
         assert response.status_code == 401
 
     def test_invite_success(self, authenticated_client, db_session, test_user):
-        """Team invite feature is not yet implemented, returns 501."""
+        """Team invite creates a pending invitation."""
         response = authenticated_client.post(
             "/api/auth/team/invite",
             json={"email": "teammate@example.com", "role": "member"},
         )
-        assert response.status_code == 501
+        assert response.status_code == 200
         data = response.get_json()
-        assert "not yet available" in data["error"].lower()
+        assert data["success"] is True
+        assert data["invite"]["email"] == "teammate@example.com"
+        assert data["invite"]["role"] == "member"
 
     def test_invite_missing_email(self, authenticated_client, db_session, test_user):
         """Invite with missing email returns 400."""
@@ -536,13 +538,15 @@ class TestTeamInvite:
         assert response.status_code in (400, 401)
 
     def test_invite_default_role(self, authenticated_client, db_session, test_user):
-        """Team invite feature is not yet implemented, returns 501 even without explicit role."""
+        """Team invite feature now works and defaults to role='member' when not specified."""
         response = authenticated_client.post(
             "/api/auth/team/invite", json={"email": "default_role@example.com"}
         )
-        assert response.status_code == 501
+        assert response.status_code == 200
         data = response.get_json()
-        assert "not yet available" in data["error"].lower()
+        assert data["success"] is True
+        # Check that default role is 'member'
+        assert data.get("invite", {}).get("role") == "member"
 
 
 # ============================================================================

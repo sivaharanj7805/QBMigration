@@ -9,10 +9,6 @@ import re
 from datetime import datetime, timezone
 
 import stripe
-from flask import Blueprint, current_app, jsonify, request
-from models.database import db
-from models.migration_credit import MigrationCredit
-from models.user import User
 
 # HIGH-06 FIX: Import shared auth decorator instead of maintaining a duplicate.
 # This ensures auth policy changes (e.g., JTI revocation, algorithm updates)
@@ -21,6 +17,10 @@ from api.auth import require_auth
 
 # H-32 FIX: Import limiter to rate-limit checkout and payment endpoints
 from extensions import limiter
+from flask import Blueprint, current_app, jsonify, request
+from models.database import db
+from models.migration_credit import MigrationCredit
+from models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -210,10 +210,26 @@ def create_checkout():
     # AUDIT FIX P8-L1: Specific exception types for better error handling
     except stripe.error.RateLimitError as e:
         logger.warning("Stripe rate limit hit for user %s: %s", current_user.id, e)
-        return jsonify({"success": False, "error": "Payment service is busy. Please retry in a moment."}), 429
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Payment service is busy. Please retry in a moment.",
+                }
+            ),
+            429,
+        )
     except stripe.error.APIConnectionError as e:
         logger.error("Stripe connection error for user %s: %s", current_user.id, e)
-        return jsonify({"success": False, "error": "Cannot reach payment service. Please try again."}), 503
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Cannot reach payment service. Please try again.",
+                }
+            ),
+            503,
+        )
     except Exception as e:
         # FIX: Sanitize exception message before logging to avoid card details
         error_str = str(e)
@@ -278,6 +294,7 @@ def stripe_webhook():
     redis_conn = None
     try:
         import redis as _redis
+
         redis_conn = _redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"))
         if redis_conn.get(f"stripe_event:{event_id}"):
             logger.info(f"Duplicate Stripe event {event_id} — already processed")
@@ -322,10 +339,25 @@ def stripe_webhook():
             customer = event["data"]["object"]
             logger.info(f"Stripe customer deleted: {customer.get('id')}")
 
+        # AUDIT FIX: Log subscription lifecycle events for observability.
+        # The billing model is credit-based (not subscription-based), so these
+        # events don't require active handling, but logging them provides audit
+        # trail if the billing model evolves to subscriptions in the future.
+        elif event["type"] in (
+            "customer.subscription.created",
+            "customer.subscription.updated",
+            "customer.subscription.deleted",
+            "customer.subscription.trial_will_end",
+            "invoice.paid",
+            "invoice.upcoming",
+        ):
+            logger.info(
+                f"Stripe subscription event received (no-op for credit model): "
+                f"type={event['type']} id={event['data']['object'].get('id', 'unknown')}"
+            )
+
     except Exception as handler_err:
-        logger.exception(
-            "Failed to handle Stripe event %s", event["type"]
-        )
+        logger.exception("Failed to handle Stripe event %s", event["type"])
         return jsonify({"received": False, "error": "Handler failed"}), 500
 
     # Mark event as completed
@@ -505,9 +537,11 @@ def verify_session(session_id):
 
             if session.payment_status == "paid":
                 # Use SELECT FOR UPDATE to prevent race with concurrent webhook
-                locked_credit = MigrationCredit.query.filter_by(
-                    id=credit.id
-                ).with_for_update().first()
+                locked_credit = (
+                    MigrationCredit.query.filter_by(id=credit.id)
+                    .with_for_update()
+                    .first()
+                )
                 if locked_credit and locked_credit.payment_status != "paid":
                     locked_credit.mark_paid(session.payment_intent, auto_commit=False)
                     db.session.commit()

@@ -1,5 +1,3 @@
-import os
-
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import Session
 from utils.env_helper import is_testing

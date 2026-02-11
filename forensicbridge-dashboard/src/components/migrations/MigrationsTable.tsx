@@ -258,7 +258,7 @@ export function MigrationsTable({
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("company_name"); } }}
                             tabIndex={0}
                             role="columnheader"
-                            aria-sort={sortField === "company_name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                            aria-sort={sortField === "company_name" ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Client Name <SortIcon field="company_name" />
@@ -271,7 +271,7 @@ export function MigrationsTable({
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("created_at"); } }}
                             tabIndex={0}
                             role="columnheader"
-                            aria-sort={sortField === "created_at" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                            aria-sort={sortField === "created_at" ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Last Sync <SortIcon field="created_at" />
@@ -283,7 +283,7 @@ export function MigrationsTable({
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("status"); } }}
                             tabIndex={0}
                             role="columnheader"
-                            aria-sort={sortField === "status" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                            aria-sort={sortField === "status" ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Status <SortIcon field="status" />
@@ -295,7 +295,7 @@ export function MigrationsTable({
                             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("progress_percent"); } }}
                             tabIndex={0}
                             role="columnheader"
-                            aria-sort={sortField === "progress_percent" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                            aria-sort={sortField === "progress_percent" ? (sortOrder === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Progress <SortIcon field="progress_percent" />
@@ -414,7 +414,6 @@ export function MigrationsTable({
                                                 <MoreHorizontal className="w-4 h-4 text-gray-400" />
                                             </button>
                                             {openMenuId === migration.migration_id && (
-                                                {/* AUDIT FIX P7-M3: max-h + bottom-safe positioning */}
                                                 <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200 max-h-[calc(100vh-4rem)] overflow-y-auto">
                                                     <div className="py-1">
                                                         <Link

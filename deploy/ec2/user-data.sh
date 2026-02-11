@@ -35,6 +35,8 @@ apt-get update -y
 apt-get upgrade -y
 
 # Install required packages
+# AUDIT FIX MUST-05: Added unattended-upgrades for auto-patching and
+# fail2ban for brute-force protection on financial data servers.
 apt-get install -y \
     python3.11 \
     python3.11-venv \
@@ -55,7 +57,10 @@ apt-get install -y \
     certbot \
     python3-certbot-nginx \
     jq \
-    awscli
+    awscli \
+    unattended-upgrades \
+    apt-listchanges \
+    fail2ban
 
 # Install Node.js 20.x for Next.js frontend
 # Pinned to a specific version to mitigate supply-chain risk from curl | bash
@@ -83,6 +88,77 @@ apt-get install -y nodejs
 echo "Node.js version: $(node --version)"
 echo "npm version: $(npm --version)"
 echo "Python version: $(python3.11 --version)"
+
+# =============================================================================
+# 1b. AUDIT FIX MUST-05: Configure auto-patching and brute-force protection
+# =============================================================================
+echo "[1b/10] Configuring unattended-upgrades and fail2ban..."
+
+# Enable automatic security updates
+cat > /etc/apt/apt.conf.d/50unattended-upgrades << 'UUEOF'
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::MinimalSteps "true";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+// Reboot at 3am if required, only if no users are logged in
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+// Email notifications (configure MAIL_TO in /etc/apt/apt.conf.d/50unattended-upgrades)
+Unattended-Upgrade::Mail "root";
+Unattended-Upgrade::MailReport "on-change";
+UUEOF
+
+cat > /etc/apt/apt.conf.d/20auto-upgrades << 'AUEOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+AUEOF
+
+systemctl enable unattended-upgrades
+systemctl start unattended-upgrades
+
+# Configure fail2ban for SSH and Nginx brute-force protection
+cat > /etc/fail2ban/jail.local << 'F2BEOF'
+[DEFAULT]
+bantime  = 3600
+findtime = 600
+maxretry = 5
+backend  = systemd
+
+[sshd]
+enabled = true
+port    = ssh
+filter  = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 7200
+
+[nginx-http-auth]
+enabled = true
+port    = http,https
+filter  = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 5
+
+[nginx-limit-req]
+enabled = true
+port    = http,https
+filter  = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+bantime = 1800
+F2BEOF
+
+systemctl enable fail2ban
+systemctl start fail2ban
+
+echo "Auto-patching and fail2ban configured."
 
 # =============================================================================
 # 2. Create Application User

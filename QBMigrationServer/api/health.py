@@ -31,6 +31,7 @@ health_bp = Blueprint("health", __name__)
 HEALTH_RATE_LIMIT = "60 per minute"
 DETAILED_RATE_LIMIT = "10 per minute"
 
+
 def require_admin_auth(f):
     """
     Decorator to require admin authentication for sensitive health endpoints.
@@ -44,13 +45,19 @@ def require_admin_auth(f):
 
         if not admin_api_key:
             logger.error("ADMIN_API_KEY not configured - admin endpoints disabled")
-            return jsonify({"success": False, "error": "Admin endpoints not configured"}), 503
+            return (
+                jsonify({"success": False, "error": "Admin endpoints not configured"}),
+                503,
+            )
 
         if not api_key:
             logger.warning(
                 f"Detailed health check attempted without auth from {request.remote_addr}"
             )
-            return jsonify({"success": False, "error": "Admin authentication required"}), 401
+            return (
+                jsonify({"success": False, "error": "Admin authentication required"}),
+                401,
+            )
 
         if not hmac.compare_digest(api_key, admin_api_key):
             logger.warning(f"Invalid admin API key from {request.remote_addr}")
@@ -519,7 +526,13 @@ def _derive_overall_status(health_status):
     status = "healthy"
 
     # Any "fail" in core checks -> unhealthy
-    for key in ("database", "canadian_residency", "s3_bucket", "aws_s3_service", "encryption"):
+    for key in (
+        "database",
+        "canadian_residency",
+        "s3_bucket",
+        "aws_s3_service",
+        "encryption",
+    ):
         check = checks.get(key)
         if check and check.get("status") == "fail":
             return "unhealthy"
