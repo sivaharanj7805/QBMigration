@@ -262,9 +262,10 @@ DATE_PAST_MAX_YEARS = get_env_int(
 # MIGRATION SETTINGS
 # ============================================================================
 
+# AUDIT FIX P3-L2: Log warning (not just info) when BATCH_SIZE is overridden
 BATCH_SIZE = get_env_int("BATCH_SIZE", 30)  # QBO limit is 30
 if BATCH_SIZE > 30:
-    logger.info(f"Warning: BATCH_SIZE {BATCH_SIZE} exceeds QBO limit of 30, using 30")
+    logger.warning(f"BATCH_SIZE {BATCH_SIZE} exceeds QBO limit of 30, clamping to 30")
     BATCH_SIZE = 30
 
 RATE_LIMIT_DELAY = get_env_float("RATE_LIMIT_DELAY", 0.15)

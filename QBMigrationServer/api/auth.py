@@ -98,9 +98,10 @@ def _blocklist_add(jti: str, exp_timestamp: float) -> None:
             redis.setex(f"jwt_blocklist:{jti}", ttl, "1")
             return
         except Exception as exc:
-            logger.debug("Redis blocklist write failed, falling back to in-memory: %s", exc)
+            # AUDIT FIX P6-L1: Warn on Redis fallback — in-memory blocklist is per-process only
+            logger.warning("Redis blocklist write failed, falling back to in-memory (per-process only): %s", exc)
 
-    # Fallback: in-memory (per-process only)
+    # Fallback: in-memory (per-process only — tokens revoked here won't be seen by other workers)
     now = _time.time()
     with _jwt_blocklist_lock:
         # Prune expired entries

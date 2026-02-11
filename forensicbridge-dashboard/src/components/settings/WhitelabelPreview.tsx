@@ -62,7 +62,13 @@ export function WhitelabelPreview({
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
 
+            // AUDIT FIX LOW-8: Track object URL for cleanup to prevent memory leak
+            const objectUrl = URL.createObjectURL(file);
+
             img.onload = () => {
+                // AUDIT FIX LOW-8: Revoke object URL after image loads to free memory
+                URL.revokeObjectURL(objectUrl);
+
                 let { width, height } = img;
 
                 // Calculate new dimensions maintaining aspect ratio
@@ -86,10 +92,13 @@ export function WhitelabelPreview({
                 }
             };
 
-            img.onerror = () => reject(new Error('Failed to load image'));
+            img.onerror = () => {
+                // AUDIT FIX LOW-8: Revoke object URL on error too
+                URL.revokeObjectURL(objectUrl);
+                reject(new Error('Failed to load image'));
+            };
 
-            // Create object URL for the image
-            img.src = URL.createObjectURL(file);
+            img.src = objectUrl;
         });
     };
 

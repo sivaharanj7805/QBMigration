@@ -212,6 +212,16 @@ def _process_webhook(webhook_type, expected_status, handler_fn):
     except Exception as e:
         logger.exception(f"Failed to process {webhook_type} webhook: {str(e)}")
         db.session.rollback()
+        # AUDIT FIX P12-L1: Log failed webhooks for dead letter review
+        try:
+            logger.error(
+                f"DEAD_LETTER: webhook_type={webhook_type} "
+                f"migration_id={request.headers.get('X-Migration-Id', 'unknown')} "
+                f"webhook_id={request.headers.get('X-Webhook-Id', 'unknown')} "
+                f"error={str(e)[:200]}"
+            )
+        except Exception:
+            pass
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 

@@ -93,14 +93,16 @@ class User(UserMixin, db.Model):
     _backup_codes_encrypted = db.Column(
         "backup_codes_encrypted", db.Text, nullable=True
     )
-    # DEPRECATED LEGACY COLUMNS - Retained only for data migration compatibility.
-    # These columns store UNENCRYPTED MFA data and MUST be dropped after all rows
-    # have been migrated to encrypted columns. See migrate_legacy_mfa_data() below.
-    # SECURITY: Never write new data to these columns - always use encrypted variants.
+    # AUDIT FIX P5-L1: DEPRECATED LEGACY COLUMNS — scheduled for removal.
+    # These store UNENCRYPTED MFA data and MUST be dropped via Alembic migration
+    # after all rows are migrated to encrypted columns. See migrate_legacy_mfa_data().
+    # SECURITY: Never write new data to these columns.
+    # TODO: Create Alembic migration: op.drop_column('users', 'mfa_secret')
+    #                                  op.drop_column('users', 'backup_codes')
     mfa_secret = db.Column(
         db.String(32), nullable=True
-    )  # DEPRECATED: DROP after migration
-    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: DROP after migration
+    )  # DEPRECATED: scheduled DROP
+    backup_codes = db.Column(db.Text, nullable=True)  # DEPRECATED: scheduled DROP
 
     # Security - Device Fingerprinting
     trusted_devices = db.Column(db.Text)  # JSON array of device fingerprints

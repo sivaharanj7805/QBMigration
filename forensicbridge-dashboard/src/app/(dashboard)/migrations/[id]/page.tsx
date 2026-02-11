@@ -71,21 +71,29 @@ export default function MigrationDetailPage() {
     // Fetch discrepancies from API
     // SECURITY: Using authFetch instead of localStorage.getItem('token')
     // FIX F-05: Validate API responses with Zod schemas
+    // AUDIT FIX P13-L2: Explicit timeout on useQuery calls
     const { data: discrepancyData } = useQuery({
         queryKey: ["discrepancies", id],
         queryFn: async ({ signal }) => {
-            const response = await authFetch(`${API_URL}/api/migrations/${id}/discrepancies`, {
-                signal,
-            });
-            if (!response.ok) return { discrepancies: [], total_discrepancy: 0 };
-            const json = await response.json();
-            // Validate structure: ensure discrepancies is an array
-            if (!Array.isArray(json?.discrepancies)) {
-                return { discrepancies: [], total_discrepancy: 0 };
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000);
+            const mergedSignal = signal ?? controller.signal;
+            try {
+                const response = await authFetch(`${API_URL}/api/migrations/${id}/discrepancies`, {
+                    signal: mergedSignal,
+                });
+                if (!response.ok) return { discrepancies: [], total_discrepancy: 0 };
+                const json = await response.json();
+                if (!Array.isArray(json?.discrepancies)) {
+                    return { discrepancies: [], total_discrepancy: 0 };
+                }
+                return json;
+            } finally {
+                clearTimeout(timeout);
             }
-            return json;
         },
         enabled: !!id && liveStatus?.status === "completed",
+        staleTime: 60000,
     });
 
     // Fetch record count from API

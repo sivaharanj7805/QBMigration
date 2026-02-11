@@ -590,12 +590,19 @@ class QBDataTransformer:
         method_name = f"transform_{normalized_type}"
 
         if not hasattr(self, method_name):
+            # AUDIT FIX P2-H1: Log unsupported entities and add to skipped report
             logger.error(
                 f"No transform method for entity type: {entity_type} "
                 f"(method '{method_name}' not found) — entity will be SKIPPED"
             )
             self.stats["unsupported_entities"] += 1
             self.stats["total_skipped"] += 1
+            self.add_manual_review(
+                entity_type=entity_type,
+                name=f"Unsupported type: {entity_type}",
+                reason=f"No transform method '{method_name}' — entity skipped. "
+                       f"Add transform_{normalized_type}() to support this type.",
+            )
             return None
 
         try:
@@ -958,16 +965,23 @@ class QBDataTransformer:
         return name
 
     def sanitize_name(self, name: str, max_len: int = 100) -> str:
-        """Sanitize name for QB Online."""
+        """Sanitize name for QB Online.
+
+        AUDIT FIX P1-M1: Expanded allowed characters to include QBO-valid chars `:;!+`
+        AUDIT FIX P1-L1: Truncate before sanitization to preserve meaningful content
+        """
         if not name:
             return ""
         name = html.unescape(name).strip()
-        name = re.sub(r"[^\w\s\-\'&.,/()@#]", "", name)
-        name = re.sub(r"\s+", " ", name)
+        # Truncate first so we keep the most meaningful leading content
         if len(name) > max_len:
             self.stats["truncations"] += 1
-            logger.debug(f"Truncated name from {len(name)} to {max_len} chars")
-        return name[:max_len]
+            logger.debug(f"Truncating name from {len(name)} to {max_len} chars: '{name[:30]}...'")
+            name = name[:max_len]
+        # QBO allows alphanumeric, spaces, and these special chars in DisplayName
+        name = re.sub(r"[^\w\s\-\'&.,/()@#:;!+]", "", name)
+        name = re.sub(r"\s+", " ", name)
+        return name.strip()
 
     def format_date(self, date_value: Any) -> Optional[str]:  # noqa: C901
         """
@@ -1207,11 +1221,18 @@ class QBDataTransformer:
             # Convert to positive for processing, but flag for review
             return abs(amount)
 
+        # AUDIT FIX P2-C1: Reject zero-amount payments — they corrupt trial balances in QBO
         if amount == 0:
             logger.warning(
                 f"Zero payment amount in {entity_type} '{entity_name}' - "
-                f"payment will be recorded but may need review"
+                f"skipping to prevent trial balance corruption"
             )
+            self.add_manual_review(
+                entity_type=entity_type,
+                name=entity_name,
+                reason="Zero-amount payment skipped — verify if this transaction is needed",
+            )
+            return None
 
         return amount
 

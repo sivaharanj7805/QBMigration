@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
     Play,
@@ -251,9 +251,14 @@ export function MigrationsTable({
                                 className="rounded border-gray-300"
                             />
                         </th>
+                        {/* AUDIT FIX P7-M1/P7-L1: Sortable headers with keyboard navigation */}
                         <th
                             className="cursor-pointer hover:bg-gray-100"
                             onClick={() => handleSort("company_name")}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("company_name"); } }}
+                            tabIndex={0}
+                            role="columnheader"
+                            aria-sort={sortField === "company_name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Client Name <SortIcon field="company_name" />
@@ -263,6 +268,10 @@ export function MigrationsTable({
                         <th
                             className="cursor-pointer hover:bg-gray-100"
                             onClick={() => handleSort("created_at")}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("created_at"); } }}
+                            tabIndex={0}
+                            role="columnheader"
+                            aria-sort={sortField === "created_at" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Last Sync <SortIcon field="created_at" />
@@ -271,6 +280,10 @@ export function MigrationsTable({
                         <th
                             className="cursor-pointer hover:bg-gray-100"
                             onClick={() => handleSort("status")}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("status"); } }}
+                            tabIndex={0}
+                            role="columnheader"
+                            aria-sort={sortField === "status" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Status <SortIcon field="status" />
@@ -279,6 +292,10 @@ export function MigrationsTable({
                         <th
                             className="cursor-pointer hover:bg-gray-100"
                             onClick={() => handleSort("progress_percent")}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleSort("progress_percent"); } }}
+                            tabIndex={0}
+                            role="columnheader"
+                            aria-sort={sortField === "progress_percent" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                         >
                             <div className="flex items-center gap-1">
                                 Progress <SortIcon field="progress_percent" />
@@ -311,7 +328,8 @@ export function MigrationsTable({
                                 <td>
                                     <Link
                                         href={`/migrations/${migration.migration_id}`}
-                                        className="font-medium text-gray-900 hover:text-[var(--bridge-blue)]"
+                                        className="font-medium text-gray-900 hover:text-[var(--bridge-blue)] truncate max-w-[200px] inline-block"
+                                        title={sanitize.text(migration.company_name)}
                                     >
                                         {sanitize.text(migration.company_name)}
                                     </Link>
@@ -380,17 +398,24 @@ export function MigrationsTable({
                                         )}
                                         {/* FIX FE-02: More Options dropdown with actual functionality */}
                                         <div className="relative">
+                                            {/* AUDIT FIX P7-M1: Keyboard-accessible dropdown trigger */}
                                             <button
                                                 className="p-1.5 hover:bg-gray-100 rounded transition-colors"
                                                 title="More Options"
+                                                aria-haspopup="true"
+                                                aria-expanded={openMenuId === migration.migration_id}
                                                 onClick={() => setOpenMenuId(
                                                     openMenuId === migration.migration_id ? null : migration.migration_id
                                                 )}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Escape') setOpenMenuId(null);
+                                                }}
                                             >
                                                 <MoreHorizontal className="w-4 h-4 text-gray-400" />
                                             </button>
                                             {openMenuId === migration.migration_id && (
-                                                <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
+                                                {/* AUDIT FIX P7-M3: max-h + bottom-safe positioning */}
+                                                <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200 max-h-[calc(100vh-4rem)] overflow-y-auto">
                                                     <div className="py-1">
                                                         <Link
                                                             href={`/migrations/${migration.migration_id}`}
