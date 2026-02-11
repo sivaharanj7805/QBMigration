@@ -45,6 +45,14 @@ namespace QBDesktopExtractor
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             _webSocket = new ClientWebSocket();
 
+            // SECURITY FIX: Send auth token via HTTP Authorization header during
+            // the WebSocket upgrade handshake instead of in the JSON message body.
+            // The header is encrypted by TLS and not visible in message-level logs.
+            if (!string.IsNullOrEmpty(_authToken))
+            {
+                _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {_authToken}");
+            }
+
             // Convert HTTP URL to WebSocket URL
             string wsUrl = _serverUrl
                 .Replace("https://", "wss://")
@@ -161,25 +169,16 @@ namespace QBDesktopExtractor
 
         private async Task AuthenticateAsync()
         {
-            // SECURITY FIX: Send auth token as a separate binary frame header
-            // instead of including it in the JSON message body where it would be
-            // visible in logs, network traces, and browser DevTools.
+            // SECURITY FIX: The auth token is sent via the WebSocket upgrade
+            // request's Authorization header (set in ConnectAsync), keeping it
+            // out of JSON message bodies where it would be visible in logs,
+            // network traces, and browser DevTools. The JSON message only
+            // carries a truncated hash for log correlation.
             var authMessage = new JObject
             {
                 ["type"] = "authenticate",
                 ["token_hash"] = ComputeTokenHash(_authToken)
             };
-
-            // Send token in Authorization-style header via first binary frame
-            var tokenBytes = Encoding.UTF8.GetBytes($"Bearer {_authToken}");
-            if (_webSocket?.State == System.Net.WebSockets.WebSocketState.Open)
-            {
-                await _webSocket.SendAsync(
-                    new ArraySegment<byte>(tokenBytes),
-                    System.Net.WebSockets.WebSocketMessageType.Binary,
-                    true,
-                    CancellationToken.None);
-            }
 
             await SendMessageAsync(authMessage);
         }
