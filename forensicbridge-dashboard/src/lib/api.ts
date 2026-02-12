@@ -574,7 +574,7 @@ class ApiClient {
             status: string;
             timestamp: string;
             checks: Record<string, string>;
-        }>("/health", {}, undefined, 5000, signal);
+        }>("/api/health", {}, undefined, 5000, signal);
     }
 
     // ==========================================
