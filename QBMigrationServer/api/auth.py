@@ -326,6 +326,54 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                         ),
                         401,
                     )
+
+                # CRITICAL FIX A16: Invalidate session if password changed after session creation
+                # Check if session was created before password was changed
+                session_created_at_str = session.get("_created_at")
+                if session_created_at_str and session_user.password_changed_at:
+                    try:
+                        session_created_at = datetime.datetime.fromisoformat(
+                            session_created_at_str
+                        )
+                        # Ensure both timestamps are timezone-aware for comparison
+                        if session_created_at.tzinfo is None:
+                            session_created_at = session_created_at.replace(
+                                tzinfo=timezone.utc
+                            )
+                        if session_created_at < session_user.password_changed_at:
+                            logger.info(
+                                f"Session invalidated for user {session_user.id}: "
+                                f"password changed after session creation"
+                            )
+                            session.clear()
+                            return (
+                                jsonify(
+                                    {
+                                        "success": False,
+                                        "error": "Session expired due to password change. "
+                                        "Please log in again.",
+                                        "session_invalid": True,
+                                    }
+                                ),
+                                401,
+                            )
+                    except (ValueError, TypeError) as e:
+                        # Invalid session timestamp format - invalidate session
+                        logger.warning(
+                            f"Invalid session timestamp for user {session_user.id}: {e}"
+                        )
+                        session.clear()
+                        return (
+                            jsonify(
+                                {
+                                    "success": False,
+                                    "error": "Session expired. Please log in again.",
+                                    "session_invalid": True,
+                                }
+                            ),
+                            401,
+                        )
+
                 session["_user_verified_at"] = now_ts
 
             request.current_user = {  # type: ignore[attr-defined]
@@ -710,6 +758,11 @@ def decode_token(token: str) -> Optional[dict]:
 
     MED-03 FIX: Uses configurable allowed algorithms from config.
     Validates that all listed algorithms are in the safe allowlist.
+
+    CRITICAL FIX A16: Invalidates tokens issued before password change.
+    When a user changes their password, all previously issued JWT tokens
+    are automatically invalidated by comparing token iat (issued at) with
+    user.password_changed_at timestamp.
     """
     try:
         allowed = current_app.config.get("JWT_ALLOWED_ALGORITHMS", ["HS256"])
@@ -736,6 +789,27 @@ def decode_token(token: str) -> Optional[dict]:
         jti = payload.get("jti")
         if jti and _blocklist_check(jti):
             return None
+
+        # CRITICAL FIX A16: Invalidate tokens issued before password change
+        # This ensures that changing password revokes all existing sessions
+        user_id = payload.get("user_id")
+        if user_id:
+            # Only perform DB lookup if we have iat claim to compare
+            iat = payload.get("iat")
+            if iat:
+                user = db.session.get(User, user_id)
+                if user and user.password_changed_at:
+                    # Convert JWT iat (Unix timestamp) to datetime for comparison
+                    token_issued_at = datetime.datetime.fromtimestamp(iat, tz=timezone.utc)
+                    # If token was issued before password was changed, reject it
+                    if token_issued_at < user.password_changed_at:
+                        logger.info(
+                            f"Token rejected for user {user_id}: issued before password change "
+                            f"(token: {token_issued_at.isoformat()}, "
+                            f"password changed: {user.password_changed_at.isoformat()})"
+                        )
+                        return None
+
         return payload
     except jwt.ExpiredSignatureError:
         return None
