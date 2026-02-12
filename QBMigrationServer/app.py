@@ -774,13 +774,21 @@ def create_app(config_name=None):  # noqa: C901
             app.logger.warning(f"Could not parse origin '{origin}': {e}")
 
     # CRITICAL SECURITY FIX: Block localhost in production CORS origins
-    # This is a security risk - localhost should never be allowed in production
+    # This is a security risk - localhost should never be allowed in production.
+    # Override with ALLOW_LOCALHOST_CORS=true for Docker-local production testing.
     if is_production() and "localhost" in str(allowed_origins):
-        raise ValueError(
-            "CRITICAL SECURITY ERROR: 'localhost' found in CORS origins for production environment! "
-            "Remove localhost from ALLOWED_ORIGINS environment variable. "
-            f"Current origins: {allowed_origins}"
-        )
+        if os.getenv("ALLOW_LOCALHOST_CORS", "").lower() not in ("true", "1"):
+            raise ValueError(
+                "CRITICAL SECURITY ERROR: 'localhost' found in CORS origins for production environment! "
+                "Remove localhost from ALLOWED_ORIGINS environment variable. "
+                "If running Docker locally, set ALLOW_LOCALHOST_CORS=true to override. "
+                f"Current origins: {allowed_origins}"
+            )
+        else:
+            app.logger.warning(
+                "SECURITY: localhost CORS origins allowed via ALLOW_LOCALHOST_CORS override. "
+                "Ensure this is DISABLED in real production deployments."
+            )
 
     # PERFORMANCE FIX: Add max_age to cache preflight responses for 1 hour
     CORS(

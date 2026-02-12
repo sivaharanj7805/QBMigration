@@ -29,7 +29,10 @@ services:
       - qbmigration-logs:/app/logs
     environment:
       - FLASK_APP=QBMigrationServer/app.py
-      - FLASK_ENV=${FLASK_ENV:-development}
+      - FLASK_ENV=${FLASK_ENV:-production}
+      # FIX: get_env() checks APP_ENV first — must match FLASK_ENV to prevent
+      # QBMigrationServer/.env (mounted via volume) from overriding with "development"
+      - APP_ENV=${FLASK_ENV:-production}
       # SECURITY FIX: Debug disabled by default; override in docker-compose.dev.yml
       - FLASK_DEBUG=${FLASK_DEBUG:-0}
       # SECURITY FIX: Use environment variables for all secrets - fail if not set
@@ -38,22 +41,35 @@ services:
       # FIX: extensions.py checks RATELIMIT_STORAGE_URL at import time — must match REDIS_URL
       - RATELIMIT_STORAGE_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD_required}@redis:6379/1
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY_required}
+      # Production secrets
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:?WEBHOOK_SECRET_required}
+      - LICENSE_SECRET_KEY=${LICENSE_SECRET_KEY:?LICENSE_SECRET_KEY_required}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:?BACKUP_ENCRYPTION_KEY_required}
+      - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+      # AWS
       - AWS_REGION=${AWS_REGION:-ca-central-1}
-      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:?AWS_S3_BUCKET_required}
+      - AWS_EC2_AMI_ID=${AWS_EC2_AMI_ID:?AWS_EC2_AMI_ID_required}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      # QuickBooks Online
       - QBO_CLIENT_ID=${QBO_CLIENT_ID:-}
       - QBO_CLIENT_SECRET=${QBO_CLIENT_SECRET:-}
       - QBO_ENVIRONMENT=${QBO_ENVIRONMENT:-sandbox}
-      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
-      - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+      - QBO_REDIRECT_URI=${QBO_REDIRECT_URI:-http://localhost:5000/api/qbo/callback}
+      # Monitoring
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      # CORS & URLs
+      - SERVER_URL=${SERVER_URL:-http://localhost:5000}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5000}
+      - ALLOW_LOCALHOST_CORS=${ALLOW_LOCALHOST_CORS:-false}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       # Email (AWS SES SMTP or any SMTP relay)
       - MAIL_SERVER=${MAIL_SERVER:-email-smtp.ca-central-1.amazonaws.com}
       - MAIL_PORT=${MAIL_PORT:-587}
       - MAIL_USERNAME=${MAIL_USERNAME:-}
       - MAIL_PASSWORD=${MAIL_PASSWORD:-}
       - MAIL_DEFAULT_SENDER=${MAIL_DEFAULT_SENDER:-noreply@qbmigrate.io}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
