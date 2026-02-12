@@ -323,6 +323,113 @@ def list_migrations():
         )
 
 
+
+@migrations_bp.route("/api/migrations/stats", methods=["GET"])
+@require_auth
+def get_migration_stats():
+    """
+    Get migration statistics for dashboard.
+
+    Returns real data (not mock) for the current user.
+    """
+    try:
+        user_id = _get_current_user_id()
+
+        # Get current month's migrations
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Total migrations this month
+        migrations_this_month = Migration.query.filter(
+            Migration.user_id == user_id, Migration.created_at >= month_start
+        ).count()
+
+        # Total records migrated (sum of records across all migrations)
+        total_records = (
+            db.session.query(func.sum(Migration.total_records_migrated))
+            .filter(Migration.user_id == user_id)
+            .scalar()
+            or 0
+        )
+
+        # Average duration (for completed migrations)
+        completed_migrations = Migration.query.filter(
+            Migration.user_id == user_id,
+            Migration.status == "completed",
+            Migration.completed_at.isnot(None),
+            Migration.created_at.isnot(None),
+        ).all()
+
+        if completed_migrations:
+            durations = []
+            for m in completed_migrations:
+                if m.completed_at and m.created_at:
+                    duration = (m.completed_at - m.created_at).total_seconds()
+                    if duration > 0:
+                        durations.append(duration)
+            avg_duration = sum(durations) / len(durations) if durations else 0
+        else:
+            avg_duration = 0
+
+        # Success rate
+        total_finished = Migration.query.filter(
+            Migration.user_id == user_id, Migration.status.in_(["completed", "failed"])
+        ).count()
+
+        successful = Migration.query.filter(
+            Migration.user_id == user_id, Migration.status == "completed"
+        ).count()
+
+        success_rate = (
+            f"{(successful / total_finished * 100):.1f}%"
+            if total_finished > 0
+            else "--"
+        )
+
+        # Format average duration
+        if avg_duration > 0:
+            minutes = int(avg_duration // 60)
+            seconds = int(avg_duration % 60)
+            avg_duration_str = f"{minutes}m {seconds}s"
+        else:
+            avg_duration_str = "--"
+
+        # Format total records
+        if total_records >= 1000000:
+            records_str = f"{total_records / 1000000:.1f}M"
+        elif total_records >= 1000:
+            records_str = f"{total_records / 1000:.1f}K"
+        else:
+            records_str = str(total_records)
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "stats": {
+                        "migrations_this_month": migrations_this_month,
+                        "total_records": records_str,
+                        "avg_duration": avg_duration_str,
+                        "success_rate": success_rate,
+                    },
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to get migration stats")
+        # SECURITY FIX: Clean up database session on error
+        db.session.rollback()
+        db.session.remove()
+        return (
+            jsonify(
+                {"success": False, "error": "Failed to retrieve migration statistics"}
+            ),
+            500,
+        )
+
+
 @migrations_bp.route("/api/migrations/<migration_id>", methods=["GET"])
 @require_auth
 def get_migration(migration_id):
@@ -1238,107 +1345,4 @@ def execute_migration_celery(migration_id):
         return jsonify({"success": False, "error": "Failed to queue migration"}), 500
 
 
-@migrations_bp.route("/api/migrations/stats", methods=["GET"])
-@require_auth
-def get_migration_stats():
-    """
-    Get migration statistics for dashboard.
 
-    Returns real data (not mock) for the current user.
-    """
-    try:
-        user_id = _get_current_user_id()
-
-        # Get current month's migrations
-        now = datetime.now(timezone.utc)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-        # Total migrations this month
-        migrations_this_month = Migration.query.filter(
-            Migration.user_id == user_id, Migration.created_at >= month_start
-        ).count()
-
-        # Total records migrated (sum of records across all migrations)
-        total_records = (
-            db.session.query(func.sum(Migration.total_records_migrated))
-            .filter(Migration.user_id == user_id)
-            .scalar()
-            or 0
-        )
-
-        # Average duration (for completed migrations)
-        completed_migrations = Migration.query.filter(
-            Migration.user_id == user_id,
-            Migration.status == "completed",
-            Migration.completed_at.isnot(None),
-            Migration.created_at.isnot(None),
-        ).all()
-
-        if completed_migrations:
-            durations = []
-            for m in completed_migrations:
-                if m.completed_at and m.created_at:
-                    duration = (m.completed_at - m.created_at).total_seconds()
-                    if duration > 0:
-                        durations.append(duration)
-            avg_duration = sum(durations) / len(durations) if durations else 0
-        else:
-            avg_duration = 0
-
-        # Success rate
-        total_finished = Migration.query.filter(
-            Migration.user_id == user_id, Migration.status.in_(["completed", "failed"])
-        ).count()
-
-        successful = Migration.query.filter(
-            Migration.user_id == user_id, Migration.status == "completed"
-        ).count()
-
-        success_rate = (
-            f"{(successful / total_finished * 100):.1f}%"
-            if total_finished > 0
-            else "--"
-        )
-
-        # Format average duration
-        if avg_duration > 0:
-            minutes = int(avg_duration // 60)
-            seconds = int(avg_duration % 60)
-            avg_duration_str = f"{minutes}m {seconds}s"
-        else:
-            avg_duration_str = "--"
-
-        # Format total records
-        if total_records >= 1000000:
-            records_str = f"{total_records / 1000000:.1f}M"
-        elif total_records >= 1000:
-            records_str = f"{total_records / 1000:.1f}K"
-        else:
-            records_str = str(total_records)
-
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "stats": {
-                        "migrations_this_month": migrations_this_month,
-                        "total_records": records_str,
-                        "avg_duration": avg_duration_str,
-                        "success_rate": success_rate,
-                    },
-                }
-            ),
-            200,
-        )
-
-    except Exception as e:
-        logger.exception("Failed to get migration stats")
-        # SECURITY FIX: Clean up database session on error
-        db.session.rollback()
-        db.session.remove()
-        return (
-            jsonify(
-                {"success": False, "error": "Failed to retrieve migration statistics"}
-            ),
-            500,
-        )

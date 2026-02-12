@@ -402,6 +402,12 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
             except Exception as e:
                 logger.warning(f"Cookie auth failed with {type(e).__name__}: {str(e)}")
                 # Cookie is invalid, continue to return 401
+                pass
+
+        # DEBUG: Log headers and cookies for 401 diagnosis
+        logger.warning(
+            f"Auth failed. Headers: {dict(request.headers)}, Cookies: {dict(request.cookies)}, Session: {dict(session)}"
+        )
 
         return jsonify({"success": False, "error": "No authorization provided"}), 401
 
