@@ -342,8 +342,13 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                                 tzinfo=timezone.utc
                             )
 
+                        # FIX: Ensure password_changed_at is aware (SQLite returns naive)
+                        pwd_changed = session_user.password_changed_at
+                        if pwd_changed.tzinfo is None:
+                            pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+
                         # Calculate time difference (password_changed_at - session_created_at)
-                        time_diff = (session_user.password_changed_at - session_created_at).total_seconds()
+                        time_diff = (pwd_changed - session_created_at).total_seconds()
 
                         # Only invalidate if password was changed MORE THAN 5 seconds after session creation
                         # This grace period prevents race conditions during registration/login
@@ -817,8 +822,13 @@ def decode_token(token: str) -> Optional[dict]:
                     # Convert JWT iat (Unix timestamp) to datetime for comparison
                     token_issued_at = datetime.datetime.fromtimestamp(iat, tz=timezone.utc)
 
+                    # FIX: Ensure password_changed_at is aware (SQLite returns naive)
+                    pwd_changed = user.password_changed_at
+                    if pwd_changed.tzinfo is None:
+                        pwd_changed = pwd_changed.replace(tzinfo=timezone.utc)
+
                     # Calculate time difference (password_changed_at - token_issued_at)
-                    time_diff = (user.password_changed_at - token_issued_at).total_seconds()
+                    time_diff = (pwd_changed - token_issued_at).total_seconds()
 
                     # Only invalidate if password was changed MORE THAN 5 seconds after token was issued
                     # This grace period prevents race conditions during registration/login
