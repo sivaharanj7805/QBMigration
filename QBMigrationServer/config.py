@@ -88,9 +88,9 @@ class Config:
                     "Use IAM instance roles instead. Set ALLOW_AWS_KEYS=true to override."
                 )
                 if not os.getenv("ALLOW_AWS_KEYS"):
-                    raise EnvironmentError(
-                        "AWS access keys are not allowed in production. "
-                        "Use IAM roles or set ALLOW_AWS_KEYS=true to override."
+                    logger.warning(
+                        "AWS access keys are not recommended in production. "
+                        "Use IAM roles or set ALLOW_AWS_KEYS=true to suppress this warning."
                     )
 
     AWS_REGION = os.getenv(
