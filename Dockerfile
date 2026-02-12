@@ -65,8 +65,12 @@ RUN mkdir -p /app/data /app/logs /app/backups && \
     chown -R qbmigration:qbmigration /app
 
 # Environment variables
+# PYTHONPATH must include QBMigrationServer/ so absolute imports
+# (from utils..., from config..., from api..., etc.) resolve correctly
+# when Gunicorn loads the app as "QBMigrationServer.app:create_app()"
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH="/app/QBMigrationServer" \
     FLASK_APP=QBMigrationServer/app.py \
     FLASK_ENV=production \
     FLASK_DEBUG=0 \

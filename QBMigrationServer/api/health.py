@@ -121,7 +121,10 @@ def health_check():
     health_status["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     # Return appropriate status code
-    status_code = 200 if health_status["status"] == "healthy" else 503
+    # "degraded" still passes healthcheck (200) — only "unhealthy" returns 503
+    # This prevents the container from being marked unhealthy when optional
+    # services (AWS, Redis) are unconfigured
+    status_code = 200 if health_status["status"] in ("healthy", "degraded") else 503
 
     return jsonify(health_status), status_code
 
