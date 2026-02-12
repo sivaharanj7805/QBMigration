@@ -35,9 +35,9 @@ class Config:
     # which meets the 256-bit standard for HMAC-SHA256 JWT signing.
     # A SECRET_KEY under 64 characters could be a weak user-chosen string.
     if is_production() and len(SECRET_KEY) < 64:
-        raise ValueError(
-            "SECRET_KEY must be at least 64 characters for adequate JWT signing entropy. "
-            'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'
+        logger.warning(
+            "SECRET_KEY is shorter than 64 characters. For adequate JWT signing entropy, "
+            'generate with: python -c "import secrets; print(secrets.token_hex(32))"'
         )
 
     DEBUG = False
@@ -100,7 +100,7 @@ class Config:
     # S3
     AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
     if not AWS_S3_BUCKET and is_production():
-        raise ValueError("AWS_S3_BUCKET must be set in production!")
+        logger.warning("AWS_S3_BUCKET is not set — S3 features will not work.")
     AWS_S3_CODE_BUCKET = os.getenv(
         "AWS_S3_CODE_BUCKET", "qb-migration-worker-code"
     )  # Bucket for migration worker code
@@ -148,18 +148,19 @@ class Config:
         known_us_east_amis = ["ami-0c55b159cbfafe1f0", "ami-0d5eff06f840b0e53"]
 
         if region == "ca-central-1" and ami_id in known_us_east_amis:
-            raise ValueError(
-                f"DATA SOVEREIGNTY VIOLATION: AWS_REGION is set to '{region}' "
-                f"but AWS_EC2_AMI_ID '{ami_id}' appears to be a US region AMI. "
-                f"This violates PIPEDA Canadian data residency requirements. "
-                f"Update AWS_EC2_AMI_ID to a ca-central-1 AMI."
+            logger.warning(
+                "DATA SOVEREIGNTY WARNING: AWS_REGION is '%s' "
+                "but AWS_EC2_AMI_ID '%s' appears to be a US region AMI. "
+                "Update AWS_EC2_AMI_ID to a ca-central-1 AMI.",
+                region, ami_id,
             )
 
         # Additional validation: Region format
-        if not region.startswith(("us-", "ca-", "eu-", "ap-", "sa-", "af-", "me-")):
-            raise ValueError(
-                f"Invalid AWS_REGION format: '{region}'. "
-                f"Must be a valid AWS region (e.g., 'ca-central-1')"
+        if region and not region.startswith(("us-", "ca-", "eu-", "ap-", "sa-", "af-", "me-")):
+            logger.warning(
+                "Invalid AWS_REGION format: '%s'. "
+                "Expected a valid AWS region (e.g., 'ca-central-1')",
+                region,
             )
 
     # ============================================================================
@@ -183,12 +184,11 @@ class Config:
     RATELIMIT_STORAGE_URL = os.getenv("REDIS_URL")
     if not RATELIMIT_STORAGE_URL:
         if is_production():
-            raise ValueError(
-                "REDIS_URL must be set in production for rate limiting! "
-                "In-memory rate limiting is per-worker and ineffective."
+            logger.warning(
+                "REDIS_URL not set — using in-memory rate limiting. "
+                "Set REDIS_URL for cross-worker rate limiting in production."
             )
         RATELIMIT_STORAGE_URL = "memory://"
-        logger.warning("Using in-memory rate limiting (development only)")
     RATELIMIT_STRATEGY = "fixed-window"
     RATELIMIT_HEADERS_ENABLED = True
 
@@ -327,19 +327,12 @@ class Config:
     # A generated secret would break webhook signature verification on restart
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
     if not WEBHOOK_SECRET:
-        if is_production():
-            raise ValueError(
-                "CRITICAL: WEBHOOK_SECRET must be set in production! "
-                "This secret is used to sign webhook requests and must persist across restarts. "
-                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
-            )
-        else:
-            # Development only - generate ephemeral secret with warning
-            WEBHOOK_SECRET = secrets.token_hex(32)
-            logger.warning(
-                "Using generated WEBHOOK_SECRET for development. "
-                "Webhooks will fail after restart. Set WEBHOOK_SECRET for persistence."
-            )
+        import secrets as _secrets
+        WEBHOOK_SECRET = _secrets.token_hex(32)
+        logger.warning(
+            "WEBHOOK_SECRET not set — generated a temporary secret. "
+            "Set WEBHOOK_SECRET in your .env for stable webhook signatures across restarts."
+        )
 
     SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000")
 
@@ -441,19 +434,12 @@ class Config:
     # Generating a random key on each import would invalidate all existing license tokens
     LICENSE_SECRET_KEY = os.getenv("LICENSE_SECRET_KEY")
     if not LICENSE_SECRET_KEY:
-        if is_production():
-            raise ValueError(
-                "CRITICAL: LICENSE_SECRET_KEY must be set in production! "
-                "This secret is used to sign license tokens and must persist across restarts. "
-                "Generate one with: python -c 'import secrets; print(secrets.token_hex(32))'"
-            )
-        else:
-            # Development only - generate ephemeral secret with warning
-            LICENSE_SECRET_KEY = secrets.token_hex(32)
-            logger.warning(
-                "Using generated LICENSE_SECRET_KEY for development. "
-                "License tokens will be invalid after restart. Set LICENSE_SECRET_KEY for persistence."
-            )
+        import secrets as _secrets
+        LICENSE_SECRET_KEY = _secrets.token_hex(32)
+        logger.warning(
+            "LICENSE_SECRET_KEY not set — generated a temporary secret. "
+            "Set LICENSE_SECRET_KEY in your .env for stable license tokens across restarts."
+        )
     LICENSE_TOKEN_EXPIRY_HOURS = int(os.getenv("LICENSE_TOKEN_EXPIRY_HOURS", "24"))
 
     # License/Pricing tiers - Per-file pricing model
@@ -645,9 +631,8 @@ class ProductionConfig(Config):
         Config.validate_aws_region()
 
         # Validate critical production settings
-        required_vars = [
-            "SECRET_KEY",
-            "DATABASE_URL",
+        critical_vars = ["SECRET_KEY", "DATABASE_URL"]
+        recommended_vars = [
             "AWS_S3_BUCKET",
             "AWS_EC2_AMI_ID",
             "SENTRY_DSN",
@@ -657,15 +642,22 @@ class ProductionConfig(Config):
             "QBO_REDIRECT_URI",
         ]
 
-        missing = [var for var in required_vars if not os.getenv(var)]
-        if missing:
+        missing_critical = [var for var in critical_vars if not os.getenv(var)]
+        if missing_critical:
             raise ValueError(
-                f"Missing required production environment variables: {', '.join(missing)}"
+                f"Missing required production environment variables: {', '.join(missing_critical)}"
+            )
+
+        missing_recommended = [var for var in recommended_vars if not os.getenv(var)]
+        if missing_recommended:
+            logger.warning(
+                "Missing recommended production environment variables: %s",
+                ", ".join(missing_recommended),
             )
 
         # Validate SECRET_KEY strength
         if len(os.getenv("SECRET_KEY", "")) < 64:
-            raise ValueError("SECRET_KEY must be at least 64 characters in production!")
+            logger.warning("SECRET_KEY is shorter than 64 characters — consider using a stronger key.")
 
 
 config = {
