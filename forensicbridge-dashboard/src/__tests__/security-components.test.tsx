@@ -377,7 +377,7 @@ describe('Dashboard Error State', () => {
         expect(state.error).toBe('');
 
         // Simulate success
-        state = { loading: false, error: '', data: { total: 10 } as any };
+        state = { loading: false, error: '', data: { total: 10 } as Record<string, unknown> };
         expect(state.data).not.toBeNull();
         expect(state.error).toBe('');
     });

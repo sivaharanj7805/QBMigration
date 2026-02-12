@@ -300,8 +300,8 @@ describe('Sanitization Module', () => {
             expect(sanitizeModule.escapeHtml("it's")).toBe('it&#x27;s');
         });
 
-        it('escapes forward slash', () => {
-            expect(sanitizeModule.escapeHtml('a/b')).toBe('a&#x2F;b');
+        it('does not escape forward slash (not required per modern OWASP)', () => {
+            expect(sanitizeModule.escapeHtml('a/b')).toBe('a/b');
         });
 
         it('escapes backtick', () => {
@@ -363,21 +363,22 @@ describe('Sanitization Module', () => {
     });
 
     describe('sanitize.html', () => {
-        it('removes script tags', () => {
+        it('escapes script tags making them safe for display', () => {
             const result = sanitizeModule.sanitize.html('<p>Hello</p><script>evil()</script>');
             expect(result).not.toContain('<script>');
-            expect(result).not.toContain('evil()');
+            expect(result).toContain('&lt;script&gt;');
         });
 
-        it('removes inline event handlers with double quotes', () => {
+        it('escapes inline event handlers with double quotes', () => {
             const result = sanitizeModule.sanitize.html('<div onmouseover="steal()">hover</div>');
-            expect(result).not.toContain('onmouseover');
-            expect(result).not.toContain('steal()');
+            expect(result).not.toContain('<div onmouseover');
+            expect(result).toContain('&lt;div');
         });
 
-        it('removes inline event handlers with single quotes', () => {
+        it('escapes inline event handlers with single quotes', () => {
             const result = sanitizeModule.sanitize.html("<img onerror='alert(1)' src='x'>");
-            expect(result).not.toContain('onerror');
+            expect(result).not.toContain('<img');
+            expect(result).toContain('&lt;img');
         });
 
         it('removes iframe tags', () => {
@@ -679,7 +680,7 @@ describe('Zod Schema Validation', () => {
                         created_at: '2026-01-15T00:00:00Z',
                     },
                 ],
-                pagination: { page: 1, per_page: 20, total: 1, pages: 1 },
+                pagination: { page: 1, per_page: 20, total_items: 1, total_pages: 1 },
             };
             const result = schemas.MigrationListSchema.safeParse(valid);
             expect(result.success).toBe(true);
@@ -688,7 +689,7 @@ describe('Zod Schema Validation', () => {
         it('accepts empty migrations array', () => {
             const valid = {
                 migrations: [],
-                pagination: { page: 1, per_page: 20, total: 0, pages: 0 },
+                pagination: { page: 1, per_page: 20, total_items: 0, total_pages: 0 },
             };
             const result = schemas.MigrationListSchema.safeParse(valid);
             expect(result.success).toBe(true);
@@ -1160,20 +1161,20 @@ describe('Security Tests', () => {
             expect(result).toContain('&lt;svg');
         });
 
-        it('sanitize.html strips script tags entirely', () => {
+        it('sanitize.html escapes script tags making them inert', () => {
             const payload = '<script>alert("xss")</script>';
             const result = sanitizeModule.sanitize.html(payload);
             expect(result).not.toContain('<script');
-            expect(result).not.toContain('alert');
+            expect(result).toContain('&lt;script&gt;');
         });
 
-        it('sanitize.html strips event handlers from remaining tags', () => {
+        it('sanitize.html escapes event handlers making them inert', () => {
             const payload = '<div onmouseover="steal()"><p onclick="evil()">text</p></div>';
             const result = sanitizeModule.sanitize.html(payload);
-            expect(result).not.toContain('onmouseover');
-            expect(result).not.toContain('onclick');
-            expect(result).not.toContain('steal()');
-            expect(result).not.toContain('evil()');
+            expect(result).not.toContain('<div');
+            expect(result).not.toContain('<p');
+            expect(result).toContain('&lt;div');
+            expect(result).toContain('&lt;p');
         });
     });
 

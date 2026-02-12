@@ -106,19 +106,16 @@ export function useDebouncedCallback<Args extends unknown[], R>(
  * Useful for cancelling API requests when component unmounts
  */
 export function useAbortController(): AbortController {
-    const controllerRef = useRef<AbortController>(new AbortController());
+    const [controller] = useState(() => new AbortController());
 
     useEffect(() => {
-        // Create new controller on mount
-        controllerRef.current = new AbortController();
-
         return () => {
             // Abort on unmount
-            controllerRef.current.abort();
+            controller.abort();
         };
-    }, []);
+    }, [controller]);
 
-    return controllerRef.current;
+    return controller;
 }
 
 /**
@@ -130,21 +127,17 @@ export function useAbortController(): AbortController {
  * and call controller.abort() manually when needed.
  */
 export function useAbortSignal(): AbortSignal {
-    // MED-21 FIX: Create controller only once via lazy ref init (removed duplicate in useEffect)
-    const controllerRef = useRef<AbortController | null>(null);
-
-    if (controllerRef.current === null) {
-        controllerRef.current = new AbortController();
-    }
+    // MED-21 FIX: Create controller only once via lazy state init
+    const [controller] = useState(() => new AbortController());
 
     useEffect(() => {
         return () => {
             // Abort on unmount to prevent memory leaks
-            controllerRef.current?.abort();
+            controller.abort();
         };
-    }, []);
+    }, [controller]);
 
-    return controllerRef.current.signal;
+    return controller.signal;
 }
 
 /**
@@ -226,6 +219,7 @@ export function usePollingWithBackoff<T>(
     const [isPolling, setIsPolling] = useState(enabled);
     const currentIntervalRef = useRef(interval);
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const pollRef = useRef<() => void>(() => {});
 
     const poll = useCallback(async () => {
         if (!enabled || !isPolling) return;
@@ -252,13 +246,19 @@ export function usePollingWithBackoff<T>(
             );
         }
 
-        // Schedule next poll
-        timeoutRef.current = setTimeout(poll, currentIntervalRef.current);
+        // Schedule next poll via ref to avoid self-reference
+        timeoutRef.current = setTimeout(() => pollRef.current(), currentIntervalRef.current);
     }, [enabled, isPolling, pollFn, interval, maxInterval, backoffMultiplier, isTerminal, onError]);
+
+    // Keep ref in sync with latest poll callback
+    useEffect(() => {
+        pollRef.current = poll;
+    }, [poll]);
 
     useEffect(() => {
         if (enabled && isPolling) {
-            poll();
+            // Schedule initial poll asynchronously to avoid synchronous setState in effect
+            timeoutRef.current = setTimeout(() => pollRef.current(), 0);
         }
 
         return () => {
@@ -266,7 +266,7 @@ export function usePollingWithBackoff<T>(
                 clearTimeout(timeoutRef.current);
             }
         };
-    }, [enabled, isPolling, poll]);
+    }, [enabled, isPolling]);
 
     const stop = useCallback(() => {
         setIsPolling(false);

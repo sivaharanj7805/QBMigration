@@ -107,7 +107,7 @@ export function TeamManagement() {
             <div className="flex items-center justify-between mb-6">
                 <div>
                     <h2 className="text-lg font-semibold">Team Members</h2>
-                    <p className="text-sm text-gray-500">Manage your team's access to ForensicBridge</p>
+                    <p className="text-sm text-gray-500">Manage your team&apos;s access to ForensicBridge</p>
                 </div>
                 <button
                     onClick={() => setShowInviteModal(true)}

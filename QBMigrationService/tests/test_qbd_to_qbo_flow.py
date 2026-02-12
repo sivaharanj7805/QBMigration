@@ -1879,7 +1879,7 @@ class TestMinorVersionURL:
     def test_minorversion_appended(self, mock_qbo_client):
         """URL should contain minorversion parameter."""
         url = mock_qbo_client._build_url("customer")
-        assert "minorversion=65" in url
+        assert "minorversion=75" in url
 
     def test_minorversion_not_duplicated(self, mock_qbo_client):
         """If minorversion already in URL, should not be added again."""

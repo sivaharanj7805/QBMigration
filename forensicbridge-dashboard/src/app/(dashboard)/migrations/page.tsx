@@ -297,11 +297,6 @@ export default function MigrationsPage() {
 
     const queryClient = useQueryClient();
 
-    // Reset to page 1 when filters change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [debouncedSearchTerm, statusFilter]);
-
     // Auto-dismiss errors after 5 seconds
     useEffect(() => {
         if (actionError) {
@@ -374,15 +369,16 @@ export default function MigrationsPage() {
     // Calculate stats from API response totals instead of filtered page data
     const stats: MigrationStats = useMemo(() => {
         if (!data) return { total: 0, completed: 0, processing: 0, failed: 0 };
+        const migs = data.migrations || [];
         return {
             total: (data as Record<string, unknown>).total as number || data.count || 0,
-            completed: (data as Record<string, unknown>).completed_count as number || migrations.filter((m: Migration) => m.status === "completed").length,
-            processing: (data as Record<string, unknown>).processing_count as number || migrations.filter(
+            completed: (data as Record<string, unknown>).completed_count as number || migs.filter((m: Migration) => m.status === "completed").length,
+            processing: (data as Record<string, unknown>).processing_count as number || migs.filter(
                 (m: Migration) => m.status === "processing" || m.status === "in_progress" || m.status === "provisioning"
             ).length,
-            failed: (data as Record<string, unknown>).failed_count as number || migrations.filter((m: Migration) => m.status === "failed").length,
+            failed: (data as Record<string, unknown>).failed_count as number || migs.filter((m: Migration) => m.status === "failed").length,
         };
-    }, [data, migrations]);
+    }, [data]);
 
     if (isLoading) {
         return (
@@ -474,7 +470,7 @@ export default function MigrationsPage() {
                         type="text"
                         placeholder="Search migrations..."
                         value={searchTerm}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchTerm(e.target.value)}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                         className="input pl-10"
                         maxLength={200}
                         aria-label="Search migrations"
@@ -482,7 +478,7 @@ export default function MigrationsPage() {
                 </div>
                 <select
                     value={statusFilter}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStatusFilter(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                     className="input w-40"
                     aria-label="Filter by status"
                 >
