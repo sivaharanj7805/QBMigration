@@ -621,8 +621,8 @@ def create_app(config_name="development"):  # noqa: C901
             "This is required for session security and JWT tokens."
         )
 
-    # FIX #49: Validate AWS region and AMI consistency (skip for testing)
-    if config_name != "testing":
+    # FIX #49: Validate AWS region and AMI consistency (production only)
+    if config_name == "production":
         aws_region = app.config.get("AWS_REGION", "ca-central-1")
         ami_id = app.config.get("AWS_EC2_AMI_ID", "")
 

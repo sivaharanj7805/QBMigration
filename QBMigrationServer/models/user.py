@@ -137,6 +137,9 @@ class User(UserMixin, db.Model):
     last_login_at = db.Column(db.DateTime)  # For anomaly detection
     last_login_ip = db.Column(db.String(45))  # For anomaly detection (supports IPv6)
 
+    # Stripe Payment Integration
+    stripe_customer_id = db.Column(db.String(255), nullable=True)  # Stripe customer ID
+
     # QuickBooks Online OAuth (tokens stored encrypted)
     qbo_access_token = db.Column(db.Text, nullable=True)  # Encrypted access token
     qbo_refresh_token = db.Column(db.Text, nullable=True)  # Encrypted refresh token
