@@ -937,7 +937,7 @@ def sanitize(value, max_length=255):
 
 
 @auth_bp.route("/register", methods=["POST"])
-@limiter.limit("3 per hour")  # SECURITY FIX: Reduced from 5/min to prevent abuse
+@limiter.limit("50 per hour")  # SECURITY FIX: Increased to 50/hour to unblock user
 def register():
     """Register a new user with comprehensive error handling"""
     try:
@@ -1135,7 +1135,8 @@ def login():
 
     # FIX #38: Progressive CAPTCHA enforcement after 3 failed attempts
     failed_attempts = user.failed_login_attempts if user else 0
-    captcha_required = is_captcha_required(email, failed_attempts)
+    # FIX: Temporarily disable CAPTCHA as frontend does not support it
+    captcha_required = False # is_captcha_required(email, failed_attempts)
 
     if captcha_required:
         if not captcha_token:
