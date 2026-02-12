@@ -60,6 +60,9 @@ urllib3==2.6.3  # Pinned to fix SNYK-PYTHON-URLLIB3-14896210
 # JWT (if needed)
 PyJWT==2.10.1
 
+# Task Queue
+celery[redis]==5.4.0
+
 # Scheduling
 APScheduler==3.10.4
 
