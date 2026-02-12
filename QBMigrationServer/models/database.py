@@ -1,12 +1,25 @@
+import logging
+import time
+
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import Session
 from utils.env_helper import is_testing
 
 db = SQLAlchemy()
 
+logger = logging.getLogger(__name__)
+
+DB_CONNECT_MAX_RETRIES = 5
+DB_CONNECT_BASE_DELAY = 2  # seconds
+
 
 def init_db(app):
-    """Initialize database"""
+    """Initialize database with retry logic for transient connection failures.
+
+    Retries db.create_all() up to DB_CONNECT_MAX_RETRIES times with exponential
+    backoff (2s, 4s, 8s, 16s, 32s) to handle cases where PostgreSQL is still
+    starting or temporarily unreachable.
+    """
     db.init_app(app)
 
     with app.app_context():
@@ -20,9 +33,39 @@ def init_db(app):
             def set_expire_on_commit(session, transaction, connection):
                 session.expire_on_commit = False
 
-        db.create_all()
+        _create_tables_with_retry(app)
 
     return db
+
+
+def _create_tables_with_retry(app):
+    """Attempt db.create_all() with exponential backoff retries."""
+    last_exc = None
+    for attempt in range(1, DB_CONNECT_MAX_RETRIES + 1):
+        try:
+            db.create_all()
+            if attempt > 1:
+                app.logger.info(
+                    f"Database connection succeeded on attempt {attempt}"
+                )
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < DB_CONNECT_MAX_RETRIES:
+                delay = DB_CONNECT_BASE_DELAY * (2 ** (attempt - 1))
+                app.logger.warning(
+                    f"Database connection attempt {attempt}/{DB_CONNECT_MAX_RETRIES} "
+                    f"failed: {exc}. Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+                # Dispose stale connections so the next attempt gets a fresh socket
+                db.engine.dispose()
+            else:
+                app.logger.error(
+                    f"Database connection failed after {DB_CONNECT_MAX_RETRIES} "
+                    f"attempts: {exc}"
+                )
+    raise last_exc
 
 
 def is_postgresql():
