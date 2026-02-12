@@ -112,6 +112,8 @@ services:
     image: redis:7-alpine
     container_name: qbmigration-redis
     restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD_required}
     # SECURITY FIX: Bind Redis to localhost only to prevent external access
     ports:
       - "127.0.0.1:6380:6379"
