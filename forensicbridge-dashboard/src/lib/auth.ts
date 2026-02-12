@@ -186,11 +186,19 @@ export function getAuthState(): AuthState {
  * Set auth state after login/register
  * SECURITY: Only stores user info, not the token
  * The token should be set as an httpOnly cookie by the server
+ * FALLBACK: If token is provided, store it in localStorage for Bearer auth
+ * (necessary for localhost/cross-origin where cookies might fail)
  */
-export function setAuthState(user: User, csrfTokenValue?: string): void {
+export function setAuthState(user: User, csrfTokenValue?: string, token?: string): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem('user', JSON.stringify(user));
     localStorage.setItem('isLoggedIn', 'true');
+
+    // FALLBACK: Store token for Bearer auth if cookies fail
+    if (token) {
+        localStorage.setItem('auth_token', token);
+    }
+
     // FIX F-02: Use sessionStorage-backed functions for session timers
     setSessionStartTime(Date.now());
     setLastActivityTime(Date.now());
@@ -206,6 +214,7 @@ export function clearAuth(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem('user');
     localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('auth_token'); // Clear fallback token
     csrfToken = null;
     csrfTokenExpiry = null;
     // FIX F-02: Clear sessionStorage-backed session timers
@@ -279,6 +288,15 @@ export async function authFetch(
         const token = await ensureValidCsrfToken();
         if (token) {
             headers.set('X-CSRF-Token', token);
+        }
+    }
+
+    // FALLBACK: Add Bearer token if available (in case cookies failed)
+    // This allows auth to work even if httpOnly cookies are blocked/dropped
+    if (typeof window !== 'undefined') {
+        const authToken = localStorage.getItem('auth_token');
+        if (authToken) {
+            headers.set('Authorization', `Bearer ${authToken}`);
         }
     }
 

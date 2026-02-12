@@ -41,8 +41,9 @@ export default function LoginPage() {
             }
 
             // SECURITY: Store only user info, not token (token is in httpOnly cookie)
+            // FALLBACK: Pass token to be stored in localStorage if needed for localhost
             if (data.user) {
-                setAuthState(data.user, data.csrf_token);
+                setAuthState(data.user, data.csrf_token, data.token);
             }
 
             // If server sends CSRF token, store it
