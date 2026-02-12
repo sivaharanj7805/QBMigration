@@ -38,8 +38,9 @@ class TestPasswordChangeInvalidation:
             assert payload["user_id"] == user.id
             assert payload["email"] == user.email
 
-            # Small delay to ensure password_changed_at timestamp differs
-            time.sleep(0.1)
+            # Wait for grace period to expire (6 seconds > 5 second grace period)
+            # This ensures password change is recognized as a real change, not registration
+            time.sleep(6)
 
             # Change password
             user.set_password("NewPassword456!")
@@ -65,13 +66,13 @@ class TestPasswordChangeInvalidation:
             db_session.add(user)
             db_session.commit()
 
-            # Change password
-            time.sleep(0.1)
+            # Change password (wait for grace period)
+            time.sleep(6)
             user.set_password("NewPassword456!")
             db_session.commit()
 
             # Create a JWT token AFTER password change (simulating new login)
-            time.sleep(0.1)
+            time.sleep(1)
             token = create_token(user.id, user.email, expires_hours=24)
 
             # Token should be valid
@@ -103,9 +104,9 @@ class TestPasswordChangeInvalidation:
             response = client.get("/api/auth/me")
             assert response.status_code == 200
 
-            # Change password (would need a change-password endpoint)
+            # Change password (wait for grace period to ensure it's detected)
             user = User.query.filter_by(email="session_test@example.com").first()
-            time.sleep(0.1)
+            time.sleep(6)
             user.set_password("NewPassword456!")
             db_session.commit()
 
@@ -137,8 +138,8 @@ class TestPasswordChangeInvalidation:
             assert decode_token(token_device2) is not None
             assert decode_token(token_device3) is not None
 
-            # Change password (simulating user changing password from device 1)
-            time.sleep(0.1)
+            # Change password (wait for grace period, simulating user changing password from device 1)
+            time.sleep(6)
             user.set_password("NewPassword456!")
             db_session.commit()
 
@@ -185,6 +186,39 @@ class TestPasswordChangeInvalidation:
                 payload is not None
             ), "Legacy token without iat should still work for backward compatibility"
 
+    def test_grace_period_prevents_registration_race_condition(self, app, db_session):
+        """Test that 5-second grace period allows registration + immediate login"""
+        with app.app_context():
+            # Create user and immediately get a token (simulating registration flow)
+            user = User(
+                email="racetest@example.com", first_name="Race", last_name="Test"
+            )
+            user.set_password("Password123!")
+            db_session.add(user)
+            db_session.commit()
+
+            # Create token immediately after registration (< 5 second grace period)
+            token = create_token(user.id, user.email, expires_hours=24)
+
+            # Token should be VALID (grace period protects against race condition)
+            payload = decode_token(token)
+            assert (
+                payload is not None
+            ), "Token should be valid within grace period (registration flow)"
+
+            # Wait for grace period to expire
+            time.sleep(6)
+
+            # Change password AFTER grace period
+            user.set_password("NewPassword456!")
+            db_session.commit()
+
+            # Now the original token should be INVALID
+            payload = decode_token(token)
+            assert (
+                payload is None
+            ), "Token should be invalid after password change (outside grace period)"
+
     def test_password_reset_invalidates_all_tokens(self, app, db_session):
         """Test that password reset via forgot-password also invalidates tokens"""
         with app.app_context():
@@ -197,8 +231,8 @@ class TestPasswordChangeInvalidation:
             old_token = create_token(user.id, user.email, expires_hours=24)
             assert decode_token(old_token) is not None
 
-            # Simulate password reset
-            time.sleep(0.1)
+            # Simulate password reset (wait for grace period)
+            time.sleep(6)
             user.set_password("NewResetPassword456!")
             db_session.commit()
 
