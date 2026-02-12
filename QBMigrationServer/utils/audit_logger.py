@@ -75,12 +75,15 @@ if not _hmac_raw and os.getenv("FLASK_ENV") == "production":
 AUDIT_HMAC_KEY = _hmac_raw.encode("utf-8")
 
 # Configure audit logger
-AUDIT_LOG_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "logs", "audit.log"
+# Use LOG_DIR env var (set in Dockerfile to /app/logs, the writable volume)
+# to avoid writing to the read-only QBMigrationServer mount
+_log_dir = os.environ.get("LOG_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "logs"
 )
+AUDIT_LOG_FILE = os.path.join(_log_dir, "audit.log")
 
 # Ensure logs directory exists
-os.makedirs(os.path.dirname(AUDIT_LOG_FILE), exist_ok=True)
+os.makedirs(_log_dir, exist_ok=True)
 
 
 class AuditEventType(Enum):
