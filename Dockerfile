@@ -16,6 +16,8 @@ FROM python:3.11-slim as builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    pkg-config \
+    libcairo2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
@@ -43,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     postgresql-client \
     curl \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
