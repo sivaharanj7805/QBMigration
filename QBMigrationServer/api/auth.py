@@ -329,6 +329,7 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
 
                 # CRITICAL FIX A16: Invalidate session if password changed after session creation
                 # Check if session was created before password was changed
+                # NOTE: Use 5-second grace period to avoid race conditions during registration
                 session_created_at_str = session.get("_created_at")
                 if session_created_at_str and session_user.password_changed_at:
                     try:
@@ -340,10 +341,17 @@ def require_auth(f: Callable[..., Any]) -> Callable[..., Any]:
                             session_created_at = session_created_at.replace(
                                 tzinfo=timezone.utc
                             )
-                        if session_created_at < session_user.password_changed_at:
+
+                        # Calculate time difference (password_changed_at - session_created_at)
+                        time_diff = (session_user.password_changed_at - session_created_at).total_seconds()
+
+                        # Only invalidate if password was changed MORE THAN 5 seconds after session creation
+                        # This grace period prevents race conditions during registration/login
+                        # while still catching legitimate password changes
+                        if time_diff > 5:
                             logger.info(
                                 f"Session invalidated for user {session_user.id}: "
-                                f"password changed after session creation"
+                                f"password changed {time_diff:.1f}s after session creation"
                             )
                             session.clear()
                             return (
@@ -792,6 +800,7 @@ def decode_token(token: str) -> Optional[dict]:
 
         # CRITICAL FIX A16: Invalidate tokens issued before password change
         # This ensures that changing password revokes all existing sessions
+        # NOTE: Use 5-second grace period to avoid race conditions during registration
         user_id = payload.get("user_id")
         if user_id:
             # Only perform DB lookup if we have iat claim to compare
@@ -801,10 +810,16 @@ def decode_token(token: str) -> Optional[dict]:
                 if user and user.password_changed_at:
                     # Convert JWT iat (Unix timestamp) to datetime for comparison
                     token_issued_at = datetime.datetime.fromtimestamp(iat, tz=timezone.utc)
-                    # If token was issued before password was changed, reject it
-                    if token_issued_at < user.password_changed_at:
+
+                    # Calculate time difference (password_changed_at - token_issued_at)
+                    time_diff = (user.password_changed_at - token_issued_at).total_seconds()
+
+                    # Only invalidate if password was changed MORE THAN 5 seconds after token was issued
+                    # This grace period prevents race conditions during registration/login
+                    # while still catching legitimate password changes
+                    if time_diff > 5:
                         logger.info(
-                            f"Token rejected for user {user_id}: issued before password change "
+                            f"Token rejected for user {user_id}: issued {time_diff:.1f}s before password change "
                             f"(token: {token_issued_at.isoformat()}, "
                             f"password changed: {user.password_changed_at.isoformat()})"
                         )
