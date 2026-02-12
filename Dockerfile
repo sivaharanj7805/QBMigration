@@ -74,6 +74,7 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_APP=QBMigrationServer/app.py \
     FLASK_ENV=production \
     FLASK_DEBUG=0 \
+    LOG_DIR=/app/logs \
     PORT=5000
 
 # Health check

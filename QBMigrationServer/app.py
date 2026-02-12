@@ -63,7 +63,9 @@ def setup_logging(app):
     """Configure application logging with rotating file handler"""
 
     # Create logs directory
-    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    # Use LOG_DIR env var (set in Dockerfile to /app/logs, the writable volume)
+    # to avoid writing to the read-only QBMigrationServer mount
+    log_dir = os.environ.get("LOG_DIR") or os.path.join(os.path.dirname(__file__), "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     # Configure root logger
