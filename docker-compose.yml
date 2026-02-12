@@ -114,7 +114,7 @@ services:
     restart: unless-stopped
     # SECURITY FIX: Bind Redis to localhost only to prevent external access
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis-data:/data
     # SECURITY FIX: Add password authentication to Redis
