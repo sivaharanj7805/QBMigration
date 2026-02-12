@@ -45,7 +45,7 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self'", // AUDIT FIX P1-01: Removed unsafe-inline for scripts
+              "script-src 'self' 'unsafe-inline'", // Next.js requires unsafe-inline for hydration scripts
               "style-src 'self' 'unsafe-inline'", // Required for Tailwind CSS
               "img-src 'self' data: https:",
               "font-src 'self' data:",
