@@ -46,6 +46,14 @@ services:
       - LICENSE_SECRET_KEY=${LICENSE_SECRET_KEY:?LICENSE_SECRET_KEY_required}
       - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:?BACKUP_ENCRYPTION_KEY_required}
       - ENCRYPTION_PASSWORD=${ENCRYPTION_PASSWORD:-}
+      # FIX: Module-level production checks require these at import time
+      # (pii_redaction.py, audit_logger.py crash before create_app() runs)
+      - PII_HASH_SALT=${PII_HASH_SALT:?PII_HASH_SALT_required}
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?AUDIT_HMAC_KEY_required}
+      - QBO_ENCRYPTION_KEY=${QBO_ENCRYPTION_KEY:-}
+      - QBM_KDF_SALT=${QBM_KDF_SALT:-}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
       # AWS
       - AWS_REGION=${AWS_REGION:-ca-central-1}
       - AWS_S3_BUCKET=${AWS_S3_BUCKET:?AWS_S3_BUCKET_required}
