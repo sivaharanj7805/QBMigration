@@ -31,6 +31,8 @@ const getConnectSrcDomains = (): string => {
 };
 
 const nextConfig: NextConfig = {
+  // Production: standalone output for Docker deployment
+  output: 'standalone',
   // HIGH-27 FIX: Add security headers including Content Security Policy
   async headers() {
     const connectSrcDomains = getConnectSrcDomains();
