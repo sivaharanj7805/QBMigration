@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
     # SECURITY FIX: Only expose to localhost by default, use POSTGRES_EXPOSE_PORT for custom binding
     ports:
-      - "${POSTGRES_EXPOSE_PORT:-127.0.0.1:5432}:5432"
+      - "${POSTGRES_EXPOSE_PORT:-127.0.0.1:5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
