@@ -119,17 +119,23 @@ def init_socketio(app, secret_key):
     """Initialize SocketIO with the Flask app"""
     global socketio
 
-    # Use threading for testing, eventlet for production
+    # Use threading for testing, eventlet/gevent for production
     if app.config.get("TESTING"):
         async_mode = "threading"
     else:
-        # Try eventlet first, fall back to threading
+        # Try eventlet first, then gevent (installed via requirements.txt),
+        # fall back to threading as last resort
         try:
             import eventlet  # noqa: F401
 
             async_mode = "eventlet"
         except ImportError:
-            async_mode = "threading"
+            try:
+                import gevent  # noqa: F401
+
+                async_mode = "gevent"
+            except ImportError:
+                async_mode = "threading"
 
     # FIX CRIT-03: Use explicit CORS origins instead of wildcard
     allowed_origins = get_allowed_cors_origins(app)

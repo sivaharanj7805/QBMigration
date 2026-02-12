@@ -79,7 +79,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Health check
 # L-11 FIX: Use explicit port for reliability (PORT defaults to 5000 above)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+# FIX: Increased start-period to 60s — Gunicorn with multiple workers needs
+# time to import the app, run DB migrations, and initialize all services.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD curl -f http://localhost:5000/api/health || exit 1
 
 # Switch to non-root user
@@ -98,11 +100,14 @@ ENV GUNICORN_WORKERS=4 \
 # L-12 FIX: Added --max-requests to recycle workers after 1000 requests,
 # preventing memory leaks from accumulating. --max-requests-jitter adds
 # randomness to avoid all workers restarting simultaneously.
+# FIX: Use module-level "app" variable instead of factory "create_app()" to
+# avoid double app creation (module import creates app, then factory creates
+# another). Each worker imports the module once, getting one app instance.
 CMD gunicorn --bind "0.0.0.0:${PORT}" --workers "${GUNICORN_WORKERS}" --threads "${GUNICORN_THREADS}" \
      --worker-class "${GUNICORN_WORKER_CLASS}" --timeout 120 --keep-alive 5 \
      --max-requests 1000 --max-requests-jitter 100 \
      --access-logfile - --error-logfile - \
-     "QBMigrationServer.app:create_app()"
+     "QBMigrationServer.app:app"
 
 # -----------------------------------------------------------------------------
 # Stage 3: Development
