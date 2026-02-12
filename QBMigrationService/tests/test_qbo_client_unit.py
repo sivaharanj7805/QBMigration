@@ -222,7 +222,7 @@ class TestMakeRequestHappyPath:
         client._make_request("GET", "customer")
 
         called_url = client.session.get.call_args[0][0]
-        assert "minorversion=65" in called_url
+        assert "minorversion=75" in called_url
 
 
 # ===================================================================
@@ -550,7 +550,13 @@ class TestGetSynctoken:
 
     def test_get_synctoken_from_cache(self, tmp_path):
         client = _make_client(tmp_path)
-        client.synctoken_cache[("Customer", "QBO-100")] = "7"
+        cache_key = ("Customer", "QBO-100")
+        client.synctoken_cache[cache_key] = "7"
+        # Set cache time so entry is not expired
+        if not hasattr(client, "_synctoken_cache_times"):
+            client._synctoken_cache_times = {}
+        import time as _time
+        client._synctoken_cache_times[cache_key] = _time.time()
         assert client.get_synctoken("Customer", "QBO-100") == "7"
 
     def test_get_synctoken_from_db_fallback(self, tmp_path):
@@ -885,17 +891,17 @@ class TestBuildUrl:
     def test_adds_minorversion_param(self, tmp_path):
         client = _make_client(tmp_path)
         url = client._build_url("customer")
-        assert url == f"{BASE_URL}/customer?minorversion=65"
+        assert url == f"{BASE_URL}/customer?minorversion=75"
 
     def test_does_not_duplicate_minorversion(self, tmp_path):
         client = _make_client(tmp_path)
-        url = client._build_url("query?query=SELECT+*+FROM+Customer&minorversion=65")
+        url = client._build_url("query?query=SELECT+*+FROM+Customer&minorversion=75")
         assert url.count("minorversion") == 1
 
     def test_appends_with_ampersand_if_query_param_exists(self, tmp_path):
         client = _make_client(tmp_path)
         url = client._build_url("query?query=SELECT+*+FROM+Customer")
-        assert "&minorversion=65" in url
+        assert "&minorversion=75" in url
 
 
 # ===================================================================

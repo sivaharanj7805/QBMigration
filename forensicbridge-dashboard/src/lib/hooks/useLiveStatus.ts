@@ -36,7 +36,7 @@ function isTerminalStatus(status: string | undefined): boolean {
  */
 export function useLiveStatus(migrationId: string) {
     const queryClient = useQueryClient();
-    const pollStartTime = useRef<number>(Date.now());
+    const pollStartTime = useRef<number>(0);
     const errorCountRef = useRef<number>(0);
 
     // Reset poll start time when migration ID changes

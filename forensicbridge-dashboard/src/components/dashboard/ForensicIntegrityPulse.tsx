@@ -58,7 +58,9 @@ async function fetchForensicLogs(migrationId: string, signal?: AbortSignal): Pro
 }
 
 export function ForensicIntegrityPulse({ isLive = false, migrationId }: ForensicIntegrityPulseProps) {
-    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [logs, setLogs] = useState<LogEntry[]>(() =>
+        demoLogs.slice(0, 5).map(log => ({ ...log, timestamp: new Date().toISOString() }))
+    );
     // AUDIT FIX LOW-8: Surface API connectivity errors to UI
     const [apiError, setApiError] = useState(false);
     const terminalRef = useRef<HTMLDivElement>(null);
@@ -86,10 +88,6 @@ export function ForensicIntegrityPulse({ isLive = false, migrationId }: Forensic
             });
         } else if (!isLive) {
             hasRealData.current = false;
-            setLogs(demoLogs.slice(0, 5).map(log => ({
-                ...log,
-                timestamp: new Date().toISOString()
-            })));
         }
         return () => controller.abort();
     }, [isLive, migrationId]);

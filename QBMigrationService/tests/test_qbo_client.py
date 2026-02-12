@@ -40,7 +40,7 @@ class TestPremiumQBOClientInit:
         )
 
         assert client._base_access_token == "test_token"
-        assert client.minor_version == 65
+        assert client.minor_version == 75
         assert client.max_workers >= 1
 
     def test_client_creates_database(self, tmp_path):

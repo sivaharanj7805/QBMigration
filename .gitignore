@@ -87,6 +87,7 @@ QBMigrationServer/package-lock.json
 .keys_rotation_temp
 
 # Test-generated artifacts
+:memory:
 QBMigrationServer/caseware_bundles/
 QBMigrationServer/certificates/
 QBMigrationServer/reports/
