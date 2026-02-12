@@ -236,14 +236,15 @@ services:
     build:
       context: ./forensicbridge-dashboard
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${SERVER_URL:-http://localhost:5000}
+        - NEXT_PUBLIC_CSP_CONNECT_DOMAINS=${SERVER_URL:-http://localhost:5000} ${FRONTEND_URL:-http://localhost:3000}
     container_name: qbmigration-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=${SERVER_URL:-http://localhost:5000}
-      - NEXT_PUBLIC_CSP_CONNECT_DOMAINS=${SERVER_URL:-http://localhost:5000} ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       server:
         condition: service_healthy
