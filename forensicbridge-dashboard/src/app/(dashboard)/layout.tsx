@@ -279,7 +279,7 @@ export default function DashboardLayout({
 
         const checkSystemHealth = async () => {
             try {
-                const response = await fetch(`${API_URL}/health`, {
+                const response = await fetch(`${API_URL}/api/health`, {
                     method: 'GET',
                     signal: controller.signal,
                 });

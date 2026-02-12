@@ -197,7 +197,7 @@ export default function DashboardHome() {
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         try {
-            const response = await fetch(`${API_URL}/health`, {
+            const response = await fetch(`${API_URL}/api/health`, {
                 method: 'GET',
                 signal: controller.signal,
             });
